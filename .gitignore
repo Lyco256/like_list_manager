@@ -1,0 +1,11 @@
+.gradle/
+.gradle-local/
+.kotlin/
+build/
+**/build/
+local.properties
+gradle-*-bin.zip
+*.apk
+*.aab
+*.iml
+.idea/
