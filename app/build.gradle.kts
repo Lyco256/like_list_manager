@@ -50,4 +50,5 @@ dependencies {
 
     implementation(libs.coil.compose)
     implementation(libs.androidx.security.crypto)
+    implementation(libs.appauth)
 }

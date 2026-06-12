@@ -10,6 +10,9 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ClipDao {
+    @Query("SELECT COUNT(*) FROM clips")
+    suspend fun countClips(): Int
+
     @Query("SELECT * FROM clips WHERE isDeleted = 0 ORDER BY savedAt DESC")
     fun observeActiveClips(): Flow<List<ClipEntity>>
 

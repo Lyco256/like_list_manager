@@ -6,25 +6,20 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
 data class ApiSettings(
-    val authMode: String = "oauth2",
-    val xUserId: String = "",
     val clientId: String = "",
-    val apiKey: String = "",
-    val apiKeySecret: String = "",
-    val accessToken: String = "",
-    val accessTokenSecret: String = "",
-) {
-    val hasAnyCredential: Boolean
-        get() = clientId.isNotBlank() ||
-            apiKey.isNotBlank() ||
-            accessToken.isNotBlank()
+)
 
-    val hasCompleteOAuth1Credentials: Boolean
-        get() = xUserId.isNotBlank() &&
-            apiKey.isNotBlank() &&
-            apiKeySecret.isNotBlank() &&
-            accessToken.isNotBlank() &&
-            accessTokenSecret.isNotBlank()
+data class OAuthSession(
+    val accessToken: String,
+    val refreshToken: String?,
+    val expiresAtEpochMillis: Long?,
+    val scopes: String,
+    val xUserId: String,
+    val username: String,
+    val displayName: String,
+) {
+    val isExpired: Boolean
+        get() = expiresAtEpochMillis?.let { it <= System.currentTimeMillis() + 60_000 } ?: false
 }
 
 class ApiSettingsStore(context: Context) {
@@ -42,24 +37,56 @@ class ApiSettingsStore(context: Context) {
     }
 
     fun load(): ApiSettings = ApiSettings(
-        authMode = preferences.getString("authMode", "oauth2").orEmpty(),
-        xUserId = preferences.getString("xUserId", "").orEmpty(),
         clientId = preferences.getString("clientId", "").orEmpty(),
-        apiKey = preferences.getString("apiKey", "").orEmpty(),
-        apiKeySecret = preferences.getString("apiKeySecret", "").orEmpty(),
-        accessToken = preferences.getString("accessToken", "").orEmpty(),
-        accessTokenSecret = preferences.getString("accessTokenSecret", "").orEmpty(),
     )
 
     fun save(settings: ApiSettings) {
         preferences.edit()
-            .putString("authMode", settings.authMode)
-            .putString("xUserId", settings.xUserId)
-            .putString("clientId", settings.clientId)
-            .putString("apiKey", settings.apiKey)
-            .putString("apiKeySecret", settings.apiKeySecret)
-            .putString("accessToken", settings.accessToken)
-            .putString("accessTokenSecret", settings.accessTokenSecret)
+            .putString("clientId", settings.clientId.trim())
+            .remove("authMode")
+            .remove("xUserId")
+            .remove("apiKey")
+            .remove("apiKeySecret")
+            .remove("accessToken")
+            .remove("accessTokenSecret")
+            .commit()
+    }
+
+    fun loadSession(): OAuthSession? {
+        val accessToken = preferences.getString("oauth2AccessToken", "").orEmpty()
+        if (accessToken.isBlank()) return null
+        return OAuthSession(
+            accessToken = accessToken,
+            refreshToken = preferences.getString("oauth2RefreshToken", null),
+            expiresAtEpochMillis = preferences.getLong("oauth2ExpiresAt", -1L).takeIf { it > 0 },
+            scopes = preferences.getString("oauth2Scopes", "").orEmpty(),
+            xUserId = preferences.getString("oauth2UserId", "").orEmpty(),
+            username = preferences.getString("oauth2Username", "").orEmpty(),
+            displayName = preferences.getString("oauth2DisplayName", "").orEmpty(),
+        )
+    }
+
+    fun saveSession(session: OAuthSession) {
+        preferences.edit()
+            .putString("oauth2AccessToken", session.accessToken)
+            .putString("oauth2RefreshToken", session.refreshToken)
+            .putLong("oauth2ExpiresAt", session.expiresAtEpochMillis ?: -1L)
+            .putString("oauth2Scopes", session.scopes)
+            .putString("oauth2UserId", session.xUserId)
+            .putString("oauth2Username", session.username)
+            .putString("oauth2DisplayName", session.displayName)
+            .commit()
+    }
+
+    fun clearSession() {
+        preferences.edit()
+            .remove("oauth2AccessToken")
+            .remove("oauth2RefreshToken")
+            .remove("oauth2ExpiresAt")
+            .remove("oauth2Scopes")
+            .remove("oauth2UserId")
+            .remove("oauth2Username")
+            .remove("oauth2DisplayName")
             .commit()
     }
 

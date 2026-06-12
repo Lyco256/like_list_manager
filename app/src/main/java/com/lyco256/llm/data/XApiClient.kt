@@ -5,9 +5,17 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
-import java.util.UUID
-import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
+
+data class XUser(
+    val id: String,
+    val name: String,
+    val username: String,
+)
+
+class XApiException(
+    val statusCode: Int,
+    val responseBody: String,
+) : IllegalStateException("X API error $statusCode: $responseBody")
 
 data class XPost(
     val id: String,
@@ -38,17 +46,15 @@ data class XApiResult(
 
 class XApiClient {
     fun fetchLikedPosts(
-        settings: ApiSettings,
+        accessToken: String,
+        xUserId: String,
         maxResults: Int = 50,
         paginationToken: String? = null,
     ): XApiResult {
-        require(settings.xUserId.isNotBlank()) { "X User ID is required." }
-        require(settings.apiKey.isNotBlank()) { "OAuth 1.0a API Key is required." }
-        require(settings.apiKeySecret.isNotBlank()) { "OAuth 1.0a API Key Secret is required." }
-        require(settings.accessToken.isNotBlank()) { "OAuth 1.0a Access Token is required." }
-        require(settings.accessTokenSecret.isNotBlank()) { "OAuth 1.0a Access Token Secret is required." }
+        require(accessToken.isNotBlank()) { "Access Token is required." }
+        require(xUserId.isNotBlank()) { "X User ID is required." }
 
-        val baseUrl = "https://api.x.com/2/users/${settings.xUserId}/liked_tweets"
+        val baseUrl = "https://api.x.com/2/users/$xUserId/liked_tweets"
         val query = linkedMapOf(
             "max_results" to maxResults.coerceIn(5, 100).toString(),
             "tweet.fields" to "id,text,created_at,author_id,attachments",
@@ -62,14 +68,14 @@ class XApiClient {
             requestMethod = "GET"
             connectTimeout = 20_000
             readTimeout = 20_000
-            setRequestProperty("Authorization", oauth1Header("GET", baseUrl, query, settings))
+            setRequestProperty("Authorization", "Bearer $accessToken")
         }
 
         val body = if (connection.responseCode in 200..299) {
             connection.inputStream.bufferedReader().use { it.readText() }
         } else {
             val error = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            throw IllegalStateException("X API error ${connection.responseCode}: $error")
+            throw XApiException(connection.responseCode, error)
         }
 
         return XApiResult(
@@ -81,31 +87,33 @@ class XApiClient {
         )
     }
 
-    private fun oauth1Header(
-        method: String,
-        baseUrl: String,
-        query: Map<String, String>,
-        settings: ApiSettings,
-    ): String {
-        val oauth = linkedMapOf(
-            "oauth_consumer_key" to settings.apiKey,
-            "oauth_nonce" to UUID.randomUUID().toString().replace("-", ""),
-            "oauth_signature_method" to "HMAC-SHA1",
-            "oauth_timestamp" to (System.currentTimeMillis() / 1000).toString(),
-            "oauth_token" to settings.accessToken,
-            "oauth_version" to "1.0",
+    fun getMyUser(accessToken: String): XUser {
+        val connection = (URL("https://api.x.com/2/users/me?user.fields=id,name,username").openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 20_000
+            readTimeout = 20_000
+            setRequestProperty("Authorization", "Bearer $accessToken")
+        }
+        val body = connection.readBodyOrThrow()
+        val data = JSONObject(body).getJSONObject("data")
+        return XUser(
+            id = data.getString("id"),
+            name = data.optString("name"),
+            username = data.optString("username"),
         )
-        val signatureParams = (query + oauth).toSortedMap()
-        val base = listOf(
-            method.uppercase(),
-            baseUrl.percentEncode(),
-            signatureParams.toQueryString().percentEncode(),
-        ).joinToString("&")
-        val signingKey = "${settings.apiKeySecret.percentEncode()}&${settings.accessTokenSecret.percentEncode()}"
-        val signature = hmacSha1(base, signingKey)
-        return (oauth + ("oauth_signature" to signature))
-            .map { (key, value) -> "${key.percentEncode()}=\"${value.percentEncode()}\"" }
-            .joinToString(prefix = "OAuth ", separator = ", ")
+    }
+
+    fun revokeToken(clientId: String, token: String) {
+        val body = linkedMapOf("client_id" to clientId, "token" to token).toQueryString()
+        val connection = (URL("https://api.x.com/2/oauth2/revoke").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 20_000
+            readTimeout = 20_000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+        }
+        connection.outputStream.use { it.write(body.toByteArray(StandardCharsets.UTF_8)) }
+        connection.readBodyOrThrow()
     }
 
     private fun parseLikedPosts(body: String): List<XPost> {
@@ -145,6 +153,13 @@ class XApiClient {
     }
 }
 
+private fun HttpURLConnection.readBodyOrThrow(): String {
+    val status = responseCode
+    if (status in 200..299) return inputStream.bufferedReader().use { it.readText() }
+    val error = errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+    throw XApiException(status, error)
+}
+
 private fun org.json.JSONArray?.toMapById(key: String): Map<String, JSONObject> {
     if (this == null) return emptyMap()
     return (0 until length())
@@ -160,12 +175,3 @@ private fun String.percentEncode(): String =
         .replace("+", "%20")
         .replace("*", "%2A")
         .replace("%7E", "~")
-
-private fun hmacSha1(value: String, key: String): String {
-    val mac = Mac.getInstance("HmacSHA1")
-    mac.init(SecretKeySpec(key.toByteArray(StandardCharsets.UTF_8), "HmacSHA1"))
-    return android.util.Base64.encodeToString(
-        mac.doFinal(value.toByteArray(StandardCharsets.UTF_8)),
-        android.util.Base64.NO_WRAP,
-    )
-}

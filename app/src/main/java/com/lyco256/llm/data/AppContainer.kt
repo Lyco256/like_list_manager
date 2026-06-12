@@ -11,10 +11,12 @@ class AppContainer(context: Context) {
     ).build()
 
     val apiSettingsStore = ApiSettingsStore(context)
+    val xOAuthManager = XOAuthManager(context)
     val repository = ClipRepository(
         context = context,
         clipDao = database.clipDao(),
         tagDao = database.tagDao(),
         apiSettingsStore = apiSettingsStore,
+        xOAuthManager = xOAuthManager,
     )
 }

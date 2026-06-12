@@ -4,7 +4,9 @@ import android.app.Application
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -55,7 +57,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
@@ -66,6 +67,7 @@ import coil.compose.AsyncImage
 import com.lyco256.llm.data.ApiSettings
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipWithDetails
+import com.lyco256.llm.data.OAuthSession
 import com.lyco256.llm.data.SyncStateEntity
 import com.lyco256.llm.data.TagEntity
 import com.lyco256.llm.data.TagWithCount
@@ -78,13 +80,31 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 
 class MainActivity : ComponentActivity() {
+    private lateinit var viewModel: MainViewModel
+    private val authorizationLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val data = result.data
+        if (data == null) {
+            Toast.makeText(this, "Xの認証がキャンセルされました", Toast.LENGTH_LONG).show()
+        } else {
+            viewModel.completeAuthorization(data) { message ->
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        viewModel = ViewModelProvider(this, MainViewModel.factory(application))[MainViewModel::class.java]
         setContent {
-            val viewModel: MainViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
-                factory = MainViewModel.factory(application),
+            LikeListManagerUi(
+                viewModel = viewModel,
+                onLogin = { settings ->
+                    viewModel.saveApiSettings(settings) {
+                        runCatching { authorizationLauncher.launch(viewModel.createAuthorizationIntent()) }
+                            .onFailure { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
+                    }
+                },
             )
-            LikeListManagerUi(viewModel)
         }
     }
 }
@@ -100,6 +120,7 @@ data class MainUiState(
     val tags: List<TagWithCount> = emptyList(),
     val syncState: SyncStateEntity? = null,
     val apiSettings: ApiSettings = ApiSettings(),
+    val oauthSession: OAuthSession? = null,
     val query: String = "",
     val selectedTagId: Long? = null,
 ) {
@@ -127,6 +148,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val query = MutableStateFlow("")
     private val selectedTagId = MutableStateFlow<Long?>(null)
     private val apiSettings = MutableStateFlow(ApiSettings())
+    private val oauthSession = MutableStateFlow<OAuthSession?>(null)
 
     private val repositoryState = combine(
         repository.clipsWithDetails,
@@ -139,14 +161,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val uiState: StateFlow<MainUiState> = combine(
         repositoryState,
         apiSettings,
+        oauthSession,
         query,
         selectedTagId,
-    ) { repositoryState, settings, queryValue, selected ->
+    ) { repositoryState, settings, session, queryValue, selected ->
         MainUiState(
             clips = repositoryState.clips,
             tags = repositoryState.tags,
             syncState = repositoryState.syncState,
             apiSettings = settings,
+            oauthSession = session,
             query = queryValue,
             selectedTagId = selected,
         )
@@ -155,6 +179,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         viewModelScope.launch {
             apiSettings.value = repository.loadApiSettings()
+            oauthSession.value = repository.loadOAuthSession()
             repository.ensureSeedData()
         }
     }
@@ -182,20 +207,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun moveClipToTrash(clip: ClipEntity) = viewModelScope.launch {
         repository.moveClipToTrash(clip)
     }
-    fun saveApiSettings(settings: ApiSettings) = viewModelScope.launch {
+    fun saveApiSettings(settings: ApiSettings, onSaved: (() -> Unit)? = null) = viewModelScope.launch {
         repository.saveApiSettings(settings)
         apiSettings.value = repository.loadApiSettings()
+        onSaved?.invoke()
+    }
+
+    fun createAuthorizationIntent(): Intent = repository.createAuthorizationIntent()
+
+    fun completeAuthorization(intent: Intent, onMessage: (String) -> Unit) = viewModelScope.launch {
+        runCatching { repository.completeAuthorization(intent) }
+            .onSuccess {
+                oauthSession.value = it
+                onMessage("@${it.username} でXにログインしました")
+            }
+            .onFailure { onMessage(it.message ?: "Xの認証に失敗しました") }
+    }
+
+    fun logout(onMessage: (String) -> Unit) = viewModelScope.launch {
+        repository.logout()
+        oauthSession.value = null
+        onMessage("Xからログアウトしました")
     }
 
     fun syncNow(onMessage: (String) -> Unit) = viewModelScope.launch {
-        runCatching { repository.syncNow() }
-            .onSuccess(onMessage)
-            .onFailure { onMessage(it.message ?: "同期に失敗しました") }
+        try {
+            onMessage(repository.syncNow())
+        } catch (error: Exception) {
+            oauthSession.value = repository.loadOAuthSession()
+            onMessage(error.message ?: "同期に失敗しました")
+        }
     }
 
     fun clearApiSettings() = viewModelScope.launch {
         repository.clearApiSettings()
         apiSettings.value = repository.loadApiSettings()
+        oauthSession.value = null
     }
 
     companion object {
@@ -207,7 +254,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 }
 
 @Composable
-fun LikeListManagerUi(viewModel: MainViewModel) {
+fun LikeListManagerUi(viewModel: MainViewModel, onLogin: (ApiSettings) -> Unit) {
     val uiState by viewModel.uiState.collectAsState()
     MaterialTheme(
         colorScheme = darkColorScheme(
@@ -219,14 +266,14 @@ fun LikeListManagerUi(viewModel: MainViewModel) {
         ),
     ) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            MainScreen(uiState, viewModel)
+            MainScreen(uiState, viewModel, onLogin)
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(uiState: MainUiState, viewModel: MainViewModel) {
+fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSettings) -> Unit) {
     var tab by remember { mutableStateOf(AppTab.Unclassified) }
     var menuOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
@@ -313,7 +360,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel) {
         }
     }
 
-    if (usageOpen) UsageDialog(uiState.syncState, uiState.apiSettings, onDismiss = { usageOpen = false })
+    if (usageOpen) UsageDialog(uiState.syncState, uiState.oauthSession, onDismiss = { usageOpen = false })
     syncMessage?.let { message ->
         AlertDialog(
             onDismissRequest = { syncMessage = null },
@@ -325,12 +372,15 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel) {
     if (settingsOpen) {
         ApiSettingsDialog(
             initial = uiState.apiSettings,
+            session = uiState.oauthSession,
             onDismiss = { settingsOpen = false },
             onSave = {
                 viewModel.saveApiSettings(it)
                 settingsOpen = false
             },
             onClear = viewModel::clearApiSettings,
+            onLogin = onLogin,
+            onLogout = { viewModel.logout { syncMessage = it } },
         )
     }
 }
@@ -679,13 +729,13 @@ fun AddAllTagsDialog(source: TagEntity, targets: List<TagEntity>, onDismiss: () 
 }
 
 @Composable
-fun UsageDialog(syncState: SyncStateEntity?, settings: ApiSettings, onDismiss: () -> Unit) {
+fun UsageDialog(syncState: SyncStateEntity?, session: OAuthSession?, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("同期/使用量") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("API設定: ${if (settings.hasCompleteOAuth1Credentials) "登録済み" else "未登録"}")
+                Text("X認証: ${session?.let { "@${it.username} でログイン中" } ?: "未ログイン"}")
                 Text("月間取得数: ${syncState?.monthlyFetchedCount ?: 0} / ${syncState?.monthlyBudgetLimit ?: 1800}")
                 Text("警告ライン: ${syncState?.monthlyWarningLimit ?: 1500}")
                 Text("停止ライン: ${syncState?.monthlyStopLimit ?: 2000}")
@@ -699,7 +749,15 @@ fun UsageDialog(syncState: SyncStateEntity?, settings: ApiSettings, onDismiss: (
 }
 
 @Composable
-fun ApiSettingsDialog(initial: ApiSettings, onDismiss: () -> Unit, onSave: (ApiSettings) -> Unit, onClear: () -> Unit) {
+fun ApiSettingsDialog(
+    initial: ApiSettings,
+    session: OAuthSession?,
+    onDismiss: () -> Unit,
+    onSave: (ApiSettings) -> Unit,
+    onClear: () -> Unit,
+    onLogin: (ApiSettings) -> Unit,
+    onLogout: () -> Unit,
+) {
     var settings by remember(initial) { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -707,15 +765,6 @@ fun ApiSettingsDialog(initial: ApiSettings, onDismiss: () -> Unit, onSave: (ApiS
         text = {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 item { Text("Callback URI: likelistmanager://oauth/x/callback") }
-                item {
-                    OutlinedTextField(
-                        value = settings.xUserId,
-                        onValueChange = { settings = settings.copy(xUserId = it) },
-                        label = { Text("X User ID") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
                 item {
                     OutlinedTextField(
                         value = settings.clientId,
@@ -726,42 +775,17 @@ fun ApiSettingsDialog(initial: ApiSettings, onDismiss: () -> Unit, onSave: (ApiS
                     )
                 }
                 item {
-                    OutlinedTextField(
-                        value = settings.apiKey,
-                        onValueChange = { settings = settings.copy(apiKey = it) },
-                        label = { Text("OAuth 1.0a API Key") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    Text(session?.let { "ログイン中: ${it.displayName} (@${it.username})" } ?: "Xにはまだログインしていません")
                 }
                 item {
-                    OutlinedTextField(
-                        value = settings.apiKeySecret,
-                        onValueChange = { settings = settings.copy(apiKeySecret = it) },
-                        label = { Text("API Key Secret") },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                item {
-                    OutlinedTextField(
-                        value = settings.accessToken,
-                        onValueChange = { settings = settings.copy(accessToken = it) },
-                        label = { Text("Access Token") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                item {
-                    OutlinedTextField(
-                        value = settings.accessTokenSecret,
-                        onValueChange = { settings = settings.copy(accessTokenSecret = it) },
-                        label = { Text("Access Token Secret") },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    Button(
+                        onClick = {
+                            if (session == null) onLogin(settings) else onLogout()
+                        },
+                        enabled = session != null || settings.clientId.isNotBlank(),
+                    ) {
+                        Text(if (session == null) "保存してXにログイン" else "Xからログアウト")
+                    }
                 }
             }
         },

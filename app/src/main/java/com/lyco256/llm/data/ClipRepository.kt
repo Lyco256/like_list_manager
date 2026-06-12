@@ -1,6 +1,7 @@
 package com.lyco256.llm.data
 
 import android.content.Context
+import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import kotlinx.coroutines.Dispatchers
@@ -18,6 +19,7 @@ class ClipRepository(
     private val clipDao: ClipDao,
     private val tagDao: TagDao,
     private val apiSettingsStore: ApiSettingsStore,
+    private val xOAuthManager: XOAuthManager,
 ) {
     private val xApiClient = XApiClient()
 
@@ -26,6 +28,35 @@ class ClipRepository(
 
     suspend fun loadApiSettings(): ApiSettings = withContext(Dispatchers.IO) {
         apiSettingsStore.load()
+    }
+
+    suspend fun loadOAuthSession(): OAuthSession? = withContext(Dispatchers.IO) {
+        apiSettingsStore.loadSession()
+    }
+
+    fun createAuthorizationIntent(): Intent = xOAuthManager.createAuthorizationIntent(apiSettingsStore.load().clientId)
+
+    suspend fun completeAuthorization(intent: Intent): OAuthSession = withContext(Dispatchers.IO) {
+        val tokens = xOAuthManager.exchangeAuthorizationResult(intent)
+        val user = xApiClient.getMyUser(tokens.accessToken)
+        OAuthSession(
+            accessToken = tokens.accessToken,
+            refreshToken = tokens.refreshToken,
+            expiresAtEpochMillis = tokens.expiresAtEpochMillis,
+            scopes = tokens.scopes,
+            xUserId = user.id,
+            username = user.username,
+            displayName = user.name,
+        ).also(apiSettingsStore::saveSession)
+    }
+
+    suspend fun logout() = withContext(Dispatchers.IO) {
+        val settings = apiSettingsStore.load()
+        val session = apiSettingsStore.loadSession()
+        if (settings.clientId.isNotBlank() && session != null) {
+            runCatching { xApiClient.revokeToken(settings.clientId, session.refreshToken ?: session.accessToken) }
+        }
+        apiSettingsStore.clearSession()
     }
 
     val syncState: Flow<SyncStateEntity?> = clipDao.observeSyncState()
@@ -68,13 +99,10 @@ class ClipRepository(
     }
 
     suspend fun ensureSeedData() = withContext(Dispatchers.IO) {
-        val state = SyncStateEntity(
-            usageMonth = YearMonth.now().toString(),
-            rateLimitRemaining = 75,
-            rateLimitLimit = 75,
-            rateLimitResetEpochSeconds = Instant.now().plusSeconds(15 * 60).epochSecond,
-        )
-        clipDao.upsertSyncState(state)
+        if (clipDao.getSyncState() == null) {
+            clipDao.upsertSyncState(SyncStateEntity(usageMonth = YearMonth.now().toString()))
+        }
+        if (clipDao.countClips() > 0) return@withContext
         val now = Instant.now().toString()
         val sampleTags = emptyList<TagEntity>()
         sampleTags.forEach { tagDao.insertTag(it) }
@@ -133,17 +161,7 @@ class ClipRepository(
     }
 
     suspend fun syncNow(): String = withContext(Dispatchers.IO) {
-        val settings = apiSettingsStore.load()
-        if (
-            settings.xUserId.isBlank() ||
-            settings.apiKey.isBlank() ||
-            settings.apiKeySecret.isBlank() ||
-            settings.accessToken.isBlank() ||
-            settings.accessTokenSecret.isBlank()
-        ) {
-            ensureSeedData()
-            return@withContext "API設定が未完了のため、ダミーデータを確認用に用意しました。"
-        }
+        val session = validSession() ?: return@withContext "X API設定からXにログインしてください"
 
         val currentMonth = YearMonth.now().toString()
         val previousRaw = clipDao.getSyncState() ?: SyncStateEntity()
@@ -175,11 +193,17 @@ class ClipRepository(
             val maxResults = minOf(100, remainingBudget - fetched)
             if (maxResults <= 0) break
 
-            val result = xApiClient.fetchLikedPosts(
-                settings = settings,
-                maxResults = maxResults,
-                paginationToken = paginationToken,
-            )
+            val result = try {
+                xApiClient.fetchLikedPosts(
+                    accessToken = session.accessToken,
+                    xUserId = session.xUserId,
+                    maxResults = maxResults,
+                    paginationToken = paginationToken,
+                )
+            } catch (error: XApiException) {
+                if (error.statusCode == 401) apiSettingsStore.clearSession()
+                throw IllegalStateException(error.toUserMessage(), error)
+            }
             lastResult = result
             fetched += result.posts.size
 
@@ -226,6 +250,24 @@ class ClipRepository(
             ),
         )
         "同期しました: 新規 $inserted 件 / 取得 $fetched 件"
+    }
+
+    private suspend fun validSession(): OAuthSession? {
+        val current = apiSettingsStore.loadSession() ?: return null
+        if (!current.isExpired) return current
+        val refreshToken = current.refreshToken ?: run {
+            apiSettingsStore.clearSession()
+            return null
+        }
+        val clientId = apiSettingsStore.load().clientId
+        if (clientId.isBlank()) return null
+        val refreshed = xOAuthManager.refresh(clientId, refreshToken)
+        return current.copy(
+            accessToken = refreshed.accessToken,
+            refreshToken = refreshed.refreshToken ?: refreshToken,
+            expiresAtEpochMillis = refreshed.expiresAtEpochMillis,
+            scopes = refreshed.scopes,
+        ).also(apiSettingsStore::saveSession)
     }
 
     private fun createAssetForMedia(
@@ -318,6 +360,14 @@ class ClipRepository(
     suspend fun moveClipToTrash(clip: ClipEntity) = withContext(Dispatchers.IO) {
         clipDao.updateClip(clip.copy(isDeleted = true))
     }
+}
+
+private fun XApiException.toUserMessage(): String = when (statusCode) {
+    401 -> "Xの認証期限が切れました。もう一度ログインしてください"
+    403 -> "X APIの権限が不足しています。Developer Consoleの権限とスコープを確認してください"
+    429 -> "X APIの15分制限に達しました。回復後にもう一度同期してください"
+    in 500..599 -> "X APIで一時的な障害が発生しています。時間を置いて再試行してください"
+    else -> "X APIとの通信に失敗しました (HTTP $statusCode)"
 }
 
 private fun Context.isWifiConnected(): Boolean {

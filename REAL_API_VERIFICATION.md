@@ -1,38 +1,50 @@
 # Real API Verification
 
-This app can be fully verified without committing API secrets. Use this checklist after entering real X API credentials in the app.
+実際のXアカウントでOAuth 2.0 + PKCE連携を確認する手順です。Client Secretやアクセストークンをソースコードへ書く必要はありません。
 
-## Required App Settings
+## X Developer Console
 
-Open `...` -> `X API設定` and enter all of these values:
+- App type: Native App
+- App permission: Read
+- Callback URI: `likelistmanager://oauth/x/callback`
+- Scopes: `tweet.read users.read like.read offline.access`
 
-- `X User ID`
-- `OAuth 1.0a API Key`
-- `API Key Secret`
-- `Access Token`
-- `Access Token Secret`
+Androidアプリに入力するのはOAuth 2.0 Client IDだけです。Client Secret、Consumer Key、Consumer Secret、Bearer Tokenは入力しません。
 
-`OAuth 2.0 Client ID` can be stored for later OAuth 2.0 work, but the current sync implementation uses OAuth 1.0a credentials.
+## Login
 
-## Expected Results
+1. アプリの `...` から `X API設定` を開きます。
+2. `OAuth 2.0 Client ID` を入力します。
+3. `保存してXにログイン` を押します。
+4. ブラウザでXへログインし、アプリへのアクセスを許可します。
+5. アプリへ戻り、`@username でXにログインしました` と表示されることを確認します。
+6. `X API設定` または `同期/使用量` にログイン中のユーザー名が表示されることを確認します。
 
-1. Open `...` -> `同期/使用量`.
-2. Confirm `API設定: 登録済み`.
-3. Open `...` -> `同期する`.
-4. Confirm the sync result dialog reports fetched and inserted counts.
-5. Confirm newly fetched liked posts appear in `未分類`.
-6. Assign a tag to one fetched post.
-7. Confirm the post moves to `分類` and the tag count increases.
-8. Search by post text, author, username, or summary in `分類`.
+## Sync
+
+1. `...` から `同期する` を押します。
+2. 同期結果に取得件数と新規保存件数が表示されることを確認します。
+3. 取得した「いいね」投稿が未分類リストに表示されることを確認します。
+4. 本文、投稿者名、画像が表示されることを確認します。
+5. 投稿へタグと概要を設定し、分類リストのタグ絞り込みと検索で見つかることを確認します。
+6. `同期/使用量` で月間取得数、15分制限、最終同期時刻が更新されることを確認します。
+
+## Token And Logout
+
+1. 時間を置いた後も再ログインなしで同期できることを確認します。期限切れに近いアクセストークンは更新トークンで自動更新されます。
+2. `X API設定` の `Xからログアウト` を押します。
+3. ログイン表示が消え、同期時にログインを求められることを確認します。
 
 ## Failure Signals
 
-- Missing credentials should show the dummy-data message instead of calling X.
-- Monthly stop limits should prevent sync before calling X.
-- A `401`, `403`, `429`, `5xx`, or network error should appear in the sync result dialog instead of crashing the app.
-- Android `logcat` should not contain `FATAL EXCEPTION`, `AndroidRuntime`, or app `ANR` entries for `com.lyco256.llm`.
+- `401`: 認証期限切れとして再ログインを案内します。
+- `403`: Developer Consoleの権限またはスコープ不足を案内します。
+- `429`: 15分制限の回復待ちを案内します。
+- `5xx`: X APIの一時障害として再試行を案内します。
+- callback後にアプリへ戻らない場合は、Developer ConsoleとManifestのURIが完全一致しているか確認します。
+- Android `logcat` に `FATAL EXCEPTION`、`AndroidRuntime`、アプリのANRがないことを確認します。
 
-## Commands Used For Local Verification
+## Local Verification Commands
 
 ```powershell
 $env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
