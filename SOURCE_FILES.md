@@ -125,4 +125,4 @@ MainActivity / Compose UI
 - `GOALS.md`: プロダクトの目的、MVP、将来目標
 - `REAL_API_VERIFICATION.md`: 実Xアカウントでの確認手順
 - `docs/CHANGE_SUMMARY_2026-06-12.md`: 今回のOAuth実装と文書整備の要約
-- `LikeTagger_requirements.md`: 初期要件メモ。文字化けがあるため、今後は `GOALS.md` を基準に更新します。
+- `LikeTagger_requirements.md`: 初期の要件・技術仕様メモ。設計経緯や将来候補の確認に使い、現在の仕様判断は `GOALS.md` と実装を優先します。
