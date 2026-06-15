@@ -48,6 +48,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -401,6 +402,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                 tags = uiState.tags.map { it.tag },
                 emptyText = "タグなしのツイートはありません",
                 modifier = Modifier.padding(padding),
+                requireTagConfirmation = true,
                 onTagsChange = viewModel::setClipTags,
                 onSummaryChange = viewModel::updateSummary,
                 onDelete = viewModel::moveClipToTrash,
@@ -606,10 +608,12 @@ fun ClipListScreen(
     tags: List<TagEntity>,
     emptyText: String,
     modifier: Modifier = Modifier,
+    requireTagConfirmation: Boolean = false,
     onTagsChange: (ClipEntity, Set<Long>) -> Unit,
     onSummaryChange: (ClipEntity, String) -> Unit,
     onDelete: (ClipEntity) -> Unit,
 ) {
+    val pendingTagIds = remember { mutableStateMapOf<Long, Set<Long>>() }
     Column(modifier.fillMaxSize().padding(12.dp)) {
         Text(title, style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(10.dp))
@@ -618,7 +622,30 @@ fun ClipListScreen(
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(clips, key = { it.clip.id }) { clip ->
-                    TweetCard(clip, tags, onTagsChange, onSummaryChange, onDelete)
+                    val selectedTagIds = if (requireTagConfirmation) {
+                        pendingTagIds[clip.clip.id] ?: clip.tags.map { it.id }.toSet()
+                    } else {
+                        clip.tags.map { it.id }.toSet()
+                    }
+                    TweetCard(
+                        clip = clip,
+                        allTags = tags,
+                        selectedTagIds = selectedTagIds,
+                        requireTagConfirmation = requireTagConfirmation,
+                        onTagSelectionChange = { tagIds ->
+                            if (requireTagConfirmation) {
+                                pendingTagIds[clip.clip.id] = tagIds
+                            } else {
+                                onTagsChange(clip.clip, tagIds)
+                            }
+                        },
+                        onTagConfirmation = {
+                            onTagsChange(clip.clip, selectedTagIds)
+                            pendingTagIds.remove(clip.clip.id)
+                        },
+                        onSummaryChange = onSummaryChange,
+                        onDelete = onDelete,
+                    )
                 }
             }
         }
@@ -653,7 +680,14 @@ fun ClassifiedScreen(
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(uiState.classified, key = { it.clip.id }) { clip ->
-                    TweetCard(clip, uiState.tags.map { it.tag }, onTagsChange, onSummaryChange, onDelete)
+                    TweetCard(
+                        clip = clip,
+                        allTags = uiState.tags.map { it.tag },
+                        selectedTagIds = clip.tags.map { it.id }.toSet(),
+                        onTagSelectionChange = { onTagsChange(clip.clip, it) },
+                        onSummaryChange = onSummaryChange,
+                        onDelete = onDelete,
+                    )
                 }
             }
         }
@@ -664,7 +698,10 @@ fun ClassifiedScreen(
 fun TweetCard(
     clip: ClipWithDetails,
     allTags: List<TagEntity>,
-    onTagsChange: (ClipEntity, Set<Long>) -> Unit,
+    selectedTagIds: Set<Long>,
+    requireTagConfirmation: Boolean = false,
+    onTagSelectionChange: (Set<Long>) -> Unit,
+    onTagConfirmation: () -> Unit = {},
     onSummaryChange: (ClipEntity, String) -> Unit,
     onDelete: (ClipEntity) -> Unit,
 ) {
@@ -713,16 +750,30 @@ fun TweetCard(
             Spacer(Modifier.height(8.dp))
             TagChipRow(
                 allTags = allTags,
-                selectedIds = clip.tags.map { it.id }.toSet(),
+                selectedIds = selectedTagIds,
                 onToggle = { tagId ->
-                    val selected = clip.tags.map { it.id }.toMutableSet()
+                    val selected = selectedTagIds.toMutableSet()
                     if (!selected.add(tagId)) selected.remove(tagId)
-                    onTagsChange(clip.clip, selected)
+                    onTagSelectionChange(selected)
                 },
             )
             Spacer(Modifier.height(6.dp))
-            TextButton(onClick = { deleteOpen = true }) {
-                Text("ローカル削除")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = { deleteOpen = true }) {
+                    Text("ローカル削除")
+                }
+                if (requireTagConfirmation) {
+                    Button(
+                        onClick = onTagConfirmation,
+                        enabled = allTags.isNotEmpty() && selectedTagIds.isNotEmpty(),
+                    ) {
+                        Text("分類")
+                    }
+                }
             }
         }
     }
