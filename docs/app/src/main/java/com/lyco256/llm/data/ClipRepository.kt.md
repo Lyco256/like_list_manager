@@ -6,13 +6,15 @@
 
 ## 役割
 
-認証、X同期、Room保存、画像取得、月間/API制限、タグ、概要、ローカル削除をまとめる業務ロジック層です。
+認証、X同期、Room保存、画像取得、保存先変更、月間/API制限、タグ、概要、ローカル削除をまとめる業務ロジック層です。
 
 ## 主な処理
 
 - OAuth: 認証Intent生成、code交換、`/users/me`、session保存、token更新、logout/revoke
 - 同期: 月間上限確認、liked postsのpagination、新規投稿だけ保存、rate limit保存
 - media: photoは回線を問わず保存、video/GIF thumbnailはWi-Fi時だけ保存
+- `PostStorageManager` の現在DBへFlowと更新操作を接続し、保存先変更後は新しいDBへ自動で切り替える
+- 保存先一覧、移動見積もり、移動実行をViewModelへ公開
 - 初期化: DBが空の初回だけサンプルを投入し、既存同期状態は上書きしない
 - タグ/概要: 作成、名称変更、削除、一括追加、投稿ごとの再割り当て、概要更新
 - エラー: 401、403、429、5xxをユーザー向け文言へ変換
@@ -24,6 +26,7 @@
 - `XApiClient.kt.md`: X API通信を実行します。
 - `XOAuthManager.kt.md`: OAuth code交換とtoken更新を実行します。
 - `ApiSettingsStore.kt.md`: Client IDとsessionを保存します。
+- `PostStorageManager.kt.md`: DBと画像の保存場所を提供します。
 - `../MainActivity.kt.md`: Repository操作のUI入口です。
 - `AppContainer.kt.md`: 依存関係を注入します。
 

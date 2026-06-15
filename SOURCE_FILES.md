@@ -21,7 +21,8 @@ MainActivity / Compose UI
       -> XOAuthManager -> AppAuth / X OAuth 2.0
       -> XApiClient -> X API v2
       -> ApiSettingsStore -> EncryptedSharedPreferences
-      -> app internal storage -> images
+      -> PostStorageManager -> internal storage / SD card app-specific storage
+        -> Room DB + images
 ```
 
 依存関係は `LikeListManagerApp` が所有する `AppContainer` で組み立てます。
@@ -36,7 +37,7 @@ MainActivity / Compose UI
 - タグリスト: 追加、名称変更、削除、別タグへの一括追加
 - X風の投稿本文、投稿者、画像表示
 - Xで開く、ローカル削除
-- メニューから同期、API使用量、X API設定を表示
+- メニューから同期、API使用量、X API設定、投稿データ保存先を表示
 
 ### X連携
 
@@ -55,7 +56,10 @@ MainActivity / Compose UI
 
 - Roomで投稿、画像情報、タグ、投稿タグ関連、同期状態を保存
 - Client IDとOAuth tokenは暗号化SharedPreferencesへ保存
-- 画像は回線を問わず内部ストレージへ保存
+- Room DBと画像は内部ストレージまたはSDカードのアプリ専用領域へまとめて保存
+- 保存先変更時はコピー、容量・件数・DB整合性検証、切り替え、旧データ削除を行う
+- 選択中のSDカードがない場合は空DBへ切り替えず、閲覧・編集・同期を停止
+- 保存先設定と移動復旧状態は内部SharedPreferencesへ保存
 - 動画/GIF本体は保存せず、preview thumbnailをWi-Fi時だけ保存
 - 投稿IDのunique制約で重複保存を防止
 - 月間取得数、警告ライン、停止ライン、15分rate limitを記録
@@ -67,6 +71,7 @@ MainActivity / Compose UI
 | --- | --- | --- |
 | 画面、操作、検索、タグUI | `docs/app/src/main/java/com/lyco256/llm/MainActivity.kt.md` | `ClipRepository.kt.md`, `Entities.kt.md` |
 | 同期ロジック、月間制限、画像保存 | `docs/app/src/main/java/com/lyco256/llm/data/ClipRepository.kt.md` | `XApiClient.kt.md`, `Daos.kt.md`, `Entities.kt.md` |
+| 投稿DB・画像の保存先、SDカード移動 | `docs/app/src/main/java/com/lyco256/llm/data/PostStorageManager.kt.md` | `AppContainer.kt.md`, `ClipRepository.kt.md`, `MainActivity.kt.md` |
 | X APIのendpointやresponse | `docs/app/src/main/java/com/lyco256/llm/data/XApiClient.kt.md` | `ClipRepository.kt.md`, `Entities.kt.md` |
 | Xログイン、scope、callback | `docs/app/src/main/java/com/lyco256/llm/data/XOAuthManager.kt.md` | `AndroidManifest.xml.md`, `ApiSettingsStore.kt.md`, `MainActivity.kt.md` |
 | DB列、table、relation | `docs/app/src/main/java/com/lyco256/llm/data/Entities.kt.md` | `LikeListDatabase.kt.md`, `Daos.kt.md`, `ClipRepository.kt.md` |
@@ -105,6 +110,7 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/data/Entities.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/Daos.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/LikeListDatabase.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/PostStorageManager.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/ApiSettingsStore.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/XOAuthManager.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/XApiClient.kt.md`
@@ -114,6 +120,7 @@ MainActivity / Compose UI
 
 - 自動バックグラウンド同期は未実装
 - backup/import/exportは未実装
+- 任意フォルダへの保存とアンインストール後の投稿データ保持は未実装
 - タグ色変更と並び替えUIは未実装
 - 動画/GIF本体は保存しない
 - DB migrationはversion 1のため未作成

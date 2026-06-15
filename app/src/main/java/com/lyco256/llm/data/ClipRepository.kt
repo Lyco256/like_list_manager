@@ -5,8 +5,11 @@ import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.HttpURLConnection
@@ -14,10 +17,10 @@ import java.net.URL
 import java.time.Instant
 import java.time.YearMonth
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class ClipRepository(
     private val context: Context,
-    private val clipDao: ClipDao,
-    private val tagDao: TagDao,
+    private val postStorageManager: PostStorageManager,
     private val apiSettingsStore: ApiSettingsStore,
     private val xOAuthManager: XOAuthManager,
 ) {
@@ -59,35 +62,57 @@ class ClipRepository(
         apiSettingsStore.clearSession()
     }
 
-    val syncState: Flow<SyncStateEntity?> = clipDao.observeSyncState()
+    val storageState = postStorageManager.state
 
-    val tagsWithCount: Flow<List<TagWithCount>> = combine(
-        tagDao.observeTags(),
-        tagDao.observeTagCounts(),
-    ) { tags, counts ->
-        val countMap = counts.associate { it.tagId to it.count }
-        tags.map { TagWithCount(it, countMap[it.id] ?: 0) }
+    val syncState: Flow<SyncStateEntity?> = postStorageManager.database.flatMapLatest { database ->
+        database?.clipDao()?.observeSyncState() ?: flowOf(null)
     }
 
-    val clipsWithDetails: Flow<List<ClipWithDetails>> = combine(
-        clipDao.observeActiveClips(),
-        tagDao.observeTags(),
-        clipDao.observeAssets(),
-        clipDao.observeClipTags(),
-    ) { clips, tags, assets, clipTags ->
-        val ids = clips.map { it.id }.toSet()
-        val visibleAssets = assets.filter { it.clipId in ids }
-        val visibleClipTags = clipTags.filter { it.clipId in ids }
-        val tagsById = tags.associateBy { it.id }
-        val assetsByClip = visibleAssets.groupBy { it.clipId }
-        val tagIdsByClip = visibleClipTags.groupBy { it.clipId }
-        clips.map { clip ->
-            ClipWithDetails(
-                clip = clip,
-                assets = assetsByClip[clip.id].orEmpty(),
-                tags = tagIdsByClip[clip.id].orEmpty().mapNotNull { tagsById[it.tagId] },
-            )
+    val tagsWithCount: Flow<List<TagWithCount>> = postStorageManager.database.flatMapLatest { database ->
+        if (database == null) return@flatMapLatest flowOf(emptyList())
+        val tagDao = database.tagDao()
+        combine(tagDao.observeTags(), tagDao.observeTagCounts()) { tags, counts ->
+            val countMap = counts.associate { it.tagId to it.count }
+            tags.map { TagWithCount(it, countMap[it.id] ?: 0) }
         }
+    }
+
+    val clipsWithDetails: Flow<List<ClipWithDetails>> = postStorageManager.database.flatMapLatest { database ->
+        if (database == null) return@flatMapLatest flowOf(emptyList())
+        val clipDao = database.clipDao()
+        val tagDao = database.tagDao()
+        combine(
+            clipDao.observeActiveClips(),
+            tagDao.observeTags(),
+            clipDao.observeAssets(),
+            clipDao.observeClipTags(),
+        ) { clips, tags, assets, clipTags ->
+            val ids = clips.map { it.id }.toSet()
+            val visibleAssets = assets.filter { it.clipId in ids }
+            val visibleClipTags = clipTags.filter { it.clipId in ids }
+            val tagsById = tags.associateBy { it.id }
+            val assetsByClip = visibleAssets.groupBy { it.clipId }
+            val tagIdsByClip = visibleClipTags.groupBy { it.clipId }
+            clips.map { clip ->
+                ClipWithDetails(
+                    clip = clip,
+                    assets = assetsByClip[clip.id].orEmpty(),
+                    tags = tagIdsByClip[clip.id].orEmpty().mapNotNull { tagsById[it.tagId] },
+                )
+            }
+        }
+    }
+
+    suspend fun refreshStorageLocations() = withContext(Dispatchers.IO) {
+        postStorageManager.refreshLocations()
+    }
+
+    suspend fun estimateStorageMove(targetId: String): PostStorageEstimate = withContext(Dispatchers.IO) {
+        postStorageManager.estimateMove(targetId)
+    }
+
+    suspend fun movePostStorage(targetId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        postStorageManager.moveTo(targetId)
     }
 
     suspend fun saveApiSettings(settings: ApiSettings) = withContext(Dispatchers.IO) {
@@ -99,10 +124,13 @@ class ClipRepository(
     }
 
     suspend fun ensureSeedData() = withContext(Dispatchers.IO) {
+        postStorageManager.withDatabase { database ->
+        val clipDao = database.clipDao()
+        val tagDao = database.tagDao()
         if (clipDao.getSyncState() == null) {
             clipDao.upsertSyncState(SyncStateEntity(usageMonth = YearMonth.now().toString()))
         }
-        if (clipDao.countClips() > 0) return@withContext
+        if (clipDao.countClips() > 0) return@withDatabase
         val now = Instant.now().toString()
         val sampleTags = emptyList<TagEntity>()
         sampleTags.forEach { tagDao.insertTag(it) }
@@ -158,10 +186,13 @@ class ClipRepository(
                 )
             }
         }
+        }
     }
 
     suspend fun syncNow(): String = withContext(Dispatchers.IO) {
-        val session = validSession() ?: return@withContext "X API設定からXにログインしてください"
+        postStorageManager.withDatabase { database ->
+        val clipDao = database.clipDao()
+        val session = validSession() ?: return@withDatabase "X API設定からXにログインしてください"
 
         val currentMonth = YearMonth.now().toString()
         val previousRaw = clipDao.getSyncState() ?: SyncStateEntity()
@@ -174,13 +205,13 @@ class ClipRepository(
             previousRaw.copy(usageMonth = previousRaw.usageMonth ?: currentMonth)
         }
         if (previous.monthlyFetchedCount >= previous.monthlyStopLimit) {
-            return@withContext "月間停止ラインに達しているため同期しませんでした。"
+            return@withDatabase "月間停止ラインに達しているため同期しませんでした。"
         }
 
         val now = Instant.now().toString()
         val remainingBudget = (previous.monthlyBudgetLimit - previous.monthlyFetchedCount).coerceAtLeast(0)
         if (remainingBudget <= 0) {
-            return@withContext "月間取得上限に達しているため同期しませんでした。"
+            return@withDatabase "月間取得上限に達しているため同期しませんでした。"
         }
 
         var paginationToken: String? = null
@@ -250,6 +281,7 @@ class ClipRepository(
             ),
         )
         "同期しました: 新規 $inserted 件 / 取得 $fetched 件"
+        }
     }
 
     private suspend fun validSession(): OAuthSession? {
@@ -270,7 +302,7 @@ class ClipRepository(
         ).also(apiSettingsStore::saveSession)
     }
 
-    private fun createAssetForMedia(
+    private suspend fun createAssetForMedia(
         clipId: Long,
         postId: String,
         media: XMedia,
@@ -310,7 +342,7 @@ class ClipRepository(
     }
 
     private fun downloadMedia(postId: String, mediaKey: String, url: String): String {
-        val imageDir = File(context.filesDir, "images").also { it.mkdirs() }
+        val imageDir = postStorageManager.imageDirectory()
         val extension = url.substringBefore("?").substringAfterLast('.', "jpg").takeIf { it.length <= 5 } ?: "jpg"
         val target = File(imageDir, "${postId}_${mediaKey}.$extension")
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -324,41 +356,48 @@ class ClipRepository(
     }
 
     suspend fun createTag(name: String) = withContext(Dispatchers.IO) {
+        postStorageManager.withDatabase { database ->
         val clean = name.trim()
         if (clean.isNotEmpty()) {
             val now = Instant.now().toString()
-            tagDao.insertTag(TagEntity(name = clean, createdAt = now, updatedAt = now))
+            database.tagDao().insertTag(TagEntity(name = clean, createdAt = now, updatedAt = now))
+        }
         }
     }
 
     suspend fun renameTag(tag: TagEntity, name: String) = withContext(Dispatchers.IO) {
+        postStorageManager.withDatabase { database ->
         val clean = name.trim()
         if (clean.isNotEmpty()) {
-            tagDao.updateTag(tag.copy(name = clean, updatedAt = Instant.now().toString()))
+            database.tagDao().updateTag(tag.copy(name = clean, updatedAt = Instant.now().toString()))
+        }
         }
     }
 
     suspend fun deleteTag(tagId: Long) = withContext(Dispatchers.IO) {
-        tagDao.deleteTag(tagId)
+        postStorageManager.withDatabase { it.tagDao().deleteTag(tagId) }
     }
 
     suspend fun addAllFromTagToTag(sourceTagId: Long, targetTagId: Long) = withContext(Dispatchers.IO) {
+        postStorageManager.withDatabase { database ->
+        val tagDao = database.tagDao()
         val now = Instant.now().toString()
         tagDao.clipsForTag(sourceTagId).forEach { clip ->
             tagDao.insertClipTag(ClipTagEntity(clip.id, targetTagId, now))
         }
+        }
     }
 
     suspend fun setClipTags(clipId: Long, tagIds: Set<Long>) = withContext(Dispatchers.IO) {
-        clipDao.replaceClipTags(clipId, tagIds, Instant.now().toString())
+        postStorageManager.withDatabase { it.clipDao().replaceClipTags(clipId, tagIds, Instant.now().toString()) }
     }
 
     suspend fun updateSummary(clip: ClipEntity, summary: String) = withContext(Dispatchers.IO) {
-        clipDao.updateClip(clip.copy(summary = summary))
+        postStorageManager.withDatabase { it.clipDao().updateClip(clip.copy(summary = summary)) }
     }
 
     suspend fun moveClipToTrash(clip: ClipEntity) = withContext(Dispatchers.IO) {
-        clipDao.updateClip(clip.copy(isDeleted = true))
+        postStorageManager.withDatabase { it.clipDao().updateClip(clip.copy(isDeleted = true)) }
     }
 }
 

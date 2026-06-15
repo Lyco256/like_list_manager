@@ -4,13 +4,17 @@
 
 `app/src/main/java/com/lyco256/llm/data/Daos.kt`
 
+## 保存容量集計
+
+- `getStoredAssetStats`: `localPath` がある保存済み画像・サムネイルの件数と `sizeBytes` 合計をSQLで集計し、保存容量表示と移動見積もりに使う
+
 ## 役割
 
 Roomを通じた投稿、画像、タグ、投稿タグ関連、同期状態のqueryとtransactionを定義します。
 
 ## 主要処理
 
-- `ClipDao`: 有効投稿の監視、投稿/画像挿入、概要・削除状態更新、タグ集合置換、同期状態保存
+- `ClipDao`: 有効投稿の監視、投稿/画像挿入、概要・削除状態更新、タグ集合置換、同期状態保存、保存先移動時の画像パス更新
 - `countClips`: 初回サンプル投入の判定
 - `TagDao`: タグ監視、件数集計、追加・更新・削除、一括タグ付け対象取得
 - `replaceClipTags`: 現在値との差分だけを追加・削除するtransaction

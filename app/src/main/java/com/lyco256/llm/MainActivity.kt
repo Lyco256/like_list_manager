@@ -34,6 +34,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -68,6 +69,9 @@ import com.lyco256.llm.data.ApiSettings
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.OAuthSession
+import com.lyco256.llm.data.PostStorageEstimate
+import com.lyco256.llm.data.PostStorageLocation
+import com.lyco256.llm.data.PostStorageState
 import com.lyco256.llm.data.SyncStateEntity
 import com.lyco256.llm.data.TagEntity
 import com.lyco256.llm.data.TagWithCount
@@ -121,6 +125,7 @@ data class MainUiState(
     val syncState: SyncStateEntity? = null,
     val apiSettings: ApiSettings = ApiSettings(),
     val oauthSession: OAuthSession? = null,
+    val storageState: PostStorageState = PostStorageState(),
     val query: String = "",
     val selectedTagId: Long? = null,
 ) {
@@ -141,6 +146,7 @@ private data class RepositoryUiState(
     val clips: List<ClipWithDetails>,
     val tags: List<TagWithCount>,
     val syncState: SyncStateEntity?,
+    val storageState: PostStorageState,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -154,8 +160,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         repository.clipsWithDetails,
         repository.tagsWithCount,
         repository.syncState,
-    ) { clips, tags, syncState ->
-        RepositoryUiState(clips, tags, syncState)
+        repository.storageState,
+    ) { clips, tags, syncState, storageState ->
+        RepositoryUiState(clips, tags, syncState, storageState)
     }
 
     val uiState: StateFlow<MainUiState> = combine(
@@ -171,6 +178,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             syncState = repositoryState.syncState,
             apiSettings = settings,
             oauthSession = session,
+            storageState = repositoryState.storageState,
             query = queryValue,
             selectedTagId = selected,
         )
@@ -239,6 +247,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun refreshStorageLocations(onComplete: (() -> Unit)? = null) = viewModelScope.launch {
+        repository.refreshStorageLocations()
+        onComplete?.invoke()
+    }
+
+    fun estimateStorageMove(
+        targetId: String,
+        onResult: (Result<PostStorageEstimate>) -> Unit,
+    ) = viewModelScope.launch {
+        onResult(runCatching { repository.estimateStorageMove(targetId) })
+    }
+
+    fun movePostStorage(targetId: String, onMessage: (String) -> Unit) = viewModelScope.launch {
+        repository.movePostStorage(targetId)
+            .onSuccess { onMessage("投稿データの保存先を変更しました") }
+            .onFailure { onMessage(it.message ?: "保存先の変更に失敗しました") }
+    }
+
     fun clearApiSettings() = viewModelScope.launch {
         repository.clearApiSettings()
         apiSettings.value = repository.loadApiSettings()
@@ -278,6 +304,10 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
     var menuOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var usageOpen by remember { mutableStateOf(false) }
+    var storageOpen by remember { mutableStateOf(false) }
+    var storageEstimate by remember { mutableStateOf<PostStorageEstimate?>(null) }
+    var storageEstimating by remember { mutableStateOf(false) }
+    var storageMoveStarting by remember { mutableStateOf(false) }
     var syncMessage by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
@@ -301,6 +331,14 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                                 text = { Text("同期/使用量") },
                                 onClick = {
                                     usageOpen = true
+                                    menuOpen = false
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("投稿データの保存先") },
+                                onClick = {
+                                    viewModel.refreshStorageLocations()
+                                    storageOpen = true
                                     menuOpen = false
                                 },
                             )
@@ -329,7 +367,34 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
             }
         },
     ) { padding ->
-        when (tab) {
+        if (uiState.storageState.isMigrating) {
+            Column(
+                Modifier.fillMaxSize().padding(padding).padding(24.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                CircularProgressIndicator()
+                Spacer(Modifier.height(16.dp))
+                Text("投稿データを移動しています", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(12.dp))
+                Text("完了するまでアプリを閉じずにお待ちください")
+            }
+        } else if (!uiState.storageState.isAvailable) {
+            Column(
+                Modifier.fillMaxSize().padding(padding).padding(24.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text("選択したSDカードを利用できません", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(12.dp))
+                Text("SDカードを再装着するか、メニューから投稿データの保存先を変更してください")
+                Spacer(Modifier.height(16.dp))
+                Button(onClick = {
+                    viewModel.refreshStorageLocations()
+                    storageOpen = true
+                }) { Text("保存先を確認") }
+            }
+        } else when (tab) {
             AppTab.Unclassified -> ClipListScreen(
                 title = "未分類",
                 clips = uiState.unclassified,
@@ -361,6 +426,60 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
     }
 
     if (usageOpen) UsageDialog(uiState.syncState, uiState.oauthSession, onDismiss = { usageOpen = false })
+    if (storageOpen) {
+        PostStorageDialog(
+            state = uiState.storageState,
+            onDismiss = { storageOpen = false },
+            onSelect = { targetId ->
+                storageEstimating = true
+                viewModel.estimateStorageMove(targetId) { result ->
+                    storageEstimating = false
+                    result.onSuccess { storageEstimate = it }
+                        .onFailure { syncMessage = it.message ?: "移動量を確認できませんでした" }
+                }
+            },
+        )
+    }
+    if (storageEstimating) {
+        StorageProgressDialog(
+            title = "移動するデータを確認しています",
+            message = "投稿件数とファイル容量を計算しています",
+        )
+    }
+    storageEstimate?.let { estimate ->
+        AlertDialog(
+            onDismissRequest = { storageEstimate = null },
+            title = { Text("投稿データを移動しますか？") },
+            text = {
+                Text(
+                    "移動先: ${estimate.target.displayName}\n" +
+                        "投稿: ${estimate.clipCount} 件\n" +
+                        "ファイル: ${estimate.fileCount} 件\n" +
+                        "容量: ${formatBytes(estimate.totalBytes)}\n\n" +
+                        "移動中は同期と編集を一時停止します。",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val targetId = estimate.target.id
+                    storageEstimate = null
+                    storageOpen = false
+                    storageMoveStarting = true
+                    viewModel.movePostStorage(targetId) {
+                        storageMoveStarting = false
+                        syncMessage = it
+                    }
+                }) { Text("移動する") }
+            },
+            dismissButton = { TextButton(onClick = { storageEstimate = null }) { Text("キャンセル") } },
+        )
+    }
+    if (storageMoveStarting && !uiState.storageState.isMigrating) {
+        StorageProgressDialog(
+            title = "移動を開始しています",
+            message = "保存先を準備しています",
+        )
+    }
     syncMessage?.let { message ->
         AlertDialog(
             onDismissRequest = { syncMessage = null },
@@ -383,6 +502,95 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
             onLogout = { viewModel.logout { syncMessage = it } },
         )
     }
+}
+
+@Composable
+fun PostStorageDialog(
+    state: PostStorageState,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("投稿データの保存先") },
+        text = {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                item {
+                    Text("投稿、タグ、概要、同期状態、保存画像を同じストレージへ保存します。認証情報とアプリ設定は内部ストレージに残ります。")
+                }
+                if (state.isRefreshing) {
+                    item {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 3.dp)
+                            Spacer(Modifier.width(12.dp))
+                            Text("使用容量を計算しています")
+                        }
+                    }
+                }
+                items(state.locations, key = { it.id }) { location ->
+                    StorageLocationCard(
+                        location = location,
+                        enabled = !state.isRefreshing && !state.isMigrating,
+                        onSelect = onSelect,
+                    )
+                }
+                if (state.isMigrating) item { Text(state.migrationMessage ?: "移動中です") }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("閉じる") } },
+    )
+}
+
+@Composable
+private fun StorageLocationCard(
+    location: PostStorageLocation,
+    enabled: Boolean,
+    onSelect: (String) -> Unit,
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                location.displayName + if (location.isCurrent) "（現在）" else "",
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(if (location.isAvailable) location.path else "未装着または読み取り不可")
+            if (location.isAvailable) {
+                Text(
+                    "使用中: ${location.usedBytes?.let(::formatBytes) ?: "計算中"} / " +
+                        "空き: ${formatBytes(location.freeBytes)}",
+                )
+            }
+            if (!location.isCurrent && location.isAvailable) {
+                TextButton(
+                    onClick = { onSelect(location.id) },
+                    enabled = enabled,
+                ) { Text("ここへ移動") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StorageProgressDialog(title: String, message: String) {
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text(title) },
+        text = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(32.dp), strokeWidth = 3.dp)
+                Spacer(Modifier.width(16.dp))
+                Text(message)
+            }
+        },
+        confirmButton = {},
+    )
+}
+
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1024L * 1024L * 1024L -> "%.1f GB".format(bytes.toDouble() / (1024L * 1024L * 1024L))
+    bytes >= 1024L * 1024L -> "%.1f MB".format(bytes.toDouble() / (1024L * 1024L))
+    bytes >= 1024L -> "%.1f KB".format(bytes.toDouble() / 1024L)
+    else -> "$bytes B"
 }
 
 fun tabIcon(tab: AppTab): String = when (tab) {

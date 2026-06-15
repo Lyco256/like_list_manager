@@ -22,6 +22,12 @@ interface ClipDao {
     @Query("SELECT * FROM assets ORDER BY id")
     fun observeAssets(): Flow<List<AssetEntity>>
 
+    @Query("SELECT * FROM assets ORDER BY id")
+    suspend fun getAllAssets(): List<AssetEntity>
+
+    @Query("SELECT COUNT(*) AS count, COALESCE(SUM(sizeBytes), 0) AS totalBytes FROM assets WHERE localPath IS NOT NULL")
+    suspend fun getStoredAssetStats(): AssetStorageStats
+
     @Query("SELECT * FROM clip_tags WHERE clipId IN (:clipIds)")
     suspend fun clipTagsForClipIds(clipIds: List<Long>): List<ClipTagEntity>
 
@@ -42,6 +48,9 @@ interface ClipDao {
 
     @Update
     suspend fun updateClip(clip: ClipEntity)
+
+    @Update
+    suspend fun updateAsset(asset: AssetEntity)
 
     @Query("SELECT * FROM sync_state WHERE id = 1")
     fun observeSyncState(): Flow<SyncStateEntity?>
@@ -87,4 +96,9 @@ interface TagDao {
 data class TagCountRow(
     val tagId: Long,
     val count: Int,
+)
+
+data class AssetStorageStats(
+    val count: Int,
+    val totalBytes: Long,
 )

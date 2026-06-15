@@ -21,10 +21,11 @@ X側の「いいね」を変更するクライアントではなく、取得し�
 - 画像は回線を問わず保存し、動画/GIFはWi-Fi時だけpreview thumbnailを保存する
 - X側へ書き込みや「いいね」解除を行わない
 - Client Secretをアプリへ埋め込まない
+- 投稿DBと保存画像の保存先を内部ストレージまたはSDカードから選択できる
 
 ## 現時点で達成済み
 
-MVPの上記機能は実装済みです。OAuth callback、token暗号化保存、自動refresh、logout/revoke、liked posts pagination、Room保存、タグ・概要・検索・使用量表示までコードとAPKビルドで確認済みです。
+MVPの上記機能は実装済みです。OAuth callback、token暗号化保存、自動refresh、logout/revoke、liked posts pagination、Room保存、タグ・概要・検索・使用量表示、投稿データ保存先変更までコードで実装済みです。
 
 実アカウントを使ったOAuth許可とliked posts取得の最終確認は、実機上でClient IDを入力して行います。
 
@@ -35,7 +36,7 @@ MVPの上記機能は実装済みです。OAuth callback、token暗号化保存�
 3. WorkManagerによる低頻度バックグラウンド同期を追加する
 4. タグ色変更、並び替え、完全なタグ統合を追加する
 5. backup/export/importを追加する
-6. 画像容量表示と手動整理機能を追加する
+6. 保存先別の容量表示に加えて、画像の手動整理機能を追加する
 7. DB schema変更に備えたmigration testを追加する
 
 ## 非目標
