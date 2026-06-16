@@ -10,6 +10,8 @@ import com.lyco256.llm.data.TagHierarchy
 import com.lyco256.llm.data.TagNodeRef
 import com.lyco256.llm.data.TagNodeType
 import com.lyco256.llm.data.TagWithCount
+import com.lyco256.llm.data.orderNodesAfterMove
+import com.lyco256.llm.data.parentGroupIdForMove
 import com.lyco256.llm.data.requireSiblingNameAvailable
 import com.lyco256.llm.data.requireValidGroupDestination
 import org.junit.Assert.assertEquals
@@ -87,6 +89,32 @@ class TagHierarchyTest {
     @Test(expected = IllegalArgumentException::class)
     fun groupCannotMoveIntoDescendant() {
         requireValidGroupDestination(listOf(parent, child), parent.id, child.id)
+    }
+
+    @Test
+    fun rootNodeParentIsResolvedWithoutTreatingNullAsMissing() {
+        assertEquals(null, parentGroupIdForMove(TagNodeRef(TagNodeType.GROUP, parent.id), listOf(parent), emptyList()))
+        assertEquals(null, parentGroupIdForMove(TagNodeRef(TagNodeType.TAG, design.id), emptyList(), listOf(design)))
+    }
+
+    @Test
+    fun movingWithinSameParentAdjustsDownwardIndexAfterRemovingSource() {
+        val a = TagNodeRef(TagNodeType.TAG, 1)
+        val b = TagNodeRef(TagNodeType.TAG, 2)
+        val c = TagNodeRef(TagNodeType.TAG, 3)
+
+        assertEquals(listOf(b, a, c), orderNodesAfterMove(listOf(a, b, c), a, 2))
+        assertEquals(listOf(b, c, a), orderNodesAfterMove(listOf(a, b, c), a, 3))
+        assertEquals(listOf(c, a, b), orderNodesAfterMove(listOf(a, b, c), c, 0))
+    }
+
+    @Test
+    fun movingAcrossParentsInsertsAtRequestedIndex() {
+        val moved = TagNodeRef(TagNodeType.TAG, 1)
+        val a = TagNodeRef(TagNodeType.TAG, 2)
+        val b = TagNodeRef(TagNodeType.TAG, 3)
+
+        assertEquals(listOf(a, moved, b), orderNodesAfterMove(listOf(a, b), moved, 1))
     }
 
     private fun hierarchy(clipTags: List<ClipTagEntity> = emptyList()) = TagHierarchy(

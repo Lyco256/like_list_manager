@@ -439,29 +439,46 @@ class ClipRepository(
         }
     }
 
-    suspend fun moveNode(node: TagNodeRef, parentGroupId: Long?) = withContext(Dispatchers.IO) {
+    suspend fun moveNode(node: TagNodeRef, parentGroupId: Long?) = moveNodeToParentAt(node, parentGroupId, Int.MAX_VALUE)
+
+    suspend fun moveNodeToParentAt(node: TagNodeRef, parentGroupId: Long?, index: Int) = withContext(Dispatchers.IO) {
         postStorageManager.withDatabase { database ->
             val tagDao = database.tagDao()
             validateParent(tagDao, parentGroupId)
             val groups = tagDao.getGroups()
             val tags = tagDao.getTags()
-            val destinationOrder = siblingNodes(groups, tags, parentGroupId).size
+            val sourceParentGroupId = parentGroupIdForMove(node, groups, tags)
             when (node.type) {
                 TagNodeType.TAG -> {
                     val tag = tags.firstOrNull { it.id == node.id } ?: error("タグが見つかりません")
                     ensureUniqueSiblingName(tagDao, parentGroupId, tag.name, node)
-                    tagDao.updateTag(tag.copy(parentGroupId = parentGroupId, sortOrder = destinationOrder, updatedAt = Instant.now().toString()))
-                    normalizeSiblings(tagDao, tag.parentGroupId)
+                    val sourceOrder = siblingNodes(groups, tags, sourceParentGroupId).map { it.first }.filterNot { it == node }
+                    val destinationOrder = orderNodesAfterMove(
+                        currentDestinationNodes = siblingNodes(groups, tags, parentGroupId).map { it.first },
+                        node = node,
+                        index = index,
+                    )
+                    if (sourceParentGroupId != parentGroupId) {
+                        applySiblingOrder(tagDao, groups, tags, sourceParentGroupId, sourceOrder)
+                    }
+                    applySiblingOrder(tagDao, groups, tags, parentGroupId, destinationOrder, movedNode = node)
                 }
                 TagNodeType.GROUP -> {
                     val group = groups.firstOrNull { it.id == node.id } ?: error("グループが見つかりません")
                     requireValidGroupDestination(groups, group.id, parentGroupId)
                     ensureUniqueSiblingName(tagDao, parentGroupId, group.name, node)
-                    tagDao.updateGroup(group.copy(parentGroupId = parentGroupId, sortOrder = destinationOrder, updatedAt = Instant.now().toString()))
-                    normalizeSiblings(tagDao, group.parentGroupId)
+                    val sourceOrder = siblingNodes(groups, tags, sourceParentGroupId).map { it.first }.filterNot { it == node }
+                    val destinationOrder = orderNodesAfterMove(
+                        currentDestinationNodes = siblingNodes(groups, tags, parentGroupId).map { it.first },
+                        node = node,
+                        index = index,
+                    )
+                    if (sourceParentGroupId != parentGroupId) {
+                        applySiblingOrder(tagDao, groups, tags, sourceParentGroupId, sourceOrder)
+                    }
+                    applySiblingOrder(tagDao, groups, tags, parentGroupId, destinationOrder, movedNode = node)
                 }
             }
-            normalizeSiblings(tagDao, parentGroupId)
         }
     }
 
@@ -470,14 +487,9 @@ class ClipRepository(
             val tagDao = database.tagDao()
             val current = siblingNodes(tagDao, parentGroupId)
             require(current.map { it.first }.toSet() == orderedNodes.toSet()) { "並び替え対象が一致しません" }
-            val groups = tagDao.getGroups().associateBy { it.id }
-            val tags = tagDao.getTags().associateBy { it.id }
-            orderedNodes.forEachIndexed { index, ref ->
-                when (ref.type) {
-                    TagNodeType.GROUP -> groups[ref.id]?.let { tagDao.updateGroup(it.copy(sortOrder = index, updatedAt = Instant.now().toString())) }
-                    TagNodeType.TAG -> tags[ref.id]?.let { tagDao.updateTag(it.copy(sortOrder = index, updatedAt = Instant.now().toString())) }
-                }
-            }
+            val groups = tagDao.getGroups()
+            val tags = tagDao.getTags()
+            applySiblingOrder(tagDao, groups, tags, parentGroupId, orderedNodes)
         }
     }
 
@@ -543,6 +555,40 @@ class ClipRepository(
         }
     }
 
+    private suspend fun applySiblingOrder(
+        tagDao: TagDao,
+        groups: List<TagGroupEntity>,
+        tags: List<TagEntity>,
+        parentGroupId: Long?,
+        orderedNodes: List<TagNodeRef>,
+        movedNode: TagNodeRef? = null,
+    ) {
+        val groupsById = groups.associateBy { it.id }
+        val tagsById = tags.associateBy { it.id }
+        orderedNodes.forEachIndexed { index, ref ->
+            when (ref.type) {
+                TagNodeType.GROUP -> groupsById[ref.id]?.let { group ->
+                    tagDao.updateGroup(
+                        if (ref == movedNode) {
+                            group.copy(parentGroupId = parentGroupId, sortOrder = index, updatedAt = Instant.now().toString())
+                        } else {
+                            group.copy(sortOrder = index, updatedAt = Instant.now().toString())
+                        },
+                    )
+                }
+                TagNodeType.TAG -> tagsById[ref.id]?.let { tag ->
+                    tagDao.updateTag(
+                        if (ref == movedNode) {
+                            tag.copy(parentGroupId = parentGroupId, sortOrder = index, updatedAt = Instant.now().toString())
+                        } else {
+                            tag.copy(sortOrder = index, updatedAt = Instant.now().toString())
+                        },
+                    )
+                }
+            }
+        }
+    }
+
 }
 
 internal fun requireSiblingNameAvailable(
@@ -573,6 +619,27 @@ internal fun requireValidGroupDestination(
         require(current != groupId) { "グループ自身または配下のグループへ移動できません" }
         current = byId[current]?.parentGroupId
     }
+}
+
+internal fun parentGroupIdForMove(
+    node: TagNodeRef,
+    groups: List<TagGroupEntity>,
+    tags: List<TagEntity>,
+): Long? = when (node.type) {
+    TagNodeType.GROUP -> (groups.firstOrNull { it.id == node.id } ?: error("グループが見つかりません")).parentGroupId
+    TagNodeType.TAG -> (tags.firstOrNull { it.id == node.id } ?: error("タグが見つかりません")).parentGroupId
+}
+
+internal fun orderNodesAfterMove(
+    currentDestinationNodes: List<TagNodeRef>,
+    node: TagNodeRef,
+    index: Int,
+): List<TagNodeRef> {
+    val currentIndex = currentDestinationNodes.indexOf(node)
+    val adjustedIndex = if (currentIndex >= 0 && currentIndex < index) index - 1 else index
+    val ordered = currentDestinationNodes.filterNot { it == node }.toMutableList()
+    ordered.add(adjustedIndex.coerceIn(0, ordered.size), node)
+    return ordered
 }
 
 private fun XApiException.toUserMessage(): String = when (statusCode) {

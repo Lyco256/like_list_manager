@@ -70,7 +70,7 @@ MainActivity / Compose UI
 
 | 変更したいこと | 最初に読む文書 | 次に確認する文書 |
 | --- | --- | --- |
-| 画面、操作、検索、タグUI | `docs/app/src/main/java/com/lyco256/llm/MainActivity.kt.md` | `ClipRepository.kt.md`, `Entities.kt.md` |
+| 画面、操作、検索、タグUI | `docs/app/src/main/java/com/lyco256/llm/MainActivity.kt.md` | `docs/app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt.md`, `ClipRepository.kt.md`, `Entities.kt.md` |
 | 同期ロジック、月間制限、画像保存 | `docs/app/src/main/java/com/lyco256/llm/data/ClipRepository.kt.md` | `XApiClient.kt.md`, `Daos.kt.md`, `Entities.kt.md` |
 | 投稿DB・画像の保存先、SDカード移動 | `docs/app/src/main/java/com/lyco256/llm/data/PostStorageManager.kt.md` | `AppContainer.kt.md`, `ClipRepository.kt.md`, `MainActivity.kt.md` |
 | X APIのendpointやresponse | `docs/app/src/main/java/com/lyco256/llm/data/XApiClient.kt.md` | `ClipRepository.kt.md`, `Entities.kt.md` |
@@ -104,6 +104,7 @@ MainActivity / Compose UI
 
 - `docs/app/src/main/java/com/lyco256/llm/LikeListManagerApp.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/MainActivity.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt.md`
 
 ### Data・API
 

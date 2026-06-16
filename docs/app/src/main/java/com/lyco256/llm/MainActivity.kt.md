@@ -11,18 +11,15 @@
 
 ## 役割
 
-Activity、ViewModel、UI state、Compose画面をまとめる現在のUI入口です。未分類、分類、タグ、同期、使用量、X API設定、投稿データ保存先設定を提供します。
+Activity、ViewModel、UI state、Compose画面の接続入口です。未分類、分類、タグ、同期、使用量、X API設定、投稿データ保存先設定へ状態とイベントを流します。画面本体のタグ階層UIは `TagHierarchyUiV2.kt` に分離されています。
 
 ## 主な処理
 
 - `MainActivity`: Compose起動とAppAuthのActivity Result受信
 - `MainViewModel`: RepositoryのFlowをUI stateへ合成し、ユーザー操作をRepositoryへ渡す
 - `MainUiState`: 未分類、分類済み、検索、タグ／グループの必須AND＋含まれるOR絞り込みを派生計算
-- `ClipListScreen`: グループを展開し、未分類投稿ごとのタグ選択を画面内に一時保持して「分類」で保存
-- `TweetCard`: X風の投稿本文・画像、概要編集、複数タグ選択、分類確定、ローカル削除
-- 分類済み画面のタグ変更は即時保存し、全タグを外した投稿は未分類へ戻す
-- `TagListScreen`: 階層表示、グループ／タグ追加、名称変更、移動、同一親内の長押し並び替え、削除、別タグへの一括追加
-- 分類画面の条件チップはタップごとに「なし→含まれる→必須」を切り替え、グループ条件は全子孫タグを対象にする
+- `EnhancedClipListScreen` / `EnhancedClassifiedScreen` / `EnhancedTagListScreen` を呼び出して、未分類、分類、タグ管理の画面へ接続する
+- `TagListScreen` 系の旧Composableは履歴として残しているが、実際の表示は `TagHierarchyUiV2.kt` 側が担当する
 - `ApiSettingsDialog`: Client ID保存、Xログイン、ログアウト
 - `PostStorageDialog`: 内部/SDカードの一覧、現在地、使用量、空き容量、移動開始
 - 保存先移動中は投稿一覧の代わりに待機画面を表示し、編集や同期を行わせない
@@ -36,6 +33,7 @@ UI操作 → `MainViewModel` → `ClipRepository` → Room/X API/暗号化設定
 ## 関連ファイル
 
 - `LikeListManagerApp.kt.md`: `AppContainer` の取得元です。
+- `TagHierarchyUiV2.kt.md`: 未分類、分類、タグ管理のCompose画面です。
 - `data/ClipRepository.kt.md`: UI操作の業務処理を実行します。
 - `data/Entities.kt.md`: 画面で表示・編集するモデルです。
 - `data/ApiSettingsStore.kt.md`: UIに表示するClient IDとログイン状態を保存します。

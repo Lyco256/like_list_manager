@@ -232,6 +232,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteTag(tag: TagEntity, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.deleteTag(tag.id) }
     fun deleteGroup(group: TagGroupEntity, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.deleteGroup(group.id) }
     fun moveTagNode(node: TagNodeRef, parentGroupId: Long?, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.moveNode(node, parentGroupId) }
+    fun moveTagNodeToIndex(node: TagNodeRef, parentGroupId: Long?, index: Int, onMessage: (String) -> Unit) = tagAction(onMessage) {
+        repository.moveNodeToParentAt(node, parentGroupId, index)
+    }
     fun reorderTagNodes(parentGroupId: Long?, nodes: List<TagNodeRef>, onMessage: (String) -> Unit) = tagAction(onMessage) {
         repository.reorderSiblings(parentGroupId, nodes)
     }
@@ -431,7 +434,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                 }) { Text("保存先を確認") }
             }
         } else when (tab) {
-            AppTab.Unclassified -> ClipListScreen(
+            AppTab.Unclassified -> EnhancedClipListScreen(
                 title = "未分類",
                 clips = uiState.unclassified,
                 hierarchy = uiState.tagHierarchy,
@@ -442,7 +445,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                 onSummaryChange = viewModel::updateSummary,
                 onDelete = viewModel::moveClipToTrash,
             )
-            AppTab.Classified -> ClassifiedScreen(
+            AppTab.Classified -> EnhancedClassifiedScreen(
                 uiState = uiState,
                 modifier = Modifier.padding(padding),
                 onQueryChange = viewModel::setQuery,
@@ -452,7 +455,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                 onSummaryChange = viewModel::updateSummary,
                 onDelete = viewModel::moveClipToTrash,
             )
-            AppTab.Tags -> TagListScreen(
+            AppTab.Tags -> EnhancedTagListScreen(
                 hierarchy = uiState.tagHierarchy,
                 modifier = Modifier.padding(padding),
                 onCreateTag = { name, parent -> viewModel.createTag(name, parent) { syncMessage = it } },
@@ -462,7 +465,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                 onDeleteTag = { tag -> viewModel.deleteTag(tag) { syncMessage = it } },
                 onDeleteGroup = { group -> viewModel.deleteGroup(group) { syncMessage = it } },
                 onMove = { node, parent -> viewModel.moveTagNode(node, parent) { syncMessage = it } },
-                onReorder = { parent, nodes -> viewModel.reorderTagNodes(parent, nodes) { syncMessage = it } },
+                onMoveToIndex = { node, parent, index -> viewModel.moveTagNodeToIndex(node, parent, index) { syncMessage = it } },
                 onAddAll = viewModel::addAllFromTagToTag,
             )
         }
@@ -1155,7 +1158,7 @@ private fun TagManagementChildren(
 }
 
 @Composable
-private fun CreateNodeDialog(type: TagNodeType, parentId: Long?, onDismiss: () -> Unit, onCreate: (String) -> Unit) {
+fun CreateNodeDialog(type: TagNodeType, parentId: Long?, onDismiss: () -> Unit, onCreate: (String) -> Unit) {
     var name by remember(type, parentId) { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1167,7 +1170,7 @@ private fun CreateNodeDialog(type: TagNodeType, parentId: Long?, onDismiss: () -
 }
 
 @Composable
-private fun RenameNodeDialog(initialName: String, onDismiss: () -> Unit, onRename: (String) -> Unit) {
+fun RenameNodeDialog(initialName: String, onDismiss: () -> Unit, onRename: (String) -> Unit) {
     var name by remember(initialName) { mutableStateOf(initialName) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1179,7 +1182,7 @@ private fun RenameNodeDialog(initialName: String, onDismiss: () -> Unit, onRenam
 }
 
 @Composable
-private fun MoveNodeDialog(node: TagTreeNode, groups: List<TagGroupEntity>, onDismiss: () -> Unit, onMove: (Long?) -> Unit) {
+fun MoveNodeDialog(node: TagTreeNode, groups: List<TagGroupEntity>, onDismiss: () -> Unit, onMove: (Long?) -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("「${node.name}」を移動") },
@@ -1196,12 +1199,12 @@ private fun MoveNodeDialog(node: TagTreeNode, groups: List<TagGroupEntity>, onDi
     )
 }
 
-private fun TagTreeNode.ref(): TagNodeRef = TagNodeRef(
+fun TagTreeNode.ref(): TagNodeRef = TagNodeRef(
     if (this is TagGroupNode) TagNodeType.GROUP else TagNodeType.TAG,
     id,
 )
 
-private fun TagFilterState.shortLabel(): String = when (this) {
+fun TagFilterState.shortLabel(): String = when (this) {
     TagFilterState.NONE -> ""
     TagFilterState.INCLUDED -> "含: "
     TagFilterState.REQUIRED -> "必: "
