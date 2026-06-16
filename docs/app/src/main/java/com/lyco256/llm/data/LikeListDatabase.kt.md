@@ -6,7 +6,13 @@
 
 ## 役割
 
-Room DatabaseにEntityを登録し、`ClipDao` と `TagDao` を公開します。現在のschema versionは1です。
+Room DatabaseにEntityを登録し、`ClipDao` と `TagDao` を公開します。現在のschema versionは2です。
+
+## Migration
+
+- `MIGRATION_1_2`: `tag_groups` を追加し、既存タグへnullableな `parentGroupId` を追加する
+- version 1のタグID、名称、色、並び順、投稿タグ割り当てを一時テーブル経由で保持し、既存タグはルート直下へ配置する
+- `clip_tags` は最終テーブル名 `tags` を参照する外部キーで再作成する
 
 ## 関連ファイル
 

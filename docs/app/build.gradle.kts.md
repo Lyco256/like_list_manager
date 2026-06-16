@@ -15,6 +15,9 @@ AndroidアプリモジュールのapplicationId、SDK、Java/Kotlin 21、Compose
 - Coil: 投稿画像表示
 - Security Crypto: Client IDとOAuthセッションの暗号化保存
 - AppAuth: OAuth 2.0 Authorization Code + PKCE
+- JUnit 4: 階層・絞り込みロジックのローカル単体テスト
+- AndroidX Test: SQLite migrationの実機テスト
+- `AndroidJUnitRunner`: `connectedDebugAndroidTest` で実機テストを検出・実行
 
 ## 関連ファイル
 

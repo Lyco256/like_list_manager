@@ -68,6 +68,24 @@ class ClipRepository(
         database?.clipDao()?.observeSyncState() ?: flowOf(null)
     }
 
+    val tagHierarchy: Flow<TagHierarchy> = postStorageManager.database.flatMapLatest { database ->
+        if (database == null) return@flatMapLatest flowOf(TagHierarchy())
+        val tagDao = database.tagDao()
+        combine(
+            tagDao.observeGroups(),
+            tagDao.observeTags(),
+            tagDao.observeTagCounts(),
+            database.clipDao().observeActiveClipTags(),
+        ) { groups, tags, counts, clipTags ->
+            val countMap = counts.associate { it.tagId to it.count }
+            TagHierarchy(
+                groups = groups,
+                tags = tags.map { TagWithCount(it, countMap[it.id] ?: 0) },
+                clipTags = clipTags,
+            )
+        }
+    }
+
     val tagsWithCount: Flow<List<TagWithCount>> = postStorageManager.database.flatMapLatest { database ->
         if (database == null) return@flatMapLatest flowOf(emptyList())
         val tagDao = database.tagDao()
@@ -355,27 +373,112 @@ class ClipRepository(
         return target.absolutePath
     }
 
-    suspend fun createTag(name: String) = withContext(Dispatchers.IO) {
+    suspend fun createTag(name: String, parentGroupId: Long? = null) = withContext(Dispatchers.IO) {
         postStorageManager.withDatabase { database ->
-        val clean = name.trim()
-        if (clean.isNotEmpty()) {
+            val clean = cleanNodeName(name)
+            val tagDao = database.tagDao()
+            validateParent(tagDao, parentGroupId)
+            ensureUniqueSiblingName(tagDao, parentGroupId, clean)
             val now = Instant.now().toString()
-            database.tagDao().insertTag(TagEntity(name = clean, createdAt = now, updatedAt = now))
-        }
+            val order = siblingNodes(tagDao, parentGroupId).size
+            check(tagDao.insertTag(TagEntity(name = clean, parentGroupId = parentGroupId, sortOrder = order, createdAt = now, updatedAt = now)) > 0) {
+                "タグを追加できませんでした"
+            }
         }
     }
 
     suspend fun renameTag(tag: TagEntity, name: String) = withContext(Dispatchers.IO) {
         postStorageManager.withDatabase { database ->
-        val clean = name.trim()
-        if (clean.isNotEmpty()) {
-            database.tagDao().updateTag(tag.copy(name = clean, updatedAt = Instant.now().toString()))
+            val clean = cleanNodeName(name)
+            val tagDao = database.tagDao()
+            ensureUniqueSiblingName(tagDao, tag.parentGroupId, clean, TagNodeRef(TagNodeType.TAG, tag.id))
+            tagDao.updateTag(tag.copy(name = clean, updatedAt = Instant.now().toString()))
         }
+    }
+
+    suspend fun createGroup(name: String, parentGroupId: Long? = null) = withContext(Dispatchers.IO) {
+        postStorageManager.withDatabase { database ->
+            val clean = cleanNodeName(name)
+            val tagDao = database.tagDao()
+            validateParent(tagDao, parentGroupId)
+            ensureUniqueSiblingName(tagDao, parentGroupId, clean)
+            val now = Instant.now().toString()
+            val order = siblingNodes(tagDao, parentGroupId).size
+            tagDao.insertGroup(
+                TagGroupEntity(
+                    name = clean,
+                    parentGroupId = parentGroupId,
+                    sortOrder = order,
+                    createdAt = now,
+                    updatedAt = now,
+                ),
+            )
+        }
+    }
+
+    suspend fun renameGroup(group: TagGroupEntity, name: String) = withContext(Dispatchers.IO) {
+        postStorageManager.withDatabase { database ->
+            val clean = cleanNodeName(name)
+            val tagDao = database.tagDao()
+            ensureUniqueSiblingName(tagDao, group.parentGroupId, clean, TagNodeRef(TagNodeType.GROUP, group.id))
+            tagDao.updateGroup(group.copy(name = clean, updatedAt = Instant.now().toString()))
         }
     }
 
     suspend fun deleteTag(tagId: Long) = withContext(Dispatchers.IO) {
         postStorageManager.withDatabase { it.tagDao().deleteTag(tagId) }
+    }
+
+    suspend fun deleteGroup(groupId: Long) = withContext(Dispatchers.IO) {
+        postStorageManager.withDatabase { database ->
+            val tagDao = database.tagDao()
+            require(tagDao.countChildGroups(groupId) == 0 && tagDao.countChildTags(groupId) == 0) {
+                "子要素があるグループは削除できません"
+            }
+            tagDao.deleteGroup(groupId)
+        }
+    }
+
+    suspend fun moveNode(node: TagNodeRef, parentGroupId: Long?) = withContext(Dispatchers.IO) {
+        postStorageManager.withDatabase { database ->
+            val tagDao = database.tagDao()
+            validateParent(tagDao, parentGroupId)
+            val groups = tagDao.getGroups()
+            val tags = tagDao.getTags()
+            val destinationOrder = siblingNodes(groups, tags, parentGroupId).size
+            when (node.type) {
+                TagNodeType.TAG -> {
+                    val tag = tags.firstOrNull { it.id == node.id } ?: error("タグが見つかりません")
+                    ensureUniqueSiblingName(tagDao, parentGroupId, tag.name, node)
+                    tagDao.updateTag(tag.copy(parentGroupId = parentGroupId, sortOrder = destinationOrder, updatedAt = Instant.now().toString()))
+                    normalizeSiblings(tagDao, tag.parentGroupId)
+                }
+                TagNodeType.GROUP -> {
+                    val group = groups.firstOrNull { it.id == node.id } ?: error("グループが見つかりません")
+                    requireValidGroupDestination(groups, group.id, parentGroupId)
+                    ensureUniqueSiblingName(tagDao, parentGroupId, group.name, node)
+                    tagDao.updateGroup(group.copy(parentGroupId = parentGroupId, sortOrder = destinationOrder, updatedAt = Instant.now().toString()))
+                    normalizeSiblings(tagDao, group.parentGroupId)
+                }
+            }
+            normalizeSiblings(tagDao, parentGroupId)
+        }
+    }
+
+    suspend fun reorderSiblings(parentGroupId: Long?, orderedNodes: List<TagNodeRef>) = withContext(Dispatchers.IO) {
+        postStorageManager.withDatabase { database ->
+            val tagDao = database.tagDao()
+            val current = siblingNodes(tagDao, parentGroupId)
+            require(current.map { it.first }.toSet() == orderedNodes.toSet()) { "並び替え対象が一致しません" }
+            val groups = tagDao.getGroups().associateBy { it.id }
+            val tags = tagDao.getTags().associateBy { it.id }
+            orderedNodes.forEachIndexed { index, ref ->
+                when (ref.type) {
+                    TagNodeType.GROUP -> groups[ref.id]?.let { tagDao.updateGroup(it.copy(sortOrder = index, updatedAt = Instant.now().toString())) }
+                    TagNodeType.TAG -> tags[ref.id]?.let { tagDao.updateTag(it.copy(sortOrder = index, updatedAt = Instant.now().toString())) }
+                }
+            }
+        }
     }
 
     suspend fun addAllFromTagToTag(sourceTagId: Long, targetTagId: Long) = withContext(Dispatchers.IO) {
@@ -398,6 +501,77 @@ class ClipRepository(
 
     suspend fun moveClipToTrash(clip: ClipEntity) = withContext(Dispatchers.IO) {
         postStorageManager.withDatabase { it.clipDao().updateClip(clip.copy(isDeleted = true)) }
+    }
+
+    private fun cleanNodeName(name: String): String = name.trim().also {
+        require(it.isNotEmpty()) { "名前を入力してください" }
+    }
+
+    private suspend fun validateParent(tagDao: TagDao, parentGroupId: Long?) {
+        if (parentGroupId != null) require(tagDao.getGroups().any { it.id == parentGroupId }) { "移動先グループが見つかりません" }
+    }
+
+    private suspend fun ensureUniqueSiblingName(
+        tagDao: TagDao,
+        parentGroupId: Long?,
+        name: String,
+        except: TagNodeRef? = null,
+    ) {
+        requireSiblingNameAvailable(tagDao.getGroups(), tagDao.getTags(), parentGroupId, name, except)
+    }
+
+    private suspend fun siblingNodes(tagDao: TagDao, parentGroupId: Long?): List<Pair<TagNodeRef, Int>> =
+        siblingNodes(tagDao.getGroups(), tagDao.getTags(), parentGroupId)
+
+    private fun siblingNodes(
+        groups: List<TagGroupEntity>,
+        tags: List<TagEntity>,
+        parentGroupId: Long?,
+    ): List<Pair<TagNodeRef, Int>> = buildList {
+        groups.filter { it.parentGroupId == parentGroupId }.forEach { add(TagNodeRef(TagNodeType.GROUP, it.id) to it.sortOrder) }
+        tags.filter { it.parentGroupId == parentGroupId }.forEach { add(TagNodeRef(TagNodeType.TAG, it.id) to it.sortOrder) }
+    }.sortedBy { it.second }
+
+    private suspend fun normalizeSiblings(tagDao: TagDao, parentGroupId: Long?) {
+        val groups = tagDao.getGroups().associateBy { it.id }
+        val tags = tagDao.getTags().associateBy { it.id }
+        siblingNodes(tagDao, parentGroupId).forEachIndexed { index, (ref, _) ->
+            when (ref.type) {
+                TagNodeType.GROUP -> groups[ref.id]?.takeIf { it.sortOrder != index }?.let { tagDao.updateGroup(it.copy(sortOrder = index)) }
+                TagNodeType.TAG -> tags[ref.id]?.takeIf { it.sortOrder != index }?.let { tagDao.updateTag(it.copy(sortOrder = index)) }
+            }
+        }
+    }
+
+}
+
+internal fun requireSiblingNameAvailable(
+    groups: List<TagGroupEntity>,
+    tags: List<TagEntity>,
+    parentGroupId: Long?,
+    name: String,
+    except: TagNodeRef? = null,
+) {
+    val duplicateGroup = groups.any {
+        it.parentGroupId == parentGroupId && it.name == name && except != TagNodeRef(TagNodeType.GROUP, it.id)
+    }
+    val duplicateTag = tags.any {
+        it.parentGroupId == parentGroupId && it.name == name && except != TagNodeRef(TagNodeType.TAG, it.id)
+    }
+    require(!duplicateGroup && !duplicateTag) { "同じ場所に同名のタグまたはグループがあります" }
+}
+
+internal fun requireValidGroupDestination(
+    groups: List<TagGroupEntity>,
+    groupId: Long,
+    parentGroupId: Long?,
+) {
+    require(parentGroupId != groupId) { "グループ自身または配下のグループへ移動できません" }
+    val byId = groups.associateBy { it.id }
+    var current = parentGroupId
+    while (current != null) {
+        require(current != groupId) { "グループ自身または配下のグループへ移動できません" }
+        current = byId[current]?.parentGroupId
     }
 }
 

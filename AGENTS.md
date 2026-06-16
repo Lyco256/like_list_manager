@@ -182,6 +182,20 @@ Entityの列変更はDB schema変更です。version、migration、既存実機�
 - token、Client ID以外のsecret、実アカウント情報をコミットしません。
 - 画像やDBを削除する操作、アプリデータ消去、`git reset --hard` は明示的な許可なしに実行しません。
 
+## 実機データ保護
+
+SC-56Cなど、ユーザーが日常利用している実機には復元できない投稿、タグ、画像、認証情報が蓄積されています。実機内のアプリデータは代替不能な本番データとして扱います。
+
+- ユーザーから操作ごとの明示的な許可を得て、復元可能なバックアップを作成・検証するまでは、アプリのアンインストール、データ消去、再インストールを伴う操作を実行しません。
+- `adb uninstall`、`adb shell pm clear`、Android Studioのデータ消去操作は実行しません。
+- `connectedDebugAndroidTest`、`connectedAndroidTest`など、対象アプリをアンインストールまたは再インストールする可能性があるGradleタスクを、蓄積データのある実機に対して実行しません。Instrumentation Testはエミュレーターまたはテスト専用端末で実行します。
+- 実行時の挙動が不明なテスト、インストール、package ID・署名・`applicationId`変更は、実機データを失う可能性がある操作として扱います。安全性を確認できない場合は実行せず、ユーザーへ報告します。
+- 実機へAPKを導入するときは、接続先とpackageを確認したうえで、既存データを維持する`adb install -r`だけを使用します。ただし、`-r`はバックアップの代わりにはなりません。
+- DB migrationの確認は、既存実機データを使わず、旧versionのDBを作成する自動テストまたは複製したテスト環境で行います。
+- 実機データへ影響する可能性がある操作が必要な場合は、DB本体、WAL/SHM、画像、設定を含むバックアップを先に作成し、ファイルが読み取れることと件数・サイズを確認します。安全なバックアップ手段がない場合は操作を中止します。
+- 実機への上書き後は、packageのUIDと初回インストール日時が変わっていないこと、投稿・タグ件数が維持されていることを確認します。
+- 2026-06-15に`connectedDebugAndroidTest`が実機上の対象アプリを再インストールし、蓄積データを消失させた事例があります。同じ操作を蓄積データのある端末で繰り返してはいけません。
+
 ## 検証
 
 Android Studioやエミュレーターは低スペックPCへの負荷が高いため、通常はコマンドラインの単発Gradle実行を優先します。
@@ -196,7 +210,8 @@ $env:PATH="$env:JAVA_HOME\bin;$env:PATH"
 
 注意:
 
-- 現在の `testDebugUnitTest` はテストコード未作成のため `NO-SOURCE` です。
+- `testDebugUnitTest`にはタグ階層と絞り込みのテストがあります。
+- DB migrationのInstrumentation Testはエミュレーターまたはテスト専用端末だけで実行します。
 - UI、OAuth callback、実X APIはSC-56CなどのUSBデバッグ実機で確認します。
 - APKの上書きインストールは `adb install -r` を使うと既存データを維持できます。
 - 実機起動後は `FATAL EXCEPTION`、`AndroidRuntime`、ANRをlogcatで確認します。

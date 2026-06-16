@@ -32,9 +32,9 @@ MainActivity / Compose UI
 ### UI
 
 - ダークテーマ
-- 未分類リスト: タグがない投稿を表示し、タグと概要を設定可能
-- 分類リスト: タグ絞り込み、本文・概要・投稿者検索、タグ再割り当て
-- タグリスト: 追加、名称変更、削除、別タグへの一括追加
+- 未分類リスト: グループを展開し、配下のタグを保留選択して分類確定
+- 分類リスト: タグ／グループの「含まれる」「必須」複合絞り込み、本文・概要・投稿者検索、タグ再割り当て
+- タグリスト: 無制限階層のグループ／タグ追加、名称変更、移動、長押し並び替え、削除、別タグへの一括追加
 - X風の投稿本文、投稿者、画像表示
 - Xで開く、ローカル削除
 - メニューから同期、API使用量、X API設定、投稿データ保存先を表示
@@ -54,7 +54,8 @@ MainActivity / Compose UI
 
 ### 保存と同期
 
-- Roomで投稿、画像情報、タグ、投稿タグ関連、同期状態を保存
+- Roomで投稿、画像情報、タググループ、タグ、投稿タグ関連、同期状態を保存
+- DB version 2でタグ階層を保持し、version 1の既存タグをルート直下へ移行
 - Client IDとOAuth tokenは暗号化SharedPreferencesへ保存
 - Room DBと画像は内部ストレージまたはSDカードのアプリ専用領域へまとめて保存
 - 保存先変更時はコピー、容量・件数・DB整合性検証、切り替え、旧データ削除を行う
@@ -116,15 +117,20 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/data/XApiClient.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/ClipRepository.kt.md`
 
+### Tests
+
+- `docs/app/src/test/java/com/lyco256/llm/TagHierarchyTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/LikeListDatabaseMigrationTest.kt.md`
+
 ## 現在の未実装・制約
 
 - 自動バックグラウンド同期は未実装
 - backup/import/exportは未実装
 - 任意フォルダへの保存とアンインストール後の投稿データ保持は未実装
-- タグ色変更と並び替えUIは未実装
+- タグ色変更は未実装
 - 動画/GIF本体は保存しない
-- DB migrationはversion 1のため未作成
-- 自動テストコードはまだなく、Gradleのtest taskは `NO-SOURCE`
+- DBはversion 2で、version 1からタグと割り当てを保持するmigrationを実装済み
+- 階層・複合絞り込み・制約の単体テストと、version 1→2の実機migration testを実装済み
 - 実際のXログインとliked posts同期はユーザーのClient IDとXアカウントで実機確認が必要
 
 ## 関連文書

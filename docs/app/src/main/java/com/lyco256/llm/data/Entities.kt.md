@@ -12,10 +12,13 @@ Roomのテーブル構造と、Repository/UI向けの合成モデルを定義し
 
 - `ClipEntity`: X投稿、投稿者、本文、概要、保存・同期時刻、ローカル削除状態
 - `AssetEntity`: 画像/動画サムネイルのURL、ローカルパス、サイズ、取得状態
-- `TagEntity`: タグ名、色、並び順
+- `TagGroupEntity`: 親グループ、名称、兄弟内の並び順
+- `TagEntity`: タグ名、色、親グループ、兄弟内の並び順
 - `ClipTagEntity`: 投稿とタグの多対多関連
 - `SyncStateEntity`: 月間取得数、予算・警告・停止ライン、15分rate limit、最終同期
 - `ClipWithDetails`, `TagWithCount`: UI表示用の合成モデル
+- `TagHierarchy`, `TagTreeNode`: グループとタグの混在階層、子孫タグ、重複を除いたグループ件数
+- `TagFilterState`, `TagNodeRef`: 「含まれる／必須」条件とタグ／グループ識別子
 
 ## 関連ファイル
 

@@ -17,11 +17,12 @@ Activity、ViewModel、UI state、Compose画面をまとめる現在のUI入口�
 
 - `MainActivity`: Compose起動とAppAuthのActivity Result受信
 - `MainViewModel`: RepositoryのFlowをUI stateへ合成し、ユーザー操作をRepositoryへ渡す
-- `MainUiState`: 未分類、分類済み、検索、タグ絞り込みを派生計算
-- `ClipListScreen`: 未分類投稿ごとのタグ選択を画面内に一時保持し、1件以上選択した状態で「分類」を押したときだけ保存
+- `MainUiState`: 未分類、分類済み、検索、タグ／グループの必須AND＋含まれるOR絞り込みを派生計算
+- `ClipListScreen`: グループを展開し、未分類投稿ごとのタグ選択を画面内に一時保持して「分類」で保存
 - `TweetCard`: X風の投稿本文・画像、概要編集、複数タグ選択、分類確定、ローカル削除
 - 分類済み画面のタグ変更は即時保存し、全タグを外した投稿は未分類へ戻す
-- `TagListScreen`: タグ追加、名称変更、削除、別タグへの一括追加
+- `TagListScreen`: 階層表示、グループ／タグ追加、名称変更、移動、同一親内の長押し並び替え、削除、別タグへの一括追加
+- 分類画面の条件チップはタップごとに「なし→含まれる→必須」を切り替え、グループ条件は全子孫タグを対象にする
 - `ApiSettingsDialog`: Client ID保存、Xログイン、ログアウト
 - `PostStorageDialog`: 内部/SDカードの一覧、現在地、使用量、空き容量、移動開始
 - 保存先移動中は投稿一覧の代わりに待機画面を表示し、編集や同期を行わせない

@@ -34,6 +34,9 @@ interface ClipDao {
     @Query("SELECT * FROM clip_tags")
     fun observeClipTags(): Flow<List<ClipTagEntity>>
 
+    @Query("SELECT clip_tags.* FROM clip_tags INNER JOIN clips ON clips.id = clip_tags.clipId WHERE clips.isDeleted = 0")
+    fun observeActiveClipTags(): Flow<List<ClipTagEntity>>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertClip(clip: ClipEntity): Long
 
@@ -71,20 +74,44 @@ interface ClipDao {
 
 @Dao
 interface TagDao {
-    @Query("SELECT * FROM tags ORDER BY sortOrder, name")
+    @Query("SELECT * FROM tags ORDER BY parentGroupId, sortOrder, name")
     fun observeTags(): Flow<List<TagEntity>>
 
-    @Query("SELECT tagId, COUNT(*) AS count FROM clip_tags GROUP BY tagId")
+    @Query("SELECT * FROM tags ORDER BY parentGroupId, sortOrder, name")
+    suspend fun getTags(): List<TagEntity>
+
+    @Query("SELECT * FROM tag_groups ORDER BY parentGroupId, sortOrder, name")
+    fun observeGroups(): Flow<List<TagGroupEntity>>
+
+    @Query("SELECT * FROM tag_groups ORDER BY parentGroupId, sortOrder, name")
+    suspend fun getGroups(): List<TagGroupEntity>
+
+    @Query("SELECT clip_tags.tagId, COUNT(*) AS count FROM clip_tags INNER JOIN clips ON clips.id = clip_tags.clipId WHERE clips.isDeleted = 0 GROUP BY clip_tags.tagId")
     fun observeTagCounts(): Flow<List<TagCountRow>>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertTag(tag: TagEntity): Long
 
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertGroup(group: TagGroupEntity): Long
+
     @Update
     suspend fun updateTag(tag: TagEntity)
 
+    @Update
+    suspend fun updateGroup(group: TagGroupEntity)
+
     @Query("DELETE FROM tags WHERE id = :tagId")
     suspend fun deleteTag(tagId: Long)
+
+    @Query("DELETE FROM tag_groups WHERE id = :groupId")
+    suspend fun deleteGroup(groupId: Long)
+
+    @Query("SELECT COUNT(*) FROM tags WHERE parentGroupId = :groupId")
+    suspend fun countChildTags(groupId: Long): Int
+
+    @Query("SELECT COUNT(*) FROM tag_groups WHERE parentGroupId = :groupId")
+    suspend fun countChildGroups(groupId: Long): Int
 
     @Query("SELECT clips.* FROM clips INNER JOIN clip_tags ON clips.id = clip_tags.clipId WHERE clip_tags.tagId = :tagId AND clips.isDeleted = 0 ORDER BY clips.savedAt DESC")
     suspend fun clipsForTag(tagId: Long): List<ClipEntity>

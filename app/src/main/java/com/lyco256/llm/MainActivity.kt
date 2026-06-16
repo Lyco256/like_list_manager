@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,6 +55,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -75,6 +77,14 @@ import com.lyco256.llm.data.PostStorageLocation
 import com.lyco256.llm.data.PostStorageState
 import com.lyco256.llm.data.SyncStateEntity
 import com.lyco256.llm.data.TagEntity
+import com.lyco256.llm.data.TagFilterState
+import com.lyco256.llm.data.TagGroupEntity
+import com.lyco256.llm.data.TagGroupNode
+import com.lyco256.llm.data.TagHierarchy
+import com.lyco256.llm.data.TagLeafNode
+import com.lyco256.llm.data.TagNodeRef
+import com.lyco256.llm.data.TagNodeType
+import com.lyco256.llm.data.TagTreeNode
 import com.lyco256.llm.data.TagWithCount
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -123,17 +133,18 @@ enum class AppTab(val label: String) {
 data class MainUiState(
     val clips: List<ClipWithDetails> = emptyList(),
     val tags: List<TagWithCount> = emptyList(),
+    val tagHierarchy: TagHierarchy = TagHierarchy(),
     val syncState: SyncStateEntity? = null,
     val apiSettings: ApiSettings = ApiSettings(),
     val oauthSession: OAuthSession? = null,
     val storageState: PostStorageState = PostStorageState(),
     val query: String = "",
-    val selectedTagId: Long? = null,
+    val tagFilters: Map<TagNodeRef, TagFilterState> = emptyMap(),
 ) {
     val unclassified: List<ClipWithDetails> = clips.filter { it.tags.isEmpty() }
     val classified: List<ClipWithDetails> = clips
         .filter { it.tags.isNotEmpty() }
-        .filter { clip -> selectedTagId == null || clip.tags.any { it.id == selectedTagId } }
+        .filter { clip -> matchesTagFilters(clip, tagHierarchy, tagFilters) }
         .filter { clip ->
             query.isBlank() ||
                 clip.clip.summary.contains(query, ignoreCase = true) ||
@@ -146,6 +157,7 @@ data class MainUiState(
 private data class RepositoryUiState(
     val clips: List<ClipWithDetails>,
     val tags: List<TagWithCount>,
+    val tagHierarchy: TagHierarchy,
     val syncState: SyncStateEntity?,
     val storageState: PostStorageState,
 )
@@ -153,17 +165,18 @@ private data class RepositoryUiState(
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = (application as LikeListManagerApp).container.repository
     private val query = MutableStateFlow("")
-    private val selectedTagId = MutableStateFlow<Long?>(null)
+    private val tagFilters = MutableStateFlow<Map<TagNodeRef, TagFilterState>>(emptyMap())
     private val apiSettings = MutableStateFlow(ApiSettings())
     private val oauthSession = MutableStateFlow<OAuthSession?>(null)
 
     private val repositoryState = combine(
         repository.clipsWithDetails,
         repository.tagsWithCount,
+        repository.tagHierarchy,
         repository.syncState,
         repository.storageState,
-    ) { clips, tags, syncState, storageState ->
-        RepositoryUiState(clips, tags, syncState, storageState)
+    ) { clips, tags, hierarchy, syncState, storageState ->
+        RepositoryUiState(clips, tags, hierarchy, syncState, storageState)
     }
 
     val uiState: StateFlow<MainUiState> = combine(
@@ -171,17 +184,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         apiSettings,
         oauthSession,
         query,
-        selectedTagId,
-    ) { repositoryState, settings, session, queryValue, selected ->
+        tagFilters,
+    ) { repositoryState, settings, session, queryValue, filters ->
         MainUiState(
             clips = repositoryState.clips,
             tags = repositoryState.tags,
+            tagHierarchy = repositoryState.tagHierarchy,
             syncState = repositoryState.syncState,
             apiSettings = settings,
             oauthSession = session,
             storageState = repositoryState.storageState,
             query = queryValue,
-            selectedTagId = selected,
+            tagFilters = filters,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 
@@ -197,13 +211,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         query.value = value
     }
 
-    fun setSelectedTag(tagId: Long?) {
-        selectedTagId.value = tagId
+    fun cycleTagFilter(node: TagNodeRef) {
+        val current = tagFilters.value[node] ?: TagFilterState.NONE
+        val next = when (current) {
+            TagFilterState.NONE -> TagFilterState.INCLUDED
+            TagFilterState.INCLUDED -> TagFilterState.REQUIRED
+            TagFilterState.REQUIRED -> TagFilterState.NONE
+        }
+        tagFilters.value = tagFilters.value.toMutableMap().apply {
+            if (next == TagFilterState.NONE) remove(node) else put(node, next)
+        }
     }
 
-    fun createTag(name: String) = viewModelScope.launch { repository.createTag(name) }
-    fun renameTag(tag: TagEntity, name: String) = viewModelScope.launch { repository.renameTag(tag, name) }
-    fun deleteTag(tag: TagEntity) = viewModelScope.launch { repository.deleteTag(tag.id) }
+    fun clearTagFilters() { tagFilters.value = emptyMap() }
+
+    fun createTag(name: String, parentGroupId: Long?, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.createTag(name, parentGroupId) }
+    fun createGroup(name: String, parentGroupId: Long?, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.createGroup(name, parentGroupId) }
+    fun renameTag(tag: TagEntity, name: String, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.renameTag(tag, name) }
+    fun renameGroup(group: TagGroupEntity, name: String, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.renameGroup(group, name) }
+    fun deleteTag(tag: TagEntity, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.deleteTag(tag.id) }
+    fun deleteGroup(group: TagGroupEntity, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.deleteGroup(group.id) }
+    fun moveTagNode(node: TagNodeRef, parentGroupId: Long?, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.moveNode(node, parentGroupId) }
+    fun reorderTagNodes(parentGroupId: Long?, nodes: List<TagNodeRef>, onMessage: (String) -> Unit) = tagAction(onMessage) {
+        repository.reorderSiblings(parentGroupId, nodes)
+    }
     fun addAllFromTagToTag(source: TagEntity, target: TagEntity) = viewModelScope.launch {
         repository.addAllFromTagToTag(source.id, target.id)
     }
@@ -246,6 +277,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             oauthSession.value = repository.loadOAuthSession()
             onMessage(error.message ?: "同期に失敗しました")
         }
+    }
+
+    private fun tagAction(onMessage: (String) -> Unit, block: suspend () -> Unit) = viewModelScope.launch {
+        runCatching { block() }.onFailure { onMessage(it.message ?: "タグ操作に失敗しました") }
     }
 
     fun refreshStorageLocations(onComplete: (() -> Unit)? = null) = viewModelScope.launch {
@@ -399,7 +434,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
             AppTab.Unclassified -> ClipListScreen(
                 title = "未分類",
                 clips = uiState.unclassified,
-                tags = uiState.tags.map { it.tag },
+                hierarchy = uiState.tagHierarchy,
                 emptyText = "タグなしのツイートはありません",
                 modifier = Modifier.padding(padding),
                 requireTagConfirmation = true,
@@ -411,17 +446,23 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                 uiState = uiState,
                 modifier = Modifier.padding(padding),
                 onQueryChange = viewModel::setQuery,
-                onTagFilterChange = viewModel::setSelectedTag,
+                onTagFilterChange = viewModel::cycleTagFilter,
+                onClearTagFilters = viewModel::clearTagFilters,
                 onTagsChange = viewModel::setClipTags,
                 onSummaryChange = viewModel::updateSummary,
                 onDelete = viewModel::moveClipToTrash,
             )
             AppTab.Tags -> TagListScreen(
-                tags = uiState.tags,
+                hierarchy = uiState.tagHierarchy,
                 modifier = Modifier.padding(padding),
-                onCreate = viewModel::createTag,
-                onRename = viewModel::renameTag,
-                onDelete = viewModel::deleteTag,
+                onCreateTag = { name, parent -> viewModel.createTag(name, parent) { syncMessage = it } },
+                onCreateGroup = { name, parent -> viewModel.createGroup(name, parent) { syncMessage = it } },
+                onRenameTag = { tag, name -> viewModel.renameTag(tag, name) { syncMessage = it } },
+                onRenameGroup = { group, name -> viewModel.renameGroup(group, name) { syncMessage = it } },
+                onDeleteTag = { tag -> viewModel.deleteTag(tag) { syncMessage = it } },
+                onDeleteGroup = { group -> viewModel.deleteGroup(group) { syncMessage = it } },
+                onMove = { node, parent -> viewModel.moveTagNode(node, parent) { syncMessage = it } },
+                onReorder = { parent, nodes -> viewModel.reorderTagNodes(parent, nodes) { syncMessage = it } },
                 onAddAll = viewModel::addAllFromTagToTag,
             )
         }
@@ -504,6 +545,25 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
             onLogout = { viewModel.logout { syncMessage = it } },
         )
     }
+}
+
+internal fun matchesTagFilters(
+    clip: ClipWithDetails,
+    hierarchy: TagHierarchy,
+    filters: Map<TagNodeRef, TagFilterState>,
+): Boolean {
+    if (filters.isEmpty()) return true
+    val clipTagIds = clip.tags.mapTo(mutableSetOf()) { it.id }
+    fun matches(ref: TagNodeRef): Boolean {
+        val targetIds = when (ref.type) {
+            TagNodeType.TAG -> setOf(ref.id)
+            TagNodeType.GROUP -> hierarchy.descendantTagIdsByGroup[ref.id].orEmpty()
+        }
+        return clipTagIds.any { it in targetIds }
+    }
+    val required = filters.filterValues { it == TagFilterState.REQUIRED }.keys
+    val included = filters.filterValues { it == TagFilterState.INCLUDED }.keys
+    return required.all(::matches) && (included.isEmpty() || included.any(::matches))
 }
 
 @Composable
@@ -605,7 +665,7 @@ fun tabIcon(tab: AppTab): String = when (tab) {
 fun ClipListScreen(
     title: String,
     clips: List<ClipWithDetails>,
-    tags: List<TagEntity>,
+    hierarchy: TagHierarchy,
     emptyText: String,
     modifier: Modifier = Modifier,
     requireTagConfirmation: Boolean = false,
@@ -614,6 +674,7 @@ fun ClipListScreen(
     onDelete: (ClipEntity) -> Unit,
 ) {
     val pendingTagIds = remember { mutableStateMapOf<Long, Set<Long>>() }
+    val expandedGroups = remember { mutableStateMapOf<Long, Boolean>() }
     Column(modifier.fillMaxSize().padding(12.dp)) {
         Text(title, style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(10.dp))
@@ -629,7 +690,8 @@ fun ClipListScreen(
                     }
                     TweetCard(
                         clip = clip,
-                        allTags = tags,
+                        hierarchy = hierarchy,
+                        expandedGroups = expandedGroups,
                         selectedTagIds = selectedTagIds,
                         requireTagConfirmation = requireTagConfirmation,
                         onTagSelectionChange = { tagIds ->
@@ -657,11 +719,13 @@ fun ClassifiedScreen(
     uiState: MainUiState,
     modifier: Modifier = Modifier,
     onQueryChange: (String) -> Unit,
-    onTagFilterChange: (Long?) -> Unit,
+    onTagFilterChange: (TagNodeRef) -> Unit,
+    onClearTagFilters: () -> Unit,
     onTagsChange: (ClipEntity, Set<Long>) -> Unit,
     onSummaryChange: (ClipEntity, String) -> Unit,
     onDelete: (ClipEntity) -> Unit,
 ) {
+    val expandedGroups = remember { mutableStateMapOf<Long, Boolean>() }
     Column(modifier.fillMaxSize().padding(12.dp)) {
         Text("分類リスト", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(10.dp))
@@ -673,7 +737,7 @@ fun ClassifiedScreen(
             label = { Text("本文/概要/投稿者を検索") },
         )
         Spacer(Modifier.height(8.dp))
-        TagFilterRow(uiState.tags, uiState.selectedTagId, onTagFilterChange)
+        TagFilterTree(uiState.tagHierarchy, uiState.tagFilters, expandedGroups, onTagFilterChange, onClearTagFilters)
         Spacer(Modifier.height(10.dp))
         if (uiState.classified.isEmpty()) {
             EmptyState("条件に合う分類済みツイートはありません")
@@ -682,7 +746,8 @@ fun ClassifiedScreen(
                 items(uiState.classified, key = { it.clip.id }) { clip ->
                     TweetCard(
                         clip = clip,
-                        allTags = uiState.tags.map { it.tag },
+                        hierarchy = uiState.tagHierarchy,
+                        expandedGroups = expandedGroups,
                         selectedTagIds = clip.tags.map { it.id }.toSet(),
                         onTagSelectionChange = { onTagsChange(clip.clip, it) },
                         onSummaryChange = onSummaryChange,
@@ -697,7 +762,8 @@ fun ClassifiedScreen(
 @Composable
 fun TweetCard(
     clip: ClipWithDetails,
-    allTags: List<TagEntity>,
+    hierarchy: TagHierarchy,
+    expandedGroups: MutableMap<Long, Boolean>,
     selectedTagIds: Set<Long>,
     requireTagConfirmation: Boolean = false,
     onTagSelectionChange: (Set<Long>) -> Unit,
@@ -748,8 +814,9 @@ fun TweetCard(
                 maxLines = 3,
             )
             Spacer(Modifier.height(8.dp))
-            TagChipRow(
-                allTags = allTags,
+            TagTreePicker(
+                hierarchy = hierarchy,
+                expandedGroups = expandedGroups,
                 selectedIds = selectedTagIds,
                 onToggle = { tagId ->
                     val selected = selectedTagIds.toMutableSet()
@@ -769,7 +836,7 @@ fun TweetCard(
                 if (requireTagConfirmation) {
                     Button(
                         onClick = onTagConfirmation,
-                        enabled = allTags.isNotEmpty() && selectedTagIds.isNotEmpty(),
+                        enabled = hierarchy.tags.isNotEmpty() && selectedTagIds.isNotEmpty(),
                     ) {
                         Text("分類")
                     }
@@ -825,41 +892,93 @@ fun MediaCell(url: String, modifier: Modifier) {
 }
 
 @Composable
-fun TagChipRow(allTags: List<TagEntity>, selectedIds: Set<Long>, onToggle: (Long) -> Unit) {
-    if (allTags.isEmpty()) {
+fun TagTreePicker(
+    hierarchy: TagHierarchy,
+    expandedGroups: MutableMap<Long, Boolean>,
+    selectedIds: Set<Long>,
+    onToggle: (Long) -> Unit,
+) {
+    if (hierarchy.tags.isEmpty()) {
         Text("タグリストでタグを追加すると、ここから選べます", color = MaterialTheme.colorScheme.onSurfaceVariant)
         return
     }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        allTags.chunked(3).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                row.forEach { tag ->
-                    FilterChip(
-                        selected = selectedIds.contains(tag.id),
-                        onClick = { onToggle(tag.id) },
-                        label = { Text(tag.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    )
+    TagPickerChildren(hierarchy, null, 0, expandedGroups, selectedIds, onToggle)
+}
+
+@Composable
+private fun TagPickerChildren(
+    hierarchy: TagHierarchy,
+    parentId: Long?,
+    depth: Int,
+    expandedGroups: MutableMap<Long, Boolean>,
+    selectedIds: Set<Long>,
+    onToggle: (Long) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        hierarchy.children(parentId).forEach { node ->
+            when (node) {
+                is TagGroupNode -> {
+                    val expanded = expandedGroups[node.id] == true
+                    TextButton(
+                        onClick = { expandedGroups[node.id] = !expanded },
+                        modifier = Modifier.padding(start = (depth * 14).dp),
+                    ) { Text("${if (expanded) "▼" else "▶"} ${node.name}") }
+                    if (expanded) TagPickerChildren(hierarchy, node.id, depth + 1, expandedGroups, selectedIds, onToggle)
                 }
+                is TagLeafNode -> FilterChip(
+                    selected = node.id in selectedIds,
+                    onClick = { onToggle(node.id) },
+                    modifier = Modifier.padding(start = (depth * 14).dp),
+                    label = { Text(node.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                )
             }
         }
     }
 }
 
 @Composable
-fun TagFilterRow(tags: List<TagWithCount>, selectedTagId: Long?, onTagFilterChange: (Long?) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            FilterChip(selected = selectedTagId == null, onClick = { onTagFilterChange(null) }, label = { Text("すべて") })
-        }
-        tags.chunked(3).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                row.forEach { item ->
-                    FilterChip(
-                        selected = selectedTagId == item.tag.id,
-                        onClick = { onTagFilterChange(item.tag.id) },
-                        label = { Text("${item.tag.name} (${item.count})") },
-                    )
-                }
+fun TagFilterTree(
+    hierarchy: TagHierarchy,
+    filters: Map<TagNodeRef, TagFilterState>,
+    expandedGroups: MutableMap<Long, Boolean>,
+    onCycle: (TagNodeRef) -> Unit,
+    onClear: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        FilterChip(selected = filters.isEmpty(), onClick = onClear, label = { Text("すべて") })
+        TagFilterChildren(hierarchy, null, 0, filters, expandedGroups, onCycle)
+        if (filters.isNotEmpty()) Text("含: いずれか / 必: すべて", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun TagFilterChildren(
+    hierarchy: TagHierarchy,
+    parentId: Long?,
+    depth: Int,
+    filters: Map<TagNodeRef, TagFilterState>,
+    expandedGroups: MutableMap<Long, Boolean>,
+    onCycle: (TagNodeRef) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        hierarchy.children(parentId).forEach { node ->
+            val ref = node.ref()
+            val state = filters[ref] ?: TagFilterState.NONE
+            Row(Modifier.padding(start = (depth * 14).dp), verticalAlignment = Alignment.CenterVertically) {
+                if (node is TagGroupNode) {
+                    val expanded = expandedGroups[node.id] == true
+                    IconButton(onClick = { expandedGroups[node.id] = !expanded }, modifier = Modifier.size(36.dp)) {
+                        Text(if (expanded) "▼" else "▶")
+                    }
+                } else Spacer(Modifier.width(36.dp))
+                FilterChip(
+                    selected = state != TagFilterState.NONE,
+                    onClick = { onCycle(ref) },
+                    label = { Text("${state.shortLabel()}${node.name} (${node.count})") },
+                )
+            }
+            if (node is TagGroupNode && expandedGroups[node.id] == true) {
+                TagFilterChildren(hierarchy, node.id, depth + 1, filters, expandedGroups, onCycle)
             }
         }
     }
@@ -867,108 +986,225 @@ fun TagFilterRow(tags: List<TagWithCount>, selectedTagId: Long?, onTagFilterChan
 
 @Composable
 fun TagListScreen(
-    tags: List<TagWithCount>,
+    hierarchy: TagHierarchy,
     modifier: Modifier = Modifier,
-    onCreate: (String) -> Unit,
-    onRename: (TagEntity, String) -> Unit,
-    onDelete: (TagEntity) -> Unit,
+    onCreateTag: (String, Long?) -> Unit,
+    onCreateGroup: (String, Long?) -> Unit,
+    onRenameTag: (TagEntity, String) -> Unit,
+    onRenameGroup: (TagGroupEntity, String) -> Unit,
+    onDeleteTag: (TagEntity) -> Unit,
+    onDeleteGroup: (TagGroupEntity) -> Unit,
+    onMove: (TagNodeRef, Long?) -> Unit,
+    onReorder: (Long?, List<TagNodeRef>) -> Unit,
     onAddAll: (TagEntity, TagEntity) -> Unit,
 ) {
-    var newTag by remember { mutableStateOf("") }
+    var createType by remember { mutableStateOf<TagNodeType?>(null) }
+    val expanded = remember { mutableStateMapOf<Long, Boolean>() }
     Column(modifier.fillMaxSize().padding(12.dp)) {
         Text("タグリスト", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(10.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = newTag,
-                onValueChange = { newTag = it },
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                label = { Text("新しいタグ") },
-            )
-            Spacer(Modifier.width(8.dp))
-            Button(onClick = {
-                onCreate(newTag)
-                newTag = ""
-            }) { Text("追加") }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { createType = TagNodeType.GROUP }) { Text("グループ追加") }
+            Button(onClick = { createType = TagNodeType.TAG }) { Text("タグ追加") }
         }
-        Spacer(Modifier.height(12.dp))
-        if (tags.isEmpty()) {
-            EmptyState("タグはまだありません")
-        } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(tags, key = { it.tag.id }) { item ->
-                    TagRow(item, tags, onRename, onDelete, onAddAll)
-                }
+        Text("長押しして上下へドラッグすると同じ階層内で並び替えます", style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.height(10.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            item {
+                TagManagementChildren(
+                    hierarchy, null, 0, expanded,
+                    onCreateTag, onCreateGroup, onRenameTag, onRenameGroup,
+                    onDeleteTag, onDeleteGroup, onMove, onReorder, onAddAll,
+                )
             }
+        }
+    }
+    createType?.let { type ->
+        CreateNodeDialog(type, null, onDismiss = { createType = null }) { name ->
+            if (type == TagNodeType.TAG) onCreateTag(name, null) else onCreateGroup(name, null)
+            createType = null
         }
     }
 }
 
 @Composable
-fun TagRow(
-    item: TagWithCount,
-    allTags: List<TagWithCount>,
-    onRename: (TagEntity, String) -> Unit,
-    onDelete: (TagEntity) -> Unit,
+private fun TagManagementChildren(
+    hierarchy: TagHierarchy,
+    parentId: Long?,
+    depth: Int,
+    expanded: MutableMap<Long, Boolean>,
+    onCreateTag: (String, Long?) -> Unit,
+    onCreateGroup: (String, Long?) -> Unit,
+    onRenameTag: (TagEntity, String) -> Unit,
+    onRenameGroup: (TagGroupEntity, String) -> Unit,
+    onDeleteTag: (TagEntity) -> Unit,
+    onDeleteGroup: (TagGroupEntity) -> Unit,
+    onMove: (TagNodeRef, Long?) -> Unit,
+    onReorder: (Long?, List<TagNodeRef>) -> Unit,
     onAddAll: (TagEntity, TagEntity) -> Unit,
 ) {
-    var editOpen by remember { mutableStateOf(false) }
-    var deleteOpen by remember { mutableStateOf(false) }
-    var mergeOpen by remember { mutableStateOf(false) }
-    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(14.dp).clip(RoundedCornerShape(4.dp)).background(Color(item.tag.color)))
-            Spacer(Modifier.width(8.dp))
-            Column(Modifier.weight(1f)) {
-                Text(item.tag.name, fontWeight = FontWeight.SemiBold)
-                Text("${item.count} 件", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    val children = hierarchy.children(parentId)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        children.forEach { node ->
+            var createType by remember(node.ref()) { mutableStateOf<TagNodeType?>(null) }
+            var renameOpen by remember(node.ref()) { mutableStateOf(false) }
+            var moveOpen by remember(node.ref()) { mutableStateOf(false) }
+            var deleteOpen by remember(node.ref()) { mutableStateOf(false) }
+            var addAllOpen by remember(node.ref()) { mutableStateOf(false) }
+            var menuOpen by remember(node.ref()) { mutableStateOf(false) }
+            var dragTotal by remember(node.ref()) { mutableStateOf(0f) }
+            Card(
+                modifier = Modifier
+                    .padding(start = (depth * 14).dp)
+                    .fillMaxWidth()
+                    .pointerInput(children.map { it.ref() }) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { dragTotal = 0f },
+                            onDragEnd = { dragTotal = 0f },
+                            onDragCancel = { dragTotal = 0f },
+                            onDrag = { change, amount ->
+                                change.consume()
+                                dragTotal += amount.y
+                                if (kotlin.math.abs(dragTotal) >= 44f) {
+                                    val refs = children.map { it.ref() }.toMutableList()
+                                    val from = refs.indexOf(node.ref())
+                                    val to = (from + if (dragTotal > 0) 1 else -1).coerceIn(refs.indices)
+                                    if (from != to) {
+                                        val moved = refs.removeAt(from)
+                                        refs.add(to, moved)
+                                        onReorder(parentId, refs)
+                                    }
+                                    dragTotal = 0f
+                                }
+                            },
+                        )
+                    },
+            ) {
+                Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (node is TagGroupNode) {
+                        IconButton(onClick = { expanded[node.id] = expanded[node.id] != true }) {
+                            Text(if (expanded[node.id] == true) "▼" else "▶")
+                        }
+                    } else {
+                        val tag = (node as TagLeafNode).tag
+                        Box(Modifier.size(14.dp).clip(RoundedCornerShape(4.dp)).background(Color(tag.color)))
+                        Spacer(Modifier.width(10.dp))
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(node.name, fontWeight = FontWeight.SemiBold)
+                        Text("${node.count} 件", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Box {
+                        TextButton(onClick = { menuOpen = true }) { Text("操作") }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            if (node is TagGroupNode) {
+                                DropdownMenuItem(text = { Text("子グループを追加") }, onClick = { menuOpen = false; createType = TagNodeType.GROUP })
+                                DropdownMenuItem(text = { Text("子タグを追加") }, onClick = { menuOpen = false; createType = TagNodeType.TAG })
+                            } else {
+                                DropdownMenuItem(text = { Text("別タグへ一括追加") }, onClick = { menuOpen = false; addAllOpen = true })
+                            }
+                            DropdownMenuItem(text = { Text("名前を変更") }, onClick = { menuOpen = false; renameOpen = true })
+                            DropdownMenuItem(text = { Text("別グループへ移動") }, onClick = { menuOpen = false; moveOpen = true })
+                            DropdownMenuItem(text = { Text("削除") }, onClick = { menuOpen = false; deleteOpen = true })
+                        }
+                    }
+                }
             }
-            TextButton(onClick = { editOpen = true }) { Text("名称") }
-            TextButton(onClick = { mergeOpen = true }) { Text("追加") }
-            TextButton(onClick = { deleteOpen = true }) { Text("削除") }
+            if (node is TagGroupNode && expanded[node.id] == true) {
+                TagManagementChildren(
+                    hierarchy, node.id, depth + 1, expanded,
+                    onCreateTag, onCreateGroup, onRenameTag, onRenameGroup,
+                    onDeleteTag, onDeleteGroup, onMove, onReorder, onAddAll,
+                )
+            }
+            createType?.let { type ->
+                CreateNodeDialog(type, (node as? TagGroupNode)?.id ?: parentId, onDismiss = { createType = null }) { name ->
+                    val parent = (node as? TagGroupNode)?.id ?: parentId
+                    if (type == TagNodeType.TAG) onCreateTag(name, parent) else onCreateGroup(name, parent)
+                    createType = null
+                }
+            }
+            if (renameOpen) RenameNodeDialog(node.name, onDismiss = { renameOpen = false }) { name ->
+                when (node) {
+                    is TagGroupNode -> onRenameGroup(node.group, name)
+                    is TagLeafNode -> onRenameTag(node.tag, name)
+                }
+                renameOpen = false
+            }
+            if (moveOpen) MoveNodeDialog(node, hierarchy.groups, onDismiss = { moveOpen = false }) { parent ->
+                onMove(node.ref(), parent)
+                moveOpen = false
+            }
+            if (deleteOpen) ConfirmDialog(
+                title = if (node is TagGroupNode) "グループを削除" else "タグを削除",
+                message = if (node is TagGroupNode) "空のグループ「${node.name}」を削除します。" else "「${node.name}」の割り当ても外れます。",
+                onDismiss = { deleteOpen = false },
+                onConfirm = {
+                    if (node is TagGroupNode) onDeleteGroup(node.group) else onDeleteTag((node as TagLeafNode).tag)
+                    deleteOpen = false
+                },
+            )
+            if (addAllOpen && node is TagLeafNode) AddAllTagsDialog(
+                source = node.tag,
+                targets = hierarchy.tags.map { it.tag }.filter { it.id != node.id },
+                onDismiss = { addAllOpen = false },
+                onAddAll = { onAddAll(node.tag, it); addAllOpen = false },
+            )
         }
-    }
-    if (editOpen) RenameTagDialog(item.tag, onDismiss = { editOpen = false }, onRename = onRename)
-    if (deleteOpen) {
-        ConfirmDialog(
-            title = "タグを削除",
-            message = "「${item.tag.name}」が付いた ${item.count} 件から割り当ても外れます。削除しますか？",
-            onDismiss = { deleteOpen = false },
-            onConfirm = {
-                onDelete(item.tag)
-                deleteOpen = false
-            },
-        )
-    }
-    if (mergeOpen) {
-        AddAllTagsDialog(
-            source = item.tag,
-            targets = allTags.map { it.tag }.filter { it.id != item.tag.id },
-            onDismiss = { mergeOpen = false },
-            onAddAll = {
-                onAddAll(item.tag, it)
-                mergeOpen = false
-            },
-        )
     }
 }
 
 @Composable
-fun RenameTagDialog(tag: TagEntity, onDismiss: () -> Unit, onRename: (TagEntity, String) -> Unit) {
-    var name by remember(tag.id) { mutableStateOf(tag.name) }
+private fun CreateNodeDialog(type: TagNodeType, parentId: Long?, onDismiss: () -> Unit, onCreate: (String) -> Unit) {
+    var name by remember(type, parentId) { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("タグ名を変更") },
-        text = { OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true) },
-        confirmButton = {
-            TextButton(onClick = {
-                onRename(tag, name)
-                onDismiss()
-            }) { Text("保存") }
-        },
+        title = { Text(if (type == TagNodeType.TAG) "タグを追加" else "グループを追加") },
+        text = { OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true, label = { Text("名前") }) },
+        confirmButton = { TextButton(onClick = { onCreate(name) }) { Text("追加") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("閉じる") } },
     )
+}
+
+@Composable
+private fun RenameNodeDialog(initialName: String, onDismiss: () -> Unit, onRename: (String) -> Unit) {
+    var name by remember(initialName) { mutableStateOf(initialName) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("名前を変更") },
+        text = { OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true) },
+        confirmButton = { TextButton(onClick = { onRename(name) }) { Text("保存") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("閉じる") } },
+    )
+}
+
+@Composable
+private fun MoveNodeDialog(node: TagTreeNode, groups: List<TagGroupEntity>, onDismiss: () -> Unit, onMove: (Long?) -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("「${node.name}」を移動") },
+        text = {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                item { AssistChip(onClick = { onMove(null) }, label = { Text("ルート") }) }
+                items(groups, key = { it.id }) { group ->
+                    AssistChip(onClick = { onMove(group.id) }, label = { Text(group.name) })
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("閉じる") } },
+    )
+}
+
+private fun TagTreeNode.ref(): TagNodeRef = TagNodeRef(
+    if (this is TagGroupNode) TagNodeType.GROUP else TagNodeType.TAG,
+    id,
+)
+
+private fun TagFilterState.shortLabel(): String = when (this) {
+    TagFilterState.NONE -> ""
+    TagFilterState.INCLUDED -> "含: "
+    TagFilterState.REQUIRED -> "必: "
 }
 
 @Composable

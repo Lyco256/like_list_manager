@@ -10,7 +10,7 @@
 
 ## 現状の主要依存
 
-Compose、Room、Coil、AndroidX Security Crypto、AppAuthを管理しています。AppAuthはOAuth 2.0 + PKCEに使います。
+Compose、Room、Coil、AndroidX Security Crypto、AppAuth、JUnit 4、AndroidX Testを管理しています。AppAuthはOAuth 2.0 + PKCE、テスト依存は階層ロジックとDB migrationの検証に使います。
 
 ## 関連ファイル
 
