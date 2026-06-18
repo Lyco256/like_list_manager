@@ -441,6 +441,51 @@ class ClipRepository(
 
     suspend fun moveNode(node: TagNodeRef, parentGroupId: Long?) = moveNodeToParentAt(node, parentGroupId, Int.MAX_VALUE)
 
+    suspend fun moveNodeToParentAtSlot(
+        node: TagNodeRef,
+        parentGroupId: Long?,
+        indexInDestinationWithoutDragged: Int,
+    ) = withContext(Dispatchers.IO) {
+        postStorageManager.withDatabase { database ->
+            val tagDao = database.tagDao()
+            validateParent(tagDao, parentGroupId)
+            val groups = tagDao.getGroups()
+            val tags = tagDao.getTags()
+            val sourceParentGroupId = parentGroupIdForMove(node, groups, tags)
+            when (node.type) {
+                TagNodeType.TAG -> {
+                    val tag = tags.firstOrNull { it.id == node.id } ?: error("タグが見つかりません")
+                    ensureUniqueSiblingName(tagDao, parentGroupId, tag.name, node)
+                    val sourceOrder = siblingNodes(groups, tags, sourceParentGroupId).map { it.first }.filterNot { it == node }
+                    val destinationOrder = orderNodesAfterMoveAtSlot(
+                        currentDestinationNodes = siblingNodes(groups, tags, parentGroupId).map { it.first },
+                        node = node,
+                        indexInDestinationWithoutDragged = indexInDestinationWithoutDragged,
+                    )
+                    if (sourceParentGroupId != parentGroupId) {
+                        applySiblingOrder(tagDao, groups, tags, sourceParentGroupId, sourceOrder)
+                    }
+                    applySiblingOrder(tagDao, groups, tags, parentGroupId, destinationOrder, movedNode = node)
+                }
+                TagNodeType.GROUP -> {
+                    val group = groups.firstOrNull { it.id == node.id } ?: error("グループが見つかりません")
+                    requireValidGroupDestination(groups, group.id, parentGroupId)
+                    ensureUniqueSiblingName(tagDao, parentGroupId, group.name, node)
+                    val sourceOrder = siblingNodes(groups, tags, sourceParentGroupId).map { it.first }.filterNot { it == node }
+                    val destinationOrder = orderNodesAfterMoveAtSlot(
+                        currentDestinationNodes = siblingNodes(groups, tags, parentGroupId).map { it.first },
+                        node = node,
+                        indexInDestinationWithoutDragged = indexInDestinationWithoutDragged,
+                    )
+                    if (sourceParentGroupId != parentGroupId) {
+                        applySiblingOrder(tagDao, groups, tags, sourceParentGroupId, sourceOrder)
+                    }
+                    applySiblingOrder(tagDao, groups, tags, parentGroupId, destinationOrder, movedNode = node)
+                }
+            }
+        }
+    }
+
     suspend fun moveNodeToParentAt(node: TagNodeRef, parentGroupId: Long?, index: Int) = withContext(Dispatchers.IO) {
         postStorageManager.withDatabase { database ->
             val tagDao = database.tagDao()
@@ -635,10 +680,24 @@ internal fun orderNodesAfterMove(
     node: TagNodeRef,
     index: Int,
 ): List<TagNodeRef> {
+    require(index >= 0 || index == Int.MAX_VALUE) { "移動先indexが不正です" }
     val currentIndex = currentDestinationNodes.indexOf(node)
     val adjustedIndex = if (currentIndex >= 0 && currentIndex < index) index - 1 else index
     val ordered = currentDestinationNodes.filterNot { it == node }.toMutableList()
-    ordered.add(adjustedIndex.coerceIn(0, ordered.size), node)
+    ordered.add(adjustedIndex.coerceAtMost(ordered.size), node)
+    return ordered
+}
+
+internal fun orderNodesAfterMoveAtSlot(
+    currentDestinationNodes: List<TagNodeRef>,
+    node: TagNodeRef,
+    indexInDestinationWithoutDragged: Int,
+): List<TagNodeRef> {
+    require(indexInDestinationWithoutDragged >= 0 || indexInDestinationWithoutDragged == Int.MAX_VALUE) {
+        "移動先indexが不正です"
+    }
+    val ordered = currentDestinationNodes.filterNot { it == node }.toMutableList()
+    ordered.add(indexInDestinationWithoutDragged.coerceAtMost(ordered.size), node)
     return ordered
 }
 

@@ -19,6 +19,7 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 - `MainViewModel`: RepositoryのFlowをUI stateへ合成し、ユーザー操作をRepositoryへ渡す
 - `MainUiState`: 未分類、分類済み、検索、タグ／グループの必須AND＋含まれるOR絞り込みを派生計算
 - `EnhancedClipListScreen` / `EnhancedClassifiedScreen` / `EnhancedTagListScreen` を呼び出して、未分類、分類、タグ管理の画面へ接続する
+- タグリストのドラッグ並び替えは `moveTagNodeToIndex` から `ClipRepository.moveNodeToParentAtSlot` へ渡し、UI側placeholderIndexとRepository側indexの意味を揃える
 - `TagListScreen` 系の旧Composableは履歴として残しているが、実際の表示は `TagHierarchyUiV2.kt` 側が担当する
 - `ApiSettingsDialog`: Client ID保存、Xログイン、ログアウト
 - `PostStorageDialog`: 内部/SDカードの一覧、現在地、使用量、空き容量、移動開始

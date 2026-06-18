@@ -53,16 +53,17 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -93,29 +94,54 @@ import com.lyco256.llm.data.TagLeafNode
 import com.lyco256.llm.data.TagNodeRef
 import com.lyco256.llm.data.TagNodeType
 import com.lyco256.llm.data.TagTreeNode
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
-private data class VisibleTagRow(
+internal data class VisibleTagRow(
     val node: TagTreeNode,
     val depth: Int,
     val parentGroupId: Long?,
     val indexInParent: Int,
 )
 
-private sealed interface TagDropTarget {
-    data class Before(val parentGroupId: Long?, val index: Int) : TagDropTarget
-    data class After(val parentGroupId: Long?, val index: Int) : TagDropTarget
-    data class IntoGroup(val groupId: Long) : TagDropTarget
+internal sealed interface TagListItem {
+    val key: String
+
+    data class Row(
+        val row: VisibleTagRow,
+        val indexInParentWithoutDragged: Int,
+    ) : TagListItem {
+        override val key: String = row.node.ref().saveableKey()
+    }
+
+    data class Placeholder(
+        val parentGroupId: Long?,
+        val index: Int,
+        val depth: Int,
+        val heightPx: Float,
+    ) : TagListItem {
+        override val key: String = "drag-placeholder:${parentGroupId ?: "root"}:$index"
+    }
 }
 
-private data class DragState(
+internal data class DragState(
     val node: TagNodeRef,
     val label: String,
     val isGroup: Boolean,
-    val originBounds: Rect,
-    val anchor: Offset,
-    val delta: Offset = Offset.Zero,
+    val sourceParentId: Long?,
+    val sourceIndexInParent: Int,
+    val targetParentId: Long?,
+    val placeholderIndex: Int,
+    val visualParentId: Long? = targetParentId,
+    val visualPlaceholderIndex: Int = placeholderIndex,
+    val pointerYInRoot: Float,
+    val grabOffsetY: Float,
+    val itemLeftX: Float,
+    val itemWidth: Float,
+    val itemHeight: Float,
+    val lastDragCenterY: Float,
+    val targetIsGroupDrop: Boolean = false,
+    val reorderLocked: Boolean = false,
 )
 
 @Composable
@@ -249,11 +275,70 @@ fun EnhancedTagListScreen(
         hierarchy.visibleRows(visibleGroups)
     }
     var dragState by remember { mutableStateOf<DragState?>(null) }
+    var settlingDragState by remember { mutableStateOf<DragState?>(null) }
     var listBounds by remember { mutableStateOf<Rect?>(null) }
     var dragLayerBounds by remember { mutableStateOf<Rect?>(null) }
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
+    val layoutDragState = dragState ?: settlingDragState
+    val displayItems = remember(visibleRows, layoutDragState) {
+        buildTagListItems(visibleRows, layoutDragState)
+    }
+    val currentVisibleRows by rememberUpdatedState(visibleRows)
+    val currentDisplayItems by rememberUpdatedState(displayItems)
+    val currentHierarchy by rememberUpdatedState(hierarchy)
+    val currentListBounds by rememberUpdatedState(listBounds)
+
+    LaunchedEffect(visibleRows) {
+        val visibleRefs = visibleRows.map { it.node.ref() }.toSet()
+        rowBounds.keys.toList().filterNot { it in visibleRefs }.forEach { rowBounds.remove(it) }
+    }
+
+    LaunchedEffect(dragState?.targetParentId, dragState?.placeholderIndex) {
+        if (dragState?.reorderLocked == true) {
+            delay(64)
+            dragState = dragState?.copy(reorderLocked = false)
+        }
+    }
+
+    LaunchedEffect(dragState != null) {
+        while (dragState != null) {
+            val current = dragState ?: break
+            val bounds = currentListBounds
+            var consumedScroll = 0f
+            if (bounds != null) {
+                val scrollAmount = calculateAutoScrollDelta(
+                    pointerY = current.pointerYInRoot,
+                    listBounds = bounds,
+                    canScrollBackward = listState.canScrollBackward,
+                    canScrollForward = listState.canScrollForward,
+                )
+                if (scrollAmount != 0f) consumedScroll = listState.scrollBy(scrollAmount)
+                if (consumedScroll != 0f) withFrameNanos { }
+            }
+            val updated = updateDragStateAfterMove(
+                state = current,
+                visibleRows = currentVisibleRows,
+                displayItems = currentDisplayItems,
+                rowBounds = rowBounds,
+                hierarchy = currentHierarchy,
+                listBounds = currentListBounds,
+                allowStaticCrossing = consumedScroll != 0f,
+            )
+            if (updated != current) dragState = updated
+            delay(16)
+        }
+    }
+
+    LaunchedEffect(settlingDragState, visibleRows) {
+        val state = settlingDragState ?: return@LaunchedEffect
+        if (isMoveReflected(visibleRows, state)) {
+            settlingDragState = null
+        } else {
+            delay(350)
+            settlingDragState = null
+        }
+    }
 
     Column(modifier.fillMaxSize().padding(12.dp)) {
         Text("タグリスト", style = MaterialTheme.typography.titleLarge)
@@ -268,7 +353,62 @@ fun EnhancedTagListScreen(
         Box(
             Modifier
                 .fillMaxSize()
-                .onGloballyPositioned { dragLayerBounds = it.boundsInRoot() },
+                .onGloballyPositioned { dragLayerBounds = it.boundsInRoot() }
+                .pointerInput(Unit) {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { offset ->
+                            val layerBounds = dragLayerBounds ?: return@detectDragGesturesAfterLongPress
+                            val pointerRoot = Offset(layerBounds.left + offset.x, layerBounds.top + offset.y)
+                            val start = dragStartCandidate(pointerRoot, currentDisplayItems, rowBounds) ?: return@detectDragGesturesAfterLongPress
+                            val bounds = start.bounds
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            dragState = DragState(
+                                node = start.item.row.node.ref(),
+                                label = start.item.row.node.name,
+                                isGroup = start.item.row.node is TagGroupNode,
+                                sourceParentId = start.item.row.parentGroupId,
+                                sourceIndexInParent = start.item.indexInParentWithoutDragged,
+                                targetParentId = start.item.row.parentGroupId,
+                                placeholderIndex = start.item.indexInParentWithoutDragged,
+                                pointerYInRoot = pointerRoot.y,
+                                grabOffsetY = (pointerRoot.y - bounds.top).coerceIn(0f, bounds.height),
+                                itemLeftX = bounds.left,
+                                itemWidth = bounds.width,
+                                itemHeight = bounds.height,
+                                lastDragCenterY = pointerRoot.y - (pointerRoot.y - bounds.top).coerceIn(0f, bounds.height) + bounds.height / 2,
+                            )
+                        },
+                        onDragCancel = {
+                            val currentDrag = dragState
+                            if (currentDrag != null) {
+                                settlingDragState = currentDrag
+                                applyDrop(currentDrag, currentHierarchy, onMoveToIndex)
+                            }
+                            dragState = null
+                        },
+                        onDragEnd = {
+                            val currentDrag = dragState
+                            if (currentDrag != null) {
+                                settlingDragState = currentDrag
+                                applyDrop(currentDrag, currentHierarchy, onMoveToIndex)
+                            }
+                            dragState = null
+                        },
+                    ) { change, dragAmount ->
+                        change.consume()
+                        dragState = dragState?.let { current ->
+                            updateDragStateAfterMove(
+                                state = current.copy(pointerYInRoot = current.pointerYInRoot + dragAmount.y),
+                                visibleRows = currentVisibleRows,
+                                displayItems = currentDisplayItems,
+                                rowBounds = rowBounds,
+                                hierarchy = currentHierarchy,
+                                listBounds = currentListBounds,
+                                allowStaticCrossing = false,
+                            )
+                        }
+                    }
+                },
         ) {
             LazyColumn(
                 state = listState,
@@ -277,69 +417,35 @@ fun EnhancedTagListScreen(
                     .fillMaxSize()
                     .onGloballyPositioned { listBounds = it.boundsInRoot() },
             ) {
-                items(visibleRows, key = { it.node.ref().saveableKey() }) { row ->
-                    TagManagementRow(
-                        row = row,
-                        hierarchy = hierarchy,
-                        expanded = expanded,
-                        currentBounds = rowBounds[row.node.ref()],
-                        highlightedTarget = dragState?.let { targetDropTarget(it, rowBounds, visibleRows, listBounds) },
-                        draggedNode = dragState?.node,
-                        onBounds = { rect -> rowBounds[row.node.ref()] = rect },
-                        onToggleExpanded = {
-                            if (row.node is TagGroupNode) expanded[row.node.id] = expanded[row.node.id] != true
-                        },
-                        onMove = onMove,
-                        onCreate = { type, parent -> createRequest = type to parent },
-                        onRenameTag = onRenameTag,
-                        onRenameGroup = onRenameGroup,
-                        onDeleteTag = onDeleteTag,
-                        onDeleteGroup = onDeleteGroup,
-                        onAddAll = onAddAll,
-                        onDragStart = { anchor, bounds ->
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            dragState = DragState(
-                                node = row.node.ref(),
-                                label = row.node.name,
-                                isGroup = row.node is TagGroupNode,
-                                originBounds = bounds ?: Rect(Offset.Zero, Offset.Zero),
-                                anchor = anchor,
+                items(displayItems, key = { it.key }) { item ->
+                    when (item) {
+                        is TagListItem.Placeholder -> TagPlaceholderSpacer(item, Modifier.animateItem())
+                        is TagListItem.Row -> {
+                            val row = item.row
+                            TagManagementRow(
+                                modifier = Modifier.animateItem(),
+                                row = row,
+                                hierarchy = hierarchy,
+                                expanded = expanded,
+                                isGroupDropTarget = dragState?.let { state ->
+                                    row.node is TagGroupNode &&
+                                        state.targetIsGroupDrop &&
+                                        state.targetParentId == row.node.id
+                                } == true,
+                                onBounds = { rect -> rowBounds[row.node.ref()] = rect },
+                                onToggleExpanded = {
+                                    if (row.node is TagGroupNode) expanded[row.node.id] = expanded[row.node.id] != true
+                                },
+                                onMove = onMove,
+                                onCreate = { type, parent -> createRequest = type to parent },
+                                onRenameTag = onRenameTag,
+                                onRenameGroup = onRenameGroup,
+                                onDeleteTag = onDeleteTag,
+                                onDeleteGroup = onDeleteGroup,
+                                onAddAll = onAddAll,
                             )
-                        },
-                        onDragDelta = { delta ->
-                            dragState = dragState?.takeIf { it.node == row.node.ref() }?.let { current ->
-                                val updated = current.copy(delta = current.delta + delta)
-                                val point = updated.pointerPosition()
-                                val bounds = listBounds
-                                if (bounds != null) {
-                                    if (!bounds.containsWithMargin(point, DragCancelMarginPx)) {
-                                        null
-                                    } else {
-                                        val edgeSize = 96f
-                                        val scrollAmount = when {
-                                            point.y < bounds.top + edgeSize -> -28f
-                                            point.y > bounds.bottom - edgeSize -> 28f
-                                            else -> 0f
-                                        }
-                                        if (scrollAmount != 0f) {
-                                            scope.launch { listState.scrollBy(scrollAmount) }
-                                        }
-                                        updated
-                                    }
-                                } else {
-                                    updated
-                                }
-                            }
-                        },
-                        onDragEnd = {
-                            val currentDrag = dragState
-                            if (currentDrag != null) {
-                                val target = targetDropTarget(currentDrag, rowBounds, visibleRows, listBounds)
-                                applyDrop(target, currentDrag.node, hierarchy, onMoveToIndex)
-                            }
-                            dragState = null
-                        },
-                    )
+                        }
+                    }
                 }
             }
             dragState?.let { state ->
@@ -779,12 +885,11 @@ private fun TagHierarchyChip(
 
 @Composable
 private fun TagManagementRow(
+    modifier: Modifier = Modifier,
     row: VisibleTagRow,
     hierarchy: TagHierarchy,
     expanded: MutableMap<Long, Boolean>,
-    currentBounds: Rect?,
-    highlightedTarget: TagDropTarget?,
-    draggedNode: TagNodeRef?,
+    isGroupDropTarget: Boolean,
     onBounds: (Rect) -> Unit,
     onToggleExpanded: () -> Unit,
     onMove: (TagNodeRef, Long?) -> Unit,
@@ -794,120 +899,97 @@ private fun TagManagementRow(
     onDeleteTag: (TagEntity) -> Unit,
     onDeleteGroup: (TagGroupEntity) -> Unit,
     onAddAll: (TagEntity, TagEntity) -> Unit,
-    onDragStart: (Offset, Rect?) -> Unit,
-    onDragDelta: (Offset) -> Unit,
-    onDragEnd: () -> Unit,
 ) {
     var renameOpen by remember(row.node.ref()) { mutableStateOf(false) }
     var moveOpen by remember(row.node.ref()) { mutableStateOf(false) }
     var deleteOpen by remember(row.node.ref()) { mutableStateOf(false) }
     var addAllOpen by remember(row.node.ref()) { mutableStateOf(false) }
     var menuOpen by remember(row.node.ref()) { mutableStateOf(false) }
-    val isDragged = draggedNode == row.node.ref()
-    val isTargetGroup = row.node is TagGroupNode && highlightedTarget == TagDropTarget.IntoGroup(row.node.id)
     val rowColor = when {
-        isTargetGroup -> MaterialTheme.colorScheme.primaryContainer
-        isDragged -> MaterialTheme.colorScheme.surfaceVariant
+        isGroupDropTarget -> MaterialTheme.colorScheme.primaryContainer
         else -> MaterialTheme.colorScheme.surface
     }
-    Column(Modifier.fillMaxWidth()) {
-        if (highlightedTarget == TagDropTarget.Before(row.parentGroupId, row.indexInParent)) {
-            TagInsertLine(row.depth)
-        }
+    Column(modifier.fillMaxWidth()) {
         Card(
             colors = CardDefaults.cardColors(containerColor = rowColor),
             modifier = Modifier
                 .padding(start = (row.depth * 14).dp)
                 .fillMaxWidth()
                 .onGloballyPositioned { onBounds(it.boundsInRoot()) }
-                .pointerInput(row.node.ref()) {
-                    detectDragGesturesAfterLongPress(
-                        onDragStart = { onDragStart(it, currentBounds) },
-                        onDragCancel = onDragEnd,
-                        onDragEnd = onDragEnd,
-                    ) { change, dragAmount ->
-                        change.consume()
-                        onDragDelta(dragAmount)
-                    }
-                }
-                .alpha(if (isDragged) 0.35f else 1f)
                 .graphicsLayer { },
         ) {
             Row(
                 Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (row.node is TagGroupNode) {
-                    IconButton(onClick = onToggleExpanded) {
+                    if (row.node is TagGroupNode) {
+                        IconButton(onClick = onToggleExpanded) {
+                            Icon(
+                                Icons.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.graphicsLayer(rotationZ = if (expanded[row.node.id] == true) 90f else 0f),
+                            )
+                        }
                         Icon(
-                            Icons.Filled.KeyboardArrowRight,
+                            Icons.Filled.Folder,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.graphicsLayer(rotationZ = if (expanded[row.node.id] == true) 90f else 0f),
+                            tint = if (expanded[row.node.id] == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(24.dp),
                         )
+                        Spacer(Modifier.width(10.dp))
+                    } else {
+                        val tag = (row.node as TagLeafNode).tag
+                        Icon(
+                            Icons.Filled.LocalOffer,
+                            contentDescription = null,
+                            tint = Color(tag.color),
+                            modifier = Modifier.size(24.dp),
+                        )
+                        Spacer(Modifier.width(10.dp))
                     }
-                    Icon(
-                        Icons.Filled.Folder,
-                        contentDescription = null,
-                        tint = if (expanded[row.node.id] == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(24.dp),
-                    )
-                    Spacer(Modifier.width(10.dp))
-                } else {
-                    val tag = (row.node as TagLeafNode).tag
-                    Icon(
-                        Icons.Filled.LocalOffer,
-                        contentDescription = null,
-                        tint = Color(tag.color),
-                        modifier = Modifier.size(24.dp),
-                    )
-                    Spacer(Modifier.width(10.dp))
-                }
-                Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                row.node.name,
+                                fontWeight = FontWeight.SemiBold,
+                                style = if (row.node.name.length > 16) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            if (row.node is TagGroupNode) {
+                                Badge { Text("${row.node.count}") }
+                            }
+                        }
                         Text(
-                            row.node.name,
-                            fontWeight = FontWeight.SemiBold,
-                            style = if (row.node.name.length > 16) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
+                            if (row.node is TagGroupNode) "グループ" else "タグ",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Spacer(Modifier.width(8.dp))
-                        if (row.node is TagGroupNode) {
-                            Badge { Text("${row.node.count}") }
+                    }
+                    Box {
+                        TextButton(onClick = { menuOpen = true }) { Text("操作") }
+                        androidx.compose.material3.DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            if (row.node is TagGroupNode) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text("子グループを追加") },
+                                    onClick = { menuOpen = false; onCreate(TagNodeType.GROUP, row.node.id) },
+                                )
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text("子タグを追加") },
+                                    onClick = { menuOpen = false; onCreate(TagNodeType.TAG, row.node.id) },
+                                )
+                            } else {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text("別タグへ一括追加") },
+                                    onClick = { menuOpen = false; addAllOpen = true },
+                                )
+                            }
+                            androidx.compose.material3.DropdownMenuItem(text = { Text("名前を変更") }, onClick = { menuOpen = false; renameOpen = true })
+                            androidx.compose.material3.DropdownMenuItem(text = { Text("別グループへ移動") }, onClick = { menuOpen = false; moveOpen = true })
+                            androidx.compose.material3.DropdownMenuItem(text = { Text("削除") }, onClick = { menuOpen = false; deleteOpen = true })
                         }
                     }
-                    Text(
-                        if (row.node is TagGroupNode) "グループ" else "タグ",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Box {
-                    TextButton(onClick = { menuOpen = true }) { Text("操作") }
-                    androidx.compose.material3.DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        if (row.node is TagGroupNode) {
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text("子グループを追加") },
-                                onClick = { menuOpen = false; onCreate(TagNodeType.GROUP, row.node.id) },
-                            )
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text("子タグを追加") },
-                                onClick = { menuOpen = false; onCreate(TagNodeType.TAG, row.node.id) },
-                            )
-                        } else {
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text("別タグへ一括追加") },
-                                onClick = { menuOpen = false; addAllOpen = true },
-                            )
-                        }
-                        androidx.compose.material3.DropdownMenuItem(text = { Text("名前を変更") }, onClick = { menuOpen = false; renameOpen = true })
-                        androidx.compose.material3.DropdownMenuItem(text = { Text("別グループへ移動") }, onClick = { menuOpen = false; moveOpen = true })
-                        androidx.compose.material3.DropdownMenuItem(text = { Text("削除") }, onClick = { menuOpen = false; deleteOpen = true })
-                    }
-                }
             }
-        }
-        if (highlightedTarget == TagDropTarget.After(row.parentGroupId, row.indexInParent)) {
-            TagInsertLine(row.depth)
         }
     }
     if (renameOpen) {
@@ -954,21 +1036,17 @@ private fun TagManagementRow(
 }
 
 @Composable
-private fun TagInsertLine(depth: Int) {
-    Row(
-        modifier = Modifier
+private fun TagPlaceholderSpacer(
+    item: TagListItem.Placeholder,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    Spacer(
+        modifier
+            .padding(start = (item.depth * 14).dp)
             .fillMaxWidth()
-            .height(8.dp)
-            .padding(start = (depth * 14).dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(2.dp)
-                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(1.dp)),
-        )
-    }
+            .height(with(density) { item.heightPx.toDp() }),
+    )
 }
 
 @Composable
@@ -977,14 +1055,14 @@ private fun TagDragPreview(state: DragState, dragLayerBounds: Rect?) {
     val layerLeft = dragLayerBounds?.left ?: 0f
     val layerTop = dragLayerBounds?.top ?: 0f
     val offset = IntOffset(
-        (state.originBounds.left + state.delta.x - layerLeft).roundToInt(),
-        (state.originBounds.top + state.delta.y - layerTop).roundToInt(),
+        (state.itemLeftX - layerLeft).roundToInt(),
+        (state.pointerYInRoot - state.grabOffsetY - layerTop).roundToInt(),
     )
     Box(
         Modifier
             .offset { offset }
-            .width(with(density) { state.originBounds.width.toDp() })
-            .height(with(density) { state.originBounds.height.toDp() })
+            .width(with(density) { state.itemWidth.toDp() })
+            .height(with(density) { state.itemHeight.toDp() })
             .graphicsLayer(alpha = 0.82f)
     ) {
         Surface(
@@ -1028,82 +1106,307 @@ private fun TagHierarchy.nodeFor(ref: TagNodeRef): TagTreeNode? = when (ref.type
 
 private fun TagNodeRef.saveableKey(): String = "${type.name}:$id"
 
-private fun DragState.pointerPosition(): Offset = Offset(
-    originBounds.left + anchor.x + delta.x,
-    originBounds.top + anchor.y + delta.y,
-)
-
-private const val DragCancelMarginPx = 24f
-
-private fun Rect.containsWithMargin(point: Offset, margin: Float): Boolean =
-    point.x >= left - margin &&
-        point.x <= right + margin &&
-        point.y >= top - margin &&
-        point.y <= bottom + margin
-
-private fun targetDropTarget(
-    dragState: DragState,
-    rowBounds: Map<TagNodeRef, Rect>,
+internal fun buildTagListItems(
     visibleRows: List<VisibleTagRow>,
-    listBounds: Rect?,
-): TagDropTarget? {
-    val point = dragState.pointerPosition()
-    if (listBounds != null && !listBounds.containsWithMargin(point, DragCancelMarginPx)) return null
-    val rowsWithBounds = visibleRows.mapNotNull { row ->
-        rowBounds[row.node.ref()]?.let { row to it }
-    }
-    if (rowsWithBounds.isEmpty()) return null
-    val first = rowsWithBounds.first()
-    if (point.y < first.second.top) return TagDropTarget.Before(first.first.parentGroupId, first.first.indexInParent)
-    val last = rowsWithBounds.last()
-    if (point.y > last.second.bottom) return TagDropTarget.After(last.first.parentGroupId, last.first.indexInParent)
-
-    rowsWithBounds.zipWithNext().forEach { (previous, next) ->
-        if (point.y > previous.second.bottom && point.y < next.second.top) {
-            return TagDropTarget.Before(next.first.parentGroupId, next.first.indexInParent)
+    dragState: DragState?,
+): List<TagListItem> {
+    if (dragState == null) {
+        val counts = mutableMapOf<Long?, Int>()
+        return visibleRows.map { row ->
+            val index = counts.getOrDefault(row.parentGroupId, 0)
+            counts[row.parentGroupId] = index + 1
+            TagListItem.Row(row, index)
         }
     }
 
-    rowsWithBounds.forEach { (row, bounds) ->
-        if (point.y in bounds.top..bounds.bottom) {
-            if (row.node is TagGroupNode) {
-                val edgeZone = minOf(18f, bounds.height * 0.20f)
-                val centerTop = bounds.top + edgeZone
-                val centerBottom = bounds.bottom - edgeZone
-                if (point.y in centerTop..centerBottom) return TagDropTarget.IntoGroup(row.node.id)
-            }
-            return if (point.y < bounds.center.y) {
-                TagDropTarget.Before(row.parentGroupId, row.indexInParent)
-            } else {
-                nextSiblingRow(visibleRows, row)?.let {
-                    TagDropTarget.Before(it.parentGroupId, it.indexInParent)
-                } ?: TagDropTarget.After(row.parentGroupId, row.indexInParent)
-            }
-        }
-    }
-    return null
+    if (visibleRows.none { it.node.ref() == dragState.node }) return buildTagListItems(visibleRows, null)
+    val rowsWithoutDragged = visibleRows.withoutDraggedSubtree(dragState.node)
+    val counts = mutableMapOf<Long?, Int>()
+    val items = rowsWithoutDragged.map { row ->
+        val index = counts.getOrDefault(row.parentGroupId, 0)
+        counts[row.parentGroupId] = index + 1
+        TagListItem.Row(row, index)
+    }.toMutableList<TagListItem>()
+    val visualParentId = dragState.visualParentId
+    val parentCount = counts.getOrDefault(visualParentId, 0)
+    val visualIndex = dragState.visualPlaceholderIndex.coerceIn(0, parentCount)
+    val placeholder = TagListItem.Placeholder(
+        parentGroupId = visualParentId,
+        index = visualIndex,
+        depth = placeholderDepth(rowsWithoutDragged, visualParentId),
+        heightPx = dragState.itemHeight,
+    )
+    items.add(placeholderInsertIndex(items, visualParentId, visualIndex), placeholder)
+    return items
 }
 
-private fun nextSiblingRow(visibleRows: List<VisibleTagRow>, row: VisibleTagRow): VisibleTagRow? =
-    visibleRows.firstOrNull {
-        it.parentGroupId == row.parentGroupId && it.indexInParent == row.indexInParent + 1
+private fun List<VisibleTagRow>.withoutDraggedSubtree(node: TagNodeRef): List<VisibleTagRow> {
+    val start = indexOfFirst { it.node.ref() == node }
+    if (start < 0) return this
+    val draggedDepth = this[start].depth
+    var endExclusive = start + 1
+    while (endExclusive < size && this[endExclusive].depth > draggedDepth) {
+        endExclusive += 1
+    }
+    return filterIndexed { index, _ -> index !in start until endExclusive }
+}
+
+private fun placeholderDepth(rows: List<VisibleTagRow>, parentGroupId: Long?): Int {
+    if (parentGroupId == null) return 0
+    return rows.firstOrNull { it.node.ref() == TagNodeRef(TagNodeType.GROUP, parentGroupId) }?.let { it.depth + 1 } ?: 0
+}
+
+private fun placeholderInsertIndex(
+    items: List<TagListItem>,
+    parentGroupId: Long?,
+    placeholderIndex: Int,
+): Int {
+    val rows = items.filterIsInstance<TagListItem.Row>()
+    rows.firstOrNull {
+        it.row.parentGroupId == parentGroupId && it.indexInParentWithoutDragged >= placeholderIndex
+    }?.let { return items.indexOf(it) }
+
+    val previous = rows.lastOrNull {
+        it.row.parentGroupId == parentGroupId && it.indexInParentWithoutDragged < placeholderIndex
+    }
+    if (previous != null) {
+        var insertIndex = items.indexOf(previous) + 1
+        while (insertIndex < items.size) {
+            val nextItem = items[insertIndex] as? TagListItem.Row ?: break
+            val nextRow = nextItem.row
+            if (nextRow.depth <= previous.row.depth) break
+            insertIndex += 1
+        }
+        return insertIndex
     }
 
+    if (parentGroupId != null) {
+        val parent = rows.firstOrNull { it.row.node.ref() == TagNodeRef(TagNodeType.GROUP, parentGroupId) }
+        if (parent != null) return items.indexOf(parent) + 1
+    }
+    return items.size
+}
+
+private data class DragStartCandidate(
+    val item: TagListItem.Row,
+    val bounds: Rect,
+)
+
+private fun dragStartCandidate(
+    pointerRoot: Offset,
+    displayItems: List<TagListItem>,
+    rowBounds: Map<TagNodeRef, Rect>,
+): DragStartCandidate? =
+    displayItems.filterIsInstance<TagListItem.Row>()
+        .firstNotNullOfOrNull { item ->
+            val bounds = rowBounds[item.row.node.ref()] ?: return@firstNotNullOfOrNull null
+            if (pointerRoot.x in bounds.left..bounds.right && pointerRoot.y in bounds.top..bounds.bottom) {
+                DragStartCandidate(item, bounds)
+            } else {
+                null
+            }
+        }
+
+private fun isMoveReflected(visibleRows: List<VisibleTagRow>, state: DragState): Boolean {
+    val row = visibleRows.firstOrNull { it.node.ref() == state.node } ?: return false
+    if (row.parentGroupId != state.targetParentId) return false
+    val index = visibleRows.count {
+        it.parentGroupId == state.targetParentId &&
+            it.indexInParent < row.indexInParent &&
+            it.node.ref() != state.node
+    }
+    return index == state.placeholderIndex
+}
+
+internal fun updateDragStateAfterMove(
+    state: DragState,
+    visibleRows: List<VisibleTagRow>,
+    displayItems: List<TagListItem>,
+    rowBounds: Map<TagNodeRef, Rect>,
+    hierarchy: TagHierarchy,
+    listBounds: Rect?,
+    allowStaticCrossing: Boolean,
+): DragState {
+    if (state.reorderLocked) return state
+    outOfBoundsSlot(state, visibleRows, listBounds)?.let { slot ->
+        return state.withUpdatedCenter().copy(
+            targetParentId = slot.parentGroupId,
+            placeholderIndex = slot.index,
+            visualParentId = slot.parentGroupId,
+            visualPlaceholderIndex = slot.index,
+            targetIsGroupDrop = false,
+            reorderLocked = slot.index != state.placeholderIndex,
+        )
+    }
+    groupDropTargetUnderPointer(state, displayItems, rowBounds, hierarchy)?.let { groupId ->
+        val count = destinationCountWithoutDragged(hierarchy, groupId, state.node)
+        return state.withUpdatedCenter().copy(
+            targetParentId = groupId,
+            placeholderIndex = count,
+            targetIsGroupDrop = true,
+        )
+    }
+
+    val directSlot = slotUnderPointer(state, displayItems, rowBounds)
+    if (directSlot != null && directSlot.parentGroupId != state.targetParentId) {
+        return state.withUpdatedCenter().copy(
+            targetParentId = directSlot.parentGroupId,
+            placeholderIndex = directSlot.index,
+            visualParentId = directSlot.parentGroupId,
+            visualPlaceholderIndex = directSlot.index,
+            targetIsGroupDrop = false,
+            reorderLocked = true,
+        )
+    }
+
+    return movePlaceholderByNeighborCenter(state, visibleRows, displayItems, rowBounds, allowStaticCrossing)
+}
+
+private data class DropSlot(val parentGroupId: Long?, val index: Int)
+
+private fun outOfBoundsSlot(
+    state: DragState,
+    visibleRows: List<VisibleTagRow>,
+    listBounds: Rect?,
+): DropSlot? {
+    if (listBounds == null) return null
+    val parent = state.targetParentId
+    val maxIndex = visibleRows.withoutDraggedSubtree(state.node).count { it.parentGroupId == parent }
+    return when {
+        state.pointerYInRoot < listBounds.top -> DropSlot(parent, 0)
+        state.pointerYInRoot > listBounds.bottom -> DropSlot(parent, maxIndex)
+        else -> null
+    }
+}
+
+private fun groupDropTargetUnderPointer(
+    state: DragState,
+    displayItems: List<TagListItem>,
+    rowBounds: Map<TagNodeRef, Rect>,
+    hierarchy: TagHierarchy,
+): Long? {
+    val dragCenterY = state.dragCenterY()
+    return displayItems.filterIsInstance<TagListItem.Row>().firstNotNullOfOrNull { item ->
+        val row = item.row
+        val group = row.node as? TagGroupNode ?: return@firstNotNullOfOrNull null
+        val bounds = rowBounds[row.node.ref()] ?: return@firstNotNullOfOrNull null
+        if (dragCenterY !in bounds.top..bounds.bottom) return@firstNotNullOfOrNull null
+        val edgeZone = minOf(22f, bounds.height * 0.28f)
+        val inCenter = dragCenterY in (bounds.top + edgeZone)..(bounds.bottom - edgeZone)
+        if (inCenter && canDropIntoGroup(state, group.id, hierarchy)) group.id else null
+    }
+}
+
+private fun slotUnderPointer(
+    state: DragState,
+    displayItems: List<TagListItem>,
+    rowBounds: Map<TagNodeRef, Rect>,
+): DropSlot? {
+    val dragCenterY = state.dragCenterY()
+    return displayItems.filterIsInstance<TagListItem.Row>().firstNotNullOfOrNull { item ->
+        val bounds = rowBounds[item.row.node.ref()] ?: return@firstNotNullOfOrNull null
+        if (dragCenterY !in bounds.top..bounds.bottom) return@firstNotNullOfOrNull null
+        val index = if (dragCenterY < bounds.center.y) {
+            item.indexInParentWithoutDragged
+        } else {
+            item.indexInParentWithoutDragged + 1
+        }
+        DropSlot(item.row.parentGroupId, index)
+    }
+}
+
+private fun movePlaceholderByNeighborCenter(
+    state: DragState,
+    visibleRows: List<VisibleTagRow>,
+    displayItems: List<TagListItem>,
+    rowBounds: Map<TagNodeRef, Rect>,
+    allowStaticCrossing: Boolean,
+): DragState {
+    val rowsInParent = displayItems.filterIsInstance<TagListItem.Row>()
+        .filter { it.row.parentGroupId == state.targetParentId }
+    val dragCenterY = state.pointerYInRoot - state.grabOffsetY + state.itemHeight / 2
+    val previousDragCenterY = state.lastDragCenterY
+    val upper = rowsInParent.firstOrNull { it.indexInParentWithoutDragged == state.placeholderIndex - 1 }
+    val lower = rowsInParent.firstOrNull { it.indexInParentWithoutDragged == state.placeholderIndex }
+    val maxIndex = visibleRows.withoutDraggedSubtree(state.node).count { it.parentGroupId == state.targetParentId }
+    val lowerCenter = lower?.let { rowBounds[it.row.node.ref()]?.center?.y }
+    val upperCenter = upper?.let { rowBounds[it.row.node.ref()]?.center?.y }
+    return when {
+        lowerCenter != null && (previousDragCenterY <= lowerCenter || allowStaticCrossing) && dragCenterY > lowerCenter -> {
+            state.copy(
+                placeholderIndex = (state.placeholderIndex + 1).coerceAtMost(maxIndex),
+                visualParentId = state.targetParentId,
+                visualPlaceholderIndex = (state.placeholderIndex + 1).coerceAtMost(maxIndex),
+                lastDragCenterY = dragCenterY,
+                targetIsGroupDrop = false,
+                reorderLocked = true,
+            )
+        }
+        upperCenter != null && (previousDragCenterY >= upperCenter || allowStaticCrossing) && dragCenterY < upperCenter -> {
+            state.copy(
+                placeholderIndex = (state.placeholderIndex - 1).coerceAtLeast(0),
+                visualParentId = state.targetParentId,
+                visualPlaceholderIndex = (state.placeholderIndex - 1).coerceAtLeast(0),
+                lastDragCenterY = dragCenterY,
+                targetIsGroupDrop = false,
+                reorderLocked = true,
+            )
+        }
+        else -> state.withUpdatedCenter()
+    }
+}
+
+private fun DragState.dragCenterY(): Float = pointerYInRoot - grabOffsetY + itemHeight / 2
+
+private fun DragState.withUpdatedCenter(): DragState = copy(lastDragCenterY = dragCenterY())
+
+private fun destinationCountWithoutDragged(hierarchy: TagHierarchy, parentGroupId: Long?, draggedNode: TagNodeRef): Int =
+    hierarchy.children(parentGroupId).count { it.ref() != draggedNode }
+
+private fun canDropIntoGroup(state: DragState, groupId: Long, hierarchy: TagHierarchy): Boolean {
+    if (!state.isGroup) return true
+    if (state.node.id == groupId) return false
+    val groupsById = hierarchy.groups.associateBy { it.id }
+    var current: Long? = groupId
+    while (current != null) {
+        if (current == state.node.id) return false
+        current = groupsById[current]?.parentGroupId
+    }
+    return true
+}
+
+internal fun calculateAutoScrollDelta(
+    pointerY: Float,
+    listBounds: Rect,
+    canScrollBackward: Boolean = true,
+    canScrollForward: Boolean = true,
+): Float {
+    val edgeSize = 96f
+    val maxScroll = 34f
+    return when {
+        pointerY < listBounds.top + edgeSize && canScrollBackward -> {
+            val distance = (listBounds.top + edgeSize - pointerY).coerceAtLeast(0f)
+            -(8f + (distance / edgeSize).coerceAtMost(1.8f) * maxScroll)
+        }
+        pointerY > listBounds.bottom - edgeSize && canScrollForward -> {
+            val distance = (pointerY - (listBounds.bottom - edgeSize)).coerceAtLeast(0f)
+            8f + (distance / edgeSize).coerceAtMost(1.8f) * maxScroll
+        }
+        else -> 0f
+    }
+}
+
 private fun applyDrop(
-    target: TagDropTarget?,
-    source: TagNodeRef,
+    state: DragState,
     hierarchy: TagHierarchy,
     onMoveToIndex: (TagNodeRef, Long?, Int) -> Unit,
 ) {
-    when (target) {
-        null -> Unit
-        is TagDropTarget.IntoGroup -> {
-            val destinationCount = hierarchy.children(target.groupId).size
-            onMoveToIndex(source, target.groupId, destinationCount)
-        }
-        is TagDropTarget.Before -> onMoveToIndex(source, target.parentGroupId, target.index)
-        is TagDropTarget.After -> onMoveToIndex(source, target.parentGroupId, target.index + 1)
-    }
+    if (state.isGroup && state.targetParentId != null && !canDropIntoGroup(state, state.targetParentId, hierarchy)) return
+    val maxIndex = destinationCountWithoutDragged(hierarchy, state.targetParentId, state.node)
+    val index = state.placeholderIndex
+    if (index !in 0..maxIndex) return
+    if (state.sourceParentId == state.targetParentId && state.sourceIndexInParent == index) return
+    onMoveToIndex(state.node, state.targetParentId, index)
 }
 
 @Composable

@@ -233,7 +233,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteGroup(group: TagGroupEntity, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.deleteGroup(group.id) }
     fun moveTagNode(node: TagNodeRef, parentGroupId: Long?, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.moveNode(node, parentGroupId) }
     fun moveTagNodeToIndex(node: TagNodeRef, parentGroupId: Long?, index: Int, onMessage: (String) -> Unit) = tagAction(onMessage) {
-        repository.moveNodeToParentAt(node, parentGroupId, index)
+        repository.moveNodeToParentAtSlot(node, parentGroupId, index)
     }
     fun reorderTagNodes(parentGroupId: Long?, nodes: List<TagNodeRef>, onMessage: (String) -> Unit) = tagAction(onMessage) {
         repository.reorderSiblings(parentGroupId, nodes)

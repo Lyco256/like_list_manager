@@ -22,6 +22,24 @@
   - 同一親内で上下へ並び替えるとき、移動元を除外した後の位置補正が正しいことを確認します。
 - `movingAcrossParentsInsertsAtRequestedIndex`
   - 別親配下への移動時は指定indexへ挿入されることを確認します。
+- `negativeMoveIndexFailsInsteadOfMovingToHead`
+  - 不正な負数indexが先頭移動へ丸められず、エラーになることを確認します。
+- `maxMoveIndexAppendsToTail`
+  - `Int.MAX_VALUE` による末尾移動を維持することを確認します。
+- `slotMoveUsesIndexAfterRemovingDraggedNode`
+  - placeholder方式のslot indexが、drag中nodeを除外した兄弟リスト上の挿入位置として扱われることを確認します。
+- `slotMoveAcrossParentsInsertsAtRequestedSlot`
+  - 別親へのslot移動と末尾移動が指定どおりになることを確認します。
+- `negativeSlotIndexFails`
+  - slot移動でも負数indexをエラーにすることを確認します。
+- `groupDropKeepsPreviousVisualPlaceholder`
+  - グループ内drop候補に入っても、表示用placeholderが直前の並び替えslotに残り、保存先だけがグループ内になることを確認します。
+- `draggedPlaceholderUsesSeparateKeyFromDraggedRow`
+  - drag中placeholderが掴んだ行とは別keyの余白itemとして描画され、LazyColumnのkey移動によるスクロール補正を起こしにくいことを確認します。
+- `topItemMovesDownOnlyOneSlotPerCrossing`
+  - 先頭行を下方向へ動かして隣接行の中心線を跨いでも、1回のcrossingで1slotだけ動き、同じ位置で連続移動しないことを確認します。
+- `autoScrollDoesNotRequestUnavailableDirection`
+  - 一番上または一番下で、スクロールできない方向へのauto-scroll量が0になることを確認します。
 
 ## 関連ファイルと関連理由
 
