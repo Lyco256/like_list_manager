@@ -2,8 +2,12 @@ package com.lyco256.llm.data
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.os.Build
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -16,6 +20,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.time.Instant
 import java.time.YearMonth
+
+private const val WEBP_QUALITY = 85
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ClipRepository(
@@ -336,7 +342,13 @@ class ClipRepository(
         } ?: return null
         val shouldDownload = isPhoto || (isVideoLike && canDownloadVideoThumb)
         val localPath = if (shouldDownload) {
-            runCatching { downloadMedia(postId, media.mediaKey, remote) }.getOrNull()
+            runCatching {
+                if (isPhoto) {
+                    downloadPhotoAsWebp(postId, media.mediaKey, remote)
+                } else {
+                    downloadMedia(postId, media.mediaKey, remote)
+                }
+            }.getOrNull()
         } else {
             null
         }
@@ -359,19 +371,61 @@ class ClipRepository(
         )
     }
 
+    private fun downloadPhotoAsWebp(postId: String, mediaKey: String, url: String): String {
+        val imageDir = postStorageManager.imageDirectory()
+        val target = File(imageDir, "${postId}_${mediaKey}.webp")
+        val sourceBytes = openConnection(url).inputStream.use { input -> input.readBytes() }
+        val decoded = BitmapFactory.decodeByteArray(sourceBytes, 0, sourceBytes.size)
+            ?: error("画像を読み込めませんでした")
+        val bitmap = decoded.withBlackBackgroundIfTransparent()
+        try {
+            target.outputStream().use { output ->
+                check(bitmap.compress(webpCompressFormat(), WEBP_QUALITY, output)) { "WebP変換に失敗しました" }
+            }
+        } catch (error: Exception) {
+            target.delete()
+            throw error
+        } finally {
+            if (bitmap !== decoded) bitmap.recycle()
+            decoded.recycle()
+        }
+        return target.absolutePath
+    }
+
     private fun downloadMedia(postId: String, mediaKey: String, url: String): String {
         val imageDir = postStorageManager.imageDirectory()
         val extension = url.substringBefore("?").substringAfterLast('.', "jpg").takeIf { it.length <= 5 } ?: "jpg"
         val target = File(imageDir, "${postId}_${mediaKey}.$extension")
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15_000
-            readTimeout = 30_000
-        }
+        val connection = openConnection(url)
         connection.inputStream.use { input ->
             target.outputStream().use { output -> input.copyTo(output) }
         }
         return target.absolutePath
     }
+
+    private fun openConnection(url: String): HttpURLConnection =
+        (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 15_000
+            readTimeout = 30_000
+        }
+
+    private fun Bitmap.withBlackBackgroundIfTransparent(): Bitmap {
+        if (!hasAlpha()) return this
+        val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        Canvas(output).apply {
+            drawColor(android.graphics.Color.BLACK)
+            drawBitmap(this@withBlackBackgroundIfTransparent, 0f, 0f, null)
+        }
+        return output
+    }
+
+    @Suppress("DEPRECATION")
+    private fun webpCompressFormat(): Bitmap.CompressFormat =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Bitmap.CompressFormat.WEBP_LOSSY
+        } else {
+            Bitmap.CompressFormat.WEBP
+        }
 
     suspend fun createTag(name: String, parentGroupId: Long? = null) = withContext(Dispatchers.IO) {
         postStorageManager.withDatabase { database ->

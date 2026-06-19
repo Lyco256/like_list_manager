@@ -3,8 +3,11 @@ package com.lyco256.llm
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +33,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -114,6 +119,7 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 internal data class VisibleTagRow(
@@ -1821,25 +1827,63 @@ fun EnhancedMediaGrid(assets: List<AssetEntity>) {
         val url = asset.localPath ?: asset.previewUrl ?: asset.remoteUrl
         url?.let { DisplayAsset(asset, it) }
     }.take(4)
+    val savedPhotos = shown.filter { it.asset.type == "photo" && it.asset.localPath != null }
+    var initialViewerPage by remember { mutableStateOf<Int?>(null) }
+
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         when (shown.size) {
             1 -> EnhancedMediaCell(
-                shown[0].url,
+                displayAsset = shown[0],
+                viewerIndex = savedPhotos.viewerIndexFor(shown[0]),
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxWidth().aspectRatio(shown[0].asset.displayAspectRatio()),
+                onOpenViewer = { initialViewerPage = it },
             )
             2 -> Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                shown.forEach { EnhancedMediaCell(it.url, ContentScale.Crop, Modifier.weight(1f).aspectRatio(1f)) }
+                shown.forEach {
+                    EnhancedMediaCell(
+                        displayAsset = it,
+                        viewerIndex = savedPhotos.viewerIndexFor(it),
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.weight(1f).aspectRatio(1f),
+                        onOpenViewer = { index -> initialViewerPage = index },
+                    )
+                }
             }
             else -> {
                 Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    shown.take(2).forEach { EnhancedMediaCell(it.url, ContentScale.Crop, Modifier.weight(1f).aspectRatio(1f)) }
+                    shown.take(2).forEach {
+                        EnhancedMediaCell(
+                            displayAsset = it,
+                            viewerIndex = savedPhotos.viewerIndexFor(it),
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.weight(1f).aspectRatio(1f),
+                            onOpenViewer = { index -> initialViewerPage = index },
+                        )
+                    }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    shown.drop(2).forEach { EnhancedMediaCell(it.url, ContentScale.Crop, Modifier.weight(1f).aspectRatio(1f)) }
+                    shown.drop(2).forEach {
+                        EnhancedMediaCell(
+                            displayAsset = it,
+                            viewerIndex = savedPhotos.viewerIndexFor(it),
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.weight(1f).aspectRatio(1f),
+                            onOpenViewer = { index -> initialViewerPage = index },
+                        )
+                    }
                     if (shown.size == 3) Spacer(Modifier.weight(1f))
                 }
             }
+        }
+    }
+    initialViewerPage?.let { initialPage ->
+        if (savedPhotos.isNotEmpty()) {
+            FullScreenImageViewer(
+                photos = savedPhotos,
+                initialPage = initialPage.coerceIn(0, savedPhotos.lastIndex),
+                onDismiss = { initialViewerPage = null },
+            )
         }
     }
 }
@@ -1856,13 +1900,151 @@ private fun AssetEntity.displayAspectRatio(): Float {
 }
 
 @Composable
-private fun EnhancedMediaCell(url: String, contentScale: ContentScale, modifier: Modifier) {
+private fun EnhancedMediaCell(
+    displayAsset: DisplayAsset,
+    viewerIndex: Int?,
+    contentScale: ContentScale,
+    modifier: Modifier,
+    onOpenViewer: (Int) -> Unit,
+) {
+    val clickableModifier = if (viewerIndex != null) {
+        Modifier.clickable { onOpenViewer(viewerIndex) }
+    } else {
+        Modifier
+    }
     AsyncImage(
-        model = url,
+        model = displayAsset.url,
         contentDescription = null,
         contentScale = contentScale,
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .then(clickableModifier),
     )
+}
+
+private fun List<DisplayAsset>.viewerIndexFor(displayAsset: DisplayAsset): Int? =
+    indexOfFirst { it.asset.id == displayAsset.asset.id }.takeIf { it >= 0 }
+
+private enum class ViewerDragMode { Horizontal, Vertical }
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun FullScreenImageViewer(
+    photos: List<DisplayAsset>,
+    initialPage: Int,
+    onDismiss: () -> Unit,
+) {
+    val pagerState = rememberPagerState(initialPage = initialPage) { photos.size }
+    val density = LocalDensity.current
+    val closeThresholdPx = remember(density) { with(density) { 120.dp.toPx() } }
+    var dragOffsetY by remember { mutableStateOf(0f) }
+    var dragTotal by remember { mutableStateOf(Offset.Zero) }
+    var dragMode by remember { mutableStateOf<ViewerDragMode?>(null) }
+    var closing by remember { mutableStateOf(false) }
+    val dragAlpha = (1f - (abs(dragOffsetY) / (closeThresholdPx * 2f))).coerceIn(0.55f, 1f)
+    val backgroundAlpha by animateFloatAsState(
+        targetValue = if (closing) 0f else dragAlpha,
+        label = "image-viewer-background",
+    )
+
+    fun closeViewer() {
+        if (!closing) closing = true
+    }
+
+    LaunchedEffect(closing) {
+        if (closing) {
+            delay(160)
+            onDismiss()
+        }
+    }
+    BackHandler(onBack = ::closeViewer)
+
+    Dialog(
+        onDismissRequest = ::closeViewer,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = backgroundAlpha)),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                IconButton(onClick = ::closeViewer) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "閉じる",
+                        tint = Color.White,
+                    )
+                }
+                Text(
+                    text = "${pagerState.currentPage + 1} / ${photos.size}",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .pointerInput(photos.size) {
+                        detectDragGestures(
+                            onDragStart = {
+                                dragTotal = Offset.Zero
+                                dragMode = null
+                            },
+                            onDragEnd = {
+                                if (dragMode == ViewerDragMode.Vertical && abs(dragOffsetY) >= closeThresholdPx) {
+                                    closeViewer()
+                                } else {
+                                    dragOffsetY = 0f
+                                }
+                                dragTotal = Offset.Zero
+                                dragMode = null
+                            },
+                            onDragCancel = {
+                                dragOffsetY = 0f
+                                dragTotal = Offset.Zero
+                                dragMode = null
+                            },
+                        ) { change, dragAmount ->
+                            dragTotal += dragAmount
+                            if (dragMode == null && (abs(dragTotal.x) > 12f || abs(dragTotal.y) > 12f)) {
+                                dragMode = if (abs(dragTotal.y) > abs(dragTotal.x)) {
+                                    ViewerDragMode.Vertical
+                                } else {
+                                    ViewerDragMode.Horizontal
+                                }
+                            }
+                            if (dragMode == ViewerDragMode.Vertical) {
+                                change.consume()
+                                dragOffsetY += dragAmount.y
+                            }
+                        }
+                    },
+            ) {
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize(),
+                ) { page ->
+                    AsyncImage(
+                        model = photos[page].url,
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer { translationY = dragOffsetY },
+                    )
+                }
+            }
+        }
+    }
 }
