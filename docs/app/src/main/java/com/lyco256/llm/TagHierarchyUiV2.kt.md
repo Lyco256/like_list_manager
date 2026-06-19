@@ -6,7 +6,7 @@
 
 ## 役割
 
-未分類、分類、タグ管理のCompose UIを分離した画面実装です。`MainActivity.kt`から受け取った状態とRepository操作を使い、タグ階層の選択、絞り込み、タグリストのドラッグ&ドロップを描画します。
+未分類、分類済み、タグ管理のCompose UIを分離した画面実装です。`MainActivity.kt`から受け取った状態とRepository操作を使い、タグ階層の選択、絞り込み、タグリストのドラッグ&ドロップを描画します。
 
 ## 主要な定義、設定、処理
 
@@ -14,8 +14,11 @@
 - `EnhancedClassifiedScreen`: 検索欄、絞り込みサマリー、全画面Dialogの絞り込みパネル、分類済み投稿の再割り当てを扱います。
 - `EnhancedTagListScreen`: タグ/グループの追加、名称変更、移動、削除、別タグへの一括追加、ドラッグ&ドロップ移動を扱います。
 - `EnhancedTweetCard`: 投稿本文、画像、概要、タグ選択をまとめます。
+- `withoutTrailingMediaUrl`: UI表示時だけ、メディア付き投稿の本文末尾に付く `https://t.co/...` を取り除きます。DB保存値、検索対象、本文途中のURLは変更しません。
+- `PreserveScrollAnchor` / `LazyListScrollbar` / `ScrollToTopButton`: 未分類、分類済み、タグ管理のスクロール位置維持、常に薄い表示専用スクロールバー、白丸黒矢印の一番上へ移動ボタンを扱います。
+- 各画面内ではTopAppBarと重複する画面名見出しを表示しません。
 - `TagHierarchySelector` / `TagSelectionDialog`: 投稿カード内のタグ選択を、コンパクトな最上位チップと半画面Dialogの単一階層ナビゲーションで扱います。
-- `TagFilterSummaryRow` / `TagFilterDialog`: 分類画面の絞り込み条件を、横スクロール要素と全画面Dialogで扱います。
+- `TagFilterSummaryRow` / `TagFilterDialog`: 分類済み画面の絞り込み条件を、横スクロール要素と全画面Dialogで扱います。
 - `TagManagementRow`: タグリストの行表示、グループの展開、操作メニュー、ドラッグ開始を扱います。
 - `TagListItem` / `DragState`: ドラッグ中の表示リストを通常行とplaceholderへ分け、掴んだnodeと表示中子孫をLazyColumn本体から除外します。placeholderのindexは「drag中nodeを除外した移動先兄弟リスト上の挿入位置」です。
 - `TagManagementRow` のdrag placeholder表示 / `TagDragPreview`: 挿入候補位置に同じ高さのplaceholderを表示し、overlayは縦方向だけ指に追従します。overlayの横位置と横幅はドラッグ開始時の行位置に固定します。
@@ -28,7 +31,7 @@
 - auto-scroll loopからの静止中心線判定は、実際にスクロール量が消費された場合だけ許可します。上端・下端へ到達済みの状態で、中心線判定が連続して進みすぎないようにします。
 - auto-scroll量の計算では、LazyColumnが該当方向へスクロール可能かを見ます。
 - LazyColumn itemには `Modifier.animateItem()` を付け、placeholder移動時にドラッグ中でない行が急に瞬間移動して見えないようにします。
-- `EnhancedMediaGrid`: 投稿内画像のグリッド表示を再利用します。
+- `EnhancedMediaGrid`: 投稿内画像の表示を扱います。1枚画像はDB上のwidth/heightからアスペクト比を維持し、複数画像はX風グリッドとして切り取り表示を許容します。
 - `TagNodeRef.saveableKey`: `LazyRow`、`LazyColumn`、`LazyVerticalGrid`のkeyをBundle保存可能な文字列へ変換し、実機でのCompose保存状態エラーを防ぎます。
 - ドラッグ中はリスト範囲外へ出ても状態を維持し、auto-scroll loopで端方向へ継続スクロールします。スクロール中もplaceholder位置を更新します。
 - グループ中央領域へ乗っている場合だけグループ内drop候補にし、グループ自身や子孫へのdropは保存しません。ドラッグ中にグループを自動展開しません。
@@ -41,4 +44,4 @@
 
 ## 変更時の確認事項
 
-タグ階層UIを変えるときは、投稿カードの一時状態、分類画面の即時保存、タグリストの移動制約、Repositoryのslot移動APIと合わせて確認します。ドラッグ変更では範囲外drag、auto-scroll、placeholder、グループ内drop、drop後の順序維持を確認します。
+タグ階層UIを変えるときは、投稿カードの一時状態、分類済み画面の即時保存、タグリストの移動制約、Repositoryのslot移動APIと合わせて確認します。ドラッグ変更では範囲外drag、auto-scroll、placeholder、グループ内drop、drop後の順序維持を確認します。スクロールバーは表示専用で、タグ管理のdrag gestureと競合せず、スクロール中も強調表示されないことを確認します。

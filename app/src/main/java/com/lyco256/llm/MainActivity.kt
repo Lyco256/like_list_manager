@@ -23,7 +23,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -126,8 +128,8 @@ class MainActivity : ComponentActivity() {
 
 enum class AppTab(val label: String) {
     Unclassified("未分類"),
-    Classified("分類"),
-    Tags("タグ"),
+    Classified("分類済み"),
+    Tags("タグ管理"),
 }
 
 data class MainUiState(
@@ -348,11 +350,25 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
     var storageEstimating by remember { mutableStateOf(false) }
     var storageMoveStarting by remember { mutableStateOf(false) }
     var syncMessage by remember { mutableStateOf<String?>(null) }
+    val unclassifiedListState = rememberLazyListState()
+    val tagListState = rememberLazyListState()
+    val classifiedListStates = remember { mutableMapOf<String, LazyListState>() }
+    val classifiedScrollKey = uiState.classifiedScrollKey()
+    val classifiedListState = remember(classifiedScrollKey) {
+        classifiedListStates.getOrPut(classifiedScrollKey) { LazyListState() }
+    }
+    val topBarTitle = screenTitle(
+        tab = tab,
+        uiState = uiState,
+        settingsOpen = settingsOpen,
+        usageOpen = usageOpen,
+        storageOpen = storageOpen,
+    )
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("like list manager", fontWeight = FontWeight.SemiBold) },
+                title = { Text(topBarTitle, fontWeight = FontWeight.SemiBold) },
                 actions = {
                     Box {
                         IconButton(onClick = { menuOpen = true }) {
@@ -439,6 +455,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                 clips = uiState.unclassified,
                 hierarchy = uiState.tagHierarchy,
                 emptyText = "タグなしのツイートはありません",
+                listState = unclassifiedListState,
                 modifier = Modifier.padding(padding),
                 requireTagConfirmation = true,
                 onTagsChange = viewModel::setClipTags,
@@ -447,6 +464,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
             )
             AppTab.Classified -> EnhancedClassifiedScreen(
                 uiState = uiState,
+                listState = classifiedListState,
                 modifier = Modifier.padding(padding),
                 onQueryChange = viewModel::setQuery,
                 onTagFilterChange = viewModel::cycleTagFilter,
@@ -457,6 +475,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
             )
             AppTab.Tags -> EnhancedTagListScreen(
                 hierarchy = uiState.tagHierarchy,
+                listState = tagListState,
                 modifier = Modifier.padding(padding),
                 onCreateTag = { name, parent -> viewModel.createTag(name, parent) { syncMessage = it } },
                 onCreateGroup = { name, parent -> viewModel.createGroup(name, parent) { syncMessage = it } },
@@ -658,6 +677,31 @@ private fun formatBytes(bytes: Long): String = when {
     else -> "$bytes B"
 }
 
+private fun screenTitle(
+    tab: AppTab,
+    uiState: MainUiState,
+    settingsOpen: Boolean,
+    usageOpen: Boolean,
+    storageOpen: Boolean,
+): String = when {
+    settingsOpen -> "X API設定"
+    usageOpen -> "同期/使用量"
+    storageOpen -> "投稿データ保存先"
+    uiState.storageState.isMigrating -> "投稿データ移動中"
+    !uiState.storageState.isAvailable -> "投稿データ保存先"
+    tab == AppTab.Unclassified -> "未分類 (${uiState.unclassified.size})"
+    tab == AppTab.Classified -> "分類済み"
+    tab == AppTab.Tags -> "タグ管理"
+    else -> tab.label
+}
+
+private fun MainUiState.classifiedScrollKey(): String {
+    val filterKey = tagFilters.entries
+        .sortedWith(compareBy({ it.key.type.name }, { it.key.id }))
+        .joinToString("|") { "${it.key.type.name}:${it.key.id}:${it.value.name}" }
+    return "classified:${query.trim()}:$filterKey"
+}
+
 fun tabIcon(tab: AppTab): String = when (tab) {
     AppTab.Unclassified -> "?"
     AppTab.Classified -> "#"
@@ -679,8 +723,6 @@ fun ClipListScreen(
     val pendingTagIds = remember { mutableStateMapOf<Long, Set<Long>>() }
     val expandedGroups = remember { mutableStateMapOf<Long, Boolean>() }
     Column(modifier.fillMaxSize().padding(12.dp)) {
-        Text(title, style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(10.dp))
         if (clips.isEmpty()) {
             EmptyState(emptyText)
         } else {
@@ -730,8 +772,6 @@ fun ClassifiedScreen(
 ) {
     val expandedGroups = remember { mutableStateMapOf<Long, Boolean>() }
     Column(modifier.fillMaxSize().padding(12.dp)) {
-        Text("分類リスト", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(10.dp))
         OutlinedTextField(
             value = uiState.query,
             onValueChange = onQueryChange,
@@ -799,7 +839,11 @@ fun TweetCard(
                 ) { Text("Xで開く") }
             }
             Spacer(Modifier.height(8.dp))
-            Text(clip.clip.text, maxLines = 8, overflow = TextOverflow.Ellipsis)
+            Text(
+                clip.clip.text.withoutTrailingMediaUrl(hasAssets = clip.assets.isNotEmpty()),
+                maxLines = 8,
+                overflow = TextOverflow.Ellipsis,
+            )
             if (clip.assets.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
                 MediaGrid(clip.assets.mapNotNull { it.localPath ?: it.previewUrl ?: it.remoteUrl })
@@ -841,7 +885,7 @@ fun TweetCard(
                         onClick = onTagConfirmation,
                         enabled = hierarchy.tags.isNotEmpty() && selectedTagIds.isNotEmpty(),
                     ) {
-                        Text("分類")
+                        Text("分類済みにする")
                     }
                 }
             }
@@ -887,7 +931,7 @@ fun MediaCell(url: String, modifier: Modifier) {
     AsyncImage(
         model = url,
         contentDescription = null,
-        contentScale = ContentScale.Crop,
+        contentScale = ContentScale.Fit,
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant),
@@ -1004,8 +1048,6 @@ fun TagListScreen(
     var createType by remember { mutableStateOf<TagNodeType?>(null) }
     val expanded = remember { mutableStateMapOf<Long, Boolean>() }
     Column(modifier.fillMaxSize().padding(12.dp)) {
-        Text("タグリスト", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { createType = TagNodeType.GROUP }) { Text("グループ追加") }
             Button(onClick = { createType = TagNodeType.TAG }) { Text("タグ追加") }

@@ -9,6 +9,7 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,12 +24,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -45,6 +47,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -59,8 +62,10 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,6 +77,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -83,6 +89,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import com.lyco256.llm.data.AssetEntity
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.TagEntity
@@ -95,6 +102,8 @@ import com.lyco256.llm.data.TagNodeRef
 import com.lyco256.llm.data.TagNodeType
 import com.lyco256.llm.data.TagTreeNode
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 internal data class VisibleTagRow(
@@ -144,12 +153,19 @@ internal data class DragState(
     val reorderLocked: Boolean = false,
 )
 
+private data class ScrollAnchor(
+    val stableId: Any?,
+    val index: Int,
+    val offset: Int,
+)
+
 @Composable
 fun EnhancedClipListScreen(
     title: String,
     clips: List<ClipWithDetails>,
     hierarchy: TagHierarchy,
     emptyText: String,
+    listState: LazyListState,
     modifier: Modifier = Modifier,
     requireTagConfirmation: Boolean = false,
     onTagsChange: (ClipEntity, Set<Long>) -> Unit,
@@ -157,39 +173,47 @@ fun EnhancedClipListScreen(
     onDelete: (ClipEntity) -> Unit,
 ) {
     val pendingTagIds = remember { mutableStateMapOf<Long, Set<Long>>() }
+    val itemKeys = remember(clips) { clips.map { it.clip.id } }
+    PreserveScrollAnchor(listState, title, itemKeys)
     Column(modifier.fillMaxSize().padding(12.dp)) {
-        Text(title, style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(10.dp))
         if (clips.isEmpty()) {
             HierarchyEmptyState(emptyText)
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(clips, key = { it.clip.id }) { clip ->
-                    val selectedTagIds = if (requireTagConfirmation) {
-                        pendingTagIds[clip.clip.id] ?: clip.tags.map { it.id }.toSet()
-                    } else {
-                        clip.tags.map { it.id }.toSet()
+            Box(Modifier.fillMaxSize()) {
+                LazyColumn(
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(clips, key = { it.clip.id }) { clip ->
+                        val selectedTagIds = if (requireTagConfirmation) {
+                            pendingTagIds[clip.clip.id] ?: clip.tags.map { it.id }.toSet()
+                        } else {
+                            clip.tags.map { it.id }.toSet()
+                        }
+                        EnhancedTweetCard(
+                            clip = clip,
+                            hierarchy = hierarchy,
+                            selectedTagIds = selectedTagIds,
+                            requireTagConfirmation = requireTagConfirmation,
+                            onTagSelectionChange = { tagIds ->
+                                if (requireTagConfirmation) {
+                                    pendingTagIds[clip.clip.id] = tagIds
+                                } else {
+                                    onTagsChange(clip.clip, tagIds)
+                                }
+                            },
+                            onTagConfirmation = {
+                                onTagsChange(clip.clip, selectedTagIds)
+                                pendingTagIds.remove(clip.clip.id)
+                            },
+                            onSummaryChange = onSummaryChange,
+                            onDelete = onDelete,
+                        )
                     }
-                    EnhancedTweetCard(
-                        clip = clip,
-                        hierarchy = hierarchy,
-                        selectedTagIds = selectedTagIds,
-                        requireTagConfirmation = requireTagConfirmation,
-                        onTagSelectionChange = { tagIds ->
-                            if (requireTagConfirmation) {
-                                pendingTagIds[clip.clip.id] = tagIds
-                            } else {
-                                onTagsChange(clip.clip, tagIds)
-                            }
-                        },
-                        onTagConfirmation = {
-                            onTagsChange(clip.clip, selectedTagIds)
-                            pendingTagIds.remove(clip.clip.id)
-                        },
-                        onSummaryChange = onSummaryChange,
-                        onDelete = onDelete,
-                    )
                 }
+                LazyListScrollbar(listState)
+                ScrollToTopButton(listState, hasItems = clips.isNotEmpty())
             }
         }
     }
@@ -198,6 +222,7 @@ fun EnhancedClipListScreen(
 @Composable
 fun EnhancedClassifiedScreen(
     uiState: MainUiState,
+    listState: LazyListState,
     modifier: Modifier = Modifier,
     onQueryChange: (String) -> Unit,
     onTagFilterChange: (TagNodeRef) -> Unit,
@@ -207,9 +232,9 @@ fun EnhancedClassifiedScreen(
     onDelete: (ClipEntity) -> Unit,
 ) {
     var filterDialogOpen by remember { mutableStateOf(false) }
+    val itemKeys = remember(uiState.classified) { uiState.classified.map { it.clip.id } }
+    PreserveScrollAnchor(listState, "classified", itemKeys)
     Column(modifier.fillMaxSize().padding(12.dp)) {
-        Text("分類リスト", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(10.dp))
         OutlinedTextField(
             value = uiState.query,
             onValueChange = onQueryChange,
@@ -228,17 +253,25 @@ fun EnhancedClassifiedScreen(
         if (uiState.classified.isEmpty()) {
             HierarchyEmptyState("条件に合う分類済みツイートはありません")
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(uiState.classified, key = { it.clip.id }) { clip ->
-                    EnhancedTweetCard(
-                        clip = clip,
-                        hierarchy = uiState.tagHierarchy,
-                        selectedTagIds = clip.tags.map { it.id }.toSet(),
-                        onTagSelectionChange = { onTagsChange(clip.clip, it) },
-                        onSummaryChange = onSummaryChange,
-                        onDelete = onDelete,
-                    )
+            Box(Modifier.fillMaxSize()) {
+                LazyColumn(
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(uiState.classified, key = { it.clip.id }) { clip ->
+                        EnhancedTweetCard(
+                            clip = clip,
+                            hierarchy = uiState.tagHierarchy,
+                            selectedTagIds = clip.tags.map { it.id }.toSet(),
+                            onTagSelectionChange = { onTagsChange(clip.clip, it) },
+                            onSummaryChange = onSummaryChange,
+                            onDelete = onDelete,
+                        )
+                    }
                 }
+                LazyListScrollbar(listState)
+                ScrollToTopButton(listState, hasItems = uiState.classified.isNotEmpty())
             }
         }
     }
@@ -256,6 +289,7 @@ fun EnhancedClassifiedScreen(
 @Composable
 fun EnhancedTagListScreen(
     hierarchy: TagHierarchy,
+    listState: LazyListState,
     modifier: Modifier = Modifier,
     onCreateTag: (String, Long?) -> Unit,
     onCreateGroup: (String, Long?) -> Unit,
@@ -278,7 +312,6 @@ fun EnhancedTagListScreen(
     var settlingDragState by remember { mutableStateOf<DragState?>(null) }
     var listBounds by remember { mutableStateOf<Rect?>(null) }
     var dragLayerBounds by remember { mutableStateOf<Rect?>(null) }
-    val listState = rememberLazyListState()
     val haptics = LocalHapticFeedback.current
     val layoutDragState = dragState ?: settlingDragState
     val displayItems = remember(visibleRows, layoutDragState) {
@@ -288,6 +321,8 @@ fun EnhancedTagListScreen(
     val currentDisplayItems by rememberUpdatedState(displayItems)
     val currentHierarchy by rememberUpdatedState(hierarchy)
     val currentListBounds by rememberUpdatedState(listBounds)
+    val itemKeys = remember(displayItems) { displayItems.map { it.key } }
+    PreserveScrollAnchor(listState, "tag_management", itemKeys)
 
     LaunchedEffect(visibleRows) {
         val visibleRefs = visibleRows.map { it.node.ref() }.toSet()
@@ -341,8 +376,6 @@ fun EnhancedTagListScreen(
     }
 
     Column(modifier.fillMaxSize().padding(12.dp)) {
-        Text("タグリスト", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { createRequest = TagNodeType.GROUP to null }) { Text("グループ追加") }
             Button(onClick = { createRequest = TagNodeType.TAG to null }) { Text("タグ追加") }
@@ -451,6 +484,8 @@ fun EnhancedTagListScreen(
             dragState?.let { state ->
                 TagDragPreview(state, dragLayerBounds)
             }
+            LazyListScrollbar(listState)
+            ScrollToTopButton(listState, hasItems = displayItems.isNotEmpty())
         }
     }
 
@@ -500,10 +535,14 @@ private fun EnhancedTweetCard(
                 ) { Text("Xで開く") }
             }
             Spacer(Modifier.height(8.dp))
-            Text(clip.clip.text, maxLines = 8, overflow = TextOverflow.Ellipsis)
+            Text(
+                clip.clip.text.withoutTrailingMediaUrl(hasAssets = clip.assets.isNotEmpty()),
+                maxLines = 8,
+                overflow = TextOverflow.Ellipsis,
+            )
             if (clip.assets.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
-                EnhancedMediaGrid(clip.assets.mapNotNull { it.localPath ?: it.previewUrl ?: it.remoteUrl })
+                EnhancedMediaGrid(clip.assets)
             }
             Spacer(Modifier.height(10.dp))
             OutlinedTextField(
@@ -546,7 +585,7 @@ private fun EnhancedTweetCard(
                         onClick = onTagConfirmation,
                         enabled = hierarchy.tags.isNotEmpty() && selectedTagIds.isNotEmpty(),
                     ) {
-                        Text("分類")
+                        Text("分類済みにする")
                     }
                 }
             }
@@ -1421,20 +1460,115 @@ private fun HierarchyEmptyState(text: String) {
 }
 
 @Composable
-fun EnhancedMediaGrid(urls: List<String>) {
-    val shown = urls.take(4)
+private fun PreserveScrollAnchor(
+    listState: LazyListState,
+    stateKey: String,
+    itemKeys: List<Any>,
+) {
+    var anchor by remember(stateKey) { mutableStateOf(ScrollAnchor(null, 0, 0)) }
+    LaunchedEffect(listState, stateKey) {
+        snapshotFlow {
+            val first = listState.layoutInfo.visibleItemsInfo.firstOrNull()
+            first?.let { ScrollAnchor(it.key, it.index, listState.firstVisibleItemScrollOffset) }
+        }.collect { next ->
+            if (next != null) anchor = next
+        }
+    }
+    LaunchedEffect(stateKey, itemKeys) {
+        if (itemKeys.isEmpty()) return@LaunchedEffect
+        val targetIndex = anchor.stableId?.let { itemKeys.indexOf(it) }
+            ?.takeIf { it >= 0 }
+            ?: anchor.index.coerceIn(0, itemKeys.lastIndex)
+        if (targetIndex != listState.firstVisibleItemIndex) {
+            listState.scrollToItem(targetIndex, anchor.offset)
+        }
+    }
+}
+
+@Composable
+private fun BoxScope.LazyListScrollbar(listState: LazyListState) {
+    val layoutInfo = listState.layoutInfo
+    val totalItems = layoutInfo.totalItemsCount
+    val visibleItems = layoutInfo.visibleItemsInfo
+    val viewportHeight = (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset).coerceAtLeast(0)
+    if (totalItems <= 0 || visibleItems.isEmpty() || viewportHeight <= 0) return
+    if (!listState.canScrollBackward && !listState.canScrollForward) return
+
+    val visibleCount = visibleItems.size.coerceAtLeast(1)
+    val maxThumbHeightPx = viewportHeight.toFloat()
+    val minThumbHeightPx = minOf(24f, maxThumbHeightPx)
+    val thumbHeightPx = (viewportHeight * visibleCount.toFloat() / totalItems)
+        .coerceIn(minThumbHeightPx, maxThumbHeightPx)
+    val scrollableItems = (totalItems - visibleCount).coerceAtLeast(1)
+    val firstIndex = listState.firstVisibleItemIndex.coerceIn(0, scrollableItems)
+    val thumbOffsetPx = ((viewportHeight - thumbHeightPx) * firstIndex / scrollableItems)
+        .coerceIn(0f, viewportHeight - thumbHeightPx)
+    val density = LocalDensity.current
+    val color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+
+    Box(
+        Modifier
+            .fillMaxHeight()
+            .width(6.dp)
+            .padding(end = 1.dp)
+            .align(Alignment.CenterEnd),
+    ) {
+        Box(
+            Modifier
+                .offset { IntOffset(0, thumbOffsetPx.roundToInt()) }
+                .align(Alignment.TopCenter)
+                .width(3.dp)
+                .height(with(density) { thumbHeightPx.toDp() })
+                .clip(RoundedCornerShape(2.dp))
+                .background(color),
+        )
+    }
+}
+
+@Composable
+private fun BoxScope.ScrollToTopButton(listState: LazyListState, hasItems: Boolean) {
+    if (!hasItems || listState.firstVisibleItemIndex < 2) return
+    val scope = rememberCoroutineScope()
+    FloatingActionButton(
+        onClick = { scope.launch { listState.scrollToItem(0) } },
+        modifier = Modifier
+            .align(Alignment.BottomEnd)
+            .padding(16.dp)
+            .size(48.dp),
+        shape = CircleShape,
+        containerColor = Color.White,
+    ) {
+        Text("↑", color = Color.Black, fontWeight = FontWeight.Bold)
+    }
+}
+
+internal fun String.withoutTrailingMediaUrl(hasAssets: Boolean): String {
+    if (!hasAssets) return this
+    return replace(Regex("""(?:\s+https://t\.co/[A-Za-z0-9_]+)+\s*$"""), "").trimEnd()
+}
+
+@Composable
+fun EnhancedMediaGrid(assets: List<AssetEntity>) {
+    val shown = assets.mapNotNull { asset ->
+        val url = asset.localPath ?: asset.previewUrl ?: asset.remoteUrl
+        url?.let { DisplayAsset(asset, it) }
+    }.take(4)
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         when (shown.size) {
-            1 -> EnhancedMediaCell(shown[0], Modifier.fillMaxWidth().aspectRatio(16f / 10f))
+            1 -> EnhancedMediaCell(
+                shown[0].url,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxWidth().aspectRatio(shown[0].asset.displayAspectRatio()),
+            )
             2 -> Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                shown.forEach { EnhancedMediaCell(it, Modifier.weight(1f).aspectRatio(1f)) }
+                shown.forEach { EnhancedMediaCell(it.url, ContentScale.Crop, Modifier.weight(1f).aspectRatio(1f)) }
             }
             else -> {
                 Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    shown.take(2).forEach { EnhancedMediaCell(it, Modifier.weight(1f).aspectRatio(1f)) }
+                    shown.take(2).forEach { EnhancedMediaCell(it.url, ContentScale.Crop, Modifier.weight(1f).aspectRatio(1f)) }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    shown.drop(2).forEach { EnhancedMediaCell(it, Modifier.weight(1f).aspectRatio(1f)) }
+                    shown.drop(2).forEach { EnhancedMediaCell(it.url, ContentScale.Crop, Modifier.weight(1f).aspectRatio(1f)) }
                     if (shown.size == 3) Spacer(Modifier.weight(1f))
                 }
             }
@@ -1442,12 +1576,23 @@ fun EnhancedMediaGrid(urls: List<String>) {
     }
 }
 
+private data class DisplayAsset(
+    val asset: AssetEntity,
+    val url: String,
+)
+
+private fun AssetEntity.displayAspectRatio(): Float {
+    val safeWidth = width?.takeIf { it > 0 } ?: return 16f / 10f
+    val safeHeight = height?.takeIf { it > 0 } ?: return 16f / 10f
+    return (safeWidth.toFloat() / safeHeight.toFloat()).coerceIn(0.35f, 3.2f)
+}
+
 @Composable
-private fun EnhancedMediaCell(url: String, modifier: Modifier) {
+private fun EnhancedMediaCell(url: String, contentScale: ContentScale, modifier: Modifier) {
     AsyncImage(
         model = url,
         contentDescription = null,
-        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+        contentScale = contentScale,
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant),

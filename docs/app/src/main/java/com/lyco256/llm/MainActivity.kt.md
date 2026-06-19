@@ -11,14 +11,16 @@
 
 ## 役割
 
-Activity、ViewModel、UI state、Compose画面の接続入口です。未分類、分類、タグ、同期、使用量、X API設定、投稿データ保存先設定へ状態とイベントを流します。画面本体のタグ階層UIは `TagHierarchyUiV2.kt` に分離されています。
+Activity、ViewModel、UI state、Compose画面の接続入口です。未分類、分類済み、タグ管理、同期/使用量、X API設定、投稿データ保存先設定へ状態とイベントを流します。画面本体のタグ階層UIは `TagHierarchyUiV2.kt` に分離されています。
 
 ## 主な処理
 
 - `MainActivity`: Compose起動とAppAuthのActivity Result受信
 - `MainViewModel`: RepositoryのFlowをUI stateへ合成し、ユーザー操作をRepositoryへ渡す
 - `MainUiState`: 未分類、分類済み、検索、タグ／グループの必須AND＋含まれるOR絞り込みを派生計算
-- `EnhancedClipListScreen` / `EnhancedClassifiedScreen` / `EnhancedTagListScreen` を呼び出して、未分類、分類、タグ管理の画面へ接続する
+- `screenTitle`: 現在のタブやDialog状態からTopAppBar表示名を生成し、未分類では総未分類件数を表示します。
+- `EnhancedClipListScreen` / `EnhancedClassifiedScreen` / `EnhancedTagListScreen` を呼び出して、未分類、分類済み、タグ管理の画面へ接続する
+- 画面内の重複見出しは出さず、現在画面名はTopAppBarへ集約します。
 - タグリストのドラッグ並び替えは `moveTagNodeToIndex` から `ClipRepository.moveNodeToParentAtSlot` へ渡し、UI側placeholderIndexとRepository側indexの意味を揃える
 - `TagListScreen` 系の旧Composableは履歴として残しているが、実際の表示は `TagHierarchyUiV2.kt` 側が担当する
 - `ApiSettingsDialog`: Client ID保存、Xログイン、ログアウト
@@ -34,7 +36,7 @@ UI操作 → `MainViewModel` → `ClipRepository` → Room/X API/暗号化設定
 ## 関連ファイル
 
 - `LikeListManagerApp.kt.md`: `AppContainer` の取得元です。
-- `TagHierarchyUiV2.kt.md`: 未分類、分類、タグ管理のCompose画面です。
+- `TagHierarchyUiV2.kt.md`: 未分類、分類済み、タグ管理のCompose画面です。
 - `data/ClipRepository.kt.md`: UI操作の業務処理を実行します。
 - `data/Entities.kt.md`: 画面で表示・編集するモデルです。
 - `data/ApiSettingsStore.kt.md`: UIに表示するClient IDとログイン状態を保存します。
