@@ -12,6 +12,16 @@
   - 入れ子グループの子孫タグ取得と、同一投稿に複数タグが付いてもグループ件数が重複しないことを確認します。
 - `filtersApplyRequiredAndTogetherAndIncludedAsOr`
   - 必須条件は AND、含まれる条件は OR として分類済み投稿を絞り込むことを確認します。
+- `excludedTagsRemoveClipBeforeRequiredAndIncluded` / `groupExcludeRemovesClipsWithDescendantTags`
+  - 排除条件が必須/含む条件より優先され、グループ排除は子孫タグ付き投稿を除外することを確認します。
+- `taggedOnlyControlsWhetherUntaggedClipsAreSearched`
+  - タグのみON/OFFで未分類投稿が検索対象に入るかどうかを確認します。
+- `selectedAuthorsMatchAsOr`
+  - 複数ユーザー条件が OR として扱われることを確認します。
+- `dateRangeIncludesStartAndEndDate`
+  - 投稿日の開始日と終了日がどちらも範囲に含まれることを確認します。
+- `invalidRegexSearchReturnsEmptyList`
+  - 不正な正規表現でクラッシュせず0件になることを確認します。
 - `siblingNameCannotDuplicateAcrossGroupAndTag`
   - 同一親配下でタグとグループの名前が重複できないことを確認します。
 - `groupCannotMoveIntoDescendant`
@@ -44,7 +54,7 @@
 ## 関連ファイルと関連理由
 
 - `app/src/main/java/com/lyco256/llm/MainActivity.kt`
-  - `matchesTagFilters` の分類済み絞り込みロジックを検証します。
+  - `matchesTagFilters` と `filterClipsForSearch` の分類済み検索/絞り込みロジックを検証します。
 - `app/src/main/java/com/lyco256/llm/data/Entities.kt`
   - `TagHierarchy`、`TagNodeRef`、`TagFilterState` などのデータ構造を利用します。
 - `app/src/main/java/com/lyco256/llm/data/ClipRepository.kt`

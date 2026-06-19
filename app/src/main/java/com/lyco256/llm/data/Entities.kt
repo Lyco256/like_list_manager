@@ -211,7 +211,7 @@ data class TagHierarchy(
     }
 }
 
-enum class TagFilterState { NONE, INCLUDED, REQUIRED }
+enum class TagFilterState { NONE, INCLUDED, REQUIRED, EXCLUDED }
 
 enum class TagNodeType { GROUP, TAG }
 

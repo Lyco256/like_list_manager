@@ -44,8 +44,13 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.Divider
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -53,8 +58,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -104,6 +111,9 @@ import com.lyco256.llm.data.TagTreeNode
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
 import kotlin.math.roundToInt
 
 internal data class VisibleTagRow(
@@ -171,6 +181,7 @@ fun EnhancedClipListScreen(
     onTagsChange: (ClipEntity, Set<Long>) -> Unit,
     onSummaryChange: (ClipEntity, String) -> Unit,
     onDelete: (ClipEntity) -> Unit,
+    onAuthorClick: (ClipEntity) -> Unit = {},
 ) {
     val pendingTagIds = remember { mutableStateMapOf<Long, Set<Long>>() }
     val itemKeys = remember(clips) { clips.map { it.clip.id } }
@@ -209,6 +220,7 @@ fun EnhancedClipListScreen(
                             },
                             onSummaryChange = onSummaryChange,
                             onDelete = onDelete,
+                            onAuthorClick = onAuthorClick,
                         )
                     }
                 }
@@ -225,33 +237,47 @@ fun EnhancedClassifiedScreen(
     listState: LazyListState,
     modifier: Modifier = Modifier,
     onQueryChange: (String) -> Unit,
+    onSearchModeChange: (SearchMode) -> Unit,
+    onSearchTargetToggle: (SearchTarget) -> Unit,
+    onDateRangeChange: (LocalDate?, LocalDate?) -> Unit,
+    onAuthorToggle: (TweetAuthorKey) -> Unit,
+    onClearAuthorFilters: () -> Unit,
+    onTaggedOnlyChange: (Boolean) -> Unit,
     onTagFilterChange: (TagNodeRef) -> Unit,
     onClearTagFilters: () -> Unit,
+    onClearAllFilters: () -> Unit,
     onTagsChange: (ClipEntity, Set<Long>) -> Unit,
     onSummaryChange: (ClipEntity, String) -> Unit,
     onDelete: (ClipEntity) -> Unit,
+    onAuthorClick: (ClipEntity) -> Unit,
 ) {
     var filterDialogOpen by remember { mutableStateOf(false) }
+    var authorDialogOpen by remember { mutableStateOf(false) }
     val itemKeys = remember(uiState.classified) { uiState.classified.map { it.clip.id } }
     PreserveScrollAnchor(listState, "classified", itemKeys)
     Column(modifier.fillMaxSize().padding(12.dp)) {
         OutlinedTextField(
-            value = uiState.query,
+            value = uiState.filters.query,
             onValueChange = onQueryChange,
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
-            label = { Text("本文/概要/投稿者を検索") },
+            isError = uiState.filters.regexError != null,
+            label = { Text("検索") },
+            supportingText = {
+                val error = uiState.filters.regexError
+                Text(error ?: "本文/概要/表示名/@ユーザー名")
+            },
         )
         Spacer(Modifier.height(8.dp))
         TagFilterSummaryRow(
+            uiState = uiState,
             hierarchy = uiState.tagHierarchy,
-            filters = uiState.tagFilters,
             onOpen = { filterDialogOpen = true },
-            onClear = onClearTagFilters,
+            onClear = onClearAllFilters,
         )
         Spacer(Modifier.height(10.dp))
         if (uiState.classified.isEmpty()) {
-            HierarchyEmptyState("条件に合う分類済みツイートはありません")
+            HierarchyEmptyState("条件に合うツイートはありません")
         } else {
             Box(Modifier.fillMaxSize()) {
                 LazyColumn(
@@ -267,6 +293,7 @@ fun EnhancedClassifiedScreen(
                             onTagSelectionChange = { onTagsChange(clip.clip, it) },
                             onSummaryChange = onSummaryChange,
                             onDelete = onDelete,
+                            onAuthorClick = onAuthorClick,
                         )
                     }
                 }
@@ -276,12 +303,29 @@ fun EnhancedClassifiedScreen(
         }
     }
     if (filterDialogOpen) {
-        TagFilterDialog(
+        SearchFilterDialog(
+            uiState = uiState,
             hierarchy = uiState.tagHierarchy,
-            filters = uiState.tagFilters,
+            filters = uiState.filters,
+            onQueryChange = onQueryChange,
+            onSearchModeChange = onSearchModeChange,
+            onSearchTargetToggle = onSearchTargetToggle,
+            onDateRangeChange = onDateRangeChange,
+            onOpenAuthorDialog = { authorDialogOpen = true },
+            onTaggedOnlyChange = onTaggedOnlyChange,
             onCycle = onTagFilterChange,
             onClear = onClearTagFilters,
+            onClearAll = onClearAllFilters,
             onDismiss = { filterDialogOpen = false },
+        )
+    }
+    if (authorDialogOpen) {
+        AuthorFilterDialog(
+            authors = uiState.authorOptions,
+            selectedAuthors = uiState.filters.selectedAuthors,
+            onToggle = onAuthorToggle,
+            onClear = onClearAuthorFilters,
+            onDismiss = { authorDialogOpen = false },
         )
     }
 }
@@ -507,6 +551,7 @@ private fun EnhancedTweetCard(
     onTagConfirmation: () -> Unit = {},
     onSummaryChange: (ClipEntity, String) -> Unit,
     onDelete: (ClipEntity) -> Unit,
+    onAuthorClick: (ClipEntity) -> Unit,
 ) {
     val context = LocalContext.current
     var summary by remember(clip.clip.id, clip.clip.summary) { mutableStateOf(clip.clip.summary) }
@@ -520,7 +565,13 @@ private fun EnhancedTweetCard(
     ) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable { onAuthorClick(clip.clip) }
+                        .padding(4.dp),
+                ) {
                     Text(clip.clip.authorName, fontWeight = FontWeight.SemiBold)
                     Text(
                         "@${clip.clip.authorUsername}",
@@ -715,25 +766,52 @@ private fun TagSelectionDialog(
 
 @Composable
 private fun TagFilterSummaryRow(
+    uiState: MainUiState,
     hierarchy: TagHierarchy,
-    filters: Map<TagNodeRef, TagFilterState>,
     onOpen: () -> Unit,
     onClear: () -> Unit,
 ) {
-    val activeFilters = filters.entries.filter { it.value != TagFilterState.NONE }
+    val filters = uiState.filters
+    val activeTagFilters = filters.tagFilters.entries.filter { it.value != TagFilterState.NONE }
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             FilterChip(
-                selected = activeFilters.isEmpty(),
-                onClick = onClear,
-                label = { Text("すべて") },
+                selected = filters.hasActiveFilters,
+                onClick = onOpen,
+                label = { Text(if (filters.hasActiveFilters) "絞り込み中: 一致 ${uiState.classified.size}件" else "一致 ${uiState.classified.size}件") },
             )
         }
-        items(activeFilters, key = { it.key.saveableKey() }) { (ref, state) ->
+        item {
+            FilterChip(
+                selected = filters.taggedOnly,
+                onClick = onOpen,
+                label = { Text(if (filters.taggedOnly) "タグのみ" else "全ツイート") },
+            )
+        }
+        if (filters.selectedAuthors.isNotEmpty()) {
+            item {
+                FilterChip(
+                    selected = true,
+                    onClick = onOpen,
+                    label = { Text("ユーザー ${filters.selectedAuthors.size}件") },
+                )
+            }
+        }
+        if (filters.startDate != null || filters.endDate != null) {
+            item {
+                FilterChip(
+                    selected = true,
+                    onClick = onOpen,
+                    label = { Text("${filters.startDate ?: "..."} - ${filters.endDate ?: "..."}") },
+                )
+            }
+        }
+        items(activeTagFilters, key = { it.key.saveableKey() }) { (ref, state) ->
             val node = hierarchy.nodeFor(ref)
             FilterChip(
                 selected = true,
                 onClick = onOpen,
+                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = tagFilterColor(state)),
                 label = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("${state.shortLabel()}${node?.name ?: "不明"}")
@@ -743,20 +821,37 @@ private fun TagFilterSummaryRow(
         }
         item {
             FilledTonalButton(onClick = onOpen) {
-                Text(if (activeFilters.isEmpty()) "絞り込み" else "絞り込み ${activeFilters.size}件")
+                Text("絞り込み")
+            }
+        }
+        if (filters.hasActiveFilters) {
+            item {
+                TextButton(onClick = onClear) { Text("クリア") }
             }
         }
     }
 }
 
+private enum class DateFilterEndpoint { Start, End }
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TagFilterDialog(
+private fun SearchFilterDialog(
+    uiState: MainUiState,
     hierarchy: TagHierarchy,
-    filters: Map<TagNodeRef, TagFilterState>,
+    filters: TweetFilterState,
+    onQueryChange: (String) -> Unit,
+    onSearchModeChange: (SearchMode) -> Unit,
+    onSearchTargetToggle: (SearchTarget) -> Unit,
+    onDateRangeChange: (LocalDate?, LocalDate?) -> Unit,
+    onOpenAuthorDialog: () -> Unit,
+    onTaggedOnlyChange: (Boolean) -> Unit,
     onCycle: (TagNodeRef) -> Unit,
     onClear: () -> Unit,
+    onClearAll: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var dateEndpoint by remember { mutableStateOf<DateFilterEndpoint?>(null) }
     val path = remember { mutableStateListOf<Long>() }
     val currentParentId = path.lastOrNull()
     val currentGroup = currentParentId?.let { hierarchy.groups.firstOrNull { group -> group.id == it } }
@@ -778,63 +873,143 @@ private fun TagFilterDialog(
                     }
                     Column(Modifier.weight(1f)) {
                         Text("絞り込み", style = MaterialTheme.typography.titleLarge)
-                        Text(currentGroup?.name ?: "ルート", style = MaterialTheme.typography.bodySmall)
+                        Text("一致 ${uiState.classified.size}件", style = MaterialTheme.typography.bodySmall)
                     }
-                    TextButton(onClick = onClear) { Text("クリア") }
+                    TextButton(onClick = onClearAll) { Text("全クリア") }
                 }
-                if (children.isEmpty()) {
-                    HierarchyEmptyState("この階層には条件を設定できる項目がありません")
-                } else {
-                    Box(Modifier.fillMaxWidth().weight(1f)) {
-                        LazyVerticalGrid(
-                            columns = GridCells.Adaptive(144.dp),
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    item {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Column(Modifier.weight(1f)) {
+                                Text("タグのみ")
+                                Text("OFFで未分類ツイートも対象", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(checked = filters.taggedOnly, onCheckedChange = onTaggedOnlyChange)
+                        }
+                    }
+                    item {
+                        OutlinedTextField(
+                            value = filters.query,
+                            onValueChange = onQueryChange,
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            isError = filters.regexError != null,
+                            label = { Text("検索") },
+                            supportingText = { Text(filters.regexError ?: "タグ名は検索対象に含めません") },
+                        )
+                    }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SearchMode.entries.forEach { mode ->
+                                FilterChip(
+                                    selected = filters.searchMode == mode,
+                                    onClick = { onSearchModeChange(mode) },
+                                    label = { Text(mode.label) },
+                                )
+                            }
+                        }
+                    }
+                    item {
+                        Text("検索対象", style = MaterialTheme.typography.titleSmall)
+                    }
+                    items(SearchTarget.entries, key = { it.name }) { target ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { onSearchTargetToggle(target) },
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            gridItems(children, key = { it.ref().saveableKey() }) { node ->
-                                val ref = node.ref()
-                                val state = filters[ref] ?: TagFilterState.NONE
-                                val selected = state != TagFilterState.NONE
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    FilterChip(
-                                        selected = selected,
-                                        onClick = { onCycle(ref) },
-                                        modifier = Modifier.weight(1f),
-                                        label = {
-                                            Column(horizontalAlignment = Alignment.Start) {
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    if (node is TagGroupNode) {
-                                                        Icon(Icons.Filled.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
-                                                        Spacer(Modifier.width(6.dp))
-                                                    } else {
-                                                        Icon(
-                                                            Icons.Filled.LocalOffer,
-                                                            contentDescription = null,
-                                                            tint = Color((node as TagLeafNode).tag.color),
-                                                            modifier = Modifier.size(18.dp),
-                                                        )
-                                                        Spacer(Modifier.width(6.dp))
+                            Checkbox(checked = target in filters.searchTargets, onCheckedChange = { onSearchTargetToggle(target) })
+                            Text(target.label)
+                        }
+                    }
+                    item {
+                        Text("投稿日", style = MaterialTheme.typography.titleSmall)
+                    }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = filters.startDate != null,
+                                onClick = { dateEndpoint = DateFilterEndpoint.Start },
+                                label = { Text("開始 ${filters.startDate ?: "未指定"}") },
+                            )
+                            FilterChip(
+                                selected = filters.endDate != null,
+                                onClick = { dateEndpoint = DateFilterEndpoint.End },
+                                label = { Text("終了 ${filters.endDate ?: "未指定"}") },
+                            )
+                            TextButton(onClick = { onDateRangeChange(null, null) }) { Text("日付クリア") }
+                        }
+                    }
+                    item {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilledTonalButton(onClick = onOpenAuthorDialog) {
+                                Text(if (filters.selectedAuthors.isEmpty()) "ユーザーを選択" else "ユーザー ${filters.selectedAuthors.size}件")
+                            }
+                            if (filters.selectedAuthors.isNotEmpty()) {
+                                Text("${filters.selectedAuthors.size}件選択中", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                    item {
+                        Divider()
+                        Text("タグ条件", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
+                        Text("含: 緑 / 必: 青 / 除: オレンジ。グループは含む・排除のみです。", style = MaterialTheme.typography.bodySmall)
+                        Text(currentGroup?.name ?: "ルート", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (children.isEmpty()) {
+                        item { HierarchyEmptyState("この階層には条件を設定できる項目がありません") }
+                    } else {
+                        item {
+                            LazyVerticalGrid(
+                                columns = GridCells.Adaptive(144.dp),
+                                modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                gridItems(children, key = { it.ref().saveableKey() }) { node ->
+                                    val ref = node.ref()
+                                    val state = filters.tagFilters[ref] ?: TagFilterState.NONE
+                                    val selected = state != TagFilterState.NONE
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        FilterChip(
+                                            selected = selected,
+                                            onClick = { onCycle(ref) },
+                                            modifier = Modifier.weight(1f),
+                                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = tagFilterColor(state)),
+                                            label = {
+                                                Column(horizontalAlignment = Alignment.Start) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        if (node is TagGroupNode) {
+                                                            Icon(Icons.Filled.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
+                                                            Spacer(Modifier.width(6.dp))
+                                                        } else {
+                                                            Icon(
+                                                                Icons.Filled.LocalOffer,
+                                                                contentDescription = null,
+                                                                tint = Color((node as TagLeafNode).tag.color),
+                                                                modifier = Modifier.size(18.dp),
+                                                            )
+                                                            Spacer(Modifier.width(6.dp))
+                                                        }
+                                                        Text("${state.shortLabel()}${node.name}")
                                                     }
-                                                    Text("${state.shortLabel()}${node.name}")
+                                                    if (node is TagGroupNode) {
+                                                        Text(
+                                                            "${node.count} 件",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        )
+                                                    }
                                                 }
-                                                if (node is TagGroupNode) {
-                                                    Text(
-                                                        "${node.count} 件",
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    )
-                                                }
+                                            },
+                                        )
+                                        if (node is TagGroupNode) {
+                                            IconButton(onClick = { path.add(node.id) }) {
+                                                Icon(
+                                                    Icons.Filled.ArrowBack,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.graphicsLayer(rotationZ = 180f),
+                                                )
                                             }
-                                        },
-                                    )
-                                    if (node is TagGroupNode) {
-                                        IconButton(onClick = { path.add(node.id) }) {
-                                            Icon(
-                                                Icons.Filled.ArrowBack,
-                                                contentDescription = null,
-                                                modifier = Modifier.graphicsLayer(rotationZ = 180f),
-                                            )
                                         }
                                     }
                                 }
@@ -842,10 +1017,103 @@ private fun TagFilterDialog(
                         }
                     }
                 }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    TextButton(onClick = onClear) { Text("タグ条件クリア") }
+                    Button(onClick = onDismiss) { Text("閉じる") }
+                }
             }
         }
     }
+    dateEndpoint?.let { endpoint ->
+        val selectedDate = if (endpoint == DateFilterEndpoint.Start) filters.startDate else filters.endDate
+        val pickerState = rememberDatePickerState(initialSelectedDateMillis = selectedDate?.toPickerMillis())
+        DatePickerDialog(
+            onDismissRequest = { dateEndpoint = null },
+            confirmButton = {
+                TextButton(onClick = {
+                    val picked = pickerState.selectedDateMillis?.toLocalDateFromPicker()
+                    if (endpoint == DateFilterEndpoint.Start) {
+                        onDateRangeChange(picked, filters.endDate)
+                    } else {
+                        onDateRangeChange(filters.startDate, picked)
+                    }
+                    dateEndpoint = null
+                }) { Text("適用") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    if (endpoint == DateFilterEndpoint.Start) {
+                        onDateRangeChange(null, filters.endDate)
+                    } else {
+                        onDateRangeChange(filters.startDate, null)
+                    }
+                    dateEndpoint = null
+                }) { Text("解除") }
+            },
+        ) {
+            DatePicker(state = pickerState)
+        }
+    }
 }
+
+@Composable
+private fun AuthorFilterDialog(
+    authors: List<TweetAuthorOption>,
+    selectedAuthors: Set<TweetAuthorKey>,
+    onToggle: (TweetAuthorKey) -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(authors, query) {
+        val clean = query.trim()
+        if (clean.isBlank()) authors else authors.filter {
+            it.displayName.contains(clean, ignoreCase = true) || it.username.contains(clean, ignoreCase = true)
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("ユーザーを選択") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("表示名/@ユーザー名を検索") },
+                )
+                LazyColumn(Modifier.heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    items(filtered, key = { "${it.key.authorId}:${it.key.username}" }) { author ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { onToggle(author.key) }.padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(checked = author.key in selectedAuthors, onCheckedChange = { onToggle(author.key) })
+                            Column(Modifier.weight(1f)) {
+                                Text(author.displayName, fontWeight = FontWeight.SemiBold)
+                                Text("@${author.username} / ${author.count}件", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { Button(onClick = onDismiss) { Text("閉じる") } },
+        dismissButton = { TextButton(onClick = onClear) { Text("クリア") } },
+    )
+}
+
+private fun tagFilterColor(state: TagFilterState): Color = when (state) {
+    TagFilterState.NONE -> Color.Transparent
+    TagFilterState.INCLUDED -> Color(0xFF2E7D32)
+    TagFilterState.REQUIRED -> Color(0xFF1565C0)
+    TagFilterState.EXCLUDED -> Color(0xFFE65100)
+}
+
+private fun LocalDate.toPickerMillis(): Long = atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+
+private fun Long.toLocalDateFromPicker(): LocalDate = Instant.ofEpochMilli(this).atZone(ZoneOffset.UTC).toLocalDate()
 
 @Composable
 private fun TagHierarchyChip(

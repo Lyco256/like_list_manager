@@ -95,6 +95,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeParseException
 
 class MainActivity : ComponentActivity() {
     private lateinit var viewModel: MainViewModel
@@ -132,6 +135,55 @@ enum class AppTab(val label: String) {
     Tags("タグ管理"),
 }
 
+enum class SearchMode(val label: String) {
+    Literal("リテラル"),
+    Regex("正規表現"),
+}
+
+enum class SearchTarget(val label: String) {
+    Text("本文"),
+    Summary("概要"),
+    AuthorName("表示名"),
+    Username("@ユーザー名"),
+}
+
+data class TweetAuthorKey(
+    val authorId: String?,
+    val username: String,
+)
+
+data class TweetAuthorOption(
+    val key: TweetAuthorKey,
+    val displayName: String,
+    val username: String,
+    val count: Int,
+)
+
+data class TweetFilterState(
+    val query: String = "",
+    val searchMode: SearchMode = SearchMode.Literal,
+    val searchTargets: Set<SearchTarget> = SearchTarget.entries.toSet(),
+    val startDate: LocalDate? = null,
+    val endDate: LocalDate? = null,
+    val selectedAuthors: Set<TweetAuthorKey> = emptySet(),
+    val tagFilters: Map<TagNodeRef, TagFilterState> = emptyMap(),
+    val taggedOnly: Boolean = true,
+) {
+    val regexError: String? = if (searchMode == SearchMode.Regex && query.isNotBlank()) {
+        runCatching { Regex(query, RegexOption.IGNORE_CASE) }.exceptionOrNull()?.message ?: null
+    } else {
+        null
+    }
+
+    val hasActiveFilters: Boolean =
+        query.isNotBlank() ||
+            startDate != null ||
+            endDate != null ||
+            selectedAuthors.isNotEmpty() ||
+            tagFilters.isNotEmpty() ||
+            !taggedOnly
+}
+
 data class MainUiState(
     val clips: List<ClipWithDetails> = emptyList(),
     val tags: List<TagWithCount> = emptyList(),
@@ -140,20 +192,13 @@ data class MainUiState(
     val apiSettings: ApiSettings = ApiSettings(),
     val oauthSession: OAuthSession? = null,
     val storageState: PostStorageState = PostStorageState(),
-    val query: String = "",
-    val tagFilters: Map<TagNodeRef, TagFilterState> = emptyMap(),
+    val filters: TweetFilterState = TweetFilterState(),
 ) {
     val unclassified: List<ClipWithDetails> = clips.filter { it.tags.isEmpty() }
-    val classified: List<ClipWithDetails> = clips
-        .filter { it.tags.isNotEmpty() }
-        .filter { clip -> matchesTagFilters(clip, tagHierarchy, tagFilters) }
-        .filter { clip ->
-            query.isBlank() ||
-                clip.clip.summary.contains(query, ignoreCase = true) ||
-                clip.clip.text.contains(query, ignoreCase = true) ||
-                clip.clip.authorName.contains(query, ignoreCase = true) ||
-                clip.clip.authorUsername.contains(query, ignoreCase = true)
-    }
+    val authorOptions: List<TweetAuthorOption> = buildAuthorOptions(clips)
+    val classified: List<ClipWithDetails> = filterClipsForSearch(clips, tagHierarchy, filters)
+    val query: String = filters.query
+    val tagFilters: Map<TagNodeRef, TagFilterState> = filters.tagFilters
 }
 
 private data class RepositoryUiState(
@@ -166,8 +211,7 @@ private data class RepositoryUiState(
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = (application as LikeListManagerApp).container.repository
-    private val query = MutableStateFlow("")
-    private val tagFilters = MutableStateFlow<Map<TagNodeRef, TagFilterState>>(emptyMap())
+    private val filters = MutableStateFlow(TweetFilterState())
     private val apiSettings = MutableStateFlow(ApiSettings())
     private val oauthSession = MutableStateFlow<OAuthSession?>(null)
 
@@ -185,9 +229,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         repositoryState,
         apiSettings,
         oauthSession,
-        query,
-        tagFilters,
-    ) { repositoryState, settings, session, queryValue, filters ->
+        filters,
+    ) { repositoryState, settings, session, filterValue ->
         MainUiState(
             clips = repositoryState.clips,
             tags = repositoryState.tags,
@@ -196,8 +239,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             apiSettings = settings,
             oauthSession = session,
             storageState = repositoryState.storageState,
-            query = queryValue,
-            tagFilters = filters,
+            filters = filterValue,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 
@@ -210,22 +252,61 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setQuery(value: String) {
-        query.value = value
+        filters.value = filters.value.copy(query = value)
+    }
+
+    fun setSearchMode(value: SearchMode) {
+        filters.value = filters.value.copy(searchMode = value)
+    }
+
+    fun toggleSearchTarget(target: SearchTarget) {
+        val current = filters.value.searchTargets
+        val next = if (target in current && current.size > 1) current - target else current + target
+        filters.value = filters.value.copy(searchTargets = next)
+    }
+
+    fun setDateRange(startDate: LocalDate?, endDate: LocalDate?) {
+        filters.value = filters.value.copy(startDate = startDate, endDate = endDate)
+    }
+
+    fun toggleAuthorFilter(key: TweetAuthorKey) {
+        val current = filters.value.selectedAuthors
+        filters.value = filters.value.copy(
+            selectedAuthors = if (key in current) current - key else current + key,
+        )
+    }
+
+    fun clearAuthorFilters() {
+        filters.value = filters.value.copy(selectedAuthors = emptySet())
+    }
+
+    fun setTaggedOnly(value: Boolean) {
+        filters.value = filters.value.copy(taggedOnly = value)
+    }
+
+    fun filterByAuthorFromClip(clip: ClipEntity) {
+        filters.value = filters.value.copy(
+            taggedOnly = false,
+            selectedAuthors = filters.value.selectedAuthors + clip.authorKey(),
+        )
     }
 
     fun cycleTagFilter(node: TagNodeRef) {
-        val current = tagFilters.value[node] ?: TagFilterState.NONE
+        val current = filters.value.tagFilters[node] ?: TagFilterState.NONE
         val next = when (current) {
             TagFilterState.NONE -> TagFilterState.INCLUDED
-            TagFilterState.INCLUDED -> TagFilterState.REQUIRED
-            TagFilterState.REQUIRED -> TagFilterState.NONE
+            TagFilterState.INCLUDED -> if (node.type == TagNodeType.GROUP) TagFilterState.EXCLUDED else TagFilterState.REQUIRED
+            TagFilterState.REQUIRED -> TagFilterState.EXCLUDED
+            TagFilterState.EXCLUDED -> TagFilterState.NONE
         }
-        tagFilters.value = tagFilters.value.toMutableMap().apply {
+        filters.value = filters.value.copy(tagFilters = filters.value.tagFilters.toMutableMap().apply {
             if (next == TagFilterState.NONE) remove(node) else put(node, next)
-        }
+        })
     }
 
-    fun clearTagFilters() { tagFilters.value = emptyMap() }
+    fun clearTagFilters() { filters.value = filters.value.copy(tagFilters = emptyMap()) }
+
+    fun clearAllFilters() { filters.value = TweetFilterState() }
 
     fun createTag(name: String, parentGroupId: Long?, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.createTag(name, parentGroupId) }
     fun createGroup(name: String, parentGroupId: Long?, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.createGroup(name, parentGroupId) }
@@ -461,17 +542,29 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                 onTagsChange = viewModel::setClipTags,
                 onSummaryChange = viewModel::updateSummary,
                 onDelete = viewModel::moveClipToTrash,
+                onAuthorClick = { clip ->
+                    viewModel.filterByAuthorFromClip(clip)
+                    tab = AppTab.Classified
+                },
             )
             AppTab.Classified -> EnhancedClassifiedScreen(
                 uiState = uiState,
                 listState = classifiedListState,
                 modifier = Modifier.padding(padding),
                 onQueryChange = viewModel::setQuery,
+                onSearchModeChange = viewModel::setSearchMode,
+                onSearchTargetToggle = viewModel::toggleSearchTarget,
+                onDateRangeChange = viewModel::setDateRange,
+                onAuthorToggle = viewModel::toggleAuthorFilter,
+                onClearAuthorFilters = viewModel::clearAuthorFilters,
+                onTaggedOnlyChange = viewModel::setTaggedOnly,
                 onTagFilterChange = viewModel::cycleTagFilter,
                 onClearTagFilters = viewModel::clearTagFilters,
+                onClearAllFilters = viewModel::clearAllFilters,
                 onTagsChange = viewModel::setClipTags,
                 onSummaryChange = viewModel::updateSummary,
                 onDelete = viewModel::moveClipToTrash,
+                onAuthorClick = viewModel::filterByAuthorFromClip,
             )
             AppTab.Tags -> EnhancedTagListScreen(
                 hierarchy = uiState.tagHierarchy,
@@ -583,10 +676,87 @@ internal fun matchesTagFilters(
         }
         return clipTagIds.any { it in targetIds }
     }
+    val excluded = filters.filterValues { it == TagFilterState.EXCLUDED }.keys
     val required = filters.filterValues { it == TagFilterState.REQUIRED }.keys
     val included = filters.filterValues { it == TagFilterState.INCLUDED }.keys
-    return required.all(::matches) && (included.isEmpty() || included.any(::matches))
+    return excluded.none(::matches) && required.all(::matches) && (included.isEmpty() || included.any(::matches))
 }
+
+internal fun filterClipsForSearch(
+    clips: List<ClipWithDetails>,
+    hierarchy: TagHierarchy,
+    filters: TweetFilterState,
+): List<ClipWithDetails> {
+    val regex = if (filters.searchMode == SearchMode.Regex && filters.query.isNotBlank()) {
+        runCatching { Regex(filters.query, RegexOption.IGNORE_CASE) }.getOrNull() ?: return emptyList()
+    } else {
+        null
+    }
+    return clips
+        .asSequence()
+        .filter { clip -> !filters.taggedOnly || clip.tags.isNotEmpty() }
+        .filter { clip -> matchesDateRange(clip.clip, filters.startDate, filters.endDate) }
+        .filter { clip -> matchesAuthors(clip.clip, filters.selectedAuthors) }
+        .filter { clip -> matchesTagFilters(clip, hierarchy, filters.tagFilters) }
+        .filter { clip -> matchesTextSearch(clip.clip, filters.query, filters.searchMode, filters.searchTargets, regex) }
+        .toList()
+}
+
+private fun matchesDateRange(clip: ClipEntity, startDate: LocalDate?, endDate: LocalDate?): Boolean {
+    if (startDate == null && endDate == null) return true
+    val date = clip.postedLocalDate() ?: return false
+    return (startDate == null || !date.isBefore(startDate)) && (endDate == null || !date.isAfter(endDate))
+}
+
+private fun matchesAuthors(clip: ClipEntity, selectedAuthors: Set<TweetAuthorKey>): Boolean {
+    if (selectedAuthors.isEmpty()) return true
+    return clip.authorKey() in selectedAuthors
+}
+
+private fun matchesTextSearch(
+    clip: ClipEntity,
+    query: String,
+    mode: SearchMode,
+    targets: Set<SearchTarget>,
+    regex: Regex?,
+): Boolean {
+    val cleanQuery = query.trim()
+    if (cleanQuery.isBlank()) return true
+    val values = buildList {
+        if (SearchTarget.Text in targets) add(clip.text)
+        if (SearchTarget.Summary in targets) add(clip.summary)
+        if (SearchTarget.AuthorName in targets) add(clip.authorName)
+        if (SearchTarget.Username in targets) add(clip.authorUsername)
+    }
+    if (values.isEmpty()) return false
+    return when (mode) {
+        SearchMode.Literal -> values.any { it.contains(cleanQuery, ignoreCase = true) }
+        SearchMode.Regex -> regex?.let { compiled -> values.any { compiled.containsMatchIn(it) } } ?: false
+    }
+}
+
+private fun buildAuthorOptions(clips: List<ClipWithDetails>): List<TweetAuthorOption> =
+    clips.groupBy { it.clip.authorKey() }
+        .map { (key, authorClips) ->
+            val latest = authorClips.first().clip
+            TweetAuthorOption(
+                key = key,
+                displayName = latest.authorName,
+                username = latest.authorUsername,
+                count = authorClips.size,
+            )
+        }
+        .sortedWith(compareBy<TweetAuthorOption> { it.displayName.lowercase() }.thenBy { it.username.lowercase() })
+
+private fun ClipEntity.authorKey(): TweetAuthorKey =
+    TweetAuthorKey(authorId = authorId?.takeIf { it.isNotBlank() }, username = authorUsername.lowercase())
+
+private fun ClipEntity.postedLocalDate(): LocalDate? =
+    try {
+        Instant.parse(xCreatedAt).atZone(ZoneId.systemDefault()).toLocalDate()
+    } catch (_: DateTimeParseException) {
+        null
+    }
 
 @Composable
 fun PostStorageDialog(
@@ -696,10 +866,12 @@ private fun screenTitle(
 }
 
 private fun MainUiState.classifiedScrollKey(): String {
-    val filterKey = tagFilters.entries
+    val filterKey = filters.tagFilters.entries
         .sortedWith(compareBy({ it.key.type.name }, { it.key.id }))
         .joinToString("|") { "${it.key.type.name}:${it.key.id}:${it.value.name}" }
-    return "classified:${query.trim()}:$filterKey"
+    val authors = filters.selectedAuthors.sortedWith(compareBy({ it.authorId.orEmpty() }, { it.username }))
+        .joinToString("|") { "${it.authorId}:${it.username}" }
+    return "classified:${filters.query.trim()}:${filters.searchMode.name}:${filters.searchTargets.sortedBy { it.name }}:${filters.startDate}:${filters.endDate}:$authors:${filters.taggedOnly}:$filterKey"
 }
 
 fun tabIcon(tab: AppTab): String = when (tab) {
@@ -1250,6 +1422,7 @@ fun TagFilterState.shortLabel(): String = when (this) {
     TagFilterState.NONE -> ""
     TagFilterState.INCLUDED -> "含: "
     TagFilterState.REQUIRED -> "必: "
+    TagFilterState.EXCLUDED -> "除: "
 }
 
 @Composable
