@@ -200,6 +200,8 @@ SC-56Cなど、ユーザーが日常利用している実機には復元でき�
 
 Android Studioやエミュレーターは低スペックPCへの負荷が高いため、通常はコマンドラインの単発Gradle実行を優先します。
 
+通常のビルド、単体テスト、lint、必要に応じた実機への安全な上書き再インストールは `SAFE_DEBUG_ROUTINE.md` と `scripts/run-safe-debug-check.ps1` を優先して使います。
+
 ```powershell
 $env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
 $env:PATH="$env:JAVA_HOME\bin;$env:PATH"

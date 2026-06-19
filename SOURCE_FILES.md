@@ -90,6 +90,7 @@ MainActivity / Compose UI
 
 - `docs/.gitignore.md`
 - `docs/build.gradle.kts.md`
+- `SAFE_DEBUG_ROUTINE.md`: 安全なビルド、テスト、lint、実機上書き再インストール手順
 - `docs/settings.gradle.kts.md`
 - `docs/gradle.properties.md`
 - `docs/gradlew.md`
@@ -127,6 +128,10 @@ MainActivity / Compose UI
 - `docs/app/src/test/java/com/lyco256/llm/TagHierarchyTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LikeListDatabaseMigrationTest.kt.md`
 
+### Scripts
+
+- `docs/scripts/run-safe-debug-check.ps1.md`
+
 ## 現在の未実装・制約
 
 - 自動バックグラウンド同期は未実装
@@ -141,6 +146,7 @@ MainActivity / Compose UI
 ## 関連文書
 
 - `GOALS.md`: プロダクトの目的、MVP、将来目標
+- `SAFE_DEBUG_ROUTINE.md`: 毎回使い回せる安全なビルド/テスト/再インストール手順
 - `REAL_API_VERIFICATION.md`: 実Xアカウントでの確認手順
 - `docs/CHANGE_SUMMARY_2026-06-12.md`: 今回のOAuth実装と文書整備の要約
 - `LikeTagger_requirements.md`: 初期の要件・技術仕様メモ。設計経緯や将来候補の確認に使い、現在の仕様判断は `GOALS.md` と実装を優先します。
