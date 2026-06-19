@@ -50,7 +50,7 @@ class TagHierarchyTest {
     fun filtersApplyRequiredAndTogetherAndIncludedAsOr() {
         val hierarchy = hierarchy()
         val clip = clip(kotlin, design)
-        val requiredParent = TagNodeRef(TagNodeType.GROUP, parent.id)
+        val requiredKotlin = TagNodeRef(TagNodeType.TAG, kotlin.id)
         val requiredDesign = TagNodeRef(TagNodeType.TAG, design.id)
         val includedCompose = TagNodeRef(TagNodeType.TAG, compose.id)
         val includedKotlin = TagNodeRef(TagNodeType.TAG, kotlin.id)
@@ -60,7 +60,7 @@ class TagHierarchyTest {
                 clip,
                 hierarchy,
                 mapOf(
-                    requiredParent to TagFilterState.REQUIRED,
+                    requiredKotlin to TagFilterState.REQUIRED,
                     requiredDesign to TagFilterState.REQUIRED,
                     includedCompose to TagFilterState.INCLUDED,
                 ),
@@ -71,13 +71,98 @@ class TagHierarchyTest {
                 clip,
                 hierarchy,
                 mapOf(
-                    requiredParent to TagFilterState.REQUIRED,
+                    requiredKotlin to TagFilterState.REQUIRED,
                     requiredDesign to TagFilterState.REQUIRED,
                     includedCompose to TagFilterState.INCLUDED,
                     includedKotlin to TagFilterState.INCLUDED,
                 ),
             ),
         )
+    }
+
+    @Test
+    fun excludedTagsRemoveClipBeforeRequiredAndIncluded() {
+        val hierarchy = hierarchy()
+        val clip = clip(kotlin, design)
+
+        assertFalse(
+            matchesTagFilters(
+                clip,
+                hierarchy,
+                mapOf(
+                    TagNodeRef(TagNodeType.TAG, kotlin.id) to TagFilterState.REQUIRED,
+                    TagNodeRef(TagNodeType.TAG, design.id) to TagFilterState.EXCLUDED,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun groupExcludeRemovesClipsWithDescendantTags() {
+        val hierarchy = hierarchy()
+        val clip = clip(kotlin)
+
+        assertFalse(
+            matchesTagFilters(
+                clip,
+                hierarchy,
+                mapOf(TagNodeRef(TagNodeType.GROUP, parent.id) to TagFilterState.EXCLUDED),
+            ),
+        )
+    }
+
+    @Test
+    fun taggedOnlyControlsWhetherUntaggedClipsAreSearched() {
+        val hierarchy = hierarchy()
+        val untagged = clip(id = 101, text = "needle")
+        val tagged = clip(kotlin, id = 102, text = "needle")
+        val filters = TweetFilterState(query = "needle")
+
+        assertEquals(listOf(tagged), filterClipsForSearch(listOf(untagged, tagged), hierarchy, filters))
+        assertEquals(
+            listOf(untagged, tagged),
+            filterClipsForSearch(listOf(untagged, tagged), hierarchy, filters.copy(taggedOnly = false)),
+        )
+    }
+
+    @Test
+    fun selectedAuthorsMatchAsOr() {
+        val hierarchy = hierarchy()
+        val first = clip(kotlin, id = 101, authorId = "a1", username = "first")
+        val second = clip(kotlin, id = 102, authorId = "a2", username = "second")
+        val third = clip(kotlin, id = 103, authorId = "a3", username = "third")
+        val filters = TweetFilterState(
+            selectedAuthors = setOf(
+                TweetAuthorKey("a1", "first"),
+                TweetAuthorKey("a3", "third"),
+            ),
+        )
+
+        assertEquals(listOf(first, third), filterClipsForSearch(listOf(first, second, third), hierarchy, filters))
+    }
+
+    @Test
+    fun dateRangeIncludesStartAndEndDate() {
+        val hierarchy = hierarchy()
+        val early = clip(kotlin, id = 101, createdAt = "2026-06-10T00:00:00Z")
+        val start = clip(kotlin, id = 102, createdAt = "2026-06-11T00:00:00Z")
+        val end = clip(kotlin, id = 103, createdAt = "2026-06-12T12:00:00Z")
+        val late = clip(kotlin, id = 104, createdAt = "2026-06-13T00:00:00Z")
+        val filters = TweetFilterState(
+            startDate = java.time.LocalDate.of(2026, 6, 11),
+            endDate = java.time.LocalDate.of(2026, 6, 12),
+        )
+
+        assertEquals(listOf(start, end), filterClipsForSearch(listOf(early, start, end, late), hierarchy, filters))
+    }
+
+    @Test
+    fun invalidRegexSearchReturnsEmptyList() {
+        val hierarchy = hierarchy()
+        val clip = clip(kotlin)
+        val filters = TweetFilterState(query = "[", searchMode = SearchMode.Regex)
+
+        assertEquals(emptyList<ClipWithDetails>(), filterClipsForSearch(listOf(clip), hierarchy, filters))
     }
 
     @Test(expected = IllegalArgumentException::class)
@@ -311,15 +396,23 @@ class TagHierarchyTest {
 
     private fun TagNodeRef.saveableKeyForTest(): String = "${type.name}:$id"
 
-    private fun clip(vararg tags: TagEntity) = ClipWithDetails(
+    private fun clip(
+        vararg tags: TagEntity,
+        id: Long = 100,
+        text: String = "text",
+        authorId: String? = null,
+        username: String = "author",
+        createdAt: String = now,
+    ) = ClipWithDetails(
         clip = ClipEntity(
-            id = 100,
-            xPostId = "x-100",
+            id = id,
+            xPostId = "x-$id",
+            authorId = authorId,
             authorName = "author",
-            authorUsername = "author",
-            text = "text",
-            postUrl = "https://x.com/author/status/x-100",
-            xCreatedAt = now,
+            authorUsername = username,
+            text = text,
+            postUrl = "https://x.com/$username/status/x-$id",
+            xCreatedAt = createdAt,
             savedAt = now,
             syncedAt = now,
         ),

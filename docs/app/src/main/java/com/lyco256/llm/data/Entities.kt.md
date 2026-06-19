@@ -18,7 +18,7 @@ Roomのテーブル構造と、Repository/UI向けの合成モデルを定義し
 - `SyncStateEntity`: 月間取得数、予算・警告・停止ライン、15分rate limit、最終同期
 - `ClipWithDetails`, `TagWithCount`: UI表示用の合成モデル
 - `TagHierarchy`, `TagTreeNode`: グループとタグの混在階層、子孫タグ、重複を除いたグループ件数
-- `TagFilterState`, `TagNodeRef`: 「含まれる／必須」条件とタグ／グループ識別子
+- `TagFilterState`, `TagNodeRef`: 「含む／必須／排除」条件とタグ／グループ識別子。グループは含む・排除に使い、必須は実タグだけで使います。
 
 ## 関連ファイル
 

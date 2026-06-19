@@ -11,9 +11,11 @@
 ## 主要な定義、設定、処理
 
 - `EnhancedClipListScreen`: 未分類投稿のカード一覧と、分類確定までの一時タグ選択、カード右下の分類ボタンを扱います。
-- `EnhancedClassifiedScreen`: 検索欄、絞り込みサマリー、全画面Dialogの絞り込みパネル、分類済み投稿の再割り当てを扱います。
+- `EnhancedClassifiedScreen`: 検索欄、絞り込みサマリー、全画面Dialogの検索/絞り込みパネル、投稿の再割り当てを扱います。タグのみOFFでは未分類投稿も表示対象に含めます。
 - `EnhancedTagListScreen`: タグ/グループの追加、名称変更、移動、削除、別タグへの一括追加、ドラッグ&ドロップ移動を扱います。
 - `EnhancedTweetCard`: 投稿本文、画像、概要、タグ選択をまとめます。
+- `SearchFilterDialog`: タグのみトグル、リテラル/正規表現、検索対象、投稿日範囲、ユーザー選択入口、タグ条件をまとめて編集します。
+- `AuthorFilterDialog`: 保存済み投稿者から生成したユーザー一覧を検索し、複数ユーザーOR条件を選択します。
 - `withoutTrailingMediaUrl`: UI表示時だけ、メディア付き投稿の本文末尾に付く `https://t.co/...` を取り除きます。DB保存値、検索対象、本文途中のURLは変更しません。
 - `PreserveScrollAnchor` / `LazyListScrollbar` / `ScrollToTopButton`: 未分類、分類済み、タグ管理のスクロール位置維持、常に薄い表示専用スクロールバー、白丸黒矢印の一番上へ移動ボタンを扱います。
 - 各画面内ではTopAppBarと重複する画面名見出しを表示しません。
@@ -44,4 +46,4 @@
 
 ## 変更時の確認事項
 
-タグ階層UIを変えるときは、投稿カードの一時状態、分類済み画面の即時保存、タグリストの移動制約、Repositoryのslot移動APIと合わせて確認します。ドラッグ変更では範囲外drag、auto-scroll、placeholder、グループ内drop、drop後の順序維持を確認します。スクロールバーは表示専用で、タグ管理のdrag gestureと競合せず、スクロール中も強調表示されないことを確認します。
+タグ階層UIを変えるときは、投稿カードの一時状態、分類済み画面の即時保存、検索条件の一致件数、タグリストの移動制約、Repositoryのslot移動APIと合わせて確認します。ドラッグ変更では範囲外drag、auto-scroll、placeholder、グループ内drop、drop後の順序維持を確認します。スクロールバーは表示専用で、タグ管理のdrag gestureと競合せず、スクロール中も強調表示されないことを確認します。
