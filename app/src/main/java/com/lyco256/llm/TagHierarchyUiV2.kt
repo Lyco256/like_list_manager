@@ -10,10 +10,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -35,11 +37,13 @@ import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
@@ -242,15 +246,7 @@ fun EnhancedClassifiedScreen(
     uiState: MainUiState,
     listState: LazyListState,
     modifier: Modifier = Modifier,
-    onQueryChange: (String) -> Unit,
-    onSearchModeChange: (SearchMode) -> Unit,
-    onSearchTargetToggle: (SearchTarget) -> Unit,
-    onDateRangeChange: (LocalDate?, LocalDate?) -> Unit,
-    onAuthorToggle: (TweetAuthorKey) -> Unit,
-    onClearAuthorFilters: () -> Unit,
-    onTaggedOnlyChange: (Boolean) -> Unit,
-    onTagFilterChange: (TagNodeRef) -> Unit,
-    onClearTagFilters: () -> Unit,
+    onApplyFilters: (TweetFilterState) -> Unit,
     onClearAllFilters: () -> Unit,
     onTagsChange: (ClipEntity, Set<Long>) -> Unit,
     onSummaryChange: (ClipEntity, String) -> Unit,
@@ -258,28 +254,15 @@ fun EnhancedClassifiedScreen(
     onAuthorClick: (ClipEntity) -> Unit,
 ) {
     var filterDialogOpen by remember { mutableStateOf(false) }
-    var authorDialogOpen by remember { mutableStateOf(false) }
+    var clearConfirmationOpen by remember { mutableStateOf(false) }
     val itemKeys = remember(uiState.classified) { uiState.classified.map { it.clip.id } }
     PreserveScrollAnchor(listState, "classified", itemKeys)
     Column(modifier.fillMaxSize().padding(12.dp)) {
-        OutlinedTextField(
-            value = uiState.filters.query,
-            onValueChange = onQueryChange,
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            isError = uiState.filters.regexError != null,
-            label = { Text("検索") },
-            supportingText = {
-                val error = uiState.filters.regexError
-                Text(error ?: "本文/概要/表示名/@ユーザー名")
-            },
-        )
-        Spacer(Modifier.height(8.dp))
         TagFilterSummaryRow(
             uiState = uiState,
             hierarchy = uiState.tagHierarchy,
             onOpen = { filterDialogOpen = true },
-            onClear = onClearAllFilters,
+            onClear = { clearConfirmationOpen = true },
         )
         Spacer(Modifier.height(10.dp))
         if (uiState.classified.isEmpty()) {
@@ -312,26 +295,24 @@ fun EnhancedClassifiedScreen(
         SearchFilterDialog(
             uiState = uiState,
             hierarchy = uiState.tagHierarchy,
-            filters = uiState.filters,
-            onQueryChange = onQueryChange,
-            onSearchModeChange = onSearchModeChange,
-            onSearchTargetToggle = onSearchTargetToggle,
-            onDateRangeChange = onDateRangeChange,
-            onOpenAuthorDialog = { authorDialogOpen = true },
-            onTaggedOnlyChange = onTaggedOnlyChange,
-            onCycle = onTagFilterChange,
-            onClear = onClearTagFilters,
-            onClearAll = onClearAllFilters,
+            initialFilters = uiState.filters,
+            onApply = onApplyFilters,
             onDismiss = { filterDialogOpen = false },
         )
     }
-    if (authorDialogOpen) {
-        AuthorFilterDialog(
-            authors = uiState.authorOptions,
-            selectedAuthors = uiState.filters.selectedAuthors,
-            onToggle = onAuthorToggle,
-            onClear = onClearAuthorFilters,
-            onDismiss = { authorDialogOpen = false },
+    if (clearConfirmationOpen) {
+        AlertDialog(
+            onDismissRequest = { clearConfirmationOpen = false },
+            title = { Text("すべての条件をクリアしますか？") },
+            confirmButton = {
+                Button(onClick = {
+                    clearConfirmationOpen = false
+                    onClearAllFilters()
+                }) { Text("クリア") }
+            },
+            dismissButton = {
+                TextButton(onClick = { clearConfirmationOpen = false }) { Text("キャンセル") }
+            },
         )
     }
 }
@@ -778,65 +759,90 @@ private fun TagFilterSummaryRow(
     onClear: () -> Unit,
 ) {
     val filters = uiState.filters
-    val activeTagFilters = filters.tagFilters.entries.filter { it.value != TagFilterState.NONE }
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        item {
-            FilterChip(
-                selected = filters.hasActiveFilters,
-                onClick = onOpen,
-                label = { Text(if (filters.hasActiveFilters) "絞り込み中: 一致 ${uiState.classified.size}件" else "一致 ${uiState.classified.size}件") },
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(
+            Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(4.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "一致件数:${uiState.classified.size}件",
+                maxLines = 1,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            Text(
+                filterConditionSummary(filters, hierarchy, uiState.authorOptions),
+                maxLines = 1,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        item {
-            FilterChip(
-                selected = filters.taggedOnly,
-                onClick = onOpen,
-                label = { Text(if (filters.taggedOnly) "タグのみ" else "全ツイート") },
+        FilledTonalButton(
+            onClick = onOpen,
+            modifier = Modifier.width(36.dp).height(32.dp),
+            contentPadding = PaddingValues(0.dp),
+        ) {
+            Icon(
+                Icons.Filled.FilterList,
+                contentDescription = "絞り込み",
+                modifier = Modifier.size(18.dp),
             )
         }
-        if (filters.selectedAuthors.isNotEmpty()) {
-            item {
-                FilterChip(
-                    selected = true,
-                    onClick = onOpen,
-                    label = { Text("ユーザー ${filters.selectedAuthors.size}件") },
-                )
-            }
-        }
-        if (filters.startDate != null || filters.endDate != null) {
-            item {
-                FilterChip(
-                    selected = true,
-                    onClick = onOpen,
-                    label = { Text("${filters.startDate ?: "..."} - ${filters.endDate ?: "..."}") },
-                )
-            }
-        }
-        items(activeTagFilters, key = { it.key.saveableKey() }) { (ref, state) ->
-            val node = hierarchy.nodeFor(ref)
-            FilterChip(
-                selected = true,
-                onClick = onOpen,
-                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = tagFilterColor(state)),
-                label = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("${state.shortLabel()}${node?.name ?: "不明"}")
-                    }
-                },
-            )
-        }
-        item {
-            FilledTonalButton(onClick = onOpen) {
-                Text("絞り込み")
-            }
-        }
-        if (filters.hasActiveFilters) {
-            item {
-                TextButton(onClick = onClear) { Text("クリア") }
-            }
+        TextButton(
+            onClick = onClear,
+            enabled = filters.hasActiveFilters,
+            modifier = Modifier.width(44.dp).height(32.dp),
+            contentPadding = PaddingValues(0.dp),
+        ) {
+            Text("クリア", style = MaterialTheme.typography.labelMedium, maxLines = 1)
         }
     }
 }
+
+internal fun filterConditionSummary(
+    filters: TweetFilterState,
+    hierarchy: TagHierarchy,
+    authors: List<TweetAuthorOption>,
+): String {
+    val conditions = mutableListOf(if (filters.taggedOnly) "対象:タグ付きのみ" else "対象:全ツイート")
+    if (filters.query.isNotBlank()) {
+        val kind = if (filters.searchMode == SearchMode.Regex) "正規表現" else "文字列"
+        val targets = SearchTarget.entries.filter { it in filters.searchTargets }.joinToString("・") { it.label }
+        conditions += "$kind:\"${filters.query}\"(対象:$targets)"
+    }
+    if (filters.startDate != null || filters.endDate != null) {
+        conditions += "期間:${filters.startDate?.summaryText() ?: "..."}~${filters.endDate?.summaryText() ?: "..."}"
+    }
+    if (filters.selectedAuthors.isNotEmpty()) {
+        val namesByKey = authors.associate { it.key to "@${it.username}" }
+        val names = authors.map { it.key }.filter { it in filters.selectedAuthors }.mapNotNull(namesByKey::get) +
+            filters.selectedAuthors.filterNot { it in namesByKey }.map { "@${it.username}" }
+        conditions += "ユーザー:${names.joinToString(",")}"
+    }
+    val tagParts = listOf(
+        TagFilterState.INCLUDED to "含む",
+        TagFilterState.REQUIRED to "必須",
+        TagFilterState.EXCLUDED to "排除",
+    ).mapNotNull { (state, label) ->
+        val names = filters.tagFilters.filterValues { it == state }.keys
+            .map { hierarchy.nodeFor(it)?.name ?: "不明" }
+        names.takeIf { it.isNotEmpty() }?.let { "$label[${it.joinToString(",")}]" }
+    }
+    if (tagParts.isNotEmpty()) conditions += "タグ:${tagParts.joinToString(",")}"
+    if (conditions.size == 1 && filters.taggedOnly) conditions += "条件なし"
+    return conditions.joinToString("、")
+}
+
+private fun LocalDate.summaryText(): String = "$year/${monthValue}/${dayOfMonth}"
 
 private enum class DateFilterEndpoint { Start, End }
 
@@ -845,58 +851,76 @@ private enum class DateFilterEndpoint { Start, End }
 private fun SearchFilterDialog(
     uiState: MainUiState,
     hierarchy: TagHierarchy,
-    filters: TweetFilterState,
-    onQueryChange: (String) -> Unit,
-    onSearchModeChange: (SearchMode) -> Unit,
-    onSearchTargetToggle: (SearchTarget) -> Unit,
-    onDateRangeChange: (LocalDate?, LocalDate?) -> Unit,
-    onOpenAuthorDialog: () -> Unit,
-    onTaggedOnlyChange: (Boolean) -> Unit,
-    onCycle: (TagNodeRef) -> Unit,
-    onClear: () -> Unit,
-    onClearAll: () -> Unit,
+    initialFilters: TweetFilterState,
+    onApply: (TweetFilterState) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var filters by remember(initialFilters) { mutableStateOf(initialFilters) }
     var dateEndpoint by remember { mutableStateOf<DateFilterEndpoint?>(null) }
+    var authorDialogOpen by remember { mutableStateOf(false) }
+    var discardConfirmationOpen by remember { mutableStateOf(false) }
+    var clearConfirmationOpen by remember { mutableStateOf(false) }
     val path = remember { mutableStateListOf<Long>() }
     val currentParentId = path.lastOrNull()
     val currentGroup = currentParentId?.let { hierarchy.groups.firstOrNull { group -> group.id == it } }
     val children = hierarchy.children(currentParentId)
-    BackHandler(enabled = path.isNotEmpty()) {
-        path.removeAt(path.lastIndex)
+    val matchingCount = remember(uiState.clips, hierarchy, filters) {
+        filterClipsForSearch(uiState.clips, hierarchy, filters).size
     }
+    val hasChanges = filters != initialFilters
+    fun requestDismiss() {
+        if (hasChanges) discardConfirmationOpen = true else onDismiss()
+    }
+    fun toggleTarget(target: SearchTarget) {
+        val current = filters.searchTargets
+        val next = if (target in current && current.size > 1) current - target else current + target
+        filters = filters.copy(searchTargets = next)
+    }
+    fun cycleTag(ref: TagNodeRef) {
+        val current = filters.tagFilters[ref] ?: TagFilterState.NONE
+        val next = when (current) {
+            TagFilterState.NONE -> TagFilterState.INCLUDED
+            TagFilterState.INCLUDED -> if (ref.type == TagNodeType.GROUP) TagFilterState.EXCLUDED else TagFilterState.REQUIRED
+            TagFilterState.REQUIRED -> TagFilterState.EXCLUDED
+            TagFilterState.EXCLUDED -> TagFilterState.NONE
+        }
+        filters = filters.copy(tagFilters = filters.tagFilters.toMutableMap().apply {
+            if (next == TagFilterState.NONE) remove(ref) else put(ref, next)
+        })
+    }
+    BackHandler { requestDismiss() }
     Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+        onDismissRequest = ::requestDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
     ) {
         Surface(Modifier.fillMaxSize(), shape = RoundedCornerShape(0.dp)) {
-            Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.fillMaxSize().padding(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = {
-                        if (path.isEmpty()) onDismiss() else path.removeAt(path.lastIndex)
-                    }) {
-                        Icon(if (path.isEmpty()) Icons.Filled.Close else Icons.Filled.ArrowBack, contentDescription = null)
-                    }
                     Column(Modifier.weight(1f)) {
                         Text("絞り込み", style = MaterialTheme.typography.titleLarge)
-                        Text("一致 ${uiState.classified.size}件", style = MaterialTheme.typography.bodySmall)
+                        Text("一致件数:${matchingCount}件", style = MaterialTheme.typography.bodySmall)
                     }
-                    TextButton(onClick = onClearAll) { Text("全クリア") }
+                    TextButton(onClick = { clearConfirmationOpen = true }) { Text("全クリア") }
                 }
-                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                LazyColumn(
+                    Modifier.weight(1f).padding(top = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
                     item {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Column(Modifier.weight(1f)) {
                                 Text("タグのみ")
                                 Text("OFFで未分類ツイートも対象", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            Switch(checked = filters.taggedOnly, onCheckedChange = onTaggedOnlyChange)
+                            Switch(checked = filters.taggedOnly, onCheckedChange = { filters = filters.copy(taggedOnly = it) })
                         }
                     }
+                    item { Divider() }
                     item {
+                        Text("文字列検索", style = MaterialTheme.typography.titleSmall)
                         OutlinedTextField(
                             value = filters.query,
-                            onValueChange = onQueryChange,
+                            onValueChange = { filters = filters.copy(query = it) },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             isError = filters.regexError != null,
@@ -909,7 +933,7 @@ private fun SearchFilterDialog(
                             SearchMode.entries.forEach { mode ->
                                 FilterChip(
                                     selected = filters.searchMode == mode,
-                                    onClick = { onSearchModeChange(mode) },
+                                    onClick = { filters = filters.copy(searchMode = mode) },
                                     label = { Text(mode.label) },
                                 )
                             }
@@ -918,17 +942,22 @@ private fun SearchFilterDialog(
                     item {
                         Text("検索対象", style = MaterialTheme.typography.titleSmall)
                     }
-                    items(SearchTarget.entries, key = { it.name }) { target ->
-                        Row(
-                            Modifier.fillMaxWidth().clickable { onSearchTargetToggle(target) },
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Checkbox(checked = target in filters.searchTargets, onCheckedChange = { onSearchTargetToggle(target) })
-                            Text(target.label)
+                    items(SearchTarget.entries.chunked(2), key = { row -> row.joinToString { it.name } }) { targets ->
+                        Row(Modifier.fillMaxWidth()) {
+                            targets.forEach { target ->
+                                Row(
+                                    Modifier.weight(1f).clickable { toggleTarget(target) },
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Checkbox(checked = target in filters.searchTargets, onCheckedChange = { toggleTarget(target) })
+                                    Text(target.label)
+                                }
+                            }
                         }
                     }
+                    item { Divider() }
                     item {
-                        Text("投稿日", style = MaterialTheme.typography.titleSmall)
+                        Text("期間", style = MaterialTheme.typography.titleSmall)
                     }
                     item {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -942,12 +971,14 @@ private fun SearchFilterDialog(
                                 onClick = { dateEndpoint = DateFilterEndpoint.End },
                                 label = { Text("終了 ${filters.endDate ?: "未指定"}") },
                             )
-                            TextButton(onClick = { onDateRangeChange(null, null) }) { Text("日付クリア") }
+                            TextButton(onClick = { filters = filters.copy(startDate = null, endDate = null) }) { Text("日付クリア") }
                         }
                     }
+                    item { Divider() }
                     item {
+                        Text("ユーザー", style = MaterialTheme.typography.titleSmall)
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilledTonalButton(onClick = onOpenAuthorDialog) {
+                            FilledTonalButton(onClick = { authorDialogOpen = true }) {
                                 Text(if (filters.selectedAuthors.isEmpty()) "ユーザーを選択" else "ユーザー ${filters.selectedAuthors.size}件")
                             }
                             if (filters.selectedAuthors.isNotEmpty()) {
@@ -955,11 +986,50 @@ private fun SearchFilterDialog(
                             }
                         }
                     }
+                    if (filters.selectedAuthors.isNotEmpty()) {
+                        item {
+                            val selected = uiState.authorOptions.filter { it.key in filters.selectedAuthors }
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(selected, key = { "${it.key.authorId}:${it.key.username}" }) { author ->
+                                    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(8.dp)) {
+                                        Row(
+                                            Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        ) {
+                                            Column {
+                                                Text(author.displayName, fontWeight = FontWeight.SemiBold)
+                                                Text("@${author.username}", style = MaterialTheme.typography.bodySmall)
+                                            }
+                                            Text("${author.count}件", style = MaterialTheme.typography.bodySmall)
+                                            IconButton(
+                                                onClick = { filters = filters.copy(selectedAuthors = filters.selectedAuthors - author.key) },
+                                                modifier = Modifier.size(32.dp),
+                                            ) { Icon(Icons.Filled.Close, contentDescription = "${author.displayName}を削除") }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    item { Divider() }
                     item {
-                        Divider()
-                        Text("タグ条件", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (path.isNotEmpty()) {
+                                IconButton(onClick = { path.removeAt(path.lastIndex) }) {
+                                    Icon(Icons.Filled.ArrowBack, contentDescription = "上のグループへ戻る")
+                                }
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Text("タグ条件", style = MaterialTheme.typography.titleSmall)
+                                Text(currentGroup?.name ?: "ルート", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            TextButton(
+                                onClick = { filters = filters.copy(tagFilters = emptyMap()) },
+                                enabled = filters.tagFilters.isNotEmpty(),
+                            ) { Text("タグ条件クリア") }
+                        }
                         Text("含: 緑 / 必: 青 / 除: オレンジ。グループは含む・排除のみです。", style = MaterialTheme.typography.bodySmall)
-                        Text(currentGroup?.name ?: "ルート", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (children.isEmpty()) {
                         item { HierarchyEmptyState("この階層には条件を設定できる項目がありません") }
@@ -978,7 +1048,7 @@ private fun SearchFilterDialog(
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                                         FilterChip(
                                             selected = selected,
-                                            onClick = { onCycle(ref) },
+                                            onClick = { cycleTag(ref) },
                                             modifier = Modifier.weight(1f),
                                             colors = FilterChipDefaults.filterChipColors(selectedContainerColor = tagFilterColor(state)),
                                             label = {
@@ -1023,9 +1093,19 @@ private fun SearchFilterDialog(
                         }
                     }
                 }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(onClick = onClear) { Text("タグ条件クリア") }
-                    Button(onClick = onDismiss) { Text("閉じる") }
+                Divider()
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    TextButton(onClick = ::requestDismiss, modifier = Modifier.weight(1f)) { Text("キャンセル") }
+                    Button(
+                        onClick = {
+                            onApply(filters)
+                            onDismiss()
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("適用") }
                 }
             }
         }
@@ -1039,9 +1119,9 @@ private fun SearchFilterDialog(
                 TextButton(onClick = {
                     val picked = pickerState.selectedDateMillis?.toLocalDateFromPicker()
                     if (endpoint == DateFilterEndpoint.Start) {
-                        onDateRangeChange(picked, filters.endDate)
+                        filters = filters.copy(startDate = picked)
                     } else {
-                        onDateRangeChange(filters.startDate, picked)
+                        filters = filters.copy(endDate = picked)
                     }
                     dateEndpoint = null
                 }) { Text("適用") }
@@ -1049,9 +1129,9 @@ private fun SearchFilterDialog(
             dismissButton = {
                 TextButton(onClick = {
                     if (endpoint == DateFilterEndpoint.Start) {
-                        onDateRangeChange(null, filters.endDate)
+                        filters = filters.copy(startDate = null)
                     } else {
-                        onDateRangeChange(filters.startDate, null)
+                        filters = filters.copy(endDate = null)
                     }
                     dateEndpoint = null
                 }) { Text("解除") }
@@ -1059,6 +1139,49 @@ private fun SearchFilterDialog(
         ) {
             DatePicker(state = pickerState)
         }
+    }
+    if (authorDialogOpen) {
+        AuthorFilterDialog(
+            authors = uiState.authorOptions,
+            selectedAuthors = filters.selectedAuthors,
+            onToggle = { key ->
+                filters = filters.copy(
+                    selectedAuthors = if (key in filters.selectedAuthors) filters.selectedAuthors - key else filters.selectedAuthors + key,
+                )
+            },
+            onClear = { filters = filters.copy(selectedAuthors = emptySet()) },
+            onDismiss = { authorDialogOpen = false },
+        )
+    }
+    if (discardConfirmationOpen) {
+        AlertDialog(
+            onDismissRequest = { discardConfirmationOpen = false },
+            title = { Text("変更を破棄しますか？") },
+            confirmButton = {
+                Button(onClick = {
+                    discardConfirmationOpen = false
+                    onDismiss()
+                }) { Text("破棄") }
+            },
+            dismissButton = {
+                TextButton(onClick = { discardConfirmationOpen = false }) { Text("戻る") }
+            },
+        )
+    }
+    if (clearConfirmationOpen) {
+        AlertDialog(
+            onDismissRequest = { clearConfirmationOpen = false },
+            title = { Text("すべての条件をクリアしますか？") },
+            confirmButton = {
+                Button(onClick = {
+                    filters = TweetFilterState()
+                    clearConfirmationOpen = false
+                }) { Text("クリア") }
+            },
+            dismissButton = {
+                TextButton(onClick = { clearConfirmationOpen = false }) { Text("キャンセル") }
+            },
+        )
     }
 }
 

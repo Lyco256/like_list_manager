@@ -175,6 +175,7 @@ Entityの列変更はDB schema変更です。version、migration、既存実機�
 - 作業前に `git status --short` と `git diff` を確認します。
 - ユーザーの既存変更を巻き戻しません。
 - 大きなリファクタは依頼なしに行いません。
+- プロジェクト内に目的に合うスクリプトや手順書がある場合は、個別コマンドを組み立てる前にそちらを優先して使います。使わなかった場合は、最終報告で理由を明記します。
 - ソース変更と対応する `docs/...md` の更新を同じコミットに含めます。
 - 全体構成や実装状況が変わった場合は `SOURCE_FILES.md` も更新します。
 - 目標や優先順位が変わった場合は `GOALS.md` も更新します。
@@ -198,9 +199,9 @@ SC-56Cなど、ユーザーが日常利用している実機には復元でき�
 
 ## 検証
 
-Android Studioやエミュレーターは低スペックPCへの負荷が高いため、通常はコマンドラインの単発Gradle実行を優先します。
+Android Studioやエミュレーターは低スペックPCへの負荷が高いため、通常はコマンドラインの単発実行を優先します。
 
-通常のビルド、単体テスト、lint、必要に応じた実機への安全な上書き再インストールは `SAFE_DEBUG_ROUTINE.md` と `scripts/run-safe-debug-check.ps1` を優先して使います。
+通常のビルド、単体テスト、lint、必要に応じた実機への安全な上書き再インストールでは、まず `SAFE_DEBUG_ROUTINE.md` と `scripts/run-safe-debug-check.ps1` を確認し、適用可能ならそれらを使います。個別に `gradlew` や `adb` を実行するのは、スクリプトでカバーできない確認が必要な場合か、スクリプト利用が不適切な理由を説明できる場合に限ります。
 
 ```powershell
 $env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"

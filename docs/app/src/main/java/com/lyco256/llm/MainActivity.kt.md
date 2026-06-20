@@ -19,6 +19,7 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 - `MainViewModel`: RepositoryのFlowをUI stateへ合成し、ユーザー操作をRepositoryへ渡す
 - `MainUiState`: 未分類、全ツイート検索、検索条件、投稿者一覧、タグ／グループの含むOR・必須AND・排除条件を派生計算
 - `TweetFilterState`: 分類済み画面の検索文字列、検索モード、検索対象、投稿日範囲、ユーザー条件、タグ条件、タグのみトグルをまとめます。
+- `MainViewModel.applyFilters`: 絞り込みDialogで確定した `TweetFilterState` 全体を一括反映します。Dialog内の編集中はViewModelの確定条件を変更しません。
 - `filterClipsForSearch`: 分類済み画面の共通フィルター関数です。タグのみ、日付、ユーザー、タグ、文字列検索を適用し、正規表現が不正な場合は0件扱いにします。
 - `screenTitle`: 現在のタブやDialog状態からTopAppBar表示名を生成し、未分類では総未分類件数を表示します。
 - `EnhancedClipListScreen` / `EnhancedClassifiedScreen` / `EnhancedTagListScreen` を呼び出して、未分類、全ツイート検索、タグ管理の画面へ接続する

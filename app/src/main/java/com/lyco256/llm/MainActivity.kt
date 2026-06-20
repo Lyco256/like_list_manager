@@ -308,6 +308,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearAllFilters() { filters.value = TweetFilterState() }
 
+    fun applyFilters(value: TweetFilterState) { filters.value = value }
+
     fun createTag(name: String, parentGroupId: Long?, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.createTag(name, parentGroupId) }
     fun createGroup(name: String, parentGroupId: Long?, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.createGroup(name, parentGroupId) }
     fun renameTag(tag: TagEntity, name: String, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.renameTag(tag, name) }
@@ -551,15 +553,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                 uiState = uiState,
                 listState = classifiedListState,
                 modifier = Modifier.padding(padding),
-                onQueryChange = viewModel::setQuery,
-                onSearchModeChange = viewModel::setSearchMode,
-                onSearchTargetToggle = viewModel::toggleSearchTarget,
-                onDateRangeChange = viewModel::setDateRange,
-                onAuthorToggle = viewModel::toggleAuthorFilter,
-                onClearAuthorFilters = viewModel::clearAuthorFilters,
-                onTaggedOnlyChange = viewModel::setTaggedOnly,
-                onTagFilterChange = viewModel::cycleTagFilter,
-                onClearTagFilters = viewModel::clearTagFilters,
+                onApplyFilters = viewModel::applyFilters,
                 onClearAllFilters = viewModel::clearAllFilters,
                 onTagsChange = viewModel::setClipTags,
                 onSummaryChange = viewModel::updateSummary,

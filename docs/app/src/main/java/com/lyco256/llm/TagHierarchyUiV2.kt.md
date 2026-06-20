@@ -11,16 +11,16 @@
 ## 主要な定義、設定、処理
 
 - `EnhancedClipListScreen`: 未分類投稿のカード一覧と、分類確定までの一時タグ選択、カード右下の分類ボタンを扱います。
-- `EnhancedClassifiedScreen`: 検索欄、絞り込みサマリー、全画面Dialogの検索/絞り込みパネル、投稿の再割り当てを扱います。タグのみOFFでは未分類投稿も表示対象に含めます。
+- `EnhancedClassifiedScreen`: 一致件数と条件文、右側固定の絞り込み/クリア操作、全画面Dialogの検索/絞り込みパネル、投稿の再割り当てを扱います。タグのみOFFでは未分類投稿も表示対象に含めます。
 - `EnhancedTagListScreen`: タグ/グループの追加、名称変更、移動、削除、別タグへの一括追加、ドラッグ&ドロップ移動を扱います。
 - `EnhancedTweetCard`: 投稿本文、画像、概要、タグ選択をまとめます。
-- `SearchFilterDialog`: タグのみトグル、リテラル/正規表現、検索対象、投稿日範囲、ユーザー選択入口、タグ条件をまとめて編集します。
+- `SearchFilterDialog`: タグのみ、文字列検索、期間、ユーザー、タグ条件を区分し、確定条件と分離した下書きとリアルタイム一致件数を扱います。画面下部の適用/キャンセルと、変更破棄・全条件クリアの確認Dialogを持ちます。
 - `AuthorFilterDialog`: 保存済み投稿者から生成したユーザー一覧を検索し、複数ユーザーOR条件を選択します。
 - `withoutTrailingMediaUrl`: UI表示時だけ、メディア付き投稿の本文末尾に付く `https://t.co/...` を取り除きます。DB保存値、検索対象、本文途中のURLは変更しません。
 - `PreserveScrollAnchor` / `LazyListScrollbar` / `ScrollToTopButton`: 未分類、分類済み、タグ管理のスクロール位置維持、常に薄い表示専用スクロールバー、白丸黒矢印の一番上へ移動ボタンを扱います。
 - 各画面内ではTopAppBarと重複する画面名見出しを表示しません。
 - `TagHierarchySelector` / `TagSelectionDialog`: 投稿カード内のタグ選択を、コンパクトな最上位チップと半画面Dialogの単一階層ナビゲーションで扱います。
-- `TagFilterSummaryRow` / `TagFilterDialog`: 分類済み画面の絞り込み条件を、横スクロール要素と全画面Dialogで扱います。
+- `TagFilterSummaryRow` / `filterConditionSummary`: 分類済み画面の一致件数と現在条件を、小さい文字と灰色背景の省スペースな横スクロール領域に表示します。右側には余白を抑えたフィルターアイコンとクリアボタンを固定します。
 - `TagManagementRow`: タグリストの行表示、グループの展開、操作メニュー、ドラッグ開始を扱います。
 - `TagListItem` / `DragState`: ドラッグ中の表示リストを通常行とplaceholderへ分け、掴んだnodeと表示中子孫をLazyColumn本体から除外します。placeholderのindexは「drag中nodeを除外した移動先兄弟リスト上の挿入位置」です。
 - `TagManagementRow` のdrag placeholder表示 / `TagDragPreview`: 挿入候補位置に同じ高さのplaceholderを表示し、overlayは縦方向だけ指に追従します。overlayの横位置と横幅はドラッグ開始時の行位置に固定します。

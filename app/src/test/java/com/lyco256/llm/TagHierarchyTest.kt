@@ -165,6 +165,51 @@ class TagHierarchyTest {
         assertEquals(emptyList<ClipWithDetails>(), filterClipsForSearch(listOf(clip), hierarchy, filters))
     }
 
+    @Test
+    fun filterSummaryShowsDefaultScopeAndNoAdditionalConditions() {
+        assertEquals(
+            "対象:タグ付きのみ、条件なし",
+            filterConditionSummary(TweetFilterState(), hierarchy(), emptyList()),
+        )
+        assertEquals(
+            "対象:全ツイート",
+            filterConditionSummary(TweetFilterState(taggedOnly = false), hierarchy(), emptyList()),
+        )
+    }
+
+    @Test
+    fun filterSummaryFormatsCombinedConditionsAsSentence() {
+        val author = TweetAuthorOption(TweetAuthorKey("a1", "alice"), "Alice", "alice", 12)
+        val filters = TweetFilterState(
+            query = "猫",
+            searchTargets = setOf(SearchTarget.Text, SearchTarget.Summary),
+            startDate = java.time.LocalDate.of(2026, 6, 1),
+            endDate = java.time.LocalDate.of(2026, 6, 20),
+            selectedAuthors = setOf(author.key),
+            tagFilters = mapOf(
+                TagNodeRef(TagNodeType.TAG, kotlin.id) to TagFilterState.INCLUDED,
+                TagNodeRef(TagNodeType.TAG, compose.id) to TagFilterState.REQUIRED,
+                TagNodeRef(TagNodeType.TAG, design.id) to TagFilterState.EXCLUDED,
+            ),
+        )
+
+        assertEquals(
+            "対象:タグ付きのみ、文字列:\"猫\"(対象:本文・概要)、期間:2026/6/1~2026/6/20、ユーザー:@alice、タグ:含む[Kotlin],必須[Compose],排除[Design]",
+            filterConditionSummary(filters, hierarchy(), listOf(author)),
+        )
+    }
+
+    @Test
+    fun reversedDateRangeReturnsEmptyList() {
+        val clip = clip(kotlin, createdAt = "2026-06-15T00:00:00Z")
+        val filters = TweetFilterState(
+            startDate = java.time.LocalDate.of(2026, 6, 20),
+            endDate = java.time.LocalDate.of(2026, 6, 1),
+        )
+
+        assertEquals(emptyList<ClipWithDetails>(), filterClipsForSearch(listOf(clip), hierarchy(), filters))
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun siblingNameCannotDuplicateAcrossGroupAndTag() {
         requireSiblingNameAvailable(
