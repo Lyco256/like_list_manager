@@ -6,6 +6,7 @@ import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -51,6 +52,45 @@ class LikeListDatabaseMigrationTest {
                     while (cursor.moveToNext()) add(cursor.getString(cursor.getColumnIndexOrThrow("table")))
                 }
                 assertEquals(setOf("clips", "tags"), referencedTables)
+            }
+        }
+        helper.close()
+        context.deleteDatabase(name)
+    }
+
+    @Test
+    fun migration2To3KeepsClipsAndAddsNullableLikeCountColumns() {
+        val name = "migration-2-3-test.db"
+        context.deleteDatabase(name)
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name(name)
+                .callback(object : SupportSQLiteOpenHelper.Callback(2) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL(
+                            "CREATE TABLE clips (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, xPostId TEXT NOT NULL, authorId TEXT, authorName TEXT NOT NULL, authorUsername TEXT NOT NULL, text TEXT NOT NULL, postUrl TEXT NOT NULL, xCreatedAt TEXT NOT NULL, savedAt TEXT NOT NULL, syncedAt TEXT NOT NULL, summary TEXT NOT NULL, isDeleted INTEGER NOT NULL)",
+                        )
+                    }
+
+                    override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+                })
+                .build(),
+        )
+        helper.writableDatabase.apply {
+            execSQL("INSERT INTO clips (id, xPostId, authorId, authorName, authorUsername, text, postUrl, xCreatedAt, savedAt, syncedAt, summary, isDeleted) VALUES (5, '123', NULL, 'name', 'user', 'text', 'url', '2026-06-01T00:00:00Z', 'now', 'now', '', 0)")
+            LikeListDatabase.MIGRATION_2_3.migrate(this)
+            query("SELECT xPostId, likeCount, likeCountFetchedAt, likeCountFetchFailedAt, likeCountFetchError FROM clips WHERE id = 5").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("123", cursor.getString(0))
+                assertTrue(cursor.isNull(1))
+                assertTrue(cursor.isNull(2))
+                assertTrue(cursor.isNull(3))
+                assertTrue(cursor.isNull(4))
+            }
+            execSQL("UPDATE clips SET likeCount = 42, likeCountFetchedAt = '2026-06-20T00:00:00Z' WHERE id = 5")
+            query("SELECT likeCount FROM clips WHERE id = 5").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(42L, cursor.getLong(0))
             }
         }
         helper.close()

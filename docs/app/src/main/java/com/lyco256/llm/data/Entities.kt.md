@@ -30,3 +30,8 @@ Roomのテーブル構造と、Repository/UI向けの合成モデルを定義し
 ## 変更時の確認
 
 Entityの列変更はDB schema変更です。`LikeListDatabase` のversionとmigration、DAO query、Repository変換、既存端末データの移行を必ず一緒に設計します。
+
+## いいね数と件数（2026-06-20）
+
+- `ClipEntity` はいいね数、取得日時、恒久失敗日時、失敗理由をnullableで保持します。
+- `TagHierarchy.groupCounts` は投稿数ではなく、各グループ直下のタグ数と子グループ数の合計です。子孫要素は含みません。

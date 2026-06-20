@@ -22,6 +22,10 @@ data class ClipEntity(
     val syncedAt: String,
     val summary: String = "",
     val isDeleted: Boolean = false,
+    val likeCount: Long? = null,
+    val likeCountFetchedAt: String? = null,
+    val likeCountFetchFailedAt: String? = null,
+    val likeCountFetchError: String? = null,
 )
 
 @Entity(
@@ -190,12 +194,10 @@ data class TagHierarchy(
     }
 
     val groupCounts: Map<Long, Int> = groups.associate { group ->
-        val descendantIds = descendantTagIdsByGroup[group.id].orEmpty()
-        group.id to clipTags.asSequence()
-            .filter { it.tagId in descendantIds }
-            .map { it.clipId }
-            .distinct()
-            .count()
+        group.id to (
+            tags.count { it.tag.parentGroupId == group.id } +
+                groups.count { it.parentGroupId == group.id }
+            )
     }
 
     fun children(parentGroupId: Long?): List<TagTreeNode> = nodesByParent[parentGroupId].orEmpty().map { node ->

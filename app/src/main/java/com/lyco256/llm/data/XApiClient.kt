@@ -25,6 +25,19 @@ data class XPost(
     val authorName: String,
     val authorUsername: String,
     val media: List<XMedia>,
+    val likeCount: Long?,
+)
+
+data class XPostMetric(val id: String, val likeCount: Long)
+
+data class XPostMetricError(val postId: String, val title: String, val detail: String)
+
+data class XPostMetricsResult(
+    val posts: List<XPostMetric>,
+    val errors: List<XPostMetricError>,
+    val rateLimitLimit: Int?,
+    val rateLimitRemaining: Int?,
+    val rateLimitReset: Long?,
 )
 
 data class XMedia(
@@ -57,7 +70,7 @@ class XApiClient {
         val baseUrl = "https://api.x.com/2/users/$xUserId/liked_tweets"
         val query = linkedMapOf(
             "max_results" to maxResults.coerceIn(5, 100).toString(),
-            "tweet.fields" to "id,text,created_at,author_id,attachments",
+            "tweet.fields" to "id,text,created_at,author_id,attachments,public_metrics",
             "expansions" to "attachments.media_keys,author_id",
             "media.fields" to "media_key,type,url,preview_image_url,width,height",
             "user.fields" to "id,name,username",
@@ -81,6 +94,44 @@ class XApiClient {
         return XApiResult(
             posts = parseLikedPosts(body),
             nextToken = JSONObject(body).optJSONObject("meta")?.optString("next_token")?.ifBlank { null },
+            rateLimitLimit = connection.getHeaderField("x-rate-limit-limit")?.toIntOrNull(),
+            rateLimitRemaining = connection.getHeaderField("x-rate-limit-remaining")?.toIntOrNull(),
+            rateLimitReset = connection.getHeaderField("x-rate-limit-reset")?.toLongOrNull(),
+        )
+    }
+
+    fun fetchPostMetrics(accessToken: String, postIds: List<String>): XPostMetricsResult {
+        require(accessToken.isNotBlank()) { "Access Token is required." }
+        require(postIds.isNotEmpty() && postIds.size <= 100) { "Post IDs must contain 1 to 100 items." }
+        val query = linkedMapOf(
+            "ids" to postIds.joinToString(","),
+            "tweet.fields" to "id,public_metrics",
+        )
+        val connection = (URL("https://api.x.com/2/tweets?${query.toQueryString()}").openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 20_000
+            readTimeout = 20_000
+            setRequestProperty("Authorization", "Bearer $accessToken")
+        }
+        val body = connection.readBodyOrThrow()
+        val root = JSONObject(body)
+        val data = root.optJSONArray("data")
+        val posts = (0 until (data?.length() ?: 0)).mapNotNull { index ->
+            val post = data!!.getJSONObject(index)
+            val metrics = post.optJSONObject("public_metrics") ?: return@mapNotNull null
+            XPostMetric(post.getString("id"), metrics.optLong("like_count"))
+        }
+        val errorItems = root.optJSONArray("errors")
+        val errors = (0 until (errorItems?.length() ?: 0)).mapNotNull { index ->
+            val error = errorItems!!.getJSONObject(index)
+            val id = error.optString("resource_id").ifBlank { error.optString("value") }
+            id.takeIf(String::isNotBlank)?.let {
+                XPostMetricError(it, error.optString("title"), error.optString("detail"))
+            }
+        }
+        return XPostMetricsResult(
+            posts = posts,
+            errors = errors,
             rateLimitLimit = connection.getHeaderField("x-rate-limit-limit")?.toIntOrNull(),
             rateLimitRemaining = connection.getHeaderField("x-rate-limit-remaining")?.toIntOrNull(),
             rateLimitReset = connection.getHeaderField("x-rate-limit-reset")?.toLongOrNull(),
@@ -148,6 +199,7 @@ class XApiClient {
                 authorName = user?.optString("name").orEmpty(),
                 authorUsername = user?.optString("username").orEmpty(),
                 media = tweetMedia,
+                likeCount = tweet.optJSONObject("public_metrics")?.optLong("like_count"),
             )
         }
     }

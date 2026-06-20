@@ -5,13 +5,13 @@
 ## 使うスクリプト
 
 ```powershell
-.\scripts\run-safe-debug-check.ps1
+.\scripts\run-safe-debug-check.cmd
 ```
 
 実機へ上書き再インストールまで行う場合:
 
 ```powershell
-.\scripts\run-safe-debug-check.ps1 -InstallToDevice
+.\scripts\run-safe-debug-check.cmd -InstallToDevice
 ```
 
 ## 実行条件
@@ -52,17 +52,19 @@
 ローカル確認だけ:
 
 ```powershell
-.\scripts\run-safe-debug-check.ps1
+.\scripts\run-safe-debug-check.cmd
 ```
 
 ビルド、テスト、lint、SC-56Cなど接続中の1台へ安全な上書き再インストール:
 
 ```powershell
-.\scripts\run-safe-debug-check.ps1 -InstallToDevice
+.\scripts\run-safe-debug-check.cmd -InstallToDevice
 ```
 
 APKやpackageを明示する場合:
 
 ```powershell
-.\scripts\run-safe-debug-check.ps1 -InstallToDevice -PackageName com.lyco256.llm -ApkPath app\build\outputs\apk\debug\app-debug.apk
+.\scripts\run-safe-debug-check.cmd -InstallToDevice -PackageName com.lyco256.llm -ApkPath app\build\outputs\apk\debug\app-debug.apk
 ```
+
+`.cmd` はPowerShellの署名ポリシーに左右されない入口です。内部で `-ExecutionPolicy Bypass` を今回のプロセスだけに指定し、既存の `.ps1` を実行します。

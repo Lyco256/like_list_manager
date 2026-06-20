@@ -16,6 +16,9 @@ interface ClipDao {
     @Query("SELECT * FROM clips WHERE isDeleted = 0 ORDER BY savedAt DESC")
     fun observeActiveClips(): Flow<List<ClipEntity>>
 
+    @Query("SELECT * FROM clips WHERE isDeleted = 0 ORDER BY savedAt DESC")
+    suspend fun getActiveClips(): List<ClipEntity>
+
     @Query("SELECT * FROM assets WHERE clipId IN (:clipIds) ORDER BY id")
     suspend fun assetsForClipIds(clipIds: List<Long>): List<AssetEntity>
 
@@ -51,6 +54,12 @@ interface ClipDao {
 
     @Update
     suspend fun updateClip(clip: ClipEntity)
+
+    @Query("UPDATE clips SET likeCount = :likeCount, likeCountFetchedAt = :fetchedAt, likeCountFetchFailedAt = NULL, likeCountFetchError = NULL WHERE id = :clipId")
+    suspend fun updateLikeCount(clipId: Long, likeCount: Long, fetchedAt: String)
+
+    @Query("UPDATE clips SET likeCountFetchFailedAt = :failedAt, likeCountFetchError = :message WHERE id = :clipId")
+    suspend fun recordLikeCountFailure(clipId: Long, failedAt: String, message: String)
 
     @Update
     suspend fun updateAsset(asset: AssetEntity)

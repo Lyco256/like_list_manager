@@ -201,15 +201,13 @@ SC-56Cなど、ユーザーが日常利用している実機には復元でき�
 
 Android Studioやエミュレーターは低スペックPCへの負荷が高いため、通常はコマンドラインの単発実行を優先します。
 
-通常のビルド、単体テスト、lint、必要に応じた実機への安全な上書き再インストールでは、まず `SAFE_DEBUG_ROUTINE.md` と `scripts/run-safe-debug-check.ps1` を確認し、適用可能ならそれらを使います。個別に `gradlew` や `adb` を実行するのは、スクリプトでカバーできない確認が必要な場合か、スクリプト利用が不適切な理由を説明できる場合に限ります。
+通常のビルド、単体テスト、lint、必要に応じた実機への安全な上書き再インストールでは、まず `SAFE_DEBUG_ROUTINE.md` を確認し、Windowsでは必ず `scripts/run-safe-debug-check.cmd` から起動します。`.ps1`の直接実行は端末のPowerShell実行ポリシーにより署名エラーになるため、通常手順では使いません。`.cmd`は今回のプロセスだけ `ExecutionPolicy Bypass` を指定して同じ`.ps1`を実行します。個別に `gradlew` や `adb` を実行するのは、スクリプトでカバーできない確認が必要な場合か、スクリプト利用が不適切な理由を説明できる場合に限ります。
 
 ```powershell
-$env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
-$env:PATH="$env:JAVA_HOME\bin;$env:PATH"
-.\gradlew.bat assembleDebug
-.\gradlew.bat testDebugUnitTest
-.\gradlew.bat lintDebug
+.\scripts\run-safe-debug-check.cmd
 ```
+
+実機へ安全に上書きする場合は `.\scripts\run-safe-debug-check.cmd -InstallToDevice` を使います。
 
 注意:
 
