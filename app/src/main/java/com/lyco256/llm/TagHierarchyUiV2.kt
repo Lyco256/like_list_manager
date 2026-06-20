@@ -971,7 +971,11 @@ private fun SearchFilterDialog(
                                 onClick = { dateEndpoint = DateFilterEndpoint.End },
                                 label = { Text("終了 ${filters.endDate ?: "未指定"}") },
                             )
-                            TextButton(onClick = { filters = filters.copy(startDate = null, endDate = null) }) { Text("日付クリア") }
+                        }
+                    }
+                    item {
+                        TextButton(onClick = { filters = filters.copy(startDate = null, endDate = null) }) {
+                            Text("日付クリア")
                         }
                     }
                     item { Divider() }
@@ -979,7 +983,7 @@ private fun SearchFilterDialog(
                         Text("ユーザー", style = MaterialTheme.typography.titleSmall)
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilledTonalButton(onClick = { authorDialogOpen = true }) {
-                                Text(if (filters.selectedAuthors.isEmpty()) "ユーザーを選択" else "ユーザー ${filters.selectedAuthors.size}件")
+                                Text("ユーザーを選択")
                             }
                             if (filters.selectedAuthors.isNotEmpty()) {
                                 Text("${filters.selectedAuthors.size}件選択中", style = MaterialTheme.typography.bodySmall)
@@ -1228,7 +1232,7 @@ private fun AuthorFilterDialog(
                 }
             }
         },
-        confirmButton = { Button(onClick = onDismiss) { Text("閉じる") } },
+        confirmButton = { Button(onClick = onDismiss) { Text("決定") } },
         dismissButton = { TextButton(onClick = onClear) { Text("クリア") } },
     )
 }
