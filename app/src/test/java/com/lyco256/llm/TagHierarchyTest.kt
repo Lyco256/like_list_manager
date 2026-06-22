@@ -16,6 +16,7 @@ import com.lyco256.llm.data.TagWithCount
 import com.lyco256.llm.data.orderNodesAfterMove
 import com.lyco256.llm.data.orderNodesAfterMoveAtSlot
 import com.lyco256.llm.data.parentGroupIdForMove
+import com.lyco256.llm.data.postsBeforeFirstExisting
 import com.lyco256.llm.data.requireSiblingNameAvailable
 import com.lyco256.llm.data.requireValidGroupDestination
 import org.junit.Assert.assertEquals
@@ -32,7 +33,7 @@ class TagHierarchyTest {
     private val design = TagEntity(12, "Design", createdAt = now, updatedAt = now)
 
     @Test
-    fun descendantTagsAndGroupCountsIncludeNestedTagsWithoutDuplicateClips() {
+    fun descendantTagsRemainRecursiveAndGroupCountsOnlyDirectChildren() {
         val hierarchy = hierarchy(
             clipTags = listOf(
                 ClipTagEntity(100, kotlin.id, now),
@@ -42,8 +43,27 @@ class TagHierarchyTest {
         )
 
         assertEquals(setOf(kotlin.id, compose.id), hierarchy.descendantTagIdsByGroup[parent.id])
-        assertEquals(2, hierarchy.groupCounts[parent.id])
+        assertEquals(1, hierarchy.groupCounts[parent.id])
         assertEquals(2, hierarchy.groupCounts[child.id])
+    }
+
+    @Test
+    fun likeCountFormattingUsesGroupingAndTruncatedJapaneseTenThousands() {
+        assertEquals("852", formatLikeCount(852))
+        assertEquals("3,643", formatLikeCount(3_643))
+        assertEquals("1.9万", formatLikeCount(19_999))
+        assertEquals("10万", formatLikeCount(100_000))
+    }
+
+    @Test
+    fun incrementalSyncStopsAtFirstExistingPost() {
+        val returnedIds = listOf("new-3", "new-2", "known", "older-known", "oldest")
+
+        assertEquals(
+            listOf("new-3", "new-2"),
+            postsBeforeFirstExisting(returnedIds, setOf("known", "older-known")) { it },
+        )
+        assertEquals(returnedIds, postsBeforeFirstExisting(returnedIds, emptySet()) { it })
     }
 
     @Test

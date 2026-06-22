@@ -6,7 +6,7 @@
 
 ## 役割
 
-Room DatabaseにEntityを登録し、`ClipDao` と `TagDao` を公開します。現在のschema versionは2です。
+Room DatabaseにEntityを登録し、`ClipDao` と `TagDao` を公開します。現在のschema versionは4です。
 
 ## Migration
 
@@ -24,3 +24,14 @@ Room DatabaseにEntityを登録し、`ClipDao` と `TagDao` を公開します�
 ## 変更時の確認
 
 Entity追加・列変更時はversionを更新し、既存実機データを保持するmigrationを追加します。破壊的migrationは明示的な判断なしに導入しません。
+
+## Migration 2→3（2026-06-20）
+
+- schema versionは3です。
+- `clips` にいいね数、取得日時、恒久失敗日時、失敗理由のnullable列を追加します。
+- 既存投稿は全列NULLの未取得状態で保持します。
+
+## Migration 3→4（2026-06-22）
+
+- `sync_state` にliked posts同期の継続用 `likedPostsNextToken` nullable列を追加します。
+- 既存状態はNULLのため、次回同期は先頭から開始します。

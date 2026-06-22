@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
@@ -43,11 +44,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.LocalOffer
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
@@ -57,6 +61,8 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -123,6 +129,9 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -545,6 +554,7 @@ private fun EnhancedTweetCard(
     var deleteOpen by remember { mutableStateOf(false) }
     val selectionPath = remember { mutableStateListOf<Long>() }
     var selectionOpen by remember { mutableStateOf(false) }
+    var likePopupOpen by remember(clip.clip.id) { mutableStateOf(false) }
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -559,7 +569,48 @@ private fun EnhancedTweetCard(
                         .clickable { onAuthorClick(clip.clip) }
                         .padding(4.dp),
                 ) {
-                    Text(clip.clip.authorName, fontWeight = FontWeight.SemiBold)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(clip.clip.authorName, fontWeight = FontWeight.SemiBold)
+                        clip.clip.likeCount?.let { likeCount ->
+                            Spacer(Modifier.width(8.dp))
+                            Box {
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .clickable { likePopupOpen = true }
+                                        .padding(horizontal = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                ) {
+                                    Text(formatLikeCount(likeCount), style = MaterialTheme.typography.bodySmall)
+                                    if (clip.clip.hasProvisionalLikeCount()) {
+                                        Icon(
+                                            Icons.Filled.ErrorOutline,
+                                            contentDescription = "暫定いいね数",
+                                            modifier = Modifier.size(14.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                                DropdownMenu(expanded = likePopupOpen, onDismissRequest = { likePopupOpen = false }) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                Text("いいね数: ${String.format(Locale.JAPAN, "%,d", likeCount)}")
+                                                Text("取得日時: ${formatLikeFetchedAt(clip.clip.likeCountFetchedAt)}", style = MaterialTheme.typography.bodySmall)
+                                                if (clip.clip.likeCountFetchError != null) {
+                                                    Text("取得失敗: ${clip.clip.likeCountFetchError}", style = MaterialTheme.typography.bodySmall)
+                                                } else if (clip.clip.hasProvisionalLikeCount()) {
+                                                    Text("投稿から一週間以内に取得した値です", style = MaterialTheme.typography.bodySmall)
+                                                }
+                                            }
+                                        },
+                                        onClick = { likePopupOpen = false },
+                                    )
+                                }
+                            }
+                        }
+                    }
                     Text(
                         "@${clip.clip.authorUsername}",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1072,13 +1123,11 @@ private fun SearchFilterDialog(
                                                         }
                                                         Text("${state.shortLabel()}${node.name}")
                                                     }
-                                                    if (node is TagGroupNode) {
-                                                        Text(
-                                                            "${node.count} 件",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        )
-                                                    }
+                                                    Text(
+                                                        "${node.count} 件",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    )
                                                 }
                                             },
                                         )
@@ -1198,17 +1247,38 @@ private fun AuthorFilterDialog(
     onDismiss: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
-    val filtered = remember(authors, query) {
+    var sortByCount by remember { mutableStateOf(false) }
+    var sortMenuOpen by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val filtered = remember(authors, query, sortByCount) {
         val clean = query.trim()
-        if (clean.isBlank()) authors else authors.filter {
+        val matching = if (clean.isBlank()) authors else authors.filter {
             it.displayName.contains(clean, ignoreCase = true) || it.username.contains(clean, ignoreCase = true)
         }
+        if (sortByCount) matching.withIndex().sortedWith(compareByDescending<IndexedValue<TweetAuthorOption>> { it.value.count }.thenBy { it.index }).map { it.value } else matching
     }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("ユーザーを選択") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
+                    Box {
+                        IconButton(onClick = { sortMenuOpen = true }) { Icon(Icons.Filled.Sort, contentDescription = "並び替え") }
+                        DropdownMenu(expanded = sortMenuOpen, onDismissRequest = { sortMenuOpen = false }) {
+                            DropdownMenuItem(
+                                text = { Text("現在の順序") },
+                                leadingIcon = { if (!sortByCount) Icon(Icons.Filled.Check, contentDescription = null) },
+                                onClick = { sortByCount = false; sortMenuOpen = false },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("件数順") },
+                                leadingIcon = { if (sortByCount) Icon(Icons.Filled.Check, contentDescription = null) },
+                                onClick = { sortByCount = true; sortMenuOpen = false },
+                            )
+                        }
+                    }
+                }
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
@@ -1216,19 +1286,22 @@ private fun AuthorFilterDialog(
                     singleLine = true,
                     label = { Text("表示名/@ユーザー名を検索") },
                 )
-                LazyColumn(Modifier.heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    items(filtered, key = { "${it.key.authorId}:${it.key.username}" }) { author ->
-                        Row(
-                            Modifier.fillMaxWidth().clickable { onToggle(author.key) }.padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Checkbox(checked = author.key in selectedAuthors, onCheckedChange = { onToggle(author.key) })
-                            Column(Modifier.weight(1f)) {
-                                Text(author.displayName, fontWeight = FontWeight.SemiBold)
-                                Text("@${author.username} / ${author.count}件", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Box(Modifier.heightIn(max = 420.dp)) {
+                    LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        items(filtered, key = { "${it.key.authorId}:${it.key.username}" }) { author ->
+                            Row(
+                                Modifier.fillMaxWidth().clickable { onToggle(author.key) }.padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(checked = author.key in selectedAuthors, onCheckedChange = { onToggle(author.key) })
+                                Column(Modifier.weight(1f)) {
+                                    Text(author.displayName, fontWeight = FontWeight.SemiBold)
+                                    Text("@${author.username} / ${author.count}件", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                             }
                         }
                     }
+                    LazyListScrollbar(listState)
                 }
             }
         },
@@ -1396,9 +1469,11 @@ private fun TagManagementRow(
                                 style = if (row.node.name.length > 16) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
                             )
                             Spacer(Modifier.width(8.dp))
-                            if (row.node is TagGroupNode) {
-                                Badge { Text("${row.node.count}") }
-                            }
+                            Text(
+                                "${row.node.count}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                         Text(
                             if (row.node is TagGroupNode) "グループ" else "タグ",
@@ -1941,6 +2016,26 @@ private fun BoxScope.ScrollToTopButton(listState: LazyListState, hasItems: Boole
     ) {
         Text("↑", color = Color.Black, fontWeight = FontWeight.Bold)
     }
+}
+
+internal fun formatLikeCount(count: Long): String = when {
+    count < 10_000 -> String.format(Locale.JAPAN, "%,d", count)
+    else -> {
+        val tenths = count / 1_000
+        if (tenths % 10L == 0L) "${tenths / 10}万" else "${tenths / 10}.${tenths % 10}万"
+    }
+}
+
+private fun ClipEntity.hasProvisionalLikeCount(): Boolean {
+    if (likeCount == null || likeCountFetchedAt == null) return false
+    val created = runCatching { Instant.parse(xCreatedAt) }.getOrNull() ?: return false
+    val fetched = runCatching { Instant.parse(likeCountFetchedAt) }.getOrNull() ?: return false
+    return fetched.isBefore(created.plusSeconds(7L * 24 * 60 * 60))
+}
+
+private fun formatLikeFetchedAt(value: String?): String {
+    val instant = value?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: return "不明"
+    return DateTimeFormatter.ofPattern("yyyy/M/d H:mm").format(instant.atZone(ZoneId.systemDefault()))
 }
 
 internal fun String.withoutTrailingMediaUrl(hasAssets: Boolean): String {

@@ -32,3 +32,8 @@ OAuth 2.0ユーザーaccess tokenをBearerとしてX APIを呼び、JSONをア�
 ## 変更時の確認
 
 fields/expansions変更時はJSON parser、Entity、UIを確認します。X API仕様変更とrate-limit headerも公式資料で再確認します。
+
+## いいね数取得（2026-06-20）
+
+- liked posts同期は `tweet.fields=public_metrics` を要求し、`like_count` を返します。
+- `fetchPostMetrics` は最大100 IDを `/2/tweets` へ渡し、取得できた指標と投稿単位エラーを分離して返します。

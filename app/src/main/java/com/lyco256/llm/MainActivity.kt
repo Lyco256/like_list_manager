@@ -73,6 +73,7 @@ import coil.compose.AsyncImage
 import com.lyco256.llm.data.ApiSettings
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipWithDetails
+import com.lyco256.llm.data.LikeCountRefreshEstimate
 import com.lyco256.llm.data.OAuthSession
 import com.lyco256.llm.data.PostStorageEstimate
 import com.lyco256.llm.data.PostStorageLocation
@@ -367,6 +368,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun estimateLikeCountRefresh(onResult: (Result<LikeCountRefreshEstimate>) -> Unit) = viewModelScope.launch {
+        onResult(runCatching { repository.estimateLikeCountRefresh() })
+    }
+
+    fun refreshLikeCounts(onMessage: (String) -> Unit) = viewModelScope.launch {
+        try {
+            onMessage(repository.refreshLikeCounts())
+        } catch (error: Exception) {
+            oauthSession.value = repository.loadOAuthSession()
+            onMessage(error.message ?: "いいね数の再取得に失敗しました")
+        }
+    }
+
     private fun tagAction(onMessage: (String) -> Unit, block: suspend () -> Unit) = viewModelScope.launch {
         runCatching { block() }.onFailure { onMessage(it.message ?: "タグ操作に失敗しました") }
     }
@@ -433,6 +447,9 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
     var storageEstimating by remember { mutableStateOf(false) }
     var storageMoveStarting by remember { mutableStateOf(false) }
     var syncMessage by remember { mutableStateOf<String?>(null) }
+    var likeRefreshEstimate by remember { mutableStateOf<LikeCountRefreshEstimate?>(null) }
+    var likeRefreshEstimating by remember { mutableStateOf(false) }
+    var likeRefreshRunning by remember { mutableStateOf(false) }
     val unclassifiedListState = rememberLazyListState()
     val tagListState = rememberLazyListState()
     val classifiedListStates = remember { mutableMapOf<String, LazyListState>() }
@@ -470,6 +487,18 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                                 onClick = {
                                     usageOpen = true
                                     menuOpen = false
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("いいね数を再取得") },
+                                onClick = {
+                                    menuOpen = false
+                                    likeRefreshEstimating = true
+                                    viewModel.estimateLikeCountRefresh { result ->
+                                        likeRefreshEstimating = false
+                                        result.onSuccess { likeRefreshEstimate = it }
+                                            .onFailure { syncMessage = it.message ?: "対象件数を確認できませんでした" }
+                                    }
                                 },
                             )
                             DropdownMenuItem(
@@ -578,6 +607,40 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
     }
 
     if (usageOpen) UsageDialog(uiState.syncState, uiState.oauthSession, onDismiss = { usageOpen = false })
+    if (likeRefreshEstimating || likeRefreshRunning) {
+        StorageProgressDialog(
+            title = if (likeRefreshRunning) "いいね数を再取得しています" else "再取得対象を確認しています",
+            message = if (likeRefreshRunning) "完了するまでお待ちください" else "ローカル投稿を集計しています",
+        )
+    }
+    likeRefreshEstimate?.let { estimate ->
+        AlertDialog(
+            onDismissRequest = { likeRefreshEstimate = null },
+            title = { Text("いいね数を再取得しますか？") },
+            text = {
+                Text(
+                    "対象: ${estimate.totalTargets}件\n" +
+                        "今回実行: ${estimate.executableTargets}件\n" +
+                        "推定API料金: \$${"%.3f".format(estimate.estimatedCostUsd)}" +
+                        if (estimate.executableTargets < estimate.totalTargets) "\n\n月間残り枠の範囲で実行します。" else "",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = estimate.executableTargets > 0,
+                    onClick = {
+                        likeRefreshEstimate = null
+                        likeRefreshRunning = true
+                        viewModel.refreshLikeCounts {
+                            likeRefreshRunning = false
+                            syncMessage = it
+                        }
+                    },
+                ) { Text("再取得する") }
+            },
+            dismissButton = { TextButton(onClick = { likeRefreshEstimate = null }) { Text("キャンセル") } },
+        )
+    }
     if (storageOpen) {
         PostStorageDialog(
             state = uiState.storageState,

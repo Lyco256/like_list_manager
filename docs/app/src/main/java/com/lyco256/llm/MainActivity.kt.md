@@ -51,3 +51,7 @@ UI操作 → `MainViewModel` → `ClipRepository` → Room/X API/暗号化設定
 ## 変更時の確認
 
 UI項目を追加する場合は、対応するViewModel操作、Repository API、Entity/DAOの必要性を確認します。OAuth画面を変える場合はManifestと `XOAuthManager` も確認します。
+
+## いいね数再取得入口（2026-06-20）
+
+右上メニューから対象件数・月間枠内の実行件数・推定料金を確認し、明示確定後だけ再取得します。処理中は待機Dialog、終了後は成功・恒久失敗・中断概要を表示します。

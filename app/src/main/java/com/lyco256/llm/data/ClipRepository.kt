@@ -22,6 +22,13 @@ import java.time.Instant
 import java.time.YearMonth
 
 private const val WEBP_QUALITY = 85
+private const val LIKE_COUNT_FINAL_AFTER_DAYS = 7L
+
+data class LikeCountRefreshEstimate(
+    val totalTargets: Int,
+    val executableTargets: Int,
+    val estimatedCostUsd: Double,
+)
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ClipRepository(
@@ -238,14 +245,22 @@ class ClipRepository(
             return@withDatabase "月間取得上限に達しているため同期しませんでした。"
         }
 
-        var paginationToken: String? = null
+        var state = previous
+        var paginationToken: String? = previous.likedPostsNextToken
+        var resumingContinuation = paginationToken != null
         var fetched = 0
         var inserted = 0
         var lastResult: XApiResult? = null
         val isWifi = context.isWifiConnected()
+        val existingPostIds = clipDao.getActiveClips().mapTo(mutableSetOf()) { it.xPostId }
+        var newestReturnedPostId: String? = null
+        var firstPageFromTop = !resumingContinuation
+        var reachedExistingBoundary = false
+        var resumedContinuation = resumingContinuation
 
-        do {
-            val maxResults = minOf(100, remainingBudget - fetched)
+        while (fetched < remainingBudget) {
+            val pageLimit = if (firstPageFromTop && existingPostIds.isNotEmpty()) 5 else 100
+            val maxResults = minOf(pageLimit, remainingBudget - fetched)
             if (maxResults <= 0) break
 
             val result = try {
@@ -261,8 +276,12 @@ class ClipRepository(
             }
             lastResult = result
             fetched += result.posts.size
+            if (firstPageFromTop) newestReturnedPostId = result.posts.firstOrNull()?.id
+            val postsToInsert = postsBeforeFirstExisting(result.posts, existingPostIds)
+            val pageReachedBoundary = postsToInsert.size < result.posts.size
+            reachedExistingBoundary = reachedExistingBoundary || pageReachedBoundary
 
-            result.posts.forEach { post ->
+            postsToInsert.forEach { post ->
                 val clipId = clipDao.insertClip(
                     ClipEntity(
                         xPostId = post.id,
@@ -274,10 +293,13 @@ class ClipRepository(
                         xCreatedAt = post.createdAt,
                         savedAt = now,
                         syncedAt = now,
+                        likeCount = post.likeCount,
+                        likeCountFetchedAt = post.likeCount?.let { now },
                     ),
                 )
                 if (clipId > 0) {
                     inserted += 1
+                    existingPostIds += post.id
                     clipDao.insertAssets(
                         post.media.mapNotNull { media ->
                             createAssetForMedia(
@@ -291,21 +313,134 @@ class ClipRepository(
                     )
                 }
             }
-            paginationToken = result.nextToken
-        } while (paginationToken != null && fetched < remainingBudget)
+            paginationToken = if (pageReachedBoundary) null else result.nextToken
+            state = state.copy(
+                monthlyFetchedCount = state.monthlyFetchedCount + result.posts.size,
+                likedPostsNextToken = paginationToken,
+                rateLimitLimit = result.rateLimitLimit,
+                rateLimitRemaining = result.rateLimitRemaining,
+                rateLimitResetEpochSeconds = result.rateLimitReset,
+            )
+            clipDao.upsertSyncState(state)
+
+            if (paginationToken == null) {
+                if (resumingContinuation && fetched < remainingBudget) {
+                    // The saved continuation is complete. Check the top once more so likes
+                    // added while it was pending are not delayed until another manual sync.
+                    resumingContinuation = false
+                    firstPageFromTop = true
+                    continue
+                }
+                break
+            }
+            firstPageFromTop = false
+        }
 
         clipDao.upsertSyncState(
-            previous.copy(
+            state.copy(
                 lastSyncAt = now,
-                monthlyFetchedCount = previous.monthlyFetchedCount + fetched,
+                newestSeenPostId = newestReturnedPostId ?: previous.newestSeenPostId,
                 usageMonth = currentMonth,
-                rateLimitLimit = lastResult?.rateLimitLimit,
-                rateLimitRemaining = lastResult?.rateLimitRemaining,
-                rateLimitResetEpochSeconds = lastResult?.rateLimitReset,
+                likedPostsNextToken = paginationToken,
+                rateLimitLimit = lastResult?.rateLimitLimit ?: state.rateLimitLimit,
+                rateLimitRemaining = lastResult?.rateLimitRemaining ?: state.rateLimitRemaining,
+                rateLimitResetEpochSeconds = lastResult?.rateLimitReset ?: state.rateLimitResetEpochSeconds,
             ),
         )
-        "同期しました: 新規 $inserted 件 / 取得 $fetched 件"
+        buildString {
+            append("同期しました: 新規 $inserted 件 / 取得 $fetched 件")
+            if (reachedExistingBoundary) append("（取得済み地点で停止）")
+            if (paginationToken != null) append("（続きは次回同期）")
+            if (resumedContinuation) append("（前回の続きから再開）")
         }
+        }
+    }
+
+    suspend fun estimateLikeCountRefresh(): LikeCountRefreshEstimate = withContext(Dispatchers.IO) {
+        postStorageManager.withDatabase { database ->
+            val dao = database.clipDao()
+            val state = currentMonthState(dao.getSyncState() ?: SyncStateEntity())
+            val targets = likeCountRefreshTargets(dao.getActiveClips(), Instant.now())
+            val remaining = (state.monthlyBudgetLimit - state.monthlyFetchedCount).coerceAtLeast(0)
+            val executable = if (state.monthlyFetchedCount >= state.monthlyStopLimit) 0 else minOf(targets.size, remaining)
+            LikeCountRefreshEstimate(targets.size, executable, executable * 0.005)
+        }
+    }
+
+    suspend fun refreshLikeCounts(): String = withContext(Dispatchers.IO) {
+        val session = validSession() ?: return@withContext "Xへのログインが必要です。"
+        postStorageManager.withDatabase { database ->
+            val dao = database.clipDao()
+            var state = currentMonthState(dao.getSyncState() ?: SyncStateEntity())
+            val remaining = (state.monthlyBudgetLimit - state.monthlyFetchedCount).coerceAtLeast(0)
+            val allTargets = likeCountRefreshTargets(dao.getActiveClips(), Instant.now())
+            val targets = if (state.monthlyFetchedCount >= state.monthlyStopLimit) emptyList() else allTargets.take(remaining)
+            if (targets.isEmpty()) {
+                return@withDatabase if (allTargets.isEmpty()) "再取得対象はありません。" else "月間取得上限に達しているため再取得できません。"
+            }
+
+            var success = 0
+            var permanentFailures = 0
+            var attempted = 0
+            var interruptedMessage: String? = null
+            for (batch in targets.chunked(100)) {
+                val now = Instant.now().toString()
+                val byPostId = batch.associateBy { it.xPostId }
+                attempted += batch.size
+                val result = try {
+                    xApiClient.fetchPostMetrics(session.accessToken, batch.map { it.xPostId })
+                } catch (error: Exception) {
+                    if (error is XApiException && error.statusCode == 401) apiSettingsStore.clearSession()
+                    state = state.copy(monthlyFetchedCount = state.monthlyFetchedCount + batch.size)
+                    dao.upsertSyncState(state)
+                    interruptedMessage = if (error is XApiException) error.toUserMessage() else "通信エラーにより中断しました"
+                    break
+                }
+
+                result.posts.forEach { post ->
+                    byPostId[post.id]?.let { dao.updateLikeCount(it.id, post.likeCount, now) }
+                    success += 1
+                }
+                result.errors.filter { it.isPermanentPostFailure() }.forEach { error ->
+                    byPostId[error.postId]?.let {
+                        dao.recordLikeCountFailure(it.id, now, error.userMessage())
+                        permanentFailures += 1
+                    }
+                }
+                state = state.copy(
+                    monthlyFetchedCount = state.monthlyFetchedCount + batch.size,
+                    rateLimitLimit = result.rateLimitLimit,
+                    rateLimitRemaining = result.rateLimitRemaining,
+                    rateLimitResetEpochSeconds = result.rateLimitReset,
+                )
+                dao.upsertSyncState(state)
+            }
+
+            buildString {
+                append("取得成功: ${success}件 / 取得失敗: ${permanentFailures}件")
+                if (interruptedMessage != null) append("\n$interruptedMessage。未処理の投稿は次回も対象です。")
+                if (permanentFailures > 0) append("\n恒久失敗の投稿は次回以降の対象から除外されます。")
+                if (attempted < allTargets.size) append("\n月間残り枠の範囲で${attempted}件を処理しました。")
+            }
+        }
+    }
+
+    private fun currentMonthState(state: SyncStateEntity): SyncStateEntity {
+        val month = YearMonth.now().toString()
+        return if (state.usageMonth != month) {
+            state.copy(monthlyFetchedCount = 0, usageMonth = month)
+        } else {
+            state.copy(usageMonth = state.usageMonth ?: month)
+        }
+    }
+
+    private fun likeCountRefreshTargets(clips: List<ClipEntity>, now: Instant): List<ClipEntity> = clips.filter { clip ->
+        if (clip.isDeleted || clip.likeCountFetchFailedAt != null || clip.xPostId.any { !it.isDigit() }) return@filter false
+        if (clip.likeCount == null) return@filter true
+        val created = runCatching { Instant.parse(clip.xCreatedAt) }.getOrNull() ?: return@filter false
+        val fetched = clip.likeCountFetchedAt?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: return@filter false
+        val finalAt = created.plusSeconds(LIKE_COUNT_FINAL_AFTER_DAYS * 24 * 60 * 60)
+        fetched.isBefore(finalAt) && !now.isBefore(finalAt)
     }
 
     private suspend fun validSession(): OAuthSession? {
@@ -762,6 +897,24 @@ private fun XApiException.toUserMessage(): String = when (statusCode) {
     in 500..599 -> "X APIで一時的な障害が発生しています。時間を置いて再試行してください"
     else -> "X APIとの通信に失敗しました (HTTP $statusCode)"
 }
+
+private fun XPostMetricError.isPermanentPostFailure(): Boolean {
+    val text = "$title $detail".lowercase()
+    return listOf("not found", "deleted", "forbidden", "unauthorized", "protected", "suspended", "permission").any(text::contains)
+}
+
+private fun XPostMetricError.userMessage(): String = detail.ifBlank { title }.ifBlank {
+    "削除済み、または表示権限がありません"
+}
+
+internal fun <T> postsBeforeFirstExisting(
+    posts: List<T>,
+    existingPostIds: Set<String>,
+    id: (T) -> String,
+): List<T> = posts.takeWhile { id(it) !in existingPostIds }
+
+private fun postsBeforeFirstExisting(posts: List<XPost>, existingPostIds: Set<String>): List<XPost> =
+    postsBeforeFirstExisting(posts, existingPostIds, XPost::id)
 
 private fun Context.isWifiConnected(): Boolean {
     val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager

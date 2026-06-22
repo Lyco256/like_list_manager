@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ClipTagEntity::class,
         SyncStateEntity::class,
     ],
-    version = 2,
+    version = 4,
     exportSchema = false,
 )
 abstract class LikeListDatabase : RoomDatabase() {
@@ -22,6 +22,21 @@ abstract class LikeListDatabase : RoomDatabase() {
     abstract fun tagDao(): TagDao
 
     companion object {
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `sync_state` ADD COLUMN `likedPostsNextToken` TEXT")
+            }
+        }
+
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `clips` ADD COLUMN `likeCount` INTEGER")
+                database.execSQL("ALTER TABLE `clips` ADD COLUMN `likeCountFetchedAt` TEXT")
+                database.execSQL("ALTER TABLE `clips` ADD COLUMN `likeCountFetchFailedAt` TEXT")
+                database.execSQL("ALTER TABLE `clips` ADD COLUMN `likeCountFetchError` TEXT")
+            }
+        }
+
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL(
