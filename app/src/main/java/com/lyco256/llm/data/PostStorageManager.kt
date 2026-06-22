@@ -233,7 +233,11 @@ class PostStorageManager(private val context: Context) {
         context,
         LikeListDatabase::class.java,
         file.absolutePath,
-    ).addMigrations(LikeListDatabase.MIGRATION_1_2, LikeListDatabase.MIGRATION_2_3).build()
+    ).addMigrations(
+        LikeListDatabase.MIGRATION_1_2,
+        LikeListDatabase.MIGRATION_2_3,
+        LikeListDatabase.MIGRATION_3_4,
+    ).build()
 
     private fun selectedPaths(): StoragePaths {
         val selectedId = preferences.getString(KEY_SELECTED_ID, PostStorageState.INTERNAL_ID).orEmpty()

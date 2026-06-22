@@ -96,4 +96,38 @@ class LikeListDatabaseMigrationTest {
         helper.close()
         context.deleteDatabase(name)
     }
+
+    @Test
+    fun migration3To4KeepsSyncStateAndAddsNullableContinuationToken() {
+        val name = "migration-3-4-test.db"
+        context.deleteDatabase(name)
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name(name)
+                .callback(object : SupportSQLiteOpenHelper.Callback(3) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("CREATE TABLE sync_state (id INTEGER PRIMARY KEY NOT NULL, monthlyFetchedCount INTEGER NOT NULL)")
+                    }
+
+                    override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+                })
+                .build(),
+        )
+        helper.writableDatabase.apply {
+            execSQL("INSERT INTO sync_state (id, monthlyFetchedCount) VALUES (1, 123)")
+            LikeListDatabase.MIGRATION_3_4.migrate(this)
+            query("SELECT monthlyFetchedCount, likedPostsNextToken FROM sync_state WHERE id = 1").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(123, cursor.getInt(0))
+                assertTrue(cursor.isNull(1))
+            }
+            execSQL("UPDATE sync_state SET likedPostsNextToken = 'next-token' WHERE id = 1")
+            query("SELECT likedPostsNextToken FROM sync_state WHERE id = 1").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("next-token", cursor.getString(0))
+            }
+        }
+        helper.close()
+        context.deleteDatabase(name)
+    }
 }

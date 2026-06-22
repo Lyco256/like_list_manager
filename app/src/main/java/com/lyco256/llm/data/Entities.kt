@@ -128,6 +128,7 @@ data class SyncStateEntity(
     @PrimaryKey val id: Int = 1,
     val xUserId: String? = null,
     val newestSeenPostId: String? = null,
+    val likedPostsNextToken: String? = null,
     val lastSyncAt: String? = null,
     val monthlyFetchedCount: Int = 0,
     val monthlyBudgetLimit: Int = 1800,

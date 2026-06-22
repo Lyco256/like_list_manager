@@ -58,7 +58,7 @@ MainActivity / Compose UI
 ### 保存と同期
 
 - Roomで投稿、画像情報、タググループ、タグ、投稿タグ関連、同期状態を保存
-- DB version 3でタグ階層といいね数情報を保持し、version 1→2で既存タグ、version 2→3で既存投稿を非破壊移行
+- DB version 4でタグ階層、いいね数、同期継続tokenを保持し、version 1→2、2→3、3→4を非破壊移行
 - Client IDとOAuth tokenは暗号化SharedPreferencesへ保存
 - Room DBと画像は内部ストレージまたはSDカードのアプリ専用領域へまとめて保存
 - 保存先変更時はコピー、容量・件数・DB整合性検証、切り替え、旧データ削除を行う
@@ -141,7 +141,7 @@ MainActivity / Compose UI
 - タグ色変更は未実装
 - 動画/GIF本体は保存しない
 - DBはversion 2で、version 1からタグと割り当てを保持するmigrationを実装済み
-- 階層・複合絞り込み・制約・件数表示の単体テストと、version 1→2・2→3のmigration testを実装済み
+- 階層・複合絞り込み・制約・件数表示の単体テストと、version 1→2・2→3・3→4のmigration testを実装済み
 - 実際のXログインとliked posts同期はユーザーのClient IDとXアカウントで実機確認が必要
 
 ## 関連文書
@@ -157,4 +157,4 @@ MainActivity / Compose UI
 - 新規同期投稿へ `public_metrics.like_count` と取得日時を保存し、既存投稿は明示再取得だけで更新します。
 - 右上メニューから未取得／期限到来した暫定値を月間残り枠内で一括再取得できます。
 - 投稿カードのいいね数・暫定警告、投稿者件数順、タグ投稿数、グループ直下要素数を表示します。
-- Room schema versionは3で、version 2→3 migrationを登録しています。
+- Room schema versionは4で、version 2→3と3→4 migrationを登録しています。

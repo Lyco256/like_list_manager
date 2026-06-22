@@ -15,7 +15,7 @@ Roomのテーブル構造と、Repository/UI向けの合成モデルを定義し
 - `TagGroupEntity`: 親グループ、名称、兄弟内の並び順
 - `TagEntity`: タグ名、色、親グループ、兄弟内の並び順
 - `ClipTagEntity`: 投稿とタグの多対多関連
-- `SyncStateEntity`: 月間取得数、予算・警告・停止ライン、15分rate limit、最終同期
+- `SyncStateEntity`: 月間取得数、予算・警告・停止ライン、15分rate limit、最終同期、liked posts同期の継続用next token
 - `ClipWithDetails`, `TagWithCount`: UI表示用の合成モデル
 - `TagHierarchy`, `TagTreeNode`: グループとタグの混在階層、子孫タグ、重複を除いたグループ件数
 - `TagFilterState`, `TagNodeRef`: 「含む／必須／排除」条件とタグ／グループ識別子。グループは含む・排除に使い、必須は実タグだけで使います。

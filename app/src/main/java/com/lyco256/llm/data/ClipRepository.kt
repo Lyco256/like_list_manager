@@ -245,18 +245,21 @@ class ClipRepository(
             return@withDatabase "月間取得上限に達しているため同期しませんでした。"
         }
 
-        var paginationToken: String? = null
+        var state = previous
+        var paginationToken: String? = previous.likedPostsNextToken
+        var resumingContinuation = paginationToken != null
         var fetched = 0
         var inserted = 0
         var lastResult: XApiResult? = null
         val isWifi = context.isWifiConnected()
         val existingPostIds = clipDao.getActiveClips().mapTo(mutableSetOf()) { it.xPostId }
         var newestReturnedPostId: String? = null
-        var firstPage = true
+        var firstPageFromTop = !resumingContinuation
         var reachedExistingBoundary = false
+        var resumedContinuation = resumingContinuation
 
-        do {
-            val pageLimit = if (firstPage && existingPostIds.isNotEmpty()) 5 else 100
+        while (fetched < remainingBudget) {
+            val pageLimit = if (firstPageFromTop && existingPostIds.isNotEmpty()) 5 else 100
             val maxResults = minOf(pageLimit, remainingBudget - fetched)
             if (maxResults <= 0) break
 
@@ -273,9 +276,10 @@ class ClipRepository(
             }
             lastResult = result
             fetched += result.posts.size
-            if (firstPage) newestReturnedPostId = result.posts.firstOrNull()?.id
+            if (firstPageFromTop) newestReturnedPostId = result.posts.firstOrNull()?.id
             val postsToInsert = postsBeforeFirstExisting(result.posts, existingPostIds)
-            reachedExistingBoundary = postsToInsert.size < result.posts.size
+            val pageReachedBoundary = postsToInsert.size < result.posts.size
+            reachedExistingBoundary = reachedExistingBoundary || pageReachedBoundary
 
             postsToInsert.forEach { post ->
                 val clipId = clipDao.insertClip(
@@ -295,6 +299,7 @@ class ClipRepository(
                 )
                 if (clipId > 0) {
                     inserted += 1
+                    existingPostIds += post.id
                     clipDao.insertAssets(
                         post.media.mapNotNull { media ->
                             createAssetForMedia(
@@ -308,23 +313,46 @@ class ClipRepository(
                     )
                 }
             }
-            paginationToken = if (reachedExistingBoundary) null else result.nextToken
-            firstPage = false
-        } while (paginationToken != null && fetched < remainingBudget)
+            paginationToken = if (pageReachedBoundary) null else result.nextToken
+            state = state.copy(
+                monthlyFetchedCount = state.monthlyFetchedCount + result.posts.size,
+                likedPostsNextToken = paginationToken,
+                rateLimitLimit = result.rateLimitLimit,
+                rateLimitRemaining = result.rateLimitRemaining,
+                rateLimitResetEpochSeconds = result.rateLimitReset,
+            )
+            clipDao.upsertSyncState(state)
+
+            if (paginationToken == null) {
+                if (resumingContinuation && fetched < remainingBudget) {
+                    // The saved continuation is complete. Check the top once more so likes
+                    // added while it was pending are not delayed until another manual sync.
+                    resumingContinuation = false
+                    firstPageFromTop = true
+                    continue
+                }
+                break
+            }
+            firstPageFromTop = false
+        }
 
         clipDao.upsertSyncState(
-            previous.copy(
+            state.copy(
                 lastSyncAt = now,
                 newestSeenPostId = newestReturnedPostId ?: previous.newestSeenPostId,
-                monthlyFetchedCount = previous.monthlyFetchedCount + fetched,
                 usageMonth = currentMonth,
-                rateLimitLimit = lastResult?.rateLimitLimit,
-                rateLimitRemaining = lastResult?.rateLimitRemaining,
-                rateLimitResetEpochSeconds = lastResult?.rateLimitReset,
+                likedPostsNextToken = paginationToken,
+                rateLimitLimit = lastResult?.rateLimitLimit ?: state.rateLimitLimit,
+                rateLimitRemaining = lastResult?.rateLimitRemaining ?: state.rateLimitRemaining,
+                rateLimitResetEpochSeconds = lastResult?.rateLimitReset ?: state.rateLimitResetEpochSeconds,
             ),
         )
-        "同期しました: 新規 $inserted 件 / 取得 $fetched 件" +
-            if (reachedExistingBoundary) "（取得済み地点で停止）" else ""
+        buildString {
+            append("同期しました: 新規 $inserted 件 / 取得 $fetched 件")
+            if (reachedExistingBoundary) append("（取得済み地点で停止）")
+            if (paginationToken != null) append("（続きは次回同期）")
+            if (resumedContinuation) append("（前回の続きから再開）")
+        }
         }
     }
 
