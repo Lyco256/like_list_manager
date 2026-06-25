@@ -1,11 +1,11 @@
 # `app/src/androidTest/java/com/lyco256/llm/MainActivityComposeTest.kt`
 
-隔離された `com.lyco256.llm.test` 上で主要Compose画面を検証する実機/Instrumentationテストです。各テストの前に隔離DBだけを初期化し、seedデータを投入します。本番 `com.lyco256.llm` のDBや画像には触れません。
+隔離された `com.lyco256.llm.test` 上で主要Compose画面を検証するInstrumentationテストです。各テストの前に隔離DBだけを初期化し、seedデータを投入します。本番 `com.lyco256.llm` のDBや画像には触れません。
 
 主な検証内容:
 
 - 主要タブ、設定/使用量ダイアログ、隔離環境でのXログイン無効化
-- 検索/絞り込みの適用、キャンセル、全クリアとDB fingerprint不変
+- 検索/絞り込みの適用、キャンセル、BackHandler破棄、全クリアとDB fingerprint不変
 - 未分類から分類済みへの移動、分類解除、Roomの `clip_tags` 更新
 - 別グループに同名の子タグがある場合の複数タグ同時付与
 - タグ/グループ作成、同名子タグ、名称変更、削除

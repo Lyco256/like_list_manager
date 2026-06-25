@@ -2,6 +2,7 @@ package com.lyco256.llm
 
 import android.os.SystemClock
 import android.view.InputDevice
+import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -110,6 +111,13 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("filter_open").performClick()
         composeRule.onNodeWithTag("filter_query").performTextReplacement("discarded-query")
         composeRule.onNodeWithText("キャンセル").performClick()
+        composeRule.onNodeWithText("変更を破棄しますか？").assertIsDisplayed()
+        composeRule.onNodeWithText("破棄").performClick()
+        composeRule.onNodeWithText("文字列:\"FilterNeedle\"", substring = true).assertIsDisplayed()
+
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_query").performTextReplacement("back-discarded-query")
+        requestDiscardConfirmationWithBack()
         composeRule.onNodeWithText("変更を破棄しますか？").assertIsDisplayed()
         composeRule.onNodeWithText("破棄").performClick()
         composeRule.onNodeWithText("文字列:\"FilterNeedle\"", substring = true).assertIsDisplayed()
@@ -297,10 +305,27 @@ class MainActivityComposeTest {
     }
 
     private fun dismissBackHandledDialog() {
-        composeRule.runOnUiThread {
-            composeRule.activity.onBackPressedDispatcher.onBackPressed()
-        }
+        InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         composeRule.waitForIdle()
+    }
+
+    private fun requestDiscardConfirmationWithBack() {
+        dismissBackHandledDialog()
+        val confirmationText = "変更を破棄しますか？"
+        val shown = try {
+            composeRule.waitUntil(1_000) {
+                composeRule.onAllNodesWithText(confirmationText).fetchSemanticsNodes().isNotEmpty()
+            }
+            true
+        } catch (_: Throwable) {
+            false
+        }
+        if (!shown) {
+            dismissBackHandledDialog()
+            composeRule.waitUntil(5_000) {
+                composeRule.onAllNodesWithText(confirmationText).fetchSemanticsNodes().isNotEmpty()
+            }
+        }
     }
 
     private fun tagsNamed(name: String): Int = runBlocking {
