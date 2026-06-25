@@ -130,8 +130,13 @@ MainActivity / Compose UI
 
 ### Scripts
 
+- `docs/scripts/SafeScriptCommon.ps1.md`
 - `docs/scripts/run-safe-debug-check.ps1.md`
 - `docs/scripts/run-safe-debug-check.cmd.md`
+- `docs/scripts/run-safe-integration-check.ps1.md`
+- `docs/scripts/run-safe-integration-check.cmd.md`
+- `docs/scripts/run-safe-snapshot-check.ps1.md`
+- `docs/scripts/run-safe-snapshot-check.cmd.md`
 
 ## 現在の未実装・制約
 

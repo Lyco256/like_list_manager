@@ -6,23 +6,15 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "SafeScriptCommon.ps1")
 
-function Write-Step {
-    param([string]$Message)
-    Write-Host ""
-    Write-Host "==> $Message"
-}
-
-function Invoke-Checked {
-    param(
-        [string]$Label,
-        [scriptblock]$Command
-    )
-    Write-Step $Label
-    & $Command
-    if ($LASTEXITCODE -ne 0) {
-        throw "$Label failed with exit code $LASTEXITCODE"
-    }
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$timeouts = @{
+    Preflight = 300
+    Build = 1800
+    UnitTest = 1800
+    Lint = 1800
+    Install = 600
 }
 
 function Get-AdbPath {
@@ -37,15 +29,31 @@ function Get-AdbPath {
     throw "adb.exe was not found. Install Android SDK platform-tools or add adb to PATH."
 }
 
+function Invoke-LoggedAdb {
+    param(
+        [Parameter(Mandatory = $true)][string]$Adb,
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+    Write-SafeLog ""
+    Write-SafeLog "> $Adb $(Join-SafeCommandArguments -Arguments $Arguments)"
+    $output = @(& $Adb @Arguments 2>&1)
+    $exitCode = $LASTEXITCODE
+    foreach ($line in $output) {
+        Write-SafeLog ($line | Out-String).TrimEnd()
+    }
+    if ($exitCode -ne 0) {
+        $script:SafeLastErrorSummary = Get-SafeErrorSummaryFromText -Lines @($output | ForEach-Object { $_.ToString() })
+        throw "adb failed with exit code $exitCode"
+    }
+    return $output
+}
+
 function Get-SingleDevice {
     param([string]$Adb)
-    $lines = & $Adb devices -l
-    if ($LASTEXITCODE -ne 0) {
-        throw "adb devices failed with exit code $LASTEXITCODE"
-    }
+    $lines = Invoke-LoggedAdb -Adb $Adb -Arguments @("devices", "-l")
     $devices = @($lines | Where-Object { $_ -match "\sdevice\s" })
     if ($devices.Count -ne 1) {
-        throw "Expected exactly one connected adb device, found $($devices.Count). Output:`n$($lines -join "`n")"
+        throw "Expected exactly one connected adb device, found $($devices.Count). Output: $($lines -join ' | ')"
     }
     return $devices[0]
 }
@@ -55,8 +63,8 @@ function Get-PackageSnapshot {
         [string]$Adb,
         [string]$Package
     )
-    $dump = & $Adb shell dumpsys package $Package
-    if ($LASTEXITCODE -ne 0 -or -not ($dump | Select-String -Pattern "pkg=Package\{.* $([regex]::Escape($Package))\}|versionName=")) {
+    $dump = Invoke-LoggedAdb -Adb $Adb -Arguments @("shell", "dumpsys", "package", $Package)
+    if (-not ($dump | Select-String -Pattern "pkg=Package\{.* $([regex]::Escape($Package))\}|versionName=")) {
         throw "Package $Package is not currently installed. Refusing to use adb install -r as a fresh install."
     }
 
@@ -88,63 +96,64 @@ function Get-PackageSnapshot {
     }
 }
 
-$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+Start-SafeScript -Name "run-safe-debug-check" -RepoRoot $repoRoot
 Set-Location $repoRoot
 
-Write-Step "Repository"
-Write-Host "Root: $repoRoot"
-git status --short --branch
-if ($LASTEXITCODE -ne 0) {
-    throw "git status failed with exit code $LASTEXITCODE"
-}
+try {
+    Invoke-SafePhase -Name "Preflight" -Action {
+        Write-SafeLog "Root: $repoRoot"
+        Invoke-SafeNativeCommand -FilePath "git" -Arguments @("status", "--short", "--branch") -TimeoutSeconds $timeouts.Preflight -WorkingDirectory $repoRoot
+        Invoke-SafeNativeCommand -FilePath "git" -Arguments @("diff", "--check") -TimeoutSeconds $timeouts.Preflight -WorkingDirectory $repoRoot
+        if (Test-Path -LiteralPath $JavaHome) {
+            $env:JAVA_HOME = $JavaHome
+            $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+            Write-SafeLog "JAVA_HOME=$env:JAVA_HOME"
+        } else {
+            Write-SafeLog "JAVA_HOME candidate not found: $JavaHome"
+            Write-SafeLog "Using existing JAVA_HOME/PATH."
+        }
+    }
 
-Invoke-Checked "Whitespace check" {
-    git diff --check
-}
+    Invoke-SafePhase -Name "Build" -Action {
+        Invoke-SafeNativeCommand -FilePath ".\gradlew.bat" -Arguments @(":app:assembleDebug", "--console=plain", "--no-daemon") -TimeoutSeconds $timeouts.Build -WorkingDirectory $repoRoot
+    }
 
-if (Test-Path -LiteralPath $JavaHome) {
-    $env:JAVA_HOME = $JavaHome
-    $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
-    Write-Host "JAVA_HOME=$env:JAVA_HOME"
-} else {
-    Write-Host "JAVA_HOME candidate not found: $JavaHome"
-    Write-Host "Using existing JAVA_HOME/PATH."
-}
+    Invoke-SafePhase -Name "UnitTest" -Action {
+        Invoke-SafeNativeCommand -FilePath ".\gradlew.bat" -Arguments @(":app:testDebugUnitTest", "--console=plain", "--no-daemon") -TimeoutSeconds $timeouts.UnitTest -WorkingDirectory $repoRoot
+    }
 
-Invoke-Checked "Gradle assembleDebug, testDebugUnitTest, lintDebug" {
-    .\gradlew.bat :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --console=plain --no-daemon
-}
+    Invoke-SafePhase -Name "Lint" -Action {
+        Invoke-SafeNativeCommand -FilePath ".\gradlew.bat" -Arguments @(":app:lintDebug", "--console=plain", "--no-daemon") -TimeoutSeconds $timeouts.Lint -WorkingDirectory $repoRoot
+    }
 
-if (-not $InstallToDevice) {
-    Write-Step "Done"
-    Write-Host "Local debug build, unit tests, and lint completed. Device reinstall was not requested."
+    if ($InstallToDevice) {
+        Invoke-SafePhase -Name "Install" -Action {
+            if (-not (Test-Path -LiteralPath $ApkPath -PathType Leaf)) {
+                throw "APK not found: $ApkPath"
+            }
+            $resolvedApk = (Resolve-Path -LiteralPath $ApkPath).Path
+            $adb = Get-AdbPath
+            Write-SafeLog "adb: $adb"
+            $deviceLine = Get-SingleDevice -Adb $adb
+            Write-SafeLog "Device: $deviceLine"
+
+            $before = Get-PackageSnapshot -Adb $adb -Package $PackageName
+            Write-SafeLog "Before: uid=$($before.Uid) appId=$($before.AppId) firstInstallTime=$($before.FirstInstallTime) lastUpdateTime=$($before.LastUpdateTime) version=$($before.VersionName)"
+
+            Invoke-SafeNativeCommand -FilePath $adb -Arguments @("install", "-r", $resolvedApk) -TimeoutSeconds $timeouts.Install -WorkingDirectory $repoRoot
+
+            $after = Get-PackageSnapshot -Adb $adb -Package $PackageName
+            Write-SafeLog "After: uid=$($after.Uid) appId=$($after.AppId) firstInstallTime=$($after.FirstInstallTime) lastUpdateTime=$($after.LastUpdateTime) version=$($after.VersionName)"
+
+            if ($before.Uid -ne $after.Uid -or $before.AppId -ne $after.AppId -or $before.FirstInstallTime -ne $after.FirstInstallTime) {
+                throw "Package identity changed after reinstall. Check device data before continuing."
+            }
+        }
+    }
+
+    Complete-SafeScript
+    Write-Host "Success"
     exit 0
+} catch {
+    Stop-SafeScriptWithFailure -Exception $_.Exception
 }
-
-$resolvedApk = Resolve-Path $ApkPath
-if (-not (Test-Path -LiteralPath $resolvedApk)) {
-    throw "APK not found: $ApkPath"
-}
-
-$adb = Get-AdbPath
-Write-Step "Device preflight"
-Write-Host "adb: $adb"
-$deviceLine = Get-SingleDevice -Adb $adb
-Write-Host "Device: $deviceLine"
-
-$before = Get-PackageSnapshot -Adb $adb -Package $PackageName
-Write-Host "Before: uid=$($before.Uid) appId=$($before.AppId) firstInstallTime=$($before.FirstInstallTime) lastUpdateTime=$($before.LastUpdateTime) version=$($before.VersionName)"
-
-Invoke-Checked "Safe reinstall with adb install -r" {
-    & $adb install -r $resolvedApk
-}
-
-$after = Get-PackageSnapshot -Adb $adb -Package $PackageName
-Write-Host "After:  uid=$($after.Uid) appId=$($after.AppId) firstInstallTime=$($after.FirstInstallTime) lastUpdateTime=$($after.LastUpdateTime) version=$($after.VersionName)"
-
-if ($before.Uid -ne $after.Uid -or $before.AppId -ne $after.AppId -or $before.FirstInstallTime -ne $after.FirstInstallTime) {
-    throw "Package identity changed after reinstall. Check device data before continuing."
-}
-
-Write-Step "Done"
-Write-Host "Build/test/lint passed, and adb install -r completed without changing package uid/appId/firstInstallTime."

@@ -14,6 +14,29 @@
 .\scripts\run-safe-debug-check.cmd -InstallToDevice
 ```
 
+これらの安全スクリプトは低出力で動作します。成功時の標準出力はフェーズ名と最後の `Success` だけです。
+
+通常検証の成功例:
+
+```text
+Preflight
+Build
+UnitTest
+Lint
+Success
+```
+
+実機上書きありの成功例:
+
+```text
+Preflight
+Build
+UnitTest
+Lint
+Install
+Success
+```
+
 ## 実行条件
 
 - Windows PowerShellから、リポジトリルートまたは任意のカレントディレクトリで実行できます。
@@ -24,13 +47,15 @@
 
 ## やってくれること
 
-- `git status --short --branch` で現在のブランチと作業ツリーを表示します。
+- `git status --short --branch` で現在のブランチと作業ツリーをログへ記録します。
 - `git diff --check` で空白エラーを確認します。
 - `JAVA_HOME` と `PATH` をAndroid Studio同梱JBRへ合わせます。
-- `.\gradlew.bat assembleDebug testDebugUnitTest lintDebug --console=plain --no-daemon` を実行します。
+- `.\gradlew.bat :app:assembleDebug`、`:app:testDebugUnitTest`、`:app:lintDebug` をフェーズごとに実行します。
 - `-InstallToDevice` 指定時だけ、ADB端末が1台であること、既存packageがあること、debug APKが存在することを確認します。
 - `adb install -r` で上書き再インストールします。
 - 再インストール前後で `uid`、`appId`、`firstInstallTime` が変わっていないことを確認します。
+- Gradle、ADB、git、aaptの詳細出力は `build/safe-script-logs/` 配下のログファイルへ保存します。
+- フェーズごとに長めのtimeoutを持ち、timeout時は失敗フェーズとログパスを表示します。
 
 ## やらないこと
 
@@ -43,9 +68,32 @@
 
 ## 失敗したとき
 
-- Gradleが失敗した場合は、出力された最初のコンパイルエラー、テスト失敗、lintエラーを修正して再実行します。
+- 失敗時の標準出力は、失敗フェーズ、最初に確認すべきエラー情報、詳細ログファイルのパスを表示します。
+- Gradleが失敗した場合は、まず標準出力の `Error:` を確認し、それだけで原因が分からない場合に限り `Log:` のファイルを確認します。
 - `-InstallToDevice` でADB端末が0台または複数台の場合は、接続状態を整理してから再実行します。
 - 再インストール後に `uid`、`appId`、`firstInstallTime` が変わった場合は、以降の操作を止めて実機データ状態を確認します。
+
+失敗時の出力例:
+
+```text
+Preflight
+Build
+Failed: Build
+Error: <最初に確認すべきエラー情報>
+Log: <詳細ログファイルのパス>
+```
+
+timeout時の出力例:
+
+```text
+Preflight
+Build
+Failed: Build
+Error: Build timeout
+Log: <詳細ログファイルのパス>
+```
+
+Codexはスクリプト実行中に高頻度で進捗確認せず、十分長いtimeoutで起動します。成功時は詳細ログを読みません。失敗時だけ、標準出力の失敗フェーズ、エラー要約、ログパスを確認し、標準出力だけで原因が分からない場合に詳細ログを読みます。
 
 ## よく使う例
 
@@ -79,6 +127,18 @@ Copy-Item .\test-device.local.properties.example .\test-device.local.properties
 .\scripts\run-safe-integration-check.cmd
 ```
 
+成功時の標準出力例:
+
+```text
+Preflight
+Build
+UnitTest
+Lint
+Install
+IntegrationTest
+Success
+```
+
 この入口は次を満たさない限りインストール前に停止します。
 
 - `test-device.local.properties` の `testDeviceSerial` と接続端末が完全一致する
@@ -98,3 +158,13 @@ Copy-Item .\test-device.local.properties.example .\test-device.local.properties
 ```
 
 元DB・画像は読み取り元としてhashを取得するだけで、SQLiteで開くのは一時コピーです。OAuth設定やtokenは対象に含めません。
+
+成功時の標準出力例:
+
+```text
+Preflight
+SnapshotTest
+Success
+```
+
+失敗時は通常の `Failed:`、`Error:`、`Log:` に加えて、元DB hash、画像件数、画像byte数の前後確認に基づく `Impact:` を表示します。詳細なhash、件数、Gradle出力はログファイルへ保存します。
