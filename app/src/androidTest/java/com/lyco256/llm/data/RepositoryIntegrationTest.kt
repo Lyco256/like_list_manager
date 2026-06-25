@@ -230,14 +230,7 @@ class RepositoryIntegrationTest {
         val server = MockWebServer()
         server.start()
         try {
-            val png = ByteArrayOutputStream().use { output ->
-                Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888).run {
-                    eraseColor(android.graphics.Color.RED)
-                    compress(Bitmap.CompressFormat.PNG, 100, output)
-                    recycle()
-                }
-                output.toByteArray()
-            }
+            val png = pngBytes(android.graphics.Color.RED)
             server.enqueue(MockResponse().setResponseCode(200).setBody(okio.Buffer().write(png)))
             val media = XMedia("media-1", "photo", server.url("/photo.png").toString(), null, 2, 2)
             api.likedResponses += XApiResult(listOf(post("301", media = listOf(media))), null, null, null, null)
@@ -255,6 +248,46 @@ class RepositoryIntegrationTest {
                 assertNotNull(BitmapFactory.decodeFile(local.absolutePath))
             }
             assertEquals(1, server.requestCount)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun multiplePhotosStoreSeparateWebpFilesWhileBrokenPhotoIsRecordedAsFailed() = runBlocking {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(MockResponse().setResponseCode(200).setBody(okio.Buffer().write(pngBytes(android.graphics.Color.BLUE))))
+            server.enqueue(MockResponse().setResponseCode(200).setBody(okio.Buffer().write(pngBytes(android.graphics.Color.GREEN))))
+            server.enqueue(MockResponse().setResponseCode(200).setBody("not an image"))
+            val media = listOf(
+                XMedia("multi-1", "photo", server.url("/one.png").toString(), null, 2, 2),
+                XMedia("multi-2", "photo", server.url("/two.png").toString(), null, 2, 2),
+                XMedia("multi-broken", "photo", server.url("/broken.png").toString(), null, 2, 2),
+            )
+            api.likedResponses += XApiResult(listOf(post("303", media = media)), null, null, null, null)
+
+            repository.syncNow()
+
+            storage.withDatabase { database ->
+                val assets = database.clipDao().getAllAssets().sortedBy { it.mediaKey }
+                assertEquals(3, assets.size)
+                val stored = assets.filter { it.downloadState == "downloaded" }
+                val failed = assets.single { it.mediaKey == "multi-broken" }
+                assertEquals(setOf("multi-1", "multi-2"), stored.map { it.mediaKey }.toSet())
+                assertEquals(2, stored.mapNotNull { it.localPath }.toSet().size)
+                stored.forEach { asset ->
+                    val local = File(requireNotNull(asset.localPath))
+                    assertTrue(local.exists())
+                    assertTrue(local.extension.equals("webp", ignoreCase = true))
+                    assertTrue(requireNotNull(asset.sizeBytes) > 0)
+                    assertNotNull(BitmapFactory.decodeFile(local.absolutePath))
+                }
+                assertEquals("failed", failed.downloadState)
+                assertEquals(null, failed.localPath)
+            }
+            assertEquals(3, server.requestCount)
         } finally {
             server.shutdown()
         }
@@ -331,6 +364,15 @@ class RepositoryIntegrationTest {
         media = media,
         likeCount = 1,
     )
+
+    private fun pngBytes(color: Int): ByteArray = ByteArrayOutputStream().use { output ->
+        Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888).run {
+            eraseColor(color)
+            compress(Bitmap.CompressFormat.PNG, 100, output)
+            recycle()
+        }
+        output.toByteArray()
+    }
 }
 
 private data class LikedCall(val accessToken: String, val paginationToken: String?)

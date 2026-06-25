@@ -1,13 +1,15 @@
-# `MainActivityComposeTest.kt`
+# `app/src/androidTest/java/com/lyco256/llm/MainActivityComposeTest.kt`
 
-通常Runnerでのテスト間独立性を保つため、各テスト前に隔離DBだけを初期化してseedを再投入します。
+隔離された `com.lyco256.llm.test` 上で主要Compose画面を検証する実機/Instrumentationテストです。各テストの前に隔離DBだけを初期化し、seedデータを投入します。本番 `com.lyco256.llm` のDBや画像には触れません。
 
-Popup外タップは別ウィンドウを含む画面座標へtouch eventを注入し、閉じることと背面の投稿へタグ変更が伝播しないことを確認します。
+主な検証内容:
 
-同期使用量の上限・警告・停止表示と、隔離環境でXログイン操作が無効であることも検証します。
+- 主要タブ、設定/使用量ダイアログ、隔離環境でのXログイン無効化
+- 検索/絞り込みの適用、キャンセル、全クリアとDB fingerprint不変
+- 未分類から分類済みへの移動、分類解除、Roomの `clip_tags` 更新
+- 別グループに同名の子タグがある場合の複数タグ同時付与
+- タグ/グループ作成、同名子タグ、名称変更、削除
+- popup外tapがカードへ伝播せず、タグ関係も変化しないこと
+- 空状態、同期エラー表示、Activity再作成後のタブ復元
 
-検索条件の適用、未確定変更の破棄、全クリア、条件summary、投稿表示と、操作前後のDB fingerprint不変を検証します。
-
-タグ管理タブを選んだ状態でActivityを再作成し、選択タブと画面が復元されることを検証します。
-
-Compose semanticsを使い、主要タブ、画面切り替え、メニュー、API設定Dialogに加え、タグ作成、未分類から分類済みへの移動と解除、同名子タグ、名称変更、削除、popup外tapの非伝播、空状態、同期エラー表示を検証します。各操作後はRoom状態もassertし、スクリーンショット比較は行いません。
+変更時は `scripts/run-safe-integration-check.cmd` で、同じ実機上の本番package metadataが前後不変であることも合わせて確認します。

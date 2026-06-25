@@ -1,3 +1,15 @@
-# `RepositoryIntegrationTest.kt`
+# `app/src/androidTest/java/com/lyco256/llm/data/RepositoryIntegrationTest.kt`
 
-テスト専用Room DBとFake API/OAuthで、再同期時の手動概要・タグ保持、重複排除、pagination、空ページ終端、401 refresh、refresh失敗時の旧session保持、2ページ目失敗後のcontinuation再開、403/429/500、月間停止、WebP画像保存、画像失敗時の投稿保持、無効な保存先への移動失敗時のDB/画像維持、タグ/グループ削除時の投稿保護を検証します。
+隔離されたRoom DB、Fake OAuth、Fake X API、MockWebServerを使って `ClipRepository` の同期・保存・保護動作を検証するInstrumentationテストです。本番package、実X API、実OAuth tokenは使いません。
+
+主な検証内容:
+
+- 再同期時に手動概要・タグ・分類を保持し、新規投稿だけを追加すること
+- pagination、continuation再開、重複投稿防止、月間使用量/rate limit保存
+- 401時の1回refreshと、refresh失敗時に旧sessionを保持すること
+- 403/429/500や空ページで部分投稿や無限retryを発生させないこと
+- photo保存をWebP化し、既存投稿の画像を重複downloadしないこと
+- 複数photoを別WebPとして保存し、破損画像だけを `failed` asset として記録すること
+- 画像download失敗、保存先移動失敗、タグ/空グループ削除時にも投稿を保護すること
+
+変更時は `run-safe-integration-check.cmd` で実機統合テストを実行し、production metadataが前後不変であることを確認します。

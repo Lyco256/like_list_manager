@@ -151,6 +151,36 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun classifyingWithTwoSameNamedChildTagsPersistsBothTagRelations() {
+        val clipId = waitForSeededClip()
+        composeRule.onNodeWithTag("tab_tags").performClick()
+        val firstGroup = createRootGroup("複合付与グループA")
+        val secondGroup = createRootGroup("複合付与グループB")
+        val firstTag = createChildTag(firstGroup, "同名の子タグ")
+        val secondTag = createChildTag(secondGroup, "同名の子タグ")
+
+        composeRule.onNodeWithTag("tab_unclassified").performClick()
+        composeRule.onNode(
+            hasTestTag("tag_group_chip_$firstGroup") and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
+            useUnmergedTree = true,
+        ).performClick()
+        composeRule.onNodeWithTag("tag_chip_$firstTag", useUnmergedTree = true).performClick()
+        dismissBackHandledDialog()
+        composeRule.onNode(
+            hasTestTag("tag_group_chip_$secondGroup") and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
+            useUnmergedTree = true,
+        ).performClick()
+        composeRule.onNodeWithTag("tag_chip_$secondTag", useUnmergedTree = true).performClick()
+        dismissBackHandledDialog()
+        composeRule.onNodeWithTag("classify_$clipId").performClick()
+
+        waitUntil { clipTagIds(clipId) == setOf(firstTag, secondTag) }
+        composeRule.onNodeWithTag("tab_classified").performClick()
+        composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
+        assertEquals(setOf(firstTag, secondTag), clipTagIds(clipId))
+    }
+
+    @Test
     fun tagManagementCreatesSameNamedChildrenThenRenamesAndDeletes() {
         composeRule.onNodeWithTag("tab_tags").performClick()
         val firstGroup = createRootGroup("E2EグループA")
@@ -264,6 +294,13 @@ class MainActivityComposeTest {
 
     private fun clipTagIds(clipId: Long): Set<Long> = runBlocking {
         storage().withDatabase { it.clipDao().clipTagsForClipIds(listOf(clipId)).map { relation -> relation.tagId }.toSet() }
+    }
+
+    private fun dismissBackHandledDialog() {
+        composeRule.runOnUiThread {
+            composeRule.activity.onBackPressedDispatcher.onBackPressed()
+        }
+        composeRule.waitForIdle()
     }
 
     private fun tagsNamed(name: String): Int = runBlocking {

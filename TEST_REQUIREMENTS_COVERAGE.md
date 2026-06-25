@@ -22,11 +22,11 @@
 | 5 | Fake X API 同期 | 主要項目完了 | pagination、401/403/429/500、refresh 失敗、中断再開、欠落/不正 JSON、mixed media |
 | 6 | API 料金/rate limit | 主要項目完了 | production URL 遮断、呼出履歴、月間停止、429 無限 retry 防止 |
 | 7 | 検索/絞り込み | ロジック完了・UI残 | 全検索 target、regex、期間、投稿者、タグ複合、件数 summary、非変更。filter dialog E2E を追加予定 |
-| 8 | 分類操作 E2E | 一部完了 | 付与・解除、DB・件数、popup 非伝播、同名タグの実付与と複数タグ付与が残る |
+| 8 | 分類操作 E2E | 主要項目完了 | 付与・解除、DB・件数、popup 非伝播、別グループ同名タグの複数同時付与を確認 |
 | 9 | タグ/グループ管理 E2E | 一部完了 | 作成、同名子タグ、tag 名称変更/削除、group 削除、循環/順序ロジック。group 名称変更・代表移動 UI が残る |
 | 10 | スクロール/大量表示 | 実装済み・実機未確認 | 1,000 件末尾/先頭 UI、10,000 件 Room。端末再接続後に実行 |
 | 11 | Macrobenchmark | 完了 | `scripts/run-safe-macrobenchmark-check.cmd` で SC-56C 上の `com.lyco256.llm.test.benchmark` cold/warm startup を測定し、本番 metadata 前後不変を確認 |
-| 12 | 画像保存/圧縮 | 一部完了 | WebP、重複 download 防止、失敗時投稿保持、snapshot。複数画像と破損画像表示を追加予定 |
+| 12 | 画像保存/圧縮 | 主要項目完了 | WebP、重複 download 防止、失敗時投稿保持、複数画像の別WebP保存、破損画像のfailed asset記録、snapshot |
 | 13 | 設定/安全装置 | 一部完了 | 使用量表示、test login 無効、暗号化設定 roundtrip、無効保存先 rollback。保存先 cancel UI が残る |
 | 14 | エラー表示/復旧 | 一部完了 | 空、未 login、HTTP/timeout/JSON、画像/保存先、continuation 再開。再起動復旧と権限不足 UI が残る |
 | 15 | UI 状態・軽微バグ | 一部完了 | 主要 tab、dialog、件数、loading、empty、popup、LazyColumn、画面再作成と filter 戻る操作が残る |
