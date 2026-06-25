@@ -11,12 +11,14 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import com.lyco256.llm.data.PostStorageManager
@@ -126,6 +128,76 @@ class MainActivityComposeTest {
         composeRule.onNodeWithText("すべての条件をクリアしますか？").assertIsDisplayed()
         composeRule.onNodeWithTag("filter_clear_confirm").performClick()
         composeRule.onNodeWithText("対象:タグ付きのみ、条件なし").assertIsDisplayed()
+        assertEquals(before, databaseFingerprint())
+    }
+
+    @Test
+    fun filterDialogAppliesAuthorAndTagConditionsTogetherWithoutChangingDatabase() {
+        waitForSeededClip()
+        val now = Instant.now().toString()
+        val fixture = runBlocking {
+            storage().withDatabase { database ->
+                val clips = database.clipDao().getActiveClips().sortedBy { it.id }
+                val matching = clips[0]
+                val wrongAuthor = clips[1]
+                val untagged = clips[2]
+                database.clipDao().updateClip(
+                    matching.copy(
+                        text = "AuthorTagNeedle",
+                        authorId = "author-filter-a",
+                        authorName = "Author Alpha",
+                        authorUsername = "alpha",
+                    ),
+                )
+                database.clipDao().updateClip(
+                    wrongAuthor.copy(
+                        text = "AuthorTagNeedle",
+                        authorId = "author-filter-b",
+                        authorName = "Author Beta",
+                        authorUsername = "beta",
+                    ),
+                )
+                database.clipDao().updateClip(
+                    untagged.copy(
+                        text = "AuthorTagNeedle",
+                        authorId = "author-filter-a",
+                        authorName = "Author Alpha",
+                        authorUsername = "alpha",
+                    ),
+                )
+                val wantedTag = database.tagDao().insertTag(TagEntity(name = "FilterUiWanted", createdAt = now, updatedAt = now))
+                val otherTag = database.tagDao().insertTag(TagEntity(name = "FilterUiOther", createdAt = now, updatedAt = now))
+                database.clipDao().insertClipTag(ClipTagEntity(matching.id, wantedTag, now))
+                database.clipDao().insertClipTag(ClipTagEntity(wrongAuthor.id, otherTag, now))
+                FilterFixture(matching.id, wrongAuthor.id, untagged.id, wantedTag)
+            }
+        }
+        waitUntil {
+            clipTagIds(fixture.matchingClipId) == setOf(fixture.wantedTagId) &&
+                clipTagIds(fixture.wrongAuthorClipId).isNotEmpty()
+        }
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("tab_classified").performClick()
+        composeRule.onNodeWithTag("clip_card_${fixture.matchingClipId}").assertIsDisplayed()
+        composeRule.onNodeWithTag("clip_card_${fixture.wrongAuthorClipId}").assertIsDisplayed()
+
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_options_list")
+            .performScrollToNode(hasTestTag("filter_author_open"))
+        composeRule.onNodeWithTag("filter_author_open").performClick()
+        composeRule.onNodeWithTag("filter_author_option_author-filter-a_alpha").performClick()
+        composeRule.onNodeWithTag("filter_author_confirm").performClick()
+        composeRule.onNodeWithTag("filter_options_list")
+            .performScrollToNode(hasTestTag("filter_tag_condition_tag_${fixture.wantedTagId}"))
+        composeRule.onNodeWithTag("filter_tag_condition_tag_${fixture.wantedTagId}").performClick()
+        composeRule.onNodeWithTag("filter_apply").performClick()
+
+        composeRule.onNodeWithTag("clip_card_${fixture.matchingClipId}").assertIsDisplayed()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("clip_card_${fixture.wrongAuthorClipId}").fetchSemanticsNodes().isEmpty()
+        }
+        assertTrue(composeRule.onAllNodesWithTag("clip_card_${fixture.untaggedClipId}").fetchSemanticsNodes().isEmpty())
         assertEquals(before, databaseFingerprint())
     }
 
@@ -303,6 +375,13 @@ class MainActivityComposeTest {
     private fun clipTagIds(clipId: Long): Set<Long> = runBlocking {
         storage().withDatabase { it.clipDao().clipTagsForClipIds(listOf(clipId)).map { relation -> relation.tagId }.toSet() }
     }
+
+    private data class FilterFixture(
+        val matchingClipId: Long,
+        val wrongAuthorClipId: Long,
+        val untaggedClipId: Long,
+        val wantedTagId: Long,
+    )
 
     private fun dismissBackHandledDialog() {
         InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)

@@ -965,7 +965,10 @@ private fun SearchFilterDialog(
                     TextButton(onClick = { clearConfirmationOpen = true }) { Text("全クリア") }
                 }
                 LazyColumn(
-                    Modifier.weight(1f).padding(top = 8.dp),
+                    Modifier
+                        .weight(1f)
+                        .padding(top = 8.dp)
+                        .testTag("filter_options_list"),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     item {
@@ -1048,7 +1051,10 @@ private fun SearchFilterDialog(
                     item {
                         Text("ユーザー", style = MaterialTheme.typography.titleSmall)
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilledTonalButton(onClick = { authorDialogOpen = true }) {
+                            FilledTonalButton(
+                                onClick = { authorDialogOpen = true },
+                                modifier = Modifier.testTag("filter_author_open"),
+                            ) {
                                 Text("ユーザーを選択")
                             }
                             if (filters.selectedAuthors.isNotEmpty()) {
@@ -1119,7 +1125,9 @@ private fun SearchFilterDialog(
                                         FilterChip(
                                             selected = selected,
                                             onClick = { cycleTag(ref) },
-                                            modifier = Modifier.weight(1f),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("filter_tag_condition_${ref.type.name.lowercase()}_${ref.id}"),
                                             colors = FilterChipDefaults.filterChipColors(selectedContainerColor = tagFilterColor(state)),
                                             label = {
                                                 Column(horizontalAlignment = Alignment.Start) {
@@ -1305,7 +1313,11 @@ private fun AuthorFilterDialog(
                     LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         items(filtered, key = { "${it.key.authorId}:${it.key.username}" }) { author ->
                             Row(
-                                Modifier.fillMaxWidth().clickable { onToggle(author.key) }.padding(vertical = 4.dp),
+                                Modifier
+                                    .fillMaxWidth()
+                                    .testTag("filter_author_option_${author.key.authorId ?: "none"}_${author.key.username}")
+                                    .clickable { onToggle(author.key) }
+                                    .padding(vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Checkbox(checked = author.key in selectedAuthors, onCheckedChange = { onToggle(author.key) })
@@ -1320,7 +1332,7 @@ private fun AuthorFilterDialog(
                 }
             }
         },
-        confirmButton = { Button(onClick = onDismiss) { Text("決定") } },
+        confirmButton = { Button(onClick = onDismiss, modifier = Modifier.testTag("filter_author_confirm")) { Text("決定") } },
         dismissButton = { TextButton(onClick = onClear) { Text("クリア") } },
     )
 }
