@@ -4,3 +4,5 @@ testDeviceSerial=REPLACE_WITH_DEVICE_SERIAL
 allowCoLocatedProductionApp=true
 productionPackage=com.lyco256.llm
 testPackage=com.lyco256.llm.test
+benchmarkPackage=com.lyco256.llm.test.benchmark
+macrobenchmarkHostPackage=com.lyco256.llm.macrobenchmark.host

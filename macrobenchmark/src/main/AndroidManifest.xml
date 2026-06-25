@@ -1,7 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <queries>
+        <package android:name="com.lyco256.llm.test.benchmark" />
+    </queries>
+
     <application
         android:allowBackup="false"
         android:label="Like List Manager Macrobenchmark Host"
+        android:networkSecurityConfig="@xml/macrobenchmark_network_security_config"
         android:supportsRtl="true" />
 </manifest>

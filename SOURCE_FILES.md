@@ -128,6 +128,13 @@ MainActivity / Compose UI
 - `docs/app/src/test/java/com/lyco256/llm/TagHierarchyTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LikeListDatabaseMigrationTest.kt.md`
 
+### Macrobenchmark
+
+- `docs/macrobenchmark/build.gradle.kts.md`
+- `docs/macrobenchmark/src/main/AndroidManifest.xml.md`
+- `docs/macrobenchmark/src/main/res/xml/macrobenchmark_network_security_config.xml.md`
+- `docs/macrobenchmark/src/androidTest/java/com/lyco256/llm/macrobenchmark/StartupMacrobenchmark.kt.md`
+
 ### Scripts
 
 - `docs/scripts/SafeScriptCommon.ps1.md`
@@ -135,6 +142,8 @@ MainActivity / Compose UI
 - `docs/scripts/run-safe-debug-check.cmd.md`
 - `docs/scripts/run-safe-integration-check.ps1.md`
 - `docs/scripts/run-safe-integration-check.cmd.md`
+- `docs/scripts/run-safe-macrobenchmark-check.ps1.md`
+- `docs/scripts/run-safe-macrobenchmark-check.cmd.md`
 - `docs/scripts/run-safe-snapshot-check.ps1.md`
 - `docs/scripts/run-safe-snapshot-check.cmd.md`
 
@@ -173,6 +182,7 @@ MainActivity / Compose UI
 - AndroidJUnitRunner、Compose UI Test、Room統合、MockWebServerで環境分離、同期、データ保持、画像、HTTP異常系、主要画面を検証します。
 - `SnapshotCompatibilityTest` は明示指定されたDB・画像をホスト側の一時コピーで検証し、コピー元hash不変を確認します。
 - `scripts/run-safe-integration-check.cmd` はGit管理外の許可serialだけを受け入れ、同じ実機上でメインと `.test` のpackage・UID分離、メインmetadata前後不変を検証します。
+- `scripts/run-safe-macrobenchmark-check.cmd` は同じ許可serial上で `.test.benchmark` 対象APKとMacrobenchmarkホストだけを扱い、メインmetadata前後不変を検証します。
 - 2026-06-23にSC-56Cで本番と隔離テストを共存させ、実機統合テスト26件の全件成功を確認しました。
 
 追加したテスト文書:
