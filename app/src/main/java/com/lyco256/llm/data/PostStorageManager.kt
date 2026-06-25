@@ -44,7 +44,17 @@ data class PostStorageEstimate(
     val totalBytes: Long,
 )
 
-class PostStorageManager(private val context: Context) {
+data class PostStorageConfig(
+    val databaseName: String = "like_list_manager.db",
+    val imagesDirectory: String = "images",
+    val dataDirectory: String = "post_data",
+    val preferencesName: String = "post_storage_settings",
+)
+
+class PostStorageManager(
+    private val context: Context,
+    private val config: PostStorageConfig = PostStorageConfig(),
+) {
     private data class StoragePaths(
         val id: String,
         val type: PostStorageType,
@@ -55,7 +65,7 @@ class PostStorageManager(private val context: Context) {
         val available: Boolean,
     )
 
-    private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+    private val preferences = context.getSharedPreferences(config.preferencesName, Context.MODE_PRIVATE)
     private val mutex = Mutex()
     private val _database = MutableStateFlow<LikeListDatabase?>(null)
     private val _state = MutableStateFlow(PostStorageState())
@@ -251,23 +261,23 @@ class PostStorageManager(private val context: Context) {
             type = PostStorageType.INTERNAL,
             displayName = "内部ストレージ",
             root = context.filesDir,
-            database = context.getDatabasePath(DATABASE_NAME),
-            images = File(context.filesDir, IMAGES_DIRECTORY),
+            database = context.getDatabasePath(config.databaseName),
+            images = File(context.filesDir, config.imagesDirectory),
             available = true,
         )
         val external = context.getExternalFilesDirs(null)
             .filterNotNull()
             .filter { Environment.isExternalStorageRemovable(it) }
             .mapIndexed { index, directory ->
-                val root = File(directory, DATA_DIRECTORY)
+                val root = File(directory, config.dataDirectory)
                 val canonical = runCatching { root.canonicalPath }.getOrDefault(root.absolutePath)
                 StoragePaths(
                     id = "external:$canonical",
                     type = PostStorageType.EXTERNAL,
                     displayName = if (index == 0) "SDカード" else "SDカード ${index + 1}",
                     root = root,
-                    database = File(root, DATABASE_NAME),
-                    images = File(root, IMAGES_DIRECTORY),
+                    database = File(root, config.databaseName),
+                    images = File(root, config.imagesDirectory),
                     available = Environment.getExternalStorageState(directory) == Environment.MEDIA_MOUNTED,
                 )
             }
@@ -282,8 +292,8 @@ class PostStorageManager(private val context: Context) {
             type = PostStorageType.EXTERNAL,
             displayName = "選択中のSDカード",
             root = root,
-            database = File(root, DATABASE_NAME),
-            images = File(root, IMAGES_DIRECTORY),
+            database = File(root, config.databaseName),
+            images = File(root, config.imagesDirectory),
             available = false,
         )
     }
@@ -443,7 +453,6 @@ class PostStorageManager(private val context: Context) {
     }
 
     companion object {
-        private const val PREFERENCES = "post_storage_settings"
         private const val KEY_SELECTED_ID = "selected_id"
         private const val KEY_SELECTED_PATH = "selected_path"
         private const val KEY_MIGRATION_PHASE = "migration_phase"
@@ -451,9 +460,6 @@ class PostStorageManager(private val context: Context) {
         private const val KEY_MIGRATION_TARGET = "migration_target"
         private const val PHASE_COPYING = "copying"
         private const val PHASE_SWITCHED = "switched"
-        private const val DATABASE_NAME = "like_list_manager.db"
-        private const val IMAGES_DIRECTORY = "images"
-        private const val DATA_DIRECTORY = "post_data"
         private const val MIN_FREE_BYTES = 10L * 1024L * 1024L
     }
 }

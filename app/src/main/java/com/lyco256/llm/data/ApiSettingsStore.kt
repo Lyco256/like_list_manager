@@ -22,12 +22,24 @@ data class OAuthSession(
         get() = expiresAtEpochMillis?.let { it <= System.currentTimeMillis() + 60_000 } ?: false
 }
 
-class ApiSettingsStore(context: Context) {
+interface SettingsStore {
+    fun load(): ApiSettings
+    fun save(settings: ApiSettings)
+    fun loadSession(): OAuthSession?
+    fun saveSession(session: OAuthSession)
+    fun clearSession()
+    fun clear()
+}
+
+class ApiSettingsStore(
+    context: Context,
+    private val preferencesName: String = "api_settings",
+) : SettingsStore {
     private val appContext = context.applicationContext
     private val preferences: SharedPreferences by lazy {
         EncryptedSharedPreferences.create(
             appContext,
-            "api_settings",
+            preferencesName,
             MasterKey.Builder(appContext)
                 .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
                 .build(),
@@ -36,11 +48,11 @@ class ApiSettingsStore(context: Context) {
         )
     }
 
-    fun load(): ApiSettings = ApiSettings(
+    override fun load(): ApiSettings = ApiSettings(
         clientId = preferences.getString("clientId", "").orEmpty(),
     )
 
-    fun save(settings: ApiSettings) {
+    override fun save(settings: ApiSettings) {
         preferences.edit()
             .putString("clientId", settings.clientId.trim())
             .remove("authMode")
@@ -52,7 +64,7 @@ class ApiSettingsStore(context: Context) {
             .commit()
     }
 
-    fun loadSession(): OAuthSession? {
+    override fun loadSession(): OAuthSession? {
         val accessToken = preferences.getString("oauth2AccessToken", "").orEmpty()
         if (accessToken.isBlank()) return null
         return OAuthSession(
@@ -66,7 +78,7 @@ class ApiSettingsStore(context: Context) {
         )
     }
 
-    fun saveSession(session: OAuthSession) {
+    override fun saveSession(session: OAuthSession) {
         preferences.edit()
             .putString("oauth2AccessToken", session.accessToken)
             .putString("oauth2RefreshToken", session.refreshToken)
@@ -78,7 +90,7 @@ class ApiSettingsStore(context: Context) {
             .commit()
     }
 
-    fun clearSession() {
+    override fun clearSession() {
         preferences.edit()
             .remove("oauth2AccessToken")
             .remove("oauth2RefreshToken")
@@ -90,7 +102,36 @@ class ApiSettingsStore(context: Context) {
             .commit()
     }
 
-    fun clear() {
+    override fun clear() {
         preferences.edit().clear().commit()
+    }
+}
+
+class InMemorySettingsStore(
+    settings: ApiSettings = ApiSettings(),
+    session: OAuthSession? = null,
+) : SettingsStore {
+    private var currentSettings = settings
+    private var currentSession = session
+
+    override fun load(): ApiSettings = currentSettings
+
+    override fun save(settings: ApiSettings) {
+        currentSettings = settings.copy(clientId = settings.clientId.trim())
+    }
+
+    override fun loadSession(): OAuthSession? = currentSession
+
+    override fun saveSession(session: OAuthSession) {
+        currentSession = session
+    }
+
+    override fun clearSession() {
+        currentSession = null
+    }
+
+    override fun clear() {
+        currentSettings = ApiSettings()
+        currentSession = null
     }
 }

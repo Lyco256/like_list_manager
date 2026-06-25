@@ -146,6 +146,8 @@ MainActivity / Compose UI
 
 ## 関連文書
 
+- `TEST_REQUIREMENTS_COVERAGE.md`: 実機レベル統合テスト要件の項目別証跡、未確認事項、完了判定基準
+
 - `GOALS.md`: プロダクトの目的、MVP、将来目標
 - `SAFE_DEBUG_ROUTINE.md`: 毎回使い回せる安全なビルド/テスト/再インストール手順
 - `REAL_API_VERIFICATION.md`: 実Xアカウントでの確認手順
@@ -158,3 +160,22 @@ MainActivity / Compose UI
 - 右上メニューから未取得／期限到来した暫定値を月間残り枠内で一括再取得できます。
 - 投稿カードのいいね数・暫定警告、投稿者件数順、タグ投稿数、グループ直下要素数を表示します。
 - Room schema versionは4で、version 2→3と3→4 migrationを登録しています。
+
+## 2026-06-22 高リスク統合テスト基盤
+
+- `integrationTest` build typeは `com.lyco256.llm.test` と本番とは異なるDB、画像、Preferencesを使います。
+- テスト用Application containerは本番OAuth/X APIを無効化し、Repositoryテストだけが記録可能なFakeを注入します。
+- AndroidJUnitRunner、Compose UI Test、Room統合、MockWebServerで環境分離、同期、データ保持、画像、HTTP異常系、主要画面を検証します。
+- `SnapshotCompatibilityTest` は明示指定されたDB・画像をホスト側の一時コピーで検証し、コピー元hash不変を確認します。
+- `scripts/run-safe-integration-check.cmd` はGit管理外の許可serialだけを受け入れ、同じ実機上でメインと `.test` のpackage・UID分離、メインmetadata前後不変を検証します。
+- 2026-06-23にSC-56Cで本番と隔離テストを共存させ、実機統合テスト26件の全件成功を確認しました。
+
+追加したテスト文書:
+
+- `docs/app/src/androidTest/java/com/lyco256/llm/TestEnvironmentIsolationTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/RepositoryIntegrationTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/XApiClientMockWebServerTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/SettingsStoreIsolationTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/LargeDatasetIntegrationTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/MainActivityComposeTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/data/SnapshotCompatibilityTest.kt.md`

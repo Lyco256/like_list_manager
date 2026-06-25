@@ -21,3 +21,9 @@ Compose、Room、Coil、AndroidX Security Crypto、AppAuth、material icons exte
 ## 変更時の確認
 
 更新時は互換性、非推奨API、APKビルド、lintを確認します。
+
+## 統合テスト依存
+
+AndroidX Test Rules、Room testing、Compose UI Test、MockWebServer、sqlite-jdbcのversionとaliasを管理します。
+
+MacrobenchmarkとUI Automator、および `com.android.test` plugin aliasも管理します。

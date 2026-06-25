@@ -24,3 +24,9 @@
 ## 変更時の確認
 
 Repositoryのconstructor変更や新しい共有サービス追加時は、このファイルとApplication初期化を同時に確認します。
+
+## テスト分離
+
+`BuildConfig.TEST_HARNESS` がtrueの専用variantでは、テスト専用DB/画像/Preferences名、`InMemorySettingsStore`、`DisabledOAuthGateway`、`DisabledXApiGateway`を注入します。本番variantは従来どおり暗号化設定、AppAuth、X API実装を使います。
+
+テストvariantではsample mediaも無効化し、UI起動時のCoil外部画像通信を防ぎます。

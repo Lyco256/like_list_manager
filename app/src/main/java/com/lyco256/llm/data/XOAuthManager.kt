@@ -23,10 +23,16 @@ data class OAuthTokens(
     val scopes: String,
 )
 
-class XOAuthManager(context: Context) {
+interface OAuthGateway {
+    fun createAuthorizationIntent(clientId: String): Intent
+    suspend fun exchangeAuthorizationResult(intent: Intent): OAuthTokens
+    suspend fun refresh(clientId: String, refreshToken: String): OAuthTokens
+}
+
+class XOAuthManager(context: Context) : OAuthGateway {
     private val service = AuthorizationService(context.applicationContext)
 
-    fun createAuthorizationIntent(clientId: String): Intent {
+    override fun createAuthorizationIntent(clientId: String): Intent {
         require(clientId.isNotBlank()) { "OAuth 2.0 Client IDを先に保存してください" }
         val request = AuthorizationRequest.Builder(
             configuration,
@@ -39,7 +45,7 @@ class XOAuthManager(context: Context) {
         return service.getAuthorizationRequestIntent(request)
     }
 
-    suspend fun exchangeAuthorizationResult(intent: Intent): OAuthTokens {
+    override suspend fun exchangeAuthorizationResult(intent: Intent): OAuthTokens {
         val error = AuthorizationException.fromIntent(intent)
         if (error != null) throw IllegalStateException(error.errorDescription ?: "Xの認証がキャンセルされました", error)
         val response = AuthorizationResponse.fromIntent(intent)
@@ -47,7 +53,7 @@ class XOAuthManager(context: Context) {
         return performTokenRequest(response.createTokenExchangeRequest())
     }
 
-    suspend fun refresh(clientId: String, refreshToken: String): OAuthTokens {
+    override suspend fun refresh(clientId: String, refreshToken: String): OAuthTokens {
         val request = TokenRequest.Builder(configuration, clientId)
             .setGrantType("refresh_token")
             .setRefreshToken(refreshToken)
@@ -84,4 +90,15 @@ class XOAuthManager(context: Context) {
             Uri.parse("https://api.x.com/2/oauth2/token"),
         )
     }
+}
+
+class DisabledOAuthGateway : OAuthGateway {
+    override fun createAuthorizationIntent(clientId: String): Intent =
+        throw IllegalStateException("テスト環境では本番OAuthを開始できません")
+
+    override suspend fun exchangeAuthorizationResult(intent: Intent): OAuthTokens =
+        throw IllegalStateException("テスト環境では本番OAuth結果を処理できません")
+
+    override suspend fun refresh(clientId: String, refreshToken: String): OAuthTokens =
+        throw IllegalStateException("テスト環境では本番OAuth tokenを更新できません")
 }

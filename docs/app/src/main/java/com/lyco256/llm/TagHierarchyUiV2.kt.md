@@ -1,5 +1,9 @@
 # `TagHierarchyUiV2.kt`
 
+投稿一覧のLazyColumnには、未構築項目へ実機UIテストから安全にスクロールできる `clip_list` test tagがあります。
+
+絞り込みbutton、Dialog、タグのみswitch、検索欄、適用buttonには安定したtest tagを付け、複合条件と破棄動作をスクリーンショットなしで検証できます。
+
 ## 対応ソース
 
 `app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt`
@@ -54,3 +58,7 @@
 - 投稿カードは取得済みいいね数を表示し、1万以上を切り捨ての万表記にします。投稿後7日以内の取得値には警告を付け、タップで正確な件数・取得日時・警告または失敗理由を表示します。
 - 投稿者選択は現行順／全件件数順をDialog内で切り替え、表示専用スクロールバーを備えます。
 - 絞り込みではタグの投稿登録件数、グループの直下要素数を表示します。タグ管理の件数は背景Badgeを使わない薄い数字表示です。
+
+## UI自動テスト
+
+投稿カード、分類確定、タグchip、タグ管理row、操作menu、group展開、root追加buttonにはIDを含む安定した `testTag` を付けています。Compose E2Eは表示テキストだけに依存せず、操作後のRoom状態もassertします。

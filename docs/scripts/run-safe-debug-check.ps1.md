@@ -1,5 +1,7 @@
 # `run-safe-debug-check.ps1`
 
+Gradle taskはすべて `:app:` へ明示的に限定し、macrobenchmarkなど別moduleの同名taskを通常ゲートへ巻き込みません。
+
 ## 対応ソース
 
 `scripts/run-safe-debug-check.ps1`

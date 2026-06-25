@@ -34,10 +34,11 @@ data class LikeCountRefreshEstimate(
 class ClipRepository(
     private val context: Context,
     private val postStorageManager: PostStorageManager,
-    private val apiSettingsStore: ApiSettingsStore,
-    private val xOAuthManager: XOAuthManager,
+    private val apiSettingsStore: SettingsStore,
+    private val xOAuthManager: OAuthGateway,
+    private val xApiClient: XApiGateway,
+    private val includeSeedMedia: Boolean = true,
 ) {
-    private val xApiClient = XApiClient()
 
     val apiSettings: ApiSettings
         get() = apiSettingsStore.load()
@@ -202,7 +203,7 @@ class ClipRepository(
 
         samples.forEachIndexed { index, clip ->
             val id = clipDao.insertClip(clip)
-            if (id > 0 && index != 1) {
+            if (includeSeedMedia && id > 0 && index != 1) {
                 clipDao.insertAssets(
                     listOf(
                         AssetEntity(
@@ -223,7 +224,7 @@ class ClipRepository(
     suspend fun syncNow(): String = withContext(Dispatchers.IO) {
         postStorageManager.withDatabase { database ->
         val clipDao = database.clipDao()
-        val session = validSession() ?: return@withDatabase "X API設定からXにログインしてください"
+        var session = validSession() ?: return@withDatabase "X API設定からXにログインしてください"
 
         val currentMonth = YearMonth.now().toString()
         val previousRaw = clipDao.getSyncState() ?: SyncStateEntity()
@@ -263,18 +264,49 @@ class ClipRepository(
             val maxResults = minOf(pageLimit, remainingBudget - fetched)
             if (maxResults <= 0) break
 
+            val fetchPage = {
+                xApiClient.fetchLikedPosts(session.accessToken, session.xUserId, maxResults, paginationToken)
+            }
             val result = try {
-                xApiClient.fetchLikedPosts(
-                    accessToken = session.accessToken,
-                    xUserId = session.xUserId,
-                    maxResults = maxResults,
-                    paginationToken = paginationToken,
-                )
+                fetchPage()
             } catch (error: XApiException) {
-                if (error.statusCode == 401) apiSettingsStore.clearSession()
-                throw IllegalStateException(error.toUserMessage(), error)
+                if (error.statusCode == 429) {
+                    state = state.copy(
+                        likedPostsNextToken = paginationToken,
+                        rateLimitLimit = error.rateLimitLimit ?: state.rateLimitLimit,
+                        rateLimitRemaining = error.rateLimitRemaining ?: 0,
+                        rateLimitResetEpochSeconds = error.rateLimitReset ?: state.rateLimitResetEpochSeconds,
+                    )
+                    clipDao.upsertSyncState(state)
+                }
+                if (error.statusCode != 401) {
+                    if (error.statusCode != 429) {
+                        clipDao.upsertSyncState(state.copy(likedPostsNextToken = paginationToken))
+                    }
+                    throw IllegalStateException(error.toUserMessage(), error)
+                }
+                session = refreshSession(session) ?: run {
+                    throw IllegalStateException(error.toUserMessage(), error)
+                }
+                try {
+                    fetchPage()
+                } catch (retryError: XApiException) {
+                    if (retryError.statusCode == 401) apiSettingsStore.clearSession()
+                    throw IllegalStateException(retryError.toUserMessage(), retryError)
+                }
             }
             lastResult = result
+            if (result.posts.isEmpty()) {
+                paginationToken = null
+                state = state.copy(
+                    likedPostsNextToken = null,
+                    rateLimitLimit = result.rateLimitLimit,
+                    rateLimitRemaining = result.rateLimitRemaining,
+                    rateLimitResetEpochSeconds = result.rateLimitReset,
+                )
+                clipDao.upsertSyncState(state)
+                break
+            }
             fetched += result.posts.size
             if (firstPageFromTop) newestReturnedPostId = result.posts.firstOrNull()?.id
             val postsToInsert = postsBeforeFirstExisting(result.posts, existingPostIds)
@@ -446,13 +478,14 @@ class ClipRepository(
     private suspend fun validSession(): OAuthSession? {
         val current = apiSettingsStore.loadSession() ?: return null
         if (!current.isExpired) return current
-        val refreshToken = current.refreshToken ?: run {
-            apiSettingsStore.clearSession()
-            return null
-        }
+        return refreshSession(current)
+    }
+
+    private suspend fun refreshSession(current: OAuthSession): OAuthSession? {
+        val refreshToken = current.refreshToken ?: return null
         val clientId = apiSettingsStore.load().clientId
         if (clientId.isBlank()) return null
-        val refreshed = xOAuthManager.refresh(clientId, refreshToken)
+        val refreshed = runCatching { xOAuthManager.refresh(clientId, refreshToken) }.getOrNull() ?: return null
         return current.copy(
             accessToken = refreshed.accessToken,
             refreshToken = refreshed.refreshToken ?: refreshToken,

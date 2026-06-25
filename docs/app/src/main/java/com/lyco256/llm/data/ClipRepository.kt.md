@@ -22,6 +22,8 @@
 - 階層制約: グループ自身／子孫への移動を禁止し、タグとグループの混在順を正規化
 - `parentGroupIdForMove` / `orderNodesAfterMove` / `orderNodesAfterMoveAtSlot`: 移動元親の解決と移動後の兄弟順計算をJVM単体テスト可能な純粋関数として提供する。不正な負数indexは先頭へ丸めずエラーにします。
 - エラー: 401、403、429、5xxをユーザー向け文言へ変換
+- refresh通信自体が失敗した場合は旧sessionを消去せず、次回同期で再試行可能にする。refresh後のtokenでも401になった場合だけsessionを無効化する
+- page取得に失敗する直前のpagination tokenを同期状態へcheckpointし、次回同期を失敗pageから再開できるようにする
 
 ## 関連ファイル
 
@@ -46,3 +48,12 @@
 - 月間残り枠まで最大100件ずつ取得し、要求ID数を使用量へ加算します。完了バッチは即時保存し、一時エラー時の未処理投稿は次回候補に残します。
 - 通常同期は既存DBがあれば最初に5件だけ取得し、取得済み投稿IDに達したページでpaginationを停止します。新規が5件を超える場合だけ以降を100件単位で取得します。
 - 月間枠・rate limit・通信中断などで取得済み地点より前に止まる場合は、最後に成功したページの `next_token` をページごとに保存します。次回同期はその続きから再開し、続きの完了後は先頭も再確認します。
+
+## テスト可能な依存関係
+
+- `SettingsStore`、`OAuthGateway`、`XApiGateway`をconstructorから受け取り、Fakeで同期を一気通貫検証できます。
+- `XApiGateway`にdefault実装はなく、本番containerまたはテストが明示注入します。
+- 401ではrefresh tokenを1回だけ試して同じAPI要求を再実行し、再度401ならsessionを破棄します。
+- 429ではheaderからrate limit状態をDBへ保存してから同期を停止します。
+- 空ページへ不正なnext tokenが付いていてもtokenを破棄して終了し、無限loopを防ぎます。
+- `includeSeedMedia=false` のテストvariantでは外部画像URLを持つsample assetを作らず、UI起動だけでネットワーク通信しません。

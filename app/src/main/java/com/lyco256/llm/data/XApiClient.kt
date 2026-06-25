@@ -15,6 +15,9 @@ data class XUser(
 class XApiException(
     val statusCode: Int,
     val responseBody: String,
+    val rateLimitLimit: Int? = null,
+    val rateLimitRemaining: Int? = null,
+    val rateLimitReset: Long? = null,
 ) : IllegalStateException("X API error $statusCode: $responseBody")
 
 data class XPost(
@@ -57,17 +60,34 @@ data class XApiResult(
     val rateLimitReset: Long?,
 )
 
-class XApiClient {
+interface XApiGateway {
     fun fetchLikedPosts(
         accessToken: String,
         xUserId: String,
         maxResults: Int = 50,
         paginationToken: String? = null,
+    ): XApiResult
+
+    fun fetchPostMetrics(accessToken: String, postIds: List<String>): XPostMetricsResult
+    fun getMyUser(accessToken: String): XUser
+    fun revokeToken(clientId: String, token: String)
+}
+
+class XApiClient(
+    private val apiBaseUrl: String,
+    private val connectTimeoutMillis: Int = 20_000,
+    private val readTimeoutMillis: Int = 20_000,
+) : XApiGateway {
+    override fun fetchLikedPosts(
+        accessToken: String,
+        xUserId: String,
+        maxResults: Int,
+        paginationToken: String?,
     ): XApiResult {
         require(accessToken.isNotBlank()) { "Access Token is required." }
         require(xUserId.isNotBlank()) { "X User ID is required." }
 
-        val baseUrl = "https://api.x.com/2/users/$xUserId/liked_tweets"
+        val baseUrl = "$apiBaseUrl/users/$xUserId/liked_tweets"
         val query = linkedMapOf(
             "max_results" to maxResults.coerceIn(5, 100).toString(),
             "tweet.fields" to "id,text,created_at,author_id,attachments,public_metrics",
@@ -79,8 +99,8 @@ class XApiClient {
         val url = URL("$baseUrl?${query.toQueryString()}")
         val connection = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            connectTimeout = 20_000
-            readTimeout = 20_000
+            connectTimeout = connectTimeoutMillis
+            readTimeout = readTimeoutMillis
             setRequestProperty("Authorization", "Bearer $accessToken")
         }
 
@@ -88,7 +108,7 @@ class XApiClient {
             connection.inputStream.bufferedReader().use { it.readText() }
         } else {
             val error = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            throw XApiException(connection.responseCode, error)
+            throw connection.toXApiException(connection.responseCode, error)
         }
 
         return XApiResult(
@@ -100,17 +120,17 @@ class XApiClient {
         )
     }
 
-    fun fetchPostMetrics(accessToken: String, postIds: List<String>): XPostMetricsResult {
+    override fun fetchPostMetrics(accessToken: String, postIds: List<String>): XPostMetricsResult {
         require(accessToken.isNotBlank()) { "Access Token is required." }
         require(postIds.isNotEmpty() && postIds.size <= 100) { "Post IDs must contain 1 to 100 items." }
         val query = linkedMapOf(
             "ids" to postIds.joinToString(","),
             "tweet.fields" to "id,public_metrics",
         )
-        val connection = (URL("https://api.x.com/2/tweets?${query.toQueryString()}").openConnection() as HttpURLConnection).apply {
+        val connection = (URL("$apiBaseUrl/tweets?${query.toQueryString()}").openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            connectTimeout = 20_000
-            readTimeout = 20_000
+            connectTimeout = connectTimeoutMillis
+            readTimeout = readTimeoutMillis
             setRequestProperty("Authorization", "Bearer $accessToken")
         }
         val body = connection.readBodyOrThrow()
@@ -138,11 +158,11 @@ class XApiClient {
         )
     }
 
-    fun getMyUser(accessToken: String): XUser {
-        val connection = (URL("https://api.x.com/2/users/me?user.fields=id,name,username").openConnection() as HttpURLConnection).apply {
+    override fun getMyUser(accessToken: String): XUser {
+        val connection = (URL("$apiBaseUrl/users/me?user.fields=id,name,username").openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            connectTimeout = 20_000
-            readTimeout = 20_000
+            connectTimeout = connectTimeoutMillis
+            readTimeout = readTimeoutMillis
             setRequestProperty("Authorization", "Bearer $accessToken")
         }
         val body = connection.readBodyOrThrow()
@@ -154,12 +174,12 @@ class XApiClient {
         )
     }
 
-    fun revokeToken(clientId: String, token: String) {
+    override fun revokeToken(clientId: String, token: String) {
         val body = linkedMapOf("client_id" to clientId, "token" to token).toQueryString()
-        val connection = (URL("https://api.x.com/2/oauth2/revoke").openConnection() as HttpURLConnection).apply {
+        val connection = (URL("$apiBaseUrl/oauth2/revoke").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            connectTimeout = 20_000
-            readTimeout = 20_000
+            connectTimeout = connectTimeoutMillis
+            readTimeout = readTimeoutMillis
             doOutput = true
             setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
         }
@@ -205,12 +225,35 @@ class XApiClient {
     }
 }
 
+class DisabledXApiGateway : XApiGateway {
+    private fun denied(): Nothing = throw IllegalStateException("テスト環境から本番X APIへ接続できません")
+
+    override fun fetchLikedPosts(
+        accessToken: String,
+        xUserId: String,
+        maxResults: Int,
+        paginationToken: String?,
+    ): XApiResult = denied()
+
+    override fun fetchPostMetrics(accessToken: String, postIds: List<String>): XPostMetricsResult = denied()
+    override fun getMyUser(accessToken: String): XUser = denied()
+    override fun revokeToken(clientId: String, token: String) = denied()
+}
+
 private fun HttpURLConnection.readBodyOrThrow(): String {
     val status = responseCode
     if (status in 200..299) return inputStream.bufferedReader().use { it.readText() }
     val error = errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
-    throw XApiException(status, error)
+    throw toXApiException(status, error)
 }
+
+private fun HttpURLConnection.toXApiException(status: Int, body: String): XApiException = XApiException(
+    statusCode = status,
+    responseBody = body,
+    rateLimitLimit = getHeaderField("x-rate-limit-limit")?.toIntOrNull(),
+    rateLimitRemaining = getHeaderField("x-rate-limit-remaining")?.toIntOrNull(),
+    rateLimitReset = getHeaderField("x-rate-limit-reset")?.toLongOrNull(),
+)
 
 private fun org.json.JSONArray?.toMapById(key: String): Map<String, JSONObject> {
     if (this == null) return emptyMap()

@@ -112,7 +112,7 @@ if (Test-Path -LiteralPath $JavaHome) {
 }
 
 Invoke-Checked "Gradle assembleDebug, testDebugUnitTest, lintDebug" {
-    .\gradlew.bat assembleDebug testDebugUnitTest lintDebug --console=plain --no-daemon
+    .\gradlew.bat :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --console=plain --no-daemon
 }
 
 if (-not $InstallToDevice) {

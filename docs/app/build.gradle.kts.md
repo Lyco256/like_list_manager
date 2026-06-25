@@ -30,3 +30,12 @@ AndroidアプリモジュールのapplicationId、SDK、Java/Kotlin 21、Compose
 ## 変更時の確認
 
 依存追加やSDK変更後は `assembleDebug`、`testDebugUnitTest`、`lintDebug` を実行します。
+
+## 統合テスト基盤
+
+- `integrationTest` build typeは `com.lyco256.llm.test` とテスト専用保存名、Fake API/OAuthを使います。
+- 実機テストはAndroidJUnitRunnerで `.test` packageを対象に連続実行します。SC-56CではOrchestratorが正常なテストプロセス終了をクラッシュと誤判定するため使用しません。
+- `benchmark` build typeは軽量なdebug設定を継承しつつAPK自体は非debuggableな `com.lyco256.llm.test.benchmark` を生成し、専用DB・画像・Preferences、disabled OAuth/APIを使用します。R8縮小は性能測定の必須条件ではないため使いません。
+- Compose UI Test、Room testing、MockWebServer、sqlite-jdbcでUI・DB・HTTP・snapshotを検証します。
+- Instrumentation Testは `scripts/run-safe-integration-check.cmd` から、メインと `.test` を別package・別UIDで共存させる許可済み実機だけで実行します。
+- `verifyTestEnvironmentIsolation` はdebug/testの生成BuildConfigとtest merged manifestを検査し、本番identity・保存名・API・OAuth receiverの混入を端末接続なしで失敗させます。

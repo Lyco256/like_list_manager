@@ -4,6 +4,8 @@
 build/
 **/build/
 local.properties
+test-device.local.properties
+device-recovery-snapshot/
 gradle-*-bin.zip
 *.apk
 *.aab

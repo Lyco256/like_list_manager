@@ -37,3 +37,11 @@ fields/expansions変更時はJSON parser、Entity、UIを確認します。X API
 
 - liked posts同期は `tweet.fields=public_metrics` を要求し、`like_count` を返します。
 - `fetchPostMetrics` は最大100 IDを `/2/tweets` へ渡し、取得できた指標と投稿単位エラーを分離して返します。
+
+## テスト境界
+
+- `XApiGateway` がRepository向け契約です。
+- `XApiClient` はbase URLとtimeoutを注入でき、MockWebServerでJSON・HTTP異常系を検証します。
+- base URLにdefaultはなく、呼び出し側が本番またはlocalhostを明示しなければ生成できません。
+- `XApiException` は429時のlimit、remaining、resetを保持します。
+- `DisabledXApiGateway` はテスト用アプリからのネットワーク要求を即時拒否します。

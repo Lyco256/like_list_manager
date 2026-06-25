@@ -22,6 +22,12 @@
   - 投稿日の開始日と終了日がどちらも範囲に含まれることを確認します。
 - `invalidRegexSearchReturnsEmptyList`
   - 不正な正規表現でクラッシュせず0件になることを確認します。
+- `eachTextSearchTargetIsAppliedIndependentlyAndCaseInsensitively`
+  - 本文・概要・表示名・usernameを個別指定でき、大文字小文字を区別しないことを確認します。
+- `regexAndCombinedFiltersRequireEveryFilterDimension`
+  - 正規表現、期間、投稿者、タグの複合条件がすべて成立した投稿だけを返すことを確認します。
+- `filteringNeverMutatesClipsTagsOrSourceOrder`
+  - 検索しても投稿、タグ、asset、入力順序が変化しないことを確認します。
 - `siblingNameCannotDuplicateAcrossGroupAndTag`
   - 同一親配下でタグとグループの名前が重複できないことを確認します。
 - `groupCannotMoveIntoDescendant`
@@ -40,6 +46,8 @@
   - placeholder方式のslot indexが、drag中nodeを除外した兄弟リスト上の挿入位置として扱われることを確認します。
 - `slotMoveAcrossParentsInsertsAtRequestedSlot`
   - 別親へのslot移動と末尾移動が指定どおりになることを確認します。
+- `randomizedSlotMovesAlwaysPreserveEveryNodeExactlyOnce`
+  - 固定seedの250パターンで、任意の兄弟数・移動元・移動slotでもnode集合、件数、一意性、挿入位置が壊れない性質を確認します。
 - `negativeSlotIndexFails`
   - slot移動でも負数indexをエラーにすることを確認します。
 - `groupDropKeepsPreviousVisualPlaceholder`

@@ -32,3 +32,7 @@
 ## DB migration登録（2026-06-20）
 
 内部・SDカードの全保存先へ `MIGRATION_1_2`、いいね数列を追加する `MIGRATION_2_3`、同期継続tokenを追加する `MIGRATION_3_4` を登録します。
+
+## テスト分離
+
+`PostStorageConfig` でDB名、画像ディレクトリ、外部保存用ディレクトリ、保存先Preferences名を指定できます。通常値は従来と同一で、統合テストvariantだけ別名を使います。

@@ -61,3 +61,20 @@ MVPの上記機能は実装済みです。OAuth callback、token暗号化保存�
 - 料金確認と月間残り枠を伴う明示的ないいね数再取得を追加
 - 投稿者の件数順、タグ投稿数、グループ直下要素数の表示を追加
 - liked posts同期が途中終了した場合のnext token保存と次回再開を追加
+
+## 2026-06-22 達成済み
+
+- 本番packageを維持したまま、`com.lyco256.llm.test` の隔離統合テストvariantを追加
+- 本番OAuth、token store、X APIをテスト用アプリから利用できないfail-closed構成を追加
+- 再同期時の手動概要・タグ保持、重複排除、pagination、401 refresh、429、月間停止のRepository統合テストを追加
+- WebP保存、タグ/グループ削除時の投稿保護、MockWebServer異常系、主要Compose画面テストを追加
+- DB・実画像バックアップを一時コピーだけで検証する任意snapshotテストを追加
+
+## 2026-06-23 達成済み
+
+- SC-56Cへ本番 `com.lyco256.llm` と隔離テスト `com.lyco256.llm.test` を同時に導入し、異なるUIDで共存することを確認
+- 本番packageのpath、UID、version、初回導入日時、更新日時が実機テスト前後で不変であることを安全スクリプトで確認
+- AndroidJUnitRunnerによる実機統合テスト26件を全件成功（Compose UI、環境分離、Room migration、Repository、MockWebServer）
+- SC-56Cで正常終了をクラッシュ扱いするOrchestratorは使わず、各UIテスト前に隔離DBだけを初期化する構成へ変更
+
+次段階では、メインと隔離テストpackageを共存させた実機でAndroidJUnitRunnerの結果を継続確認し、大量データ、Macrobenchmark、property-based testing、より細かなUI状態の自動検査を追加します。SC-56CではOrchestratorが正常終了をクラッシュと誤判定するため採用しません。

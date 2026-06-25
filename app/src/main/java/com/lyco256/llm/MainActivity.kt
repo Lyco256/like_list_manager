@@ -54,6 +54,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +63,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -438,7 +440,7 @@ fun LikeListManagerUi(viewModel: MainViewModel, onLogin: (ApiSettings) -> Unit) 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSettings) -> Unit) {
-    var tab by remember { mutableStateOf(AppTab.Unclassified) }
+    var tab by rememberSaveable { mutableStateOf(AppTab.Unclassified) }
     var menuOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var usageOpen by remember { mutableStateOf(false) }
@@ -466,12 +468,16 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
     )
 
     Scaffold(
+        modifier = Modifier.testTag("main_screen"),
         topBar = {
             TopAppBar(
                 title = { Text(topBarTitle, fontWeight = FontWeight.SemiBold) },
                 actions = {
                     Box {
-                        IconButton(onClick = { menuOpen = true }) {
+                        IconButton(
+                            onClick = { menuOpen = true },
+                            modifier = Modifier.testTag("main_menu"),
+                        ) {
                             Text("...")
                         }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -525,6 +531,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
             NavigationBar {
                 AppTab.entries.forEach { item ->
                     NavigationBarItem(
+                        modifier = Modifier.testTag("tab_${item.name.lowercase()}"),
                         selected = tab == item,
                         onClick = { tab = item },
                         label = { Text(item.label) },
@@ -568,7 +575,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                 hierarchy = uiState.tagHierarchy,
                 emptyText = "タグなしのツイートはありません",
                 listState = unclassifiedListState,
-                modifier = Modifier.padding(padding),
+                modifier = Modifier.padding(padding).testTag("unclassified_screen"),
                 requireTagConfirmation = true,
                 onTagsChange = viewModel::setClipTags,
                 onSummaryChange = viewModel::updateSummary,
@@ -581,7 +588,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
             AppTab.Classified -> EnhancedClassifiedScreen(
                 uiState = uiState,
                 listState = classifiedListState,
-                modifier = Modifier.padding(padding),
+                modifier = Modifier.padding(padding).testTag("classified_screen"),
                 onApplyFilters = viewModel::applyFilters,
                 onClearAllFilters = viewModel::clearAllFilters,
                 onTagsChange = viewModel::setClipTags,
@@ -592,7 +599,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
             AppTab.Tags -> EnhancedTagListScreen(
                 hierarchy = uiState.tagHierarchy,
                 listState = tagListState,
-                modifier = Modifier.padding(padding),
+                modifier = Modifier.padding(padding).testTag("tags_screen"),
                 onCreateTag = { name, parent -> viewModel.createTag(name, parent) { syncMessage = it } },
                 onCreateGroup = { name, parent -> viewModel.createGroup(name, parent) { syncMessage = it } },
                 onRenameTag = { tag, name -> viewModel.renameTag(tag, name) { syncMessage = it } },
@@ -707,6 +714,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
         ApiSettingsDialog(
             initial = uiState.apiSettings,
             session = uiState.oauthSession,
+            loginEnabled = !BuildConfig.TEST_HARNESS,
             onDismiss = { settingsOpen = false },
             onSave = {
                 viewModel.saveApiSettings(it)
@@ -882,7 +890,7 @@ private fun StorageLocationCard(
 }
 
 @Composable
-private fun StorageProgressDialog(title: String, message: String) {
+internal fun StorageProgressDialog(title: String, message: String) {
     AlertDialog(
         onDismissRequest = {},
         title = { Text(title) },
@@ -1522,6 +1530,7 @@ fun UsageDialog(syncState: SyncStateEntity?, session: OAuthSession?, onDismiss: 
 fun ApiSettingsDialog(
     initial: ApiSettings,
     session: OAuthSession?,
+    loginEnabled: Boolean = true,
     onDismiss: () -> Unit,
     onSave: (ApiSettings) -> Unit,
     onClear: () -> Unit,
@@ -1547,12 +1556,15 @@ fun ApiSettingsDialog(
                 item {
                     Text(session?.let { "ログイン中: ${it.displayName} (@${it.username})" } ?: "Xにはまだログインしていません")
                 }
+                if (!loginEnabled) {
+                    item { Text("隔離テスト環境ではXログインを実行できません") }
+                }
                 item {
                     Button(
                         onClick = {
                             if (session == null) onLogin(settings) else onLogout()
                         },
-                        enabled = session != null || settings.clientId.isNotBlank(),
+                        enabled = loginEnabled && (session != null || settings.clientId.isNotBlank()),
                     ) {
                         Text(if (session == null) "保存してXにログイン" else "Xからログアウト")
                     }
@@ -1582,7 +1594,7 @@ fun ConfirmDialog(title: String, message: String, onDismiss: () -> Unit, onConfi
 
 @Composable
 fun EmptyState(message: String) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().testTag("empty_state"), contentAlignment = Alignment.Center) {
         Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

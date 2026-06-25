@@ -104,6 +104,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -213,7 +214,7 @@ fun EnhancedClipListScreen(
                 LazyColumn(
                     state = listState,
                     verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().testTag("clip_list"),
                 ) {
                     items(clips, key = { it.clip.id }) { clip ->
                         val selectedTagIds = if (requireTagConfirmation) {
@@ -314,10 +315,13 @@ fun EnhancedClassifiedScreen(
             onDismissRequest = { clearConfirmationOpen = false },
             title = { Text("すべての条件をクリアしますか？") },
             confirmButton = {
-                Button(onClick = {
-                    clearConfirmationOpen = false
-                    onClearAllFilters()
-                }) { Text("クリア") }
+                Button(
+                    onClick = {
+                        clearConfirmationOpen = false
+                        onClearAllFilters()
+                    },
+                    modifier = Modifier.testTag("filter_clear_confirm"),
+                ) { Text("クリア") }
             },
             dismissButton = {
                 TextButton(onClick = { clearConfirmationOpen = false }) { Text("キャンセル") }
@@ -417,8 +421,14 @@ fun EnhancedTagListScreen(
 
     Column(modifier.fillMaxSize().padding(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { createRequest = TagNodeType.GROUP to null }) { Text("グループ追加") }
-            Button(onClick = { createRequest = TagNodeType.TAG to null }) { Text("タグ追加") }
+            Button(
+                onClick = { createRequest = TagNodeType.GROUP to null },
+                modifier = Modifier.testTag("create_root_group"),
+            ) { Text("グループ追加") }
+            Button(
+                onClick = { createRequest = TagNodeType.TAG to null },
+                modifier = Modifier.testTag("create_root_tag"),
+            ) { Text("タグ追加") }
         }
         Spacer(Modifier.height(8.dp))
         Text("長押ししてドラッグすると、グループへの移動と並び替えができます", style = MaterialTheme.typography.bodySmall)
@@ -558,7 +568,7 @@ private fun EnhancedTweetCard(
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().testTag("clip_card_${clip.clip.id}"),
     ) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -673,6 +683,7 @@ private fun EnhancedTweetCard(
                     Button(
                         onClick = onTagConfirmation,
                         enabled = hierarchy.tags.isNotEmpty() && selectedTagIds.isNotEmpty(),
+                        modifier = Modifier.testTag("classify_${clip.clip.id}"),
                     ) {
                         Text("分類済みにする")
                     }
@@ -839,7 +850,7 @@ private fun TagFilterSummaryRow(
         }
         FilledTonalButton(
             onClick = onOpen,
-            modifier = Modifier.width(36.dp).height(32.dp),
+            modifier = Modifier.width(36.dp).height(32.dp).testTag("filter_open"),
             contentPadding = PaddingValues(0.dp),
         ) {
             Icon(
@@ -851,7 +862,7 @@ private fun TagFilterSummaryRow(
         TextButton(
             onClick = onClear,
             enabled = filters.hasActiveFilters,
-            modifier = Modifier.width(44.dp).height(32.dp),
+            modifier = Modifier.width(44.dp).height(32.dp).testTag("filter_clear"),
             contentPadding = PaddingValues(0.dp),
         ) {
             Text("クリア", style = MaterialTheme.typography.labelMedium, maxLines = 1)
@@ -944,7 +955,7 @@ private fun SearchFilterDialog(
         onDismissRequest = ::requestDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
     ) {
-        Surface(Modifier.fillMaxSize(), shape = RoundedCornerShape(0.dp)) {
+        Surface(Modifier.fillMaxSize().testTag("filter_dialog"), shape = RoundedCornerShape(0.dp)) {
             Column(Modifier.fillMaxSize().padding(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -963,7 +974,11 @@ private fun SearchFilterDialog(
                                 Text("タグのみ")
                                 Text("OFFで未分類ツイートも対象", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            Switch(checked = filters.taggedOnly, onCheckedChange = { filters = filters.copy(taggedOnly = it) })
+                            Switch(
+                                checked = filters.taggedOnly,
+                                onCheckedChange = { filters = filters.copy(taggedOnly = it) },
+                                modifier = Modifier.testTag("filter_tagged_only"),
+                            )
                         }
                     }
                     item { Divider() }
@@ -972,7 +987,7 @@ private fun SearchFilterDialog(
                         OutlinedTextField(
                             value = filters.query,
                             onValueChange = { filters = filters.copy(query = it) },
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().testTag("filter_query"),
                             singleLine = true,
                             isError = filters.regexError != null,
                             label = { Text("検索") },
@@ -1157,7 +1172,7 @@ private fun SearchFilterDialog(
                             onApply(filters)
                             onDismiss()
                         },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).testTag("filter_apply"),
                     ) { Text("適用") }
                 }
             }
@@ -1336,6 +1351,7 @@ private fun TagHierarchyChip(
         val selectedCount = hierarchy.descendantTagIdsByGroup[node.id].orEmpty().count { it in selectedTagIds }
         Surface(
             modifier = modifier
+                .testTag("tag_group_chip_${node.id}")
                 .heightIn(min = 32.dp)
                 .clip(shape)
                 .clickable { onOpenGroup(node.id) },
@@ -1368,6 +1384,7 @@ private fun TagHierarchyChip(
         val selected = tag.id in selectedTagIds
         Surface(
             modifier = modifier
+                .testTag("tag_chip_${tag.id}")
                 .heightIn(min = 32.dp)
                 .clip(shape)
                 .clickable { onToggleTag(tag.id) },
@@ -1426,6 +1443,7 @@ private fun TagManagementRow(
         Card(
             colors = CardDefaults.cardColors(containerColor = rowColor),
             modifier = Modifier
+                .testTag("tag_row_${row.node.ref().type.name.lowercase()}_${row.node.id}")
                 .padding(start = (row.depth * 14).dp)
                 .fillMaxWidth()
                 .onGloballyPositioned { onBounds(it.boundsInRoot()) }
@@ -1436,7 +1454,10 @@ private fun TagManagementRow(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                     if (row.node is TagGroupNode) {
-                        IconButton(onClick = onToggleExpanded) {
+                        IconButton(
+                            onClick = onToggleExpanded,
+                            modifier = Modifier.testTag("tag_expand_group_${row.node.id}"),
+                        ) {
                             Icon(
                                 Icons.Filled.KeyboardArrowRight,
                                 contentDescription = null,
@@ -1482,7 +1503,10 @@ private fun TagManagementRow(
                         )
                     }
                     Box {
-                        TextButton(onClick = { menuOpen = true }) { Text("操作") }
+                        TextButton(
+                            onClick = { menuOpen = true },
+                            modifier = Modifier.testTag("tag_operation_${row.node.ref().type.name.lowercase()}_${row.node.id}"),
+                        ) { Text("操作") }
                         androidx.compose.material3.DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             if (row.node is TagGroupNode) {
                                 androidx.compose.material3.DropdownMenuItem(

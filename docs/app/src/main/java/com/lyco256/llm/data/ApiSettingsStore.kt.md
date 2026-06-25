@@ -26,3 +26,9 @@ OAuth 2.0 Client IDとOAuthセッションを `EncryptedSharedPreferences` へ�
 ## 変更時の確認
 
 保存キー変更時は既存データ移行とログアウト動作を確認します。tokenやClient Secretをログ、通常Preferences、ソースへ出さないでください。
+
+## テスト分離
+
+- `SettingsStore` がRepository向けの保存契約です。
+- 本番は名前を指定できる `ApiSettingsStore`、統合テスト用アプリは永続化しない `InMemorySettingsStore` を使います。
+- テスト用アプリは暗号化済み本番PreferencesやOAuth tokenを読みません。

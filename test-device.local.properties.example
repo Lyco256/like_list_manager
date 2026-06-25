@@ -1,0 +1,6 @@
+# Copy this file to test-device.local.properties (ignored by Git).
+# The production and isolated test apps intentionally coexist on this device.
+testDeviceSerial=REPLACE_WITH_DEVICE_SERIAL
+allowCoLocatedProductionApp=true
+productionPackage=com.lyco256.llm
+testPackage=com.lyco256.llm.test

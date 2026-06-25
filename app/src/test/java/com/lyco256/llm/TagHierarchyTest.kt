@@ -23,6 +23,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.random.Random
 
 class TagHierarchyTest {
     private val now = "2026-06-15T00:00:00Z"
@@ -186,6 +187,87 @@ class TagHierarchyTest {
     }
 
     @Test
+    fun eachTextSearchTargetIsAppliedIndependentlyAndCaseInsensitively() {
+        val candidate = clip(
+            kotlin,
+            text = "Body Needle",
+            summary = "Summary Marker",
+            authorName = "Display Person",
+            username = "Account_Name",
+        )
+        val cases = listOf(
+            SearchTarget.Text to "body needle",
+            SearchTarget.Summary to "summary marker",
+            SearchTarget.AuthorName to "display person",
+            SearchTarget.Username to "account_name",
+        )
+
+        cases.forEach { (target, query) ->
+            val filters = TweetFilterState(query = query, searchTargets = setOf(target))
+            assertEquals(listOf(candidate), filterClipsForSearch(listOf(candidate), hierarchy(), filters))
+            assertEquals(
+                emptyList<ClipWithDetails>(),
+                filterClipsForSearch(listOf(candidate), hierarchy(), filters.copy(searchTargets = SearchTarget.entries.toSet() - target)),
+            )
+        }
+    }
+
+    @Test
+    fun regexAndCombinedFiltersRequireEveryFilterDimension() {
+        val matching = clip(
+            kotlin,
+            id = 201,
+            text = "Kotlin 2.0 migration",
+            authorId = "author-1",
+            username = "alice",
+            createdAt = "2026-06-12T12:00:00Z",
+        )
+        val wrongAuthor = clip(
+            kotlin,
+            id = 202,
+            text = "Kotlin 2.0 migration",
+            authorId = "author-2",
+            username = "bob",
+            createdAt = "2026-06-12T12:00:00Z",
+        )
+        val wrongTag = clip(
+            design,
+            id = 203,
+            text = "Kotlin 2.0 migration",
+            authorId = "author-1",
+            username = "alice",
+            createdAt = "2026-06-12T12:00:00Z",
+        )
+        val filters = TweetFilterState(
+            query = "kotlin\\s+2\\.0",
+            searchMode = SearchMode.Regex,
+            searchTargets = setOf(SearchTarget.Text),
+            startDate = java.time.LocalDate.of(2026, 6, 12),
+            endDate = java.time.LocalDate.of(2026, 6, 12),
+            selectedAuthors = setOf(TweetAuthorKey("author-1", "alice")),
+            tagFilters = mapOf(TagNodeRef(TagNodeType.TAG, kotlin.id) to TagFilterState.REQUIRED),
+        )
+
+        assertEquals(
+            listOf(matching),
+            filterClipsForSearch(listOf(matching, wrongAuthor, wrongTag), hierarchy(), filters),
+        )
+    }
+
+    @Test
+    fun filteringNeverMutatesClipsTagsOrSourceOrder() {
+        val first = clip(kotlin, id = 301, text = "needle")
+        val second = clip(design, id = 302, text = "other")
+        val source = mutableListOf(first, second)
+        val before = source.map { it.copy(clip = it.clip.copy(), tags = it.tags.toList(), assets = it.assets.toList()) }
+
+        filterClipsForSearch(source, hierarchy(), TweetFilterState(query = "needle"))
+
+        assertEquals(before, source)
+        assertEquals(listOf(301L, 302L), source.map { it.clip.id })
+    }
+
+    @Test
     fun filterSummaryShowsDefaultScopeAndNoAdditionalConditions() {
         assertEquals(
             "対象:タグ付きのみ、条件なし",
@@ -307,6 +389,24 @@ class TagHierarchyTest {
 
         assertEquals(listOf(a, moved, b), orderNodesAfterMoveAtSlot(listOf(a, b), moved, 1))
         assertEquals(listOf(a, b, moved), orderNodesAfterMoveAtSlot(listOf(a, b), moved, Int.MAX_VALUE))
+    }
+
+    @Test
+    fun randomizedSlotMovesAlwaysPreserveEveryNodeExactlyOnce() {
+        val random = Random(0x4C4C4D)
+        repeat(250) {
+            val size = random.nextInt(1, 80)
+            val nodes = (0 until size).map { id -> TagNodeRef(TagNodeType.TAG, id.toLong()) }
+            val moved = nodes[random.nextInt(nodes.size)]
+            val requestedSlot = random.nextInt(0, size + 20)
+
+            val result = orderNodesAfterMoveAtSlot(nodes, moved, requestedSlot)
+
+            assertEquals(nodes.size, result.size)
+            assertEquals(nodes.toSet(), result.toSet())
+            assertEquals(1, result.count { it == moved })
+            assertEquals(requestedSlot.coerceAtMost(size - 1), result.indexOf(moved))
+        }
     }
 
     @Test(expected = IllegalArgumentException::class)
@@ -465,7 +565,9 @@ class TagHierarchyTest {
         vararg tags: TagEntity,
         id: Long = 100,
         text: String = "text",
+        summary: String = "",
         authorId: String? = null,
+        authorName: String = "author",
         username: String = "author",
         createdAt: String = now,
     ) = ClipWithDetails(
@@ -473,13 +575,14 @@ class TagHierarchyTest {
             id = id,
             xPostId = "x-$id",
             authorId = authorId,
-            authorName = "author",
+            authorName = authorName,
             authorUsername = username,
             text = text,
             postUrl = "https://x.com/$username/status/x-$id",
             xCreatedAt = createdAt,
             savedAt = now,
             syncedAt = now,
+            summary = summary,
         ),
         assets = emptyList(),
         tags = tags.toList(),

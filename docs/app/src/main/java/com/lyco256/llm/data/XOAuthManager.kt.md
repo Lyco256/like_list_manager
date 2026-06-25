@@ -34,3 +34,7 @@ AppAuthを使い、XのOAuth 2.0 Authorization Code Flow with PKCEを実行し�
 ## 変更時の確認
 
 endpoint、scope、callback変更時はX Developer Console、Manifest、設定画面、実機callbackをまとめて確認します。
+
+## テスト境界
+
+`OAuthGateway` を介してRepositoryへ注入します。統合テスト用アプリは `DisabledOAuthGateway` を使い、認証画面、code交換、token refreshを本番endpointへ送信できません。Repositoryテストでは記録可能なFakeを使います。

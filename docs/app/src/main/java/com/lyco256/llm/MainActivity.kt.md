@@ -22,12 +22,13 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 - `MainViewModel.applyFilters`: 絞り込みDialogで確定した `TweetFilterState` 全体を一括反映します。Dialog内の編集中はViewModelの確定条件を変更しません。
 - `filterClipsForSearch`: 分類済み画面の共通フィルター関数です。タグのみ、日付、ユーザー、タグ、文字列検索を適用し、正規表現が不正な場合は0件扱いにします。
 - `screenTitle`: 現在のタブやDialog状態からTopAppBar表示名を生成し、未分類では総未分類件数を表示します。
+- 選択中タブは `rememberSaveable` で保持し、Activity再作成後も同じ画面へ復元します。
 - `EnhancedClipListScreen` / `EnhancedClassifiedScreen` / `EnhancedTagListScreen` を呼び出して、未分類、全ツイート検索、タグ管理の画面へ接続する
 - 未分類画面の投稿者タップは分類済み画面へ移動し、タグのみOFFのユーザー絞り込みを開始します。
 - 画面内の重複見出しは出さず、現在画面名はTopAppBarへ集約します。
 - タグリストのドラッグ並び替えは `moveTagNodeToIndex` から `ClipRepository.moveNodeToParentAtSlot` へ渡し、UI側placeholderIndexとRepository側indexの意味を揃える
 - `TagListScreen` 系の旧Composableは履歴として残しているが、実際の表示は `TagHierarchyUiV2.kt` 側が担当する
-- `ApiSettingsDialog`: Client ID保存、Xログイン、ログアウト
+- `ApiSettingsDialog`: Client ID保存、Xログイン、ログアウト。隔離テストvariantではログイン操作を無効化し、実OAuthへ遷移できないことを表示します。
 - `PostStorageDialog`: 内部/SDカードの一覧、現在地、使用量、空き容量、移動開始
 - 保存先移動中は投稿一覧の代わりに待機画面を表示し、編集や同期を行わせない
 - SDカード未装着時は投稿一覧と編集・同期を停止し、保存先確認を案内
@@ -55,3 +56,9 @@ UI項目を追加する場合は、対応するViewModel操作、Repository API�
 ## いいね数再取得入口（2026-06-20）
 
 右上メニューから対象件数・月間枠内の実行件数・推定料金を確認し、明示確定後だけ再取得します。処理中は待機Dialog、終了後は成功・恒久失敗・中断概要を表示します。
+
+## UI自動テスト
+
+主要画面、ナビゲーション、メニュー、空状態に安定したCompose `testTag` を設定しています。表示テキストとtagを使って画面遷移をassertし、スクリーンショットを合否判定には使いません。
+
+`StorageProgressDialog` はandroidTestからloading表示を直接renderできるinternal composableです。
