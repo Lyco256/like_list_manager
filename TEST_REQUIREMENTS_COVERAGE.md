@@ -23,7 +23,7 @@
 | 6 | API料金/rate limit | 主要項目完了 | production URL遮断、呼出履歴、月間停止、429無限retry防止 |
 | 7 | 検索/絞り込み | ロジック完了・主要UI完了 | 全検索target、regex、期間、投稿者、タグ複合、件数summary、非変更。filter dialogのquery適用、日付条件適用/クリア、投稿者＋タグ条件の複合E2E、Cancel/Back破棄、全クリアE2Eを確認 |
 | 8 | 分類操作 E2E | 主要項目完了 | 付与・解除、DB・件数、popup非伝播、別グループ同名タグの複数同時付与を確認 |
-| 9 | タグ/グループ管理 E2E | 一部完了 | 作成、同名子タグ、tag名称変更/削除、group名称変更/削除、循環/順序ロジック。代表移動UIが残る |
+| 9 | タグ/グループ管理 E2E | 主要項目完了 | 作成、同名子タグ、tag名称変更/削除、group名称変更/削除、タグの別グループ移動UI、循環/順序ロジックを確認 |
 | 10 | スクロール/大量表示 | 実装済み・実機未確認 | 1,000件末尾/先頭UI、10,000件Room。端末再接続後に実行 |
 | 11 | Macrobenchmark | 完了 | `scripts/run-safe-macrobenchmark-check.cmd` で SC-56C 上の `com.lyco256.llm.test.benchmark` cold/warm startupを測定し、本番metadata前後不変を確認 |
 | 12 | 画像保存/圧縮 | 主要項目完了 | WebP、重複download防止、失敗時投稿保持、複数画像の別WebP保存、破損画像のfailed asset記録、snapshot |

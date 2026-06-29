@@ -403,6 +403,23 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun tagManagementMovesTagToAnotherGroupThroughDialog() {
+        composeRule.onNodeWithTag("tab_tags").performClick()
+        val sourceGroup = createRootGroup("E2E移動元グループ")
+        val targetGroup = createRootGroup("E2E移動先グループ")
+        val movedTag = createChildTag(sourceGroup, "E2E移動タグ")
+        waitUntil { tagParentGroupId(movedTag) == sourceGroup }
+
+        composeRule.onNodeWithTag("tag_expand_group_$sourceGroup").performClick()
+        composeRule.onNodeWithTag("tag_operation_tag_$movedTag").performClick()
+        composeRule.onNodeWithText("別グループへ移動").performClick()
+        composeRule.onNodeWithTag("move_node_target_group_$targetGroup").performClick()
+
+        waitUntil { tagParentGroupId(movedTag) == targetGroup }
+        assertEquals(targetGroup, tagParentGroupId(movedTag))
+    }
+
+    @Test
     fun dismissingTagPopupOutsideDoesNotModifyOrPropagateToTheClip() {
         val clipId = waitForSeededClip()
         composeRule.onNodeWithTag("tab_tags").performClick()
@@ -539,6 +556,10 @@ class MainActivityComposeTest {
 
     private fun tagExists(id: Long): Boolean = runBlocking {
         storage().withDatabase { it.tagDao().getTags().any { tag -> tag.id == id } }
+    }
+
+    private fun tagParentGroupId(id: Long): Long? = runBlocking {
+        storage().withDatabase { it.tagDao().getTags().single { tag -> tag.id == id }.parentGroupId }
     }
 
     private fun groupExists(id: Long): Boolean = runBlocking {

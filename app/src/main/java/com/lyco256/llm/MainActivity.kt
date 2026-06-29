@@ -1490,9 +1490,19 @@ fun MoveNodeDialog(node: TagTreeNode, groups: List<TagGroupEntity>, onDismiss: (
         title = { Text("「${node.name}」を移動") },
         text = {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                item { AssistChip(onClick = { onMove(null) }, label = { Text("ルート") }) }
+                item {
+                    AssistChip(
+                        onClick = { onMove(null) },
+                        modifier = Modifier.testTag("move_node_target_root"),
+                        label = { Text("ルート") },
+                    )
+                }
                 items(groups, key = { it.id }) { group ->
-                    AssistChip(onClick = { onMove(group.id) }, label = { Text(group.name) })
+                    AssistChip(
+                        onClick = { onMove(group.id) },
+                        modifier = Modifier.testTag("move_node_target_group_${group.id}"),
+                        label = { Text(group.name) },
+                    )
                 }
             }
         },

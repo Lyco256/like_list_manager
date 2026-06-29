@@ -22,6 +22,8 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 
 `StorageMoveEstimateDialog` は移動開始を伴わないキャンセルUIをandroidTestから直接renderできます。`StorageProgressDialog` はandroidTestからloading表示を直接renderできるinternal composableです。
 
+タグ移動Dialogの移動先には `move_node_target_root` と `move_node_target_group_<groupId>` のtest tagを付け、E2Eから表示テキストだけに依存せず移動先を選べます。
+
 ## 変更時の確認
 
 UI項目を追加する場合は、対応するViewModel操作、Repository API、Entity/DAOの必要性を確認します。OAuth画面を変える場合はManifestと `XOAuthManager`、保存先画面を変える場合は `PostStorageManager` と安全な実機上書き手順も合わせて確認します。
