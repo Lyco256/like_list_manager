@@ -349,6 +349,70 @@ class RepositoryIntegrationTest {
     }
 
     @Test
+    fun tagAndGroupMoveOperationsPersistParentsAndSiblingOrder() = runBlocking {
+        val now = Instant.now().toString()
+        val fixture = storage.withDatabase { database ->
+            val alphaGroup = database.tagDao().insertGroup(TagGroupEntity(name = "Alpha", sortOrder = 0, createdAt = now, updatedAt = now))
+            val betaGroup = database.tagDao().insertGroup(TagGroupEntity(name = "Beta", sortOrder = 1, createdAt = now, updatedAt = now))
+            val gammaGroup = database.tagDao().insertGroup(TagGroupEntity(name = "Gamma", parentGroupId = alphaGroup, sortOrder = 0, createdAt = now, updatedAt = now))
+            val alphaTag = database.tagDao().insertTag(TagEntity(name = "AlphaTag", parentGroupId = alphaGroup, sortOrder = 1, createdAt = now, updatedAt = now))
+            val betaTag = database.tagDao().insertTag(TagEntity(name = "BetaTag", parentGroupId = betaGroup, sortOrder = 0, createdAt = now, updatedAt = now))
+            val rootTag = database.tagDao().insertTag(TagEntity(name = "RootTag", sortOrder = 2, createdAt = now, updatedAt = now))
+            MoveFixture(alphaGroup, betaGroup, gammaGroup, alphaTag, betaTag, rootTag)
+        }
+
+        repository.moveNode(TagNodeRef(TagNodeType.TAG, fixture.alphaTag), fixture.betaGroup)
+        assertEquals(
+            listOf("tag:${fixture.betaTag}:0", "tag:${fixture.alphaTag}:1"),
+            siblingOrder(fixture.betaGroup),
+        )
+
+        repository.moveNodeToParentAtSlot(TagNodeRef(TagNodeType.TAG, fixture.alphaTag), fixture.betaGroup, 0)
+        assertEquals(
+            listOf("tag:${fixture.alphaTag}:0", "tag:${fixture.betaTag}:1"),
+            siblingOrder(fixture.betaGroup),
+        )
+
+        repository.moveNodeToParentAt(TagNodeRef(TagNodeType.TAG, fixture.alphaTag), null, 1)
+        assertEquals(null, tagParentGroupId(fixture.alphaTag))
+        assertEquals(
+            listOf("group:${fixture.alphaGroup}:0", "tag:${fixture.alphaTag}:1", "group:${fixture.betaGroup}:2", "tag:${fixture.rootTag}:3"),
+            siblingOrder(null),
+        )
+
+        repository.moveNode(TagNodeRef(TagNodeType.GROUP, fixture.gammaGroup), fixture.betaGroup)
+        assertEquals(
+            listOf("tag:${fixture.betaTag}:0", "group:${fixture.gammaGroup}:1"),
+            siblingOrder(fixture.betaGroup),
+        )
+
+        repository.moveNodeToParentAtSlot(TagNodeRef(TagNodeType.GROUP, fixture.gammaGroup), null, 0)
+        assertEquals(null, groupParentGroupId(fixture.gammaGroup))
+        assertEquals(
+            listOf("group:${fixture.gammaGroup}:0", "group:${fixture.alphaGroup}:1", "tag:${fixture.alphaTag}:2", "group:${fixture.betaGroup}:3", "tag:${fixture.rootTag}:4"),
+            siblingOrder(null),
+        )
+
+        repository.reorderSiblings(
+            null,
+            listOf(
+                TagNodeRef(TagNodeType.GROUP, fixture.betaGroup),
+                TagNodeRef(TagNodeType.GROUP, fixture.gammaGroup),
+                TagNodeRef(TagNodeType.TAG, fixture.alphaTag),
+                TagNodeRef(TagNodeType.GROUP, fixture.alphaGroup),
+                TagNodeRef(TagNodeType.TAG, fixture.rootTag),
+            ),
+        )
+
+        assertEquals(
+            listOf("group:${fixture.betaGroup}:0", "group:${fixture.gammaGroup}:1", "tag:${fixture.alphaTag}:2", "group:${fixture.alphaGroup}:3", "tag:${fixture.rootTag}:4"),
+            siblingOrder(null),
+        )
+        assertEquals(fixture.betaGroup, tagParentGroupId(fixture.betaTag))
+        assertEquals(emptyList<String>(), siblingOrder(fixture.alphaGroup))
+    }
+
+    @Test
     fun deletingTagOrEmptyGroupNeverDeletesTheClip() = runBlocking {
         val now = Instant.now().toString()
         val (clipId, tagId, groupId) = storage.withDatabase { database ->
@@ -399,6 +463,33 @@ class RepositoryIntegrationTest {
         }
         output.toByteArray()
     }
+
+    private suspend fun siblingOrder(parentGroupId: Long?): List<String> = storage.withDatabase { database ->
+        val groups = database.tagDao().getGroups()
+            .filter { it.parentGroupId == parentGroupId }
+            .map { "group:${it.id}:${it.sortOrder}" }
+        val tags = database.tagDao().getTags()
+            .filter { it.parentGroupId == parentGroupId }
+            .map { "tag:${it.id}:${it.sortOrder}" }
+        (groups + tags).sortedBy { it.substringAfterLast(':').toInt() }
+    }
+
+    private suspend fun tagParentGroupId(id: Long): Long? = storage.withDatabase { database ->
+        database.tagDao().getTags().single { it.id == id }.parentGroupId
+    }
+
+    private suspend fun groupParentGroupId(id: Long): Long? = storage.withDatabase { database ->
+        database.tagDao().getGroups().single { it.id == id }.parentGroupId
+    }
+
+    private data class MoveFixture(
+        val alphaGroup: Long,
+        val betaGroup: Long,
+        val gammaGroup: Long,
+        val alphaTag: Long,
+        val betaTag: Long,
+        val rootTag: Long,
+    )
 }
 
 private data class LikedCall(val accessToken: String, val paginationToken: String?)

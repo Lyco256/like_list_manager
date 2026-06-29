@@ -11,6 +11,7 @@
 - 403/429/500や空ページで部分投稿や無限retryを発生させないこと
 - photo保存をWebP化し、既存投稿の画像を重複downloadしないこと
 - 複数photoを別WebPとして保存し、破損画像だけを `failed` asset として記録すること
+- Repository経由のタグ/グループ移動API全種で、親と兄弟順がRoomへ永続化されること
 - 画像download失敗、保存先移動失敗、タグ/空グループ削除時にも投稿を保護すること
 
 変更時は `run-safe-integration-check.cmd` で実機統合テストを実行し、production metadataが前後不変であることを確認します。
