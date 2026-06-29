@@ -831,6 +831,7 @@ fun PostStorageDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.testTag("post_storage_dialog"),
         title = { Text("投稿データの保存先") },
         text = {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -856,7 +857,7 @@ fun PostStorageDialog(
                 if (state.isMigrating) item { Text(state.migrationMessage ?: "移動中です") }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("閉じる") } },
+        confirmButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("post_storage_close")) { Text("閉じる") } },
     )
 }
 

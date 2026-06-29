@@ -27,7 +27,7 @@
 | 10 | スクロール/大量表示 | 実装済み・実機未確認 | 1,000件末尾/先頭UI、10,000件Room。端末再接続後に実行 |
 | 11 | Macrobenchmark | 完了 | `scripts/run-safe-macrobenchmark-check.cmd` で SC-56C 上の `com.lyco256.llm.test.benchmark` cold/warm startupを測定し、本番metadata前後不変を確認 |
 | 12 | 画像保存/圧縮 | 主要項目完了 | WebP、重複download防止、失敗時投稿保持、複数画像の別WebP保存、破損画像のfailed asset記録、snapshot |
-| 13 | 設定/安全装置 | 一部完了 | 使用量表示、test login無効、暗号化設定roundtrip、無効保存先rollback。保存先cancel UIが残る |
+| 13 | 設定/安全装置 | 一部完了 | 使用量表示、test login無効、暗号化設定roundtrip、無効保存先rollback、保存先Dialogの閉じる操作とDB不変。保存先移動見積もりcancel UIが残る |
 | 14 | エラー表示/復旧 | 一部完了 | 空、未login、HTTP/timeout/JSON、画像/保存先、continuation再開。再起動復旧と権限不足UIが残る |
 | 15 | UI状態・軽微バグ | 一部完了 | 主要tab、dialog、件数、loading、empty、popup、LazyColumn、画面再作成、filter BackHandler破棄を確認。画像viewerなど細部の追加E2Eを継続 |
 | 16 | 回帰テスト枠 | 運用開始 | popup外tap、二重同期、continuation、保存先失敗を回帰化。発見ごとに追加 |

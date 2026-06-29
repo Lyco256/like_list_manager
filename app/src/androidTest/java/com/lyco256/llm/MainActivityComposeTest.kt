@@ -88,6 +88,20 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun storageLocationDialogDismissDoesNotChangeDatabase() {
+        waitForSeededClip()
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("main_menu").performClick()
+        composeRule.onNodeWithText("投稿データの保存先").performClick()
+        composeRule.onNodeWithTag("post_storage_dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("post_storage_close").performClick()
+        composeRule.onNodeWithTag("main_screen").assertIsDisplayed()
+
+        assertEquals(before, databaseFingerprint())
+    }
+
+    @Test
     fun filterApplyDiscardAndClearKeepDatabaseUnchanged() {
         val clipId = waitForSeededClip()
         val now = Instant.now().toString()
