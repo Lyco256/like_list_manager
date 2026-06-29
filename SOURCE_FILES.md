@@ -127,6 +127,7 @@ MainActivity / Compose UI
 
 - `docs/app/src/test/java/com/lyco256/llm/TagHierarchyTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/UiStateRenderingTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/SearchFilterDatabaseIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LikeListDatabaseMigrationTest.kt.md`
 
 ### Macrobenchmark
@@ -194,4 +195,5 @@ MainActivity / Compose UI
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/SettingsStoreIsolationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LargeDatasetIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/MainActivityComposeTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/SearchFilterDatabaseIntegrationTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/SnapshotCompatibilityTest.kt.md`

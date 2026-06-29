@@ -17,7 +17,7 @@
 |---:|---|---|---|
 | 1 | テスト用アプリ分離 | 完了 | `TestEnvironmentIsolationTest` |
 | 2 | バックアップ/コピー | 一部完了 | `SnapshotCompatibilityTest`。実画像backupでの最終確認が残る |
-| 3 | DB/Repository 整合性 | 一部完了 | Room migration、同期、タグ削除、保存先失敗。検索条件のDB一気通貫と全移動操作を追加予定 |
+| 3 | DB/Repository 整合性 | 一部完了 | Room migration、同期、タグ削除、保存先失敗、Repository Flow経由の複合検索DB一気通貫。全移動操作を追加予定 |
 | 4 | データ破壊防止 | 主要項目完了 | 手動概要、タグ・分類保持、検索非変更、削除時投稿保護、画像失敗、保存先失敗 |
 | 5 | Fake X API 同期 | 主要項目完了 | pagination、401/403/429/500、refresh失敗、中断再開、欠落/不正JSON、mixed media |
 | 6 | API料金/rate limit | 主要項目完了 | production URL遮断、呼出履歴、月間停止、429無限retry防止 |
