@@ -126,6 +126,7 @@ MainActivity / Compose UI
 ### Tests
 
 - `docs/app/src/test/java/com/lyco256/llm/TagHierarchyTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/UiStateRenderingTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LikeListDatabaseMigrationTest.kt.md`
 
 ### Macrobenchmark

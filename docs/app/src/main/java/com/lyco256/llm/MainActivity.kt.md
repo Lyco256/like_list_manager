@@ -9,6 +9,7 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 - `MainUiState`: 未分類、分類済み、検索条件、投稿者一覧、タグ階層、保存先状態、同期状態をまとめる
 - `TweetFilterState`: 分類済み画面の文字列検索、検索モード、検索対象、期間、投稿者条件、タグ条件、タグのみtoggleを表す
 - `PostStorageDialog`: 内部/SDカードの一覧、現在地、使用量、空き容量、移動開始入口を表示する
+- `StorageMoveEstimateDialog`: 保存先移動見積もりの内容確認と、移動開始/キャンセル操作を扱う
 - `StorageProgressDialog`: 保存先見積もり中、移動開始準備中、移動中などの待機表示を行う
 
 保存先移動中は投稿一覧の代わりに待機画面を表示し、編集や同期を行わせません。SDカード未装着時は投稿一覧と編集・同期を停止し、保存先確認を案内します。
@@ -19,7 +20,7 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 
 `PostStorageDialog` は保存先移動を開始しない閉じる操作をE2Eで確認できるよう、Dialog本体に `post_storage_dialog`、閉じるボタンに `post_storage_close` を付けています。
 
-`StorageProgressDialog` はandroidTestからloading表示を直接renderできるinternal composableです。
+`StorageMoveEstimateDialog` は移動開始を伴わないキャンセルUIをandroidTestから直接renderできます。`StorageProgressDialog` はandroidTestからloading表示を直接renderできるinternal composableです。
 
 ## 変更時の確認
 

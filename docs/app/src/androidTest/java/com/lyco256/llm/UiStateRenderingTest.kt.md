@@ -3,3 +3,5 @@
 1,000投稿のLazyColumnを末尾まで移動し、末尾カードを確認した後に先頭へ戻れることも検証します。
 
 読み込み中DialogのtitleとmessageをCompose semanticsで直接検証し、スクリーンショットなしでloading表示の回帰を検出します。
+
+保存先移動の見積もり確認Dialogを直接renderし、キャンセル操作でDialogが閉じ、移動開始側のcallbackが呼ばれないことを検証します。

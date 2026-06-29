@@ -669,31 +669,19 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
         )
     }
     storageEstimate?.let { estimate ->
-        AlertDialog(
-            onDismissRequest = { storageEstimate = null },
-            title = { Text("投稿データを移動しますか？") },
-            text = {
-                Text(
-                    "移動先: ${estimate.target.displayName}\n" +
-                        "投稿: ${estimate.clipCount} 件\n" +
-                        "ファイル: ${estimate.fileCount} 件\n" +
-                        "容量: ${formatBytes(estimate.totalBytes)}\n\n" +
-                        "移動中は同期と編集を一時停止します。",
-                )
+        StorageMoveEstimateDialog(
+            estimate = estimate,
+            onConfirm = {
+                val targetId = estimate.target.id
+                storageEstimate = null
+                storageOpen = false
+                storageMoveStarting = true
+                viewModel.movePostStorage(targetId) {
+                    storageMoveStarting = false
+                    syncMessage = it
+                }
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    val targetId = estimate.target.id
-                    storageEstimate = null
-                    storageOpen = false
-                    storageMoveStarting = true
-                    viewModel.movePostStorage(targetId) {
-                        storageMoveStarting = false
-                        syncMessage = it
-                    }
-                }) { Text("移動する") }
-            },
-            dismissButton = { TextButton(onClick = { storageEstimate = null }) { Text("キャンセル") } },
+            onDismiss = { storageEstimate = null },
         )
     }
     if (storageMoveStarting && !uiState.storageState.isMigrating) {
@@ -822,6 +810,40 @@ private fun ClipEntity.postedLocalDate(): LocalDate? =
     } catch (_: DateTimeParseException) {
         null
     }
+
+@Composable
+internal fun StorageMoveEstimateDialog(
+    estimate: PostStorageEstimate,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.testTag("post_storage_estimate_dialog"),
+        title = { Text("投稿データを移動しますか？") },
+        text = {
+            Text(
+                "移動先: ${estimate.target.displayName}\n" +
+                    "投稿: ${estimate.clipCount} 件\n" +
+                    "ファイル: ${estimate.fileCount} 件\n" +
+                    "容量: ${formatBytes(estimate.totalBytes)}\n\n" +
+                    "移動中は同期と編集を一時停止します。",
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                modifier = Modifier.testTag("post_storage_estimate_confirm"),
+            ) { Text("移動する") }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.testTag("post_storage_estimate_cancel"),
+            ) { Text("キャンセル") }
+        },
+    )
+}
 
 @Composable
 fun PostStorageDialog(
