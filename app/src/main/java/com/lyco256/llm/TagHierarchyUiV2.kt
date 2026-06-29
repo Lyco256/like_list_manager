@@ -2186,6 +2186,7 @@ private fun EnhancedMediaCell(
         contentDescription = null,
         contentScale = contentScale,
         modifier = modifier
+            .testTag("media_asset_${displayAsset.asset.id}")
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .then(clickableModifier),
@@ -2236,6 +2237,7 @@ private fun FullScreenImageViewer(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .testTag("image_viewer")
                 .background(Color.Black.copy(alpha = backgroundAlpha)),
         ) {
             Row(
@@ -2246,7 +2248,10 @@ private fun FullScreenImageViewer(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                IconButton(onClick = ::closeViewer) {
+                IconButton(
+                    onClick = ::closeViewer,
+                    modifier = Modifier.testTag("image_viewer_close"),
+                ) {
                     Icon(
                         imageVector = Icons.Filled.Close,
                         contentDescription = "閉じる",
@@ -2255,6 +2260,7 @@ private fun FullScreenImageViewer(
                 }
                 Text(
                     text = "${pagerState.currentPage + 1} / ${photos.size}",
+                    modifier = Modifier.testTag("image_viewer_position"),
                     color = Color.White,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold,
@@ -2310,6 +2316,7 @@ private fun FullScreenImageViewer(
                         contentScale = ContentScale.Fit,
                         modifier = Modifier
                             .fillMaxSize()
+                            .testTag("image_viewer_photo_$page")
                             .graphicsLayer { translationY = dragOffsetY },
                     )
                 }

@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
+import com.lyco256.llm.data.AssetEntity
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.PostStorageEstimate
@@ -74,6 +75,51 @@ class UiStateRenderingTest {
         composeRule.onNodeWithTag("post_storage_estimate_cancel").performClick()
         composeRule.waitUntil(5_000) {
             composeRule.onAllNodesWithTag("post_storage_estimate_dialog").fetchSemanticsNodes().isEmpty()
+        }
+    }
+
+    @Test
+    fun savedPhotoOpensFullScreenViewerAndCloseDismissesIt() {
+        val assets = listOf(
+            AssetEntity(
+                id = 101,
+                clipId = 1,
+                mediaKey = "saved-photo",
+                type = "photo",
+                remoteUrl = "https://example.test/photo.jpg",
+                previewUrl = null,
+                localPath = "/tmp/saved-photo.webp",
+                width = 1200,
+                height = 800,
+                createdAt = "2026-01-01T00:00:00Z",
+            ),
+            AssetEntity(
+                id = 102,
+                clipId = 1,
+                mediaKey = "video-thumb",
+                type = "video_thumbnail",
+                remoteUrl = null,
+                previewUrl = "https://example.test/video.jpg",
+                localPath = null,
+                width = 1200,
+                height = 800,
+                createdAt = "2026-01-01T00:00:00Z",
+            ),
+        )
+        composeRule.setContent {
+            MaterialTheme {
+                EnhancedMediaGrid(assets)
+            }
+        }
+
+        composeRule.onNodeWithTag("media_asset_101").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_asset_101").performClick()
+        composeRule.onNodeWithTag("image_viewer").assertIsDisplayed()
+        composeRule.onNodeWithTag("image_viewer_position").assertIsDisplayed()
+        composeRule.onNodeWithText("1 / 1").assertIsDisplayed()
+        composeRule.onNodeWithTag("image_viewer_close").performClick()
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithTag("image_viewer").fetchSemanticsNodes().isEmpty()
         }
     }
 
