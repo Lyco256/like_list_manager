@@ -28,7 +28,7 @@
 | 11 | Macrobenchmark | 完了 | `scripts/run-safe-macrobenchmark-check.cmd` で SC-56C 上の `com.lyco256.llm.test.benchmark` cold/warm startupを測定し、本番metadata前後不変を確認 |
 | 12 | 画像保存/圧縮 | 主要項目完了 | WebP、重複download防止、失敗時投稿保持、複数画像の別WebP保存、破損画像のfailed asset記録、snapshot |
 | 13 | 設定/安全装置 | 主要項目完了 | 使用量表示、test login無効、暗号化設定roundtrip、無効保存先rollback、保存先Dialogの閉じる操作とDB不変、保存先移動見積もりcancel UIを確認 |
-| 14 | エラー表示/復旧 | 一部完了 | 空、未login、HTTP/timeout/JSON、画像/保存先、continuation再開。再起動復旧と権限不足UIが残る |
+| 14 | エラー表示/復旧 | 一部完了 | 空、未login、HTTP/timeout/JSON、画像/保存先、continuation再開、Activity再作成後のタブ/フィルター復元を確認。権限不足UIとプロセス再起動級の復旧確認が残る |
 | 15 | UI状態・軽微バグ | 一部完了 | 主要tab、dialog、件数、loading、empty、popup、LazyColumn、画面再作成、filter BackHandler破棄、画像viewerの表示/閉じる操作を確認。細部の追加E2Eを継続 |
 | 16 | 回帰テスト枠 | 運用開始 | popup外tap、二重同期、continuation、保存先失敗を回帰化。発見ごとに追加 |
 | 17 | Property-based 候補 | 一部完了 | JUnit固定seedの250パターンでslot移動の一意性・集合保存・位置を検証。同期不変条件の追加を検討 |

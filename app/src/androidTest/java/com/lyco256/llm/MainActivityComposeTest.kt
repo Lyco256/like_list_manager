@@ -74,6 +74,34 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun classifiedFilterSurvivesActivityRecreation() {
+        val clipId = waitForSeededClip()
+        val now = Instant.now().toString()
+        runBlocking {
+            storage().withDatabase { database ->
+                val clip = database.clipDao().getActiveClips().single { it.id == clipId }
+                database.clipDao().updateClip(clip.copy(text = "RecreateFilterNeedle"))
+                val tagId = database.tagDao().insertTag(TagEntity(name = "RecreateFilterTag", createdAt = now, updatedAt = now))
+                database.clipDao().insertClipTag(ClipTagEntity(clipId, tagId, now))
+            }
+        }
+        waitUntil { clipTagIds(clipId).isNotEmpty() }
+
+        composeRule.onNodeWithTag("tab_classified").performClick()
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_query").performTextReplacement("RecreateFilterNeedle")
+        composeRule.onNodeWithTag("filter_apply").performClick()
+        composeRule.onNodeWithText("文字列:\"RecreateFilterNeedle\"", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
+
+        composeRule.activityRule.scenario.recreate()
+
+        composeRule.onNodeWithTag("classified_screen").assertIsDisplayed()
+        composeRule.onNodeWithText("文字列:\"RecreateFilterNeedle\"", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
+    }
+
+    @Test
     fun usageAndSettingsSafetyControlsReflectTheIsolatedEnvironment() {
         composeRule.onNodeWithTag("main_menu").performClick()
         composeRule.onNodeWithText("同期/使用量").performClick()
