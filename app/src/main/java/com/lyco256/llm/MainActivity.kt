@@ -691,12 +691,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
         )
     }
     syncMessage?.let { message ->
-        AlertDialog(
-            onDismissRequest = { syncMessage = null },
-            title = { Text("同期結果") },
-            text = { Text(message) },
-            confirmButton = { TextButton(onClick = { syncMessage = null }) { Text("閉じる") } },
-        )
+        SyncResultDialog(message = message, onDismiss = { syncMessage = null })
     }
     if (settingsOpen) {
         ApiSettingsDialog(
@@ -713,6 +708,16 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
             onLogout = { viewModel.logout { syncMessage = it } },
         )
     }
+}
+
+@Composable
+internal fun SyncResultDialog(message: String, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("同期結果") },
+        text = { Text(message) },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("閉じる") } },
+    )
 }
 
 internal fun matchesTagFilters(

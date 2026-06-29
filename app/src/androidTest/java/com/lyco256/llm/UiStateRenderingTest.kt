@@ -9,6 +9,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -37,6 +38,28 @@ class UiStateRenderingTest {
 
         composeRule.onNodeWithText("テスト読み込み中").assertIsDisplayed()
         composeRule.onNodeWithText("完了するまでお待ちください").assertIsDisplayed()
+    }
+
+    @Test
+    fun syncResultDialogShowsPermissionShortageMessageAndDismisses() {
+        composeRule.setContent {
+            MaterialTheme {
+                var visible by remember { mutableStateOf(true) }
+                if (visible) {
+                    SyncResultDialog(
+                        message = "X APIの権限が不足しています。Developer Consoleの権限とスコープを確認してください",
+                        onDismiss = { visible = false },
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("同期結果").assertIsDisplayed()
+        composeRule.onNodeWithText("X APIの権限が不足しています", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("閉じる").performClick()
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithText("同期結果").fetchSemanticsNodes().isEmpty()
+        }
     }
 
     @Test
