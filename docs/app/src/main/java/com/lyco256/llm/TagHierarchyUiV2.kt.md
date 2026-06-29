@@ -61,5 +61,5 @@
 
 ## UI自動テスト
 
-投稿カード、分類確定、タグchip、タグ管理row、操作menu、group展開、root追加buttonにはIDを含む安定した `testTag` を付けています。Compose E2Eは表示テキストだけに依存せず、操作後のRoom状態もassertします。
+投稿カード、分類確定、タグchip、タグ管理row、操作menu、group展開、root追加buttonにはIDを含む安定した `testTag` を付けています。Compose E2Eは表示テキストだけに依存せず、操作後のRoom状態もassertします。タグ管理では、操作menuからのタグ名称変更に加えてグループ名称変更もRoom状態で確認します。
 検索/絞り込みDialogには、投稿者条件とタグ条件を実機E2Eから安定して操作するため、`filter_options_list`、`filter_author_open`、`filter_author_option_<authorId>_<username>`、`filter_author_confirm`、`filter_tag_condition_<type>_<id>` を付けています。

@@ -279,6 +279,13 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("tab_tags").performClick()
         val firstGroup = createRootGroup("E2EグループA")
         val secondGroup = createRootGroup("E2EグループB")
+        composeRule.onNodeWithTag("tag_operation_group_$secondGroup").performClick()
+        composeRule.onNodeWithText("名前を変更").performClick()
+        composeRule.onNode(hasSetTextAction()).performTextReplacement("E2E変更後グループ")
+        composeRule.onNodeWithText("保存").performClick()
+        waitUntil { groupsNamed("E2E変更後グループ") == 1 && groupsNamed("E2EグループB") == 0 }
+        assertTrue(groupExists(secondGroup))
+
         val firstTag = createChildTag(firstGroup, "共有タグ")
         createChildTag(secondGroup, "共有タグ")
         assertEquals(2, tagsNamed("共有タグ"))
