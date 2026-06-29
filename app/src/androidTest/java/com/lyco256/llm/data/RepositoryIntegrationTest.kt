@@ -104,6 +104,32 @@ class RepositoryIntegrationTest {
     }
 
     @Test
+    fun resyncDoesNotReviveLocallyDeletedPosts() = runBlocking {
+        val deletedId = storage.withDatabase { database ->
+            val clipId = database.clipDao().insertClip(clip("150", summary = "削除前メモ"))
+            val deleted = database.clipDao().getActiveClips().single { it.id == clipId }.copy(isDeleted = true)
+            database.clipDao().updateClip(deleted)
+            clipId
+        }
+        api.likedResponses += XApiResult(
+            posts = listOf(post("151"), post("150", text = "APIから再登場")),
+            nextToken = null,
+            rateLimitLimit = 75,
+            rateLimitRemaining = 73,
+            rateLimitReset = 1234,
+        )
+
+        repository.syncNow()
+
+        storage.withDatabase { database ->
+            val activeIds = database.clipDao().getActiveClips().map { it.xPostId }.toSet()
+            assertEquals(setOf("151"), activeIds)
+            assertFalse(database.clipDao().getActiveClips().any { it.id == deletedId })
+            assertEquals(2, database.clipDao().countClips())
+        }
+    }
+
+    @Test
     fun paginationPersistsUsageAndDoesNotDuplicatePosts() = runBlocking {
         api.likedResponses += XApiResult(listOf(post("201")), "next-1", 75, 70, 1234)
         api.likedResponses += XApiResult(listOf(post("202"), post("201")), null, 75, 68, 1234)
