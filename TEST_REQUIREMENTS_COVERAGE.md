@@ -31,7 +31,7 @@
 | 14 | エラー表示/復旧 | 主要項目完了 | 空、未login、HTTP/timeout/JSON、権限不足UI、画像/保存先、continuation再開、Activity再作成後のタブ/フィルター復元、保存先移動copying中断とswitched切替先不可の起動時復旧を確認 |
 | 15 | UI状態・軽微バグ | 一部完了 | 主要tab、dialog、件数、loading、empty、popup、LazyColumn、画面再作成、filter BackHandler破棄、画像viewerの表示/閉じる操作を確認。細部の追加E2Eを継続 |
 | 16 | 回帰テスト枠 | 運用開始 | popup外tap、二重同期、continuation、保存先失敗を回帰化。発見ごとに追加 |
-| 17 | Property-based 候補 | 一部完了 | JUnit固定seedの250パターンでslot移動の一意性・集合保存・位置を検証。同期不変条件としてローカル削除済み投稿の非復活を追加。より広い生成系同期不変条件は検討継続 |
+| 17 | Property-based 候補 | 主要項目完了 | JUnit固定seedの250パターンでslot移動の一意性・集合保存・位置を検証。同期不変条件としてローカル削除済み投稿の非復活、固定seed複数ページ同期の投稿ID一意性・使用量加算・continuation消去を確認 |
 
 ## 合格ゲート
 

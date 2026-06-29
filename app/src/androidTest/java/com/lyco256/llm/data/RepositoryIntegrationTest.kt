@@ -20,6 +20,7 @@ import org.junit.runner.RunWith
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.time.Instant
+import kotlin.random.Random
 
 @RunWith(AndroidJUnit4::class)
 class RepositoryIntegrationTest {
@@ -142,6 +143,39 @@ class RepositoryIntegrationTest {
             assertEquals(3, state?.monthlyFetchedCount)
             assertEquals(null, state?.likedPostsNextToken)
             assertEquals(2, api.likedCalls.size)
+        }
+    }
+
+    @Test
+    fun randomizedPagedSyncPreservesUniquePostSetAndUsageAccounting() = runBlocking {
+        val random = Random(1729)
+        val expectedIds = linkedSetOf<String>()
+        var expectedFetched = 0
+        repeat(12) { page ->
+            val uniqueIds = (0 until 8).map { index -> "property-${page.toString().padStart(2, '0')}-$index" }
+            val duplicateIds = List(random.nextInt(0, 4)) { uniqueIds[random.nextInt(uniqueIds.size)] }
+            val responseIds = (uniqueIds + duplicateIds).shuffled(random)
+            expectedIds += responseIds
+            expectedFetched += responseIds.size
+            api.likedResponses += XApiResult(
+                posts = responseIds.map { id -> post(id) },
+                nextToken = if (page == 11) null else "property-next-$page",
+                rateLimitLimit = 75,
+                rateLimitRemaining = 75 - page,
+                rateLimitReset = 1234L + page,
+            )
+        }
+
+        repository.syncNow()
+
+        storage.withDatabase { database ->
+            val activeIds = database.clipDao().getActiveClips().map { it.xPostId }
+            assertEquals(expectedIds, activeIds.toSet())
+            assertEquals(expectedIds.size, activeIds.size)
+            val state = database.clipDao().getSyncState()
+            assertEquals(expectedFetched, state?.monthlyFetchedCount)
+            assertEquals(null, state?.likedPostsNextToken)
+            assertEquals(12, api.likedCalls.size)
         }
     }
 
