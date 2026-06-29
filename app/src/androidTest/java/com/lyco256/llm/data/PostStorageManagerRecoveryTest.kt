@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.lyco256.llm.BuildConfig
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -68,6 +69,31 @@ class PostStorageManagerRecoveryTest {
         manager.database.value?.close()
     }
 
+    @Test
+    fun startupFallsBackToSourceWhenSwitchedTargetCannotBeOpened() {
+        val missingTargetId = "external:${File(context.filesDir, "missing_after_switch").absolutePath}"
+        context.getSharedPreferences(storageConfig.preferencesName, Context.MODE_PRIVATE)
+            .edit()
+            .putString("selected_id", missingTargetId)
+            .putString("selected_path", File(context.filesDir, "missing_after_switch").absolutePath)
+            .putString("migration_phase", "switched")
+            .putString("migration_source", "internal")
+            .putString("migration_target", missingTargetId)
+            .commit()
+
+        val manager = PostStorageManager(context, storageConfig)
+
+        val preferences = context.getSharedPreferences(storageConfig.preferencesName, Context.MODE_PRIVATE)
+        assertEquals(PostStorageState.INTERNAL_ID, manager.state.value.currentLocationId)
+        assertTrue(manager.state.value.isAvailable)
+        assertEquals("前回の移動を完了できなかったため元の保存先へ戻しました", manager.state.value.migrationMessage)
+        assertEquals(PostStorageState.INTERNAL_ID, preferences.getString("selected_id", null))
+        assertNull(preferences.getString("migration_phase", null))
+        assertNull(preferences.getString("migration_source", null))
+        assertNull(preferences.getString("migration_target", null))
+        manager.database.value?.close()
+    }
+
     private fun cleanup() {
         context.deleteDatabase(storageConfig.databaseName)
         File(context.getDatabasePath(storageConfig.databaseName).path + ".moving").delete()
@@ -76,6 +102,7 @@ class PostStorageManagerRecoveryTest {
         File(context.filesDir, storageConfig.imagesDirectory).deleteRecursively()
         File(context.filesDir, "${storageConfig.imagesDirectory}.moving").deleteRecursively()
         File(context.filesDir, storageConfig.dataDirectory).deleteRecursively()
+        File(context.filesDir, "missing_after_switch").deleteRecursively()
         context.getSharedPreferences(storageConfig.preferencesName, Context.MODE_PRIVATE).edit().clear().commit()
     }
 }
