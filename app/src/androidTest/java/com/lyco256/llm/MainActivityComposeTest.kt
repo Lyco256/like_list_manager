@@ -33,6 +33,9 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
 
 class MainActivityComposeTest {
     @get:Rule
@@ -212,6 +215,68 @@ class MainActivityComposeTest {
             composeRule.onAllNodesWithTag("clip_card_${fixture.wrongAuthorClipId}").fetchSemanticsNodes().isEmpty()
         }
         assertTrue(composeRule.onAllNodesWithTag("clip_card_${fixture.untaggedClipId}").fetchSemanticsNodes().isEmpty())
+        assertEquals(before, databaseFingerprint())
+    }
+
+    @Test
+    fun filterDialogAppliesAndClearsDateRangeWithoutChangingDatabase() {
+        waitForSeededClip()
+        val now = Instant.now().toString()
+        val startDate = LocalDate.now()
+        val olderDate = startDate.minusDays(1)
+        val fixture = runBlocking {
+            storage().withDatabase { database ->
+                val clips = database.clipDao().getActiveClips().sortedBy { it.id }
+                val matching = clips[0]
+                val older = clips[1]
+                val tagId = database.tagDao().insertTag(TagEntity(name = "FilterDateTag", createdAt = now, updatedAt = now))
+                database.clipDao().updateClip(
+                    matching.copy(
+                        text = "DateFilterNeedle",
+                        xCreatedAt = startDate.toClipInstantString(),
+                    ),
+                )
+                database.clipDao().updateClip(
+                    older.copy(
+                        text = "DateFilterNeedle",
+                        xCreatedAt = olderDate.toClipInstantString(),
+                    ),
+                )
+                database.clipDao().insertClipTag(ClipTagEntity(matching.id, tagId, now))
+                database.clipDao().insertClipTag(ClipTagEntity(older.id, tagId, now))
+                DateFilterFixture(matching.id, older.id)
+            }
+        }
+        waitUntil {
+            clipTagIds(fixture.matchingClipId).isNotEmpty() &&
+                clipTagIds(fixture.olderClipId).isNotEmpty()
+        }
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("tab_classified").performClick()
+        composeRule.onNodeWithTag("clip_card_${fixture.matchingClipId}").assertIsDisplayed()
+        composeRule.onNodeWithTag("clip_card_${fixture.olderClipId}").assertIsDisplayed()
+
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_options_list")
+            .performScrollToNode(hasTestTag("filter_start_date"))
+        composeRule.onNodeWithTag("filter_start_date").performClick()
+        composeRule.onNodeWithTag("filter_date_picker_apply").performClick()
+        composeRule.onNodeWithTag("filter_apply").performClick()
+
+        composeRule.onNodeWithText("期間:${startDate.year}/${startDate.monthValue}/${startDate.dayOfMonth}~", substring = true)
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("clip_card_${fixture.matchingClipId}").assertIsDisplayed()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("clip_card_${fixture.olderClipId}").fetchSemanticsNodes().isEmpty()
+        }
+
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_options_list")
+            .performScrollToNode(hasTestTag("filter_date_clear"))
+        composeRule.onNodeWithTag("filter_date_clear").performClick()
+        composeRule.onNodeWithTag("filter_apply").performClick()
+        composeRule.onNodeWithTag("clip_card_${fixture.olderClipId}").assertIsDisplayed()
         assertEquals(before, databaseFingerprint())
     }
 
@@ -404,6 +469,14 @@ class MainActivityComposeTest {
         val wantedTagId: Long,
     )
 
+    private data class DateFilterFixture(
+        val matchingClipId: Long,
+        val olderClipId: Long,
+    )
+
+    private fun LocalDate.toClipInstantString(): String =
+        atTime(LocalTime.NOON).atZone(ZoneId.systemDefault()).toInstant().toString()
+
     private fun dismissBackHandledDialog() {
         InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         composeRule.waitForIdle()
@@ -447,7 +520,7 @@ class MainActivityComposeTest {
     private fun databaseFingerprint(): List<String> = runBlocking {
         storage().withDatabase { database ->
             buildList {
-                addAll(database.clipDao().getActiveClips().map { "clip:${it.id}:${it.text}:${it.summary}:${it.isDeleted}" })
+                addAll(database.clipDao().getActiveClips().map { "clip:${it.id}:${it.text}:${it.xCreatedAt}:${it.summary}:${it.isDeleted}" })
                 addAll(database.tagDao().getTags().map { "tag:${it.id}:${it.name}:${it.parentGroupId}:${it.sortOrder}" })
                 addAll(database.clipDao().observeClipTags().first().map { "relation:${it.clipId}:${it.tagId}" })
             }

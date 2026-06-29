@@ -18,7 +18,7 @@
 - `EnhancedClassifiedScreen`: 一致件数と条件文、右側固定の絞り込み/クリア操作、全画面Dialogの検索/絞り込みパネル、投稿の再割り当てを扱います。タグのみOFFでは未分類投稿も表示対象に含めます。
 - `EnhancedTagListScreen`: タグ/グループの追加、名称変更、移動、削除、別タグへの一括追加、ドラッグ&ドロップ移動を扱います。
 - `EnhancedTweetCard`: 投稿本文、画像、概要、タグ選択をまとめます。
-- `SearchFilterDialog`: タグのみ、文字列検索、期間、ユーザー、タグ条件を区分し、確定条件と分離した下書きとリアルタイム一致件数を扱います。期間の日付クリア操作は開始・終了指定の次行へ固定し、画面下部には適用/キャンセル、変更破棄・全条件クリアの確認Dialogを持ちます。
+- `SearchFilterDialog`: タグのみ、文字列検索、期間、ユーザー、タグ条件を区分し、確定条件と分離した下書きとリアルタイム一致件数を扱います。期間DatePickerは未指定時に今日を初期選択し、日付クリア操作は開始・終了指定の次行へ固定します。画面下部には適用/キャンセル、変更破棄・全条件クリアの確認Dialogを持ちます。
 - `AuthorFilterDialog`: 保存済み投稿者から生成したユーザー一覧を検索し、複数ユーザーOR条件を選択して「決定」で閉じます。選択数は入口ボタンの外に表示し、入口の文言は常に「ユーザーを選択」です。
 - `withoutTrailingMediaUrl`: UI表示時だけ、メディア付き投稿の本文末尾に付く `https://t.co/...` を取り除きます。DB保存値、検索対象、本文途中のURLは変更しません。
 - `PreserveScrollAnchor` / `LazyListScrollbar` / `ScrollToTopButton`: 未分類、分類済み、タグ管理のスクロール位置維持、常に薄い表示専用スクロールバー、白丸黒矢印の一番上へ移動ボタンを扱います。
@@ -62,4 +62,4 @@
 ## UI自動テスト
 
 投稿カード、分類確定、タグchip、タグ管理row、操作menu、group展開、root追加buttonにはIDを含む安定した `testTag` を付けています。Compose E2Eは表示テキストだけに依存せず、操作後のRoom状態もassertします。タグ管理では、操作menuからのタグ名称変更に加えてグループ名称変更もRoom状態で確認します。
-検索/絞り込みDialogには、投稿者条件とタグ条件を実機E2Eから安定して操作するため、`filter_options_list`、`filter_author_open`、`filter_author_option_<authorId>_<username>`、`filter_author_confirm`、`filter_tag_condition_<type>_<id>` を付けています。
+検索/絞り込みDialogには、日付条件、投稿者条件、タグ条件を実機E2Eから安定して操作するため、`filter_options_list`、`filter_start_date`、`filter_end_date`、`filter_date_clear`、`filter_date_picker_apply`、`filter_date_picker_clear`、`filter_author_open`、`filter_author_option_<authorId>_<username>`、`filter_author_confirm`、`filter_tag_condition_<type>_<id>` を付けています。

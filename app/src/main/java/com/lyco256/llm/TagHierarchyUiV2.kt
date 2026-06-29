@@ -1033,17 +1033,22 @@ private fun SearchFilterDialog(
                             FilterChip(
                                 selected = filters.startDate != null,
                                 onClick = { dateEndpoint = DateFilterEndpoint.Start },
+                                modifier = Modifier.testTag("filter_start_date"),
                                 label = { Text("開始 ${filters.startDate ?: "未指定"}") },
                             )
                             FilterChip(
                                 selected = filters.endDate != null,
                                 onClick = { dateEndpoint = DateFilterEndpoint.End },
+                                modifier = Modifier.testTag("filter_end_date"),
                                 label = { Text("終了 ${filters.endDate ?: "未指定"}") },
                             )
                         }
                     }
                     item {
-                        TextButton(onClick = { filters = filters.copy(startDate = null, endDate = null) }) {
+                        TextButton(
+                            onClick = { filters = filters.copy(startDate = null, endDate = null) },
+                            modifier = Modifier.testTag("filter_date_clear"),
+                        ) {
                             Text("日付クリア")
                         }
                     }
@@ -1188,29 +1193,35 @@ private fun SearchFilterDialog(
     }
     dateEndpoint?.let { endpoint ->
         val selectedDate = if (endpoint == DateFilterEndpoint.Start) filters.startDate else filters.endDate
-        val pickerState = rememberDatePickerState(initialSelectedDateMillis = selectedDate?.toPickerMillis())
+        val pickerState = rememberDatePickerState(initialSelectedDateMillis = (selectedDate ?: LocalDate.now()).toPickerMillis())
         DatePickerDialog(
             onDismissRequest = { dateEndpoint = null },
             confirmButton = {
-                TextButton(onClick = {
-                    val picked = pickerState.selectedDateMillis?.toLocalDateFromPicker()
-                    if (endpoint == DateFilterEndpoint.Start) {
-                        filters = filters.copy(startDate = picked)
-                    } else {
-                        filters = filters.copy(endDate = picked)
-                    }
-                    dateEndpoint = null
-                }) { Text("適用") }
+                TextButton(
+                    onClick = {
+                        val picked = pickerState.selectedDateMillis?.toLocalDateFromPicker()
+                        if (endpoint == DateFilterEndpoint.Start) {
+                            filters = filters.copy(startDate = picked)
+                        } else {
+                            filters = filters.copy(endDate = picked)
+                        }
+                        dateEndpoint = null
+                    },
+                    modifier = Modifier.testTag("filter_date_picker_apply"),
+                ) { Text("適用") }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    if (endpoint == DateFilterEndpoint.Start) {
-                        filters = filters.copy(startDate = null)
-                    } else {
-                        filters = filters.copy(endDate = null)
-                    }
-                    dateEndpoint = null
-                }) { Text("解除") }
+                TextButton(
+                    onClick = {
+                        if (endpoint == DateFilterEndpoint.Start) {
+                            filters = filters.copy(startDate = null)
+                        } else {
+                            filters = filters.copy(endDate = null)
+                        }
+                        dateEndpoint = null
+                    },
+                    modifier = Modifier.testTag("filter_date_picker_clear"),
+                ) { Text("解除") }
             },
         ) {
             DatePicker(state = pickerState)
