@@ -368,6 +368,30 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun localDeleteDialogSoftDeletesClipAndRemovesItFromLists() {
+        val clipId = waitForSeededClip()
+        val totalBefore = totalClipCount()
+
+        composeRule.onNode(
+            hasText("ローカル削除") and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
+            useUnmergedTree = true,
+        ).performClick()
+        composeRule.onNodeWithText("このツイートをアプリ内の一覧から削除します", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("戻る").performClick()
+        composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
+        assertTrue(activeClipIds().contains(clipId))
+
+        composeRule.onNode(
+            hasText("ローカル削除") and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
+            useUnmergedTree = true,
+        ).performClick()
+        composeRule.onNodeWithText("実行").performClick()
+        waitUntil { !activeClipIds().contains(clipId) }
+        assertEquals(totalBefore, totalClipCount())
+        assertTrue(composeRule.onAllNodesWithTag("clip_card_$clipId").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
     fun tagManagementCreatesSameNamedChildrenThenRenamesAndDeletes() {
         composeRule.onNodeWithTag("tab_tags").performClick()
         val firstGroup = createRootGroup("E2EグループA")
@@ -505,6 +529,14 @@ class MainActivityComposeTest {
 
     private fun clipTagIds(clipId: Long): Set<Long> = runBlocking {
         storage().withDatabase { it.clipDao().clipTagsForClipIds(listOf(clipId)).map { relation -> relation.tagId }.toSet() }
+    }
+
+    private fun activeClipIds(): Set<Long> = runBlocking {
+        storage().withDatabase { it.clipDao().getActiveClips().map { clip -> clip.id }.toSet() }
+    }
+
+    private fun totalClipCount(): Int = runBlocking {
+        storage().withDatabase { it.clipDao().countClips() }
     }
 
     private data class FilterFixture(
