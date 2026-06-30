@@ -580,6 +580,74 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun imageViewerSwipeMovesBetweenSavedPhotosWithoutChangingDatabase() {
+        val clipId = waitForSeededClip()
+        val now = Instant.now().toString()
+        val assetIds = runBlocking {
+            storage().withDatabase { database ->
+                database.clipDao().insertAssets(
+                    listOf(
+                        AssetEntity(
+                            clipId = clipId,
+                            mediaKey = "viewer-swipe-photo-1",
+                            type = "photo",
+                            remoteUrl = "https://example.test/viewer-swipe-1.jpg",
+                            previewUrl = null,
+                            localPath = "/tmp/viewer-swipe-photo-1.webp",
+                            width = 1200,
+                            height = 800,
+                            sizeBytes = 1111,
+                            downloadState = "downloaded",
+                            createdAt = now,
+                        ),
+                        AssetEntity(
+                            clipId = clipId,
+                            mediaKey = "viewer-swipe-photo-2",
+                            type = "photo",
+                            remoteUrl = "https://example.test/viewer-swipe-2.jpg",
+                            previewUrl = null,
+                            localPath = "/tmp/viewer-swipe-photo-2.webp",
+                            width = 800,
+                            height = 1200,
+                            sizeBytes = 2222,
+                            downloadState = "downloaded",
+                            createdAt = now,
+                        ),
+                    ),
+                )
+                database.clipDao().assetsForClipIds(listOf(clipId))
+                    .filter { it.mediaKey.startsWith("viewer-swipe-photo-") }
+                    .sortedBy { it.mediaKey }
+                    .map { it.id }
+            }
+        }
+        waitUntil {
+            runBlocking {
+                storage().withDatabase { database ->
+                    database.clipDao().assetsForClipIds(listOf(clipId))
+                        .count { it.mediaKey.startsWith("viewer-swipe-photo-") } == 2
+                }
+            }
+        }
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("media_asset_${assetIds.first()}").performClick()
+        composeRule.onNodeWithTag("image_viewer").assertIsDisplayed()
+        composeRule.onNodeWithText("1 / 2").assertIsDisplayed()
+        swipeLeftOnScreen()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithText("2 / 2").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("image_viewer_photo_1").assertIsDisplayed()
+        composeRule.onNodeWithTag("image_viewer_close").performClick()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("image_viewer").fetchSemanticsNodes().isEmpty()
+        }
+
+        assertEquals(before, databaseFingerprint())
+    }
+
+    @Test
     fun tagManagementCreatesSameNamedChildrenThenRenamesAndDeletes() {
         composeRule.onNodeWithTag("tab_tags").performClick()
         val firstGroup = createRootGroup("E2EグループA")
@@ -841,5 +909,32 @@ class MainActivityComposeTest {
             event.recycle()
         }
         instrumentation.waitForIdleSync()
+    }
+
+    private fun swipeLeftOnScreen() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val metrics = composeRule.activity.resources.displayMetrics
+        val downTime = SystemClock.uptimeMillis()
+        val y = metrics.heightPixels * 0.55f
+        val startX = metrics.widthPixels * 0.82f
+        val endX = metrics.widthPixels * 0.18f
+        val steps = 12
+        val events = buildList {
+            add(MotionEvent.ACTION_DOWN to startX)
+            for (step in 1 until steps) {
+                val fraction = step.toFloat() / steps
+                add(MotionEvent.ACTION_MOVE to (startX + (endX - startX) * fraction))
+            }
+            add(MotionEvent.ACTION_UP to endX)
+        }
+        events.forEachIndexed { index, (action, x) ->
+            val event = MotionEvent.obtain(downTime, downTime + index * 16L, action, x, y, 0).apply {
+                source = InputDevice.SOURCE_TOUCHSCREEN
+            }
+            check(instrumentation.uiAutomation.injectInputEvent(event, true))
+            event.recycle()
+        }
+        instrumentation.waitForIdleSync()
+        composeRule.waitForIdle()
     }
 }
