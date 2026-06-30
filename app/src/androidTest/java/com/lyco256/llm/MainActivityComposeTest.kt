@@ -705,9 +705,9 @@ class MainActivityComposeTest {
         val firstGroup = createRootGroup("E2EグループA")
         val secondGroup = createRootGroup("E2EグループB")
         composeRule.onNodeWithTag("tag_operation_group_$secondGroup").performClick()
-        composeRule.onNodeWithText("名前を変更").performClick()
-        composeRule.onNode(hasSetTextAction()).performTextReplacement("E2E変更後グループ")
-        composeRule.onNodeWithText("保存").performClick()
+        composeRule.onNodeWithTag("tag_rename_open_group_$secondGroup").performClick()
+        composeRule.onNodeWithTag("rename_node_name").performTextReplacement("E2E変更後グループ")
+        composeRule.onNodeWithTag("rename_node_save").performClick()
         waitUntil { groupsNamed("E2E変更後グループ") == 1 && groupsNamed("E2EグループB") == 0 }
         assertTrue(groupExists(secondGroup))
 
@@ -717,9 +717,9 @@ class MainActivityComposeTest {
 
         composeRule.onNodeWithTag("tag_expand_group_$firstGroup").performClick()
         composeRule.onNodeWithTag("tag_operation_tag_$firstTag").performClick()
-        composeRule.onNodeWithText("名前を変更").performClick()
-        composeRule.onNode(hasSetTextAction()).performTextReplacement("変更後タグ")
-        composeRule.onNodeWithText("保存").performClick()
+        composeRule.onNodeWithTag("tag_rename_open_tag_$firstTag").performClick()
+        composeRule.onNodeWithTag("rename_node_name").performTextReplacement("変更後タグ")
+        composeRule.onNodeWithTag("rename_node_save").performClick()
         waitUntil { tagsNamed("変更後タグ") == 1 }
 
         composeRule.onNodeWithTag("tag_operation_tag_$firstTag").performClick()
@@ -759,6 +759,31 @@ class MainActivityComposeTest {
 
         waitUntil { groupsNamed("キャンセル作成グループ") == 0 }
         assertEquals(0, groupsNamed("キャンセル作成グループ"))
+        assertEquals(before, databaseFingerprint())
+    }
+
+    @Test
+    fun renameDialogCancelKeepsTagAndGroupNames() {
+        composeRule.onNodeWithTag("tab_tags").performClick()
+        val groupId = createRootGroup("名称キャンセルグループ")
+        val tagId = createChildTag(groupId, "名称キャンセルタグ")
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("tag_operation_group_$groupId").performClick()
+        composeRule.onNodeWithTag("tag_rename_open_group_$groupId").performClick()
+        composeRule.onNodeWithTag("rename_node_name").performTextReplacement("変更されないグループ")
+        composeRule.onNodeWithTag("rename_node_cancel").performClick()
+
+        composeRule.onNodeWithTag("tag_expand_group_$groupId").performClick()
+        composeRule.onNodeWithTag("tag_operation_tag_$tagId").performClick()
+        composeRule.onNodeWithTag("tag_rename_open_tag_$tagId").performClick()
+        composeRule.onNodeWithTag("rename_node_name").performTextReplacement("変更されないタグ")
+        composeRule.onNodeWithTag("rename_node_cancel").performClick()
+
+        assertEquals(1, groupsNamed("名称キャンセルグループ"))
+        assertEquals(0, groupsNamed("変更されないグループ"))
+        assertEquals(1, tagsNamed("名称キャンセルタグ"))
+        assertEquals(0, tagsNamed("変更されないタグ"))
         assertEquals(before, databaseFingerprint())
     }
 

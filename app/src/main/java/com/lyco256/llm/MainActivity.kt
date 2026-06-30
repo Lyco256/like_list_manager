@@ -1490,9 +1490,16 @@ fun RenameNodeDialog(initialName: String, onDismiss: () -> Unit, onRename: (Stri
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("名前を変更") },
-        text = { OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true) },
-        confirmButton = { TextButton(onClick = { onRename(name) }) { Text("保存") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("閉じる") } },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                modifier = Modifier.testTag("rename_node_name"),
+            )
+        },
+        confirmButton = { TextButton(onClick = { onRename(name) }, modifier = Modifier.testTag("rename_node_save")) { Text("保存") } },
+        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("rename_node_cancel")) { Text("閉じる") } },
     )
 }
 
