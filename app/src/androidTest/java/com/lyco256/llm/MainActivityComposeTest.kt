@@ -21,8 +21,9 @@ import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
-import com.lyco256.llm.data.PostStorageManager
+import com.lyco256.llm.data.AssetEntity
 import com.lyco256.llm.data.ClipTagEntity
+import com.lyco256.llm.data.PostStorageManager
 import com.lyco256.llm.data.TagEntity
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
@@ -533,6 +534,52 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun imageViewerBackDismissesWithoutChangingDatabase() {
+        val clipId = waitForSeededClip()
+        val now = Instant.now().toString()
+        val assetId = runBlocking {
+            storage().withDatabase { database ->
+                database.clipDao().insertAssets(
+                    listOf(
+                        AssetEntity(
+                            clipId = clipId,
+                            mediaKey = "viewer-back-photo",
+                            type = "photo",
+                            remoteUrl = "https://example.test/viewer-back.jpg",
+                            previewUrl = null,
+                            localPath = "/tmp/viewer-back-photo.webp",
+                            width = 1200,
+                            height = 800,
+                            sizeBytes = 1234,
+                            downloadState = "downloaded",
+                            createdAt = now,
+                        ),
+                    ),
+                )
+                database.clipDao().assetsForClipIds(listOf(clipId)).single { it.mediaKey == "viewer-back-photo" }.id
+            }
+        }
+        waitUntil {
+            runBlocking {
+                storage().withDatabase { database ->
+                    database.clipDao().assetsForClipIds(listOf(clipId)).any { it.id == assetId }
+                }
+            }
+        }
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("media_asset_$assetId").performClick()
+        composeRule.onNodeWithTag("image_viewer").assertIsDisplayed()
+        composeRule.onNodeWithTag("image_viewer_position").assertIsDisplayed()
+        dismissBackHandledDialog()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("image_viewer").fetchSemanticsNodes().isEmpty()
+        }
+
+        assertEquals(before, databaseFingerprint())
+    }
+
+    @Test
     fun tagManagementCreatesSameNamedChildrenThenRenamesAndDeletes() {
         composeRule.onNodeWithTag("tab_tags").performClick()
         val firstGroup = createRootGroup("E2EグループA")
@@ -759,6 +806,11 @@ class MainActivityComposeTest {
                 addAll(
                     database.clipDao().getActiveClips().map {
                         "clip:${it.id}:${it.authorId}:${it.authorName}:${it.authorUsername}:${it.text}:${it.xCreatedAt}:${it.summary}:${it.isDeleted}:${it.likeCount}:${it.likeCountFetchedAt}:${it.likeCountFetchFailedAt}:${it.likeCountFetchError}"
+                    },
+                )
+                addAll(
+                    database.clipDao().getAllAssets().map {
+                        "asset:${it.id}:${it.clipId}:${it.mediaKey}:${it.type}:${it.remoteUrl}:${it.previewUrl}:${it.localPath}:${it.width}:${it.height}:${it.sizeBytes}:${it.downloadState}"
                     },
                 )
                 addAll(database.tagDao().getTags().map { "tag:${it.id}:${it.name}:${it.parentGroupId}:${it.sortOrder}" })
