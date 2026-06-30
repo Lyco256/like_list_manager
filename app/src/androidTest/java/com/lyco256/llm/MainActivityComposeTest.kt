@@ -330,6 +330,73 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun filterAuthorDialogClearKeepsDatabaseUnchanged() {
+        waitForSeededClip()
+        val now = Instant.now().toString()
+        val fixture = runBlocking {
+            storage().withDatabase { database ->
+                val clips = database.clipDao().getActiveClips().sortedBy { it.id }
+                val first = clips[0]
+                val second = clips[1]
+                val untagged = clips[2]
+                database.clipDao().updateClip(
+                    first.copy(
+                        text = "AuthorClearNeedle",
+                        authorId = "author-clear-a",
+                        authorName = "Author Clear A",
+                        authorUsername = "cleara",
+                    ),
+                )
+                database.clipDao().updateClip(
+                    second.copy(
+                        text = "AuthorClearNeedle",
+                        authorId = "author-clear-b",
+                        authorName = "Author Clear B",
+                        authorUsername = "clearb",
+                    ),
+                )
+                database.clipDao().updateClip(untagged.copy(text = "AuthorClearNeedle"))
+                val tagId = database.tagDao().insertTag(TagEntity(name = "AuthorClearTag", createdAt = now, updatedAt = now))
+                database.clipDao().insertClipTag(ClipTagEntity(first.id, tagId, now))
+                database.clipDao().insertClipTag(ClipTagEntity(second.id, tagId, now))
+                Triple(first.id, second.id, untagged.id)
+            }
+        }
+        waitUntil {
+            clipTagIds(fixture.first).isNotEmpty() &&
+                clipTagIds(fixture.second).isNotEmpty()
+        }
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("tab_classified").performClick()
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_options_list")
+            .performScrollToNode(hasTestTag("filter_author_open"))
+        composeRule.onNodeWithTag("filter_author_open").performClick()
+        composeRule.onNodeWithTag("filter_author_option_author-clear-a_cleara").performClick()
+        composeRule.onNodeWithTag("filter_author_confirm").performClick()
+        composeRule.onNodeWithTag("filter_apply").performClick()
+
+        composeRule.onNodeWithTag("clip_card_${fixture.first}").assertIsDisplayed()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("clip_card_${fixture.second}").fetchSemanticsNodes().isEmpty()
+        }
+
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_options_list")
+            .performScrollToNode(hasTestTag("filter_author_open"))
+        composeRule.onNodeWithTag("filter_author_open").performClick()
+        composeRule.onNodeWithTag("filter_author_clear").performClick()
+        composeRule.onNodeWithTag("filter_author_confirm").performClick()
+        composeRule.onNodeWithTag("filter_apply").performClick()
+
+        composeRule.onNodeWithTag("clip_card_${fixture.first}").assertIsDisplayed()
+        composeRule.onNodeWithTag("clip_card_${fixture.second}").assertIsDisplayed()
+        assertTrue(composeRule.onAllNodesWithTag("clip_card_${fixture.third}").fetchSemanticsNodes().isEmpty())
+        assertEquals(before, databaseFingerprint())
+    }
+
+    @Test
     fun authorClickMovesToClassifiedAuthorFilterWithoutChangingDatabase() {
         waitForSeededClip()
         val fixture = runBlocking {
@@ -474,6 +541,24 @@ class MainActivityComposeTest {
         composeRule.onNodeWithText("期間:${startDate.year}/${startDate.monthValue}/${startDate.dayOfMonth}~", substring = true)
             .assertIsDisplayed()
         composeRule.onNodeWithTag("clip_card_${fixture.matchingClipId}").assertIsDisplayed()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("clip_card_${fixture.olderClipId}").fetchSemanticsNodes().isEmpty()
+        }
+
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_options_list")
+            .performScrollToNode(hasTestTag("filter_start_date"))
+        composeRule.onNodeWithTag("filter_start_date").performClick()
+        composeRule.onNodeWithTag("filter_date_picker_clear").performClick()
+        composeRule.onNodeWithTag("filter_apply").performClick()
+        composeRule.onNodeWithTag("clip_card_${fixture.olderClipId}").assertIsDisplayed()
+
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_options_list")
+            .performScrollToNode(hasTestTag("filter_start_date"))
+        composeRule.onNodeWithTag("filter_start_date").performClick()
+        composeRule.onNodeWithTag("filter_date_picker_apply").performClick()
+        composeRule.onNodeWithTag("filter_apply").performClick()
         composeRule.waitUntil(10_000) {
             composeRule.onAllNodesWithTag("clip_card_${fixture.olderClipId}").fetchSemanticsNodes().isEmpty()
         }

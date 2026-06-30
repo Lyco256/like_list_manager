@@ -1362,7 +1362,7 @@ private fun AuthorFilterDialog(
             }
         },
         confirmButton = { Button(onClick = onDismiss, modifier = Modifier.testTag("filter_author_confirm")) { Text("決定") } },
-        dismissButton = { TextButton(onClick = onClear) { Text("クリア") } },
+        dismissButton = { TextButton(onClick = onClear, modifier = Modifier.testTag("filter_author_clear")) { Text("クリア") } },
     )
 }
 
