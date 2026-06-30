@@ -392,6 +392,27 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun summaryEditPersistsToDatabaseAndSurvivesActivityRecreation() {
+        val clipId = waitForSeededClip()
+        val summary = "E2E永続概要"
+
+        composeRule.onNode(
+            hasSetTextAction() and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
+            useUnmergedTree = true,
+        ).performTextReplacement(summary)
+        waitUntil { summaryForClip(clipId) == summary }
+
+        composeRule.activityRule.scenario.recreate()
+
+        composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
+        composeRule.onNode(
+            hasSetTextAction() and hasText(summary) and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
+            useUnmergedTree = true,
+        ).assertIsDisplayed()
+        assertEquals(summary, summaryForClip(clipId))
+    }
+
+    @Test
     fun tagManagementCreatesSameNamedChildrenThenRenamesAndDeletes() {
         composeRule.onNodeWithTag("tab_tags").performClick()
         val firstGroup = createRootGroup("E2EグループA")
@@ -537,6 +558,10 @@ class MainActivityComposeTest {
 
     private fun totalClipCount(): Int = runBlocking {
         storage().withDatabase { it.clipDao().countClips() }
+    }
+
+    private fun summaryForClip(clipId: Long): String = runBlocking {
+        storage().withDatabase { database -> database.clipDao().getActiveClips().single { it.id == clipId }.summary }
     }
 
     private data class FilterFixture(
