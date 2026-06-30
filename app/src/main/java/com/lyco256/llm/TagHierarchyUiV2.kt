@@ -577,6 +577,7 @@ private fun EnhancedTweetCard(
                         .weight(1f)
                         .clip(RoundedCornerShape(6.dp))
                         .clickable { onAuthorClick(clip.clip) }
+                        .testTag("clip_author_${clip.clip.id}")
                         .padding(4.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {

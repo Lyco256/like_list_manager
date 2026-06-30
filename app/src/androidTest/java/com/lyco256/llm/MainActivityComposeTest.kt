@@ -247,6 +247,64 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun authorClickMovesToClassifiedAuthorFilterWithoutChangingDatabase() {
+        waitForSeededClip()
+        val fixture = runBlocking {
+            storage().withDatabase { database ->
+                val clips = database.clipDao().getActiveClips().sortedBy { it.id }
+                val first = clips[0]
+                val second = clips[1]
+                val other = clips[2]
+                database.clipDao().updateClip(
+                    first.copy(
+                        text = "AuthorQuickFilterNeedle first",
+                        authorId = "author-quick-filter",
+                        authorName = "Quick Filter",
+                        authorUsername = "quickfilter",
+                    ),
+                )
+                database.clipDao().updateClip(
+                    second.copy(
+                        text = "AuthorQuickFilterNeedle second",
+                        authorId = "author-quick-filter",
+                        authorName = "Quick Filter",
+                        authorUsername = "quickfilter",
+                    ),
+                )
+                database.clipDao().updateClip(
+                    other.copy(
+                        text = "AuthorQuickFilterNeedle other",
+                        authorId = "author-other-filter",
+                        authorName = "Other Filter",
+                        authorUsername = "otherfilter",
+                    ),
+                )
+                AuthorClickFixture(first.id, second.id, other.id)
+            }
+        }
+        waitUntil {
+            runBlocking {
+                storage().withDatabase { database ->
+                    database.clipDao().getActiveClips().all { it.text.startsWith("AuthorQuickFilterNeedle") }
+                }
+            }
+        }
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("clip_author_${fixture.clickedClipId}").performClick()
+
+        composeRule.onNodeWithTag("classified_screen").assertIsDisplayed()
+        composeRule.onNodeWithText("対象:全ツイート", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("ユーザー:@quickfilter", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("clip_card_${fixture.clickedClipId}").assertIsDisplayed()
+        composeRule.onNodeWithTag("clip_card_${fixture.sameAuthorClipId}").assertIsDisplayed()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("clip_card_${fixture.otherAuthorClipId}").fetchSemanticsNodes().isEmpty()
+        }
+        assertEquals(before, databaseFingerprint())
+    }
+
+    @Test
     fun filterDialogAppliesAndClearsDateRangeWithoutChangingDatabase() {
         waitForSeededClip()
         val now = Instant.now().toString()
@@ -574,6 +632,12 @@ class MainActivityComposeTest {
     private data class DateFilterFixture(
         val matchingClipId: Long,
         val olderClipId: Long,
+    )
+
+    private data class AuthorClickFixture(
+        val clickedClipId: Long,
+        val sameAuthorClipId: Long,
+        val otherAuthorClipId: Long,
     )
 
     private fun LocalDate.toClipInstantString(): String =
