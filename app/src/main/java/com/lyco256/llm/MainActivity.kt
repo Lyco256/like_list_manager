@@ -1536,11 +1536,17 @@ fun AddAllTagsDialog(source: TagEntity, targets: List<TagEntity>, onDismiss: () 
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("「${source.name}」の全ツイートに追加するタグを選びます。元のタグは残ります。")
-                targets.forEach { target -> AssistChip(onClick = { onAddAll(target) }, label = { Text(target.name) }) }
+                targets.forEach { target ->
+                    AssistChip(
+                        onClick = { onAddAll(target) },
+                        modifier = Modifier.testTag("add_all_target_tag_${target.id}"),
+                        label = { Text(target.name) },
+                    )
+                }
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("閉じる") } },
+        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("add_all_cancel")) { Text("閉じる") } },
     )
 }
 
