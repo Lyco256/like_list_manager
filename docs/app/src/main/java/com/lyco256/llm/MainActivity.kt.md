@@ -28,7 +28,7 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 
 タグ移動Dialogの移動先には `move_node_target_root` と `move_node_target_group_<groupId>`、キャンセルには `move_node_cancel` のtest tagを付け、E2Eから表示テキストだけに依存せず移動先選択と閉じる操作を検証できます。
 
-`AddAllTagsDialog` は一括追加先タグに `add_all_target_tag_<tagId>`、閉じる操作に `add_all_cancel` のtest tagを付け、E2Eで「別タグへ一括追加」の対象選択を安定して操作できます。
+`AddAllTagsDialog` は一括追加先タグに `add_all_target_tag_<tagId>`、閉じる操作に `add_all_cancel` のtest tagを付け、E2Eで「別タグへ一括追加」の対象選択とキャンセルを安定して操作できます。
 
 `CreateNodeDialog` は入力欄、追加、閉じる操作に `create_node_*` のtest tagを付け、作成とキャンセルをE2Eで安定して検証できます。
 

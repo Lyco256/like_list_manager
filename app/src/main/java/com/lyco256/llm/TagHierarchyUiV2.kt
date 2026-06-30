@@ -1547,6 +1547,7 @@ private fun TagManagementRow(
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text("別タグへ一括追加") },
                                     onClick = { menuOpen = false; addAllOpen = true },
+                                    modifier = Modifier.testTag("tag_add_all_open_${row.node.id}"),
                                 )
                             }
                             androidx.compose.material3.DropdownMenuItem(

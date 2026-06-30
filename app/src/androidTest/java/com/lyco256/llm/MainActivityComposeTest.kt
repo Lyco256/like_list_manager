@@ -884,12 +884,37 @@ class MainActivityComposeTest {
 
         composeRule.onNodeWithTag("tab_tags").performClick()
         composeRule.onNodeWithTag("tag_operation_tag_$sourceTag").performClick()
-        composeRule.onNodeWithText("別タグへ一括追加").performClick()
+        composeRule.onNodeWithTag("tag_add_all_open_$sourceTag").performClick()
         composeRule.onNodeWithText("「一括追加元タグ」の全ツイートに追加するタグを選びます。元のタグは残ります。").assertIsDisplayed()
         composeRule.onNodeWithTag("add_all_target_tag_$targetTag").performClick()
 
         waitUntil { clipTagIds(clipId) == setOf(sourceTag, targetTag) }
         assertEquals(setOf(sourceTag, targetTag), clipTagIds(clipId))
+    }
+
+    @Test
+    fun addAllTagsDialogCancelKeepsRelations() {
+        val clipId = waitForSeededClip()
+        composeRule.onNodeWithTag("tab_tags").performClick()
+        val sourceTag = createRootTag("一括追加キャンセル元")
+        createRootTag("一括追加キャンセル先")
+
+        composeRule.onNodeWithTag("tab_unclassified").performClick()
+        composeRule.onNode(
+            hasTestTag("tag_chip_$sourceTag") and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
+            useUnmergedTree = true,
+        ).performClick()
+        composeRule.onNodeWithTag("classify_$clipId").performClick()
+        waitUntil { clipTagIds(clipId) == setOf(sourceTag) }
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("tab_tags").performClick()
+        composeRule.onNodeWithTag("tag_operation_tag_$sourceTag").performClick()
+        composeRule.onNodeWithTag("tag_add_all_open_$sourceTag").performClick()
+        composeRule.onNodeWithTag("add_all_cancel").performClick()
+
+        assertEquals(setOf(sourceTag), clipTagIds(clipId))
+        assertEquals(before, databaseFingerprint())
     }
 
     @Test
