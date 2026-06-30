@@ -182,16 +182,22 @@ class MainActivityComposeTest {
 
         composeRule.onNodeWithTag("filter_open").performClick()
         composeRule.onNodeWithTag("filter_query").performTextReplacement("discarded-query")
-        composeRule.onNodeWithText("キャンセル").performClick()
+        composeRule.onNodeWithTag("filter_cancel").performClick()
         composeRule.onNodeWithText("変更を破棄しますか？").assertIsDisplayed()
-        composeRule.onNodeWithText("破棄").performClick()
+        composeRule.onNodeWithTag("filter_discard_confirm").performClick()
         composeRule.onNodeWithText("文字列:\"FilterNeedle\"", substring = true).assertIsDisplayed()
 
         composeRule.onNodeWithTag("filter_open").performClick()
         composeRule.onNodeWithTag("filter_query").performTextReplacement("back-discarded-query")
         requestDiscardConfirmationWithBack()
         composeRule.onNodeWithText("変更を破棄しますか？").assertIsDisplayed()
-        composeRule.onNodeWithText("破棄").performClick()
+        composeRule.onNodeWithTag("filter_discard_confirm").performClick()
+        composeRule.onNodeWithText("文字列:\"FilterNeedle\"", substring = true).assertIsDisplayed()
+
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_clear_all_open").performClick()
+        composeRule.onNodeWithTag("filter_clear_all_cancel").performClick()
+        composeRule.onNodeWithTag("filter_apply").performClick()
         composeRule.onNodeWithText("文字列:\"FilterNeedle\"", substring = true).assertIsDisplayed()
 
         composeRule.onNodeWithTag("filter_clear").performClick()

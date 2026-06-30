@@ -964,7 +964,10 @@ private fun SearchFilterDialog(
                         Text("絞り込み", style = MaterialTheme.typography.titleLarge)
                         Text("一致件数:${matchingCount}件", style = MaterialTheme.typography.bodySmall)
                     }
-                    TextButton(onClick = { clearConfirmationOpen = true }) { Text("全クリア") }
+                    TextButton(
+                        onClick = { clearConfirmationOpen = true },
+                        modifier = Modifier.testTag("filter_clear_all_open"),
+                    ) { Text("全クリア") }
                 }
                 LazyColumn(
                     Modifier
@@ -1182,7 +1185,7 @@ private fun SearchFilterDialog(
                     Modifier.fillMaxWidth().padding(top = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    TextButton(onClick = ::requestDismiss, modifier = Modifier.weight(1f)) { Text("キャンセル") }
+                    TextButton(onClick = ::requestDismiss, modifier = Modifier.weight(1f).testTag("filter_cancel")) { Text("キャンセル") }
                     Button(
                         onClick = {
                             onApply(filters)
@@ -1248,13 +1251,19 @@ private fun SearchFilterDialog(
             onDismissRequest = { discardConfirmationOpen = false },
             title = { Text("変更を破棄しますか？") },
             confirmButton = {
-                Button(onClick = {
-                    discardConfirmationOpen = false
-                    onDismiss()
-                }) { Text("破棄") }
+                Button(
+                    onClick = {
+                        discardConfirmationOpen = false
+                        onDismiss()
+                    },
+                    modifier = Modifier.testTag("filter_discard_confirm"),
+                ) { Text("破棄") }
             },
             dismissButton = {
-                TextButton(onClick = { discardConfirmationOpen = false }) { Text("戻る") }
+                TextButton(
+                    onClick = { discardConfirmationOpen = false },
+                    modifier = Modifier.testTag("filter_discard_cancel"),
+                ) { Text("戻る") }
             },
         )
     }
@@ -1263,13 +1272,19 @@ private fun SearchFilterDialog(
             onDismissRequest = { clearConfirmationOpen = false },
             title = { Text("すべての条件をクリアしますか？") },
             confirmButton = {
-                Button(onClick = {
-                    filters = TweetFilterState()
-                    clearConfirmationOpen = false
-                }) { Text("クリア") }
+                Button(
+                    onClick = {
+                        filters = TweetFilterState()
+                        clearConfirmationOpen = false
+                    },
+                    modifier = Modifier.testTag("filter_clear_all_confirm"),
+                ) { Text("クリア") }
             },
             dismissButton = {
-                TextButton(onClick = { clearConfirmationOpen = false }) { Text("キャンセル") }
+                TextButton(
+                    onClick = { clearConfirmationOpen = false },
+                    modifier = Modifier.testTag("filter_clear_all_cancel"),
+                ) { Text("キャンセル") }
             },
         )
     }
