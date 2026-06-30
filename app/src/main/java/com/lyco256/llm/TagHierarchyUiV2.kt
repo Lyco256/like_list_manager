@@ -1110,6 +1110,7 @@ private fun SearchFilterDialog(
                             TextButton(
                                 onClick = { filters = filters.copy(tagFilters = emptyMap()) },
                                 enabled = filters.tagFilters.isNotEmpty(),
+                                modifier = Modifier.testTag("filter_tag_clear"),
                             ) { Text("タグ条件クリア") }
                         }
                         Text("含: 緑 / 必: 青 / 除: オレンジ。グループは含む・排除のみです。", style = MaterialTheme.typography.bodySmall)

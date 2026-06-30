@@ -272,6 +272,58 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun filterDialogClearsOnlyTagConditionsWithoutChangingDatabase() {
+        waitForSeededClip()
+        val now = Instant.now().toString()
+        val fixture = runBlocking {
+            storage().withDatabase { database ->
+                val clips = database.clipDao().getActiveClips().sortedBy { it.id }
+                val matching = clips[0]
+                val otherTagged = clips[1]
+                val untagged = clips[2]
+                database.clipDao().updateClip(matching.copy(text = "TagClearNeedle"))
+                database.clipDao().updateClip(otherTagged.copy(text = "TagClearNeedle"))
+                database.clipDao().updateClip(untagged.copy(text = "TagClearNeedle"))
+                val wantedTag = database.tagDao().insertTag(TagEntity(name = "TagClearWanted", createdAt = now, updatedAt = now))
+                val otherTag = database.tagDao().insertTag(TagEntity(name = "TagClearOther", createdAt = now, updatedAt = now))
+                database.clipDao().insertClipTag(ClipTagEntity(matching.id, wantedTag, now))
+                database.clipDao().insertClipTag(ClipTagEntity(otherTagged.id, otherTag, now))
+                FilterFixture(matching.id, otherTagged.id, untagged.id, wantedTag)
+            }
+        }
+        waitUntil {
+            clipTagIds(fixture.matchingClipId) == setOf(fixture.wantedTagId) &&
+                clipTagIds(fixture.wrongAuthorClipId).isNotEmpty()
+        }
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("tab_classified").performClick()
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_options_list")
+            .performScrollToNode(hasTestTag("filter_tag_condition_tag_${fixture.wantedTagId}"))
+        composeRule.onNodeWithTag("filter_tag_condition_tag_${fixture.wantedTagId}").performClick()
+        composeRule.onNodeWithTag("filter_apply").performClick()
+
+        composeRule.onNodeWithText("タグ:含む[TagClearWanted]", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("clip_card_${fixture.matchingClipId}").assertIsDisplayed()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("clip_card_${fixture.wrongAuthorClipId}").fetchSemanticsNodes().isEmpty()
+        }
+
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_options_list")
+            .performScrollToNode(hasTestTag("filter_tag_clear"))
+        composeRule.onNodeWithTag("filter_tag_clear").performClick()
+        composeRule.onNodeWithTag("filter_apply").performClick()
+
+        composeRule.onNodeWithText("対象:タグ付きのみ、条件なし").assertIsDisplayed()
+        composeRule.onNodeWithTag("clip_card_${fixture.matchingClipId}").assertIsDisplayed()
+        composeRule.onNodeWithTag("clip_card_${fixture.wrongAuthorClipId}").assertIsDisplayed()
+        assertTrue(composeRule.onAllNodesWithTag("clip_card_${fixture.untaggedClipId}").fetchSemanticsNodes().isEmpty())
+        assertEquals(before, databaseFingerprint())
+    }
+
+    @Test
     fun authorClickMovesToClassifiedAuthorFilterWithoutChangingDatabase() {
         waitForSeededClip()
         val fixture = runBlocking {
