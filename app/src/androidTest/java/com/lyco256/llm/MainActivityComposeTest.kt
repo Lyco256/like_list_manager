@@ -749,6 +749,20 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun createGroupDialogCancelDoesNotCreateGroup() {
+        composeRule.onNodeWithTag("tab_tags").performClick()
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("create_root_group").performClick()
+        composeRule.onNodeWithTag("create_node_name").performTextInput("キャンセル作成グループ")
+        composeRule.onNodeWithTag("create_node_cancel").performClick()
+
+        waitUntil { groupsNamed("キャンセル作成グループ") == 0 }
+        assertEquals(0, groupsNamed("キャンセル作成グループ"))
+        assertEquals(before, databaseFingerprint())
+    }
+
+    @Test
     fun tagDeleteDialogCancelKeepsTagAndRelations() {
         val clipId = waitForSeededClip()
         composeRule.onNodeWithTag("tab_tags").performClick()
