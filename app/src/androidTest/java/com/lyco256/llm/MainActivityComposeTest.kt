@@ -305,6 +305,44 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun likeCountPopupShowsDetailsAndDoesNotChangeDatabase() {
+        val clipId = waitForSeededClip()
+        val createdAt = Instant.now().minusSeconds(24 * 60 * 60).toString()
+        val fetchedAt = Instant.now().toString()
+        runBlocking {
+            storage().withDatabase { database ->
+                val clip = database.clipDao().getActiveClips().single { it.id == clipId }
+                database.clipDao().updateClip(
+                    clip.copy(
+                        xCreatedAt = createdAt,
+                        likeCount = 12_345,
+                        likeCountFetchedAt = fetchedAt,
+                    ),
+                )
+            }
+        }
+        waitUntil {
+            runBlocking {
+                storage().withDatabase { database ->
+                    database.clipDao().getActiveClips().single { it.id == clipId }.likeCount == 12_345L
+                }
+            }
+        }
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("clip_like_count_$clipId").performClick()
+
+        composeRule.onNodeWithText("いいね数: 12,345").assertIsDisplayed()
+        composeRule.onNodeWithText("取得日時:", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("投稿から一週間以内に取得した値です").assertIsDisplayed()
+        composeRule.onNodeWithText("いいね数: 12,345").performClick()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithText("いいね数: 12,345").fetchSemanticsNodes().isEmpty()
+        }
+        assertEquals(before, databaseFingerprint())
+    }
+
+    @Test
     fun filterDialogAppliesAndClearsDateRangeWithoutChangingDatabase() {
         waitForSeededClip()
         val now = Instant.now().toString()
@@ -690,7 +728,11 @@ class MainActivityComposeTest {
     private fun databaseFingerprint(): List<String> = runBlocking {
         storage().withDatabase { database ->
             buildList {
-                addAll(database.clipDao().getActiveClips().map { "clip:${it.id}:${it.text}:${it.xCreatedAt}:${it.summary}:${it.isDeleted}" })
+                addAll(
+                    database.clipDao().getActiveClips().map {
+                        "clip:${it.id}:${it.authorId}:${it.authorName}:${it.authorUsername}:${it.text}:${it.xCreatedAt}:${it.summary}:${it.isDeleted}:${it.likeCount}:${it.likeCountFetchedAt}:${it.likeCountFetchFailedAt}:${it.likeCountFetchError}"
+                    },
+                )
                 addAll(database.tagDao().getTags().map { "tag:${it.id}:${it.name}:${it.parentGroupId}:${it.sortOrder}" })
                 addAll(database.clipDao().observeClipTags().first().map { "relation:${it.clipId}:${it.tagId}" })
             }

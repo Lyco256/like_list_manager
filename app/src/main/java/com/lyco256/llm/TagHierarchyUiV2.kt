@@ -589,6 +589,7 @@ private fun EnhancedTweetCard(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(4.dp))
                                         .clickable { likePopupOpen = true }
+                                        .testTag("clip_like_count_${clip.clip.id}")
                                         .padding(horizontal = 2.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(2.dp),
