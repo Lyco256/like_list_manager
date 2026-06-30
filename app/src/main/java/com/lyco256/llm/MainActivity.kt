@@ -1512,7 +1512,7 @@ fun MoveNodeDialog(node: TagTreeNode, groups: List<TagGroupEntity>, onDismiss: (
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("閉じる") } },
+        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("move_node_cancel")) { Text("閉じる") } },
     )
 }
 

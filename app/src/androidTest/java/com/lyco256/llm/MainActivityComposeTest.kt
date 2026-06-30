@@ -779,6 +779,26 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun tagMoveDialogCancelKeepsParentGroup() {
+        composeRule.onNodeWithTag("tab_tags").performClick()
+        val sourceGroup = createRootGroup("移動キャンセル元")
+        createRootGroup("移動キャンセル先")
+        val tagId = createChildTag(sourceGroup, "移動キャンセルタグ")
+        waitUntil { tagParentGroupId(tagId) == sourceGroup }
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("tag_expand_group_$sourceGroup").performClick()
+        composeRule.onNodeWithTag("tag_operation_tag_$tagId").performClick()
+        composeRule.onNodeWithText("別グループへ移動").performClick()
+        composeRule.onNodeWithText("「移動キャンセルタグ」を移動").assertIsDisplayed()
+        composeRule.onNodeWithTag("move_node_cancel").performClick()
+
+        composeRule.onNodeWithTag("tag_row_tag_$tagId").assertIsDisplayed()
+        assertEquals(sourceGroup, tagParentGroupId(tagId))
+        assertEquals(before, databaseFingerprint())
+    }
+
+    @Test
     fun dismissingTagPopupOutsideDoesNotModifyOrPropagateToTheClip() {
         val clipId = waitForSeededClip()
         composeRule.onNodeWithTag("tab_tags").performClick()
