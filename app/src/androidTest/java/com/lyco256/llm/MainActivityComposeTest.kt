@@ -840,7 +840,7 @@ class MainActivityComposeTest {
 
         composeRule.onNodeWithTag("tag_expand_group_$sourceGroup").performClick()
         composeRule.onNodeWithTag("tag_operation_tag_$movedTag").performClick()
-        composeRule.onNodeWithText("別グループへ移動").performClick()
+        composeRule.onNodeWithTag("tag_move_open_tag_$movedTag").performClick()
         composeRule.onNodeWithTag("move_node_target_group_$targetGroup").performClick()
 
         waitUntil { tagParentGroupId(movedTag) == targetGroup }
@@ -858,12 +858,29 @@ class MainActivityComposeTest {
 
         composeRule.onNodeWithTag("tag_expand_group_$sourceGroup").performClick()
         composeRule.onNodeWithTag("tag_operation_tag_$tagId").performClick()
-        composeRule.onNodeWithText("別グループへ移動").performClick()
+        composeRule.onNodeWithTag("tag_move_open_tag_$tagId").performClick()
         composeRule.onNodeWithText("「移動キャンセルタグ」を移動").assertIsDisplayed()
         composeRule.onNodeWithTag("move_node_cancel").performClick()
 
         composeRule.onNodeWithTag("tag_row_tag_$tagId").assertIsDisplayed()
         assertEquals(sourceGroup, tagParentGroupId(tagId))
+        assertEquals(before, databaseFingerprint())
+    }
+
+    @Test
+    fun groupMoveDialogCancelKeepsParentGroup() {
+        composeRule.onNodeWithTag("tab_tags").performClick()
+        val sourceGroup = createRootGroup("グループ移動キャンセル元")
+        createRootGroup("グループ移動キャンセル先")
+        waitUntil { groupParentGroupId(sourceGroup) == null }
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("tag_operation_group_$sourceGroup").performClick()
+        composeRule.onNodeWithTag("tag_move_open_group_$sourceGroup").performClick()
+        composeRule.onNodeWithTag("move_node_cancel").performClick()
+
+        composeRule.onNodeWithTag("tag_row_group_$sourceGroup").assertIsDisplayed()
+        assertEquals(null, groupParentGroupId(sourceGroup))
         assertEquals(before, databaseFingerprint())
     }
 
@@ -1080,6 +1097,10 @@ class MainActivityComposeTest {
 
     private fun tagParentGroupId(id: Long): Long? = runBlocking {
         storage().withDatabase { it.tagDao().getTags().single { tag -> tag.id == id }.parentGroupId }
+    }
+
+    private fun groupParentGroupId(id: Long): Long? = runBlocking {
+        storage().withDatabase { it.tagDao().getGroups().single { group -> group.id == id }.parentGroupId }
     }
 
     private fun groupExists(id: Long): Boolean = runBlocking {

@@ -26,7 +26,7 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 
 `SyncResultDialog` は同期成功/失敗の結果表示を直接renderできるinternal composableです。権限不足などのエラーメッセージ表示と閉じる操作をUIテストで固定します。
 
-タグ移動Dialogの移動先には `move_node_target_root` と `move_node_target_group_<groupId>`、キャンセルには `move_node_cancel` のtest tagを付け、E2Eから表示テキストだけに依存せず移動先選択と閉じる操作を検証できます。
+タグ/グループ移動Dialogの移動先には `move_node_target_root` と `move_node_target_group_<groupId>`、キャンセルには `move_node_cancel` のtest tagを付け、E2Eから表示テキストだけに依存せず移動先選択と閉じる操作を検証できます。
 
 `AddAllTagsDialog` は一括追加先タグに `add_all_target_tag_<tagId>`、閉じる操作に `add_all_cancel` のtest tagを付け、E2Eで「別タグへ一括追加」の対象選択とキャンセルを安定して操作できます。
 

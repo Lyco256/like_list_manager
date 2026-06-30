@@ -61,6 +61,6 @@
 
 ## UI自動テスト
 
-投稿カード、投稿者クリック領域、いいね数表示、分類確定、タグchip、タグ管理row、操作menu、名称変更menu、削除menu、一括追加menu、group展開、root追加button、タグ/グループ削除DialogにはIDを含む安定した `testTag` を付けています。Compose E2Eは表示テキストだけに依存せず、操作後のRoom状態もassertします。タグ管理では、operation menuからのタグ名称変更、グループ名称変更、名称変更Dialogキャンセル、タグの別グループ移動、別タグへの一括追加Dialogキャンセル、タグ/グループ削除DialogのキャンセルをRoom状態で確認します。
+投稿カード、投稿者クリック領域、いいね数表示、分類確定、タグchip、タグ管理row、操作menu、名称変更menu、移動menu、削除menu、一括追加menu、group展開、root追加button、タグ/グループ削除DialogにはIDを含む安定した `testTag` を付けています。Compose E2Eは表示テキストだけに依存せず、操作後のRoom状態もassertします。タグ管理では、operation menuからのタグ名称変更、グループ名称変更、名称変更Dialogキャンセル、タグの別グループ移動、タグ/グループ移動Dialogキャンセル、別タグへの一括追加Dialogキャンセル、タグ/グループ削除DialogのキャンセルをRoom状態で確認します。
 検索/絞り込みDialogには、日付条件、投稿者条件、タグ条件を実機E2Eから安定して操作するため、`filter_options_list`、`filter_start_date`、`filter_end_date`、`filter_date_clear`、`filter_date_picker_apply`、`filter_date_picker_clear`、`filter_author_open`、`filter_author_option_<authorId>_<username>`、`filter_author_confirm`、`filter_tag_condition_<type>_<id>`、`filter_tag_clear` を付けています。
 メディアグリッドと全画面画像viewerには、保存済みPhotoのタップと閉じる操作をスクリーンショットなしで検証するため、`media_asset_<assetId>`、`image_viewer`、`image_viewer_close`、`image_viewer_position`、`image_viewer_photo_<index>` を付けています。
