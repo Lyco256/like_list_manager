@@ -735,6 +735,20 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun createTagDialogCancelDoesNotCreateTag() {
+        composeRule.onNodeWithTag("tab_tags").performClick()
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("create_root_tag").performClick()
+        composeRule.onNodeWithTag("create_node_name").performTextInput("キャンセル作成タグ")
+        composeRule.onNodeWithTag("create_node_cancel").performClick()
+
+        waitUntil { tagsNamed("キャンセル作成タグ") == 0 }
+        assertEquals(0, tagsNamed("キャンセル作成タグ"))
+        assertEquals(before, databaseFingerprint())
+    }
+
+    @Test
     fun tagDeleteDialogCancelKeepsTagAndRelations() {
         val clipId = waitForSeededClip()
         composeRule.onNodeWithTag("tab_tags").performClick()
@@ -866,16 +880,16 @@ class MainActivityComposeTest {
 
     private fun createRootTag(name: String): Long {
         composeRule.onNodeWithTag("create_root_tag").performClick()
-        composeRule.onNode(hasSetTextAction()).performTextInput(name)
-        composeRule.onNodeWithText("追加").performClick()
+        composeRule.onNodeWithTag("create_node_name").performTextInput(name)
+        composeRule.onNodeWithTag("create_node_confirm").performClick()
         waitUntil { tagsNamed(name) == 1 }
         return runBlocking { storage().withDatabase { it.tagDao().getTags().single { tag -> tag.name == name }.id } }
     }
 
     private fun createRootGroup(name: String): Long {
         composeRule.onNodeWithTag("create_root_group").performClick()
-        composeRule.onNode(hasSetTextAction()).performTextInput(name)
-        composeRule.onNodeWithText("追加").performClick()
+        composeRule.onNodeWithTag("create_node_name").performTextInput(name)
+        composeRule.onNodeWithTag("create_node_confirm").performClick()
         waitUntil { groupsNamed(name) == 1 }
         return runBlocking { storage().withDatabase { it.tagDao().getGroups().single { group -> group.name == name }.id } }
     }
@@ -883,8 +897,8 @@ class MainActivityComposeTest {
     private fun createChildTag(groupId: Long, name: String): Long {
         composeRule.onNodeWithTag("tag_operation_group_$groupId").performClick()
         composeRule.onNodeWithText("子タグを追加").performClick()
-        composeRule.onNode(hasSetTextAction()).performTextInput(name)
-        composeRule.onNodeWithText("追加").performClick()
+        composeRule.onNodeWithTag("create_node_name").performTextInput(name)
+        composeRule.onNodeWithTag("create_node_confirm").performClick()
         waitUntil {
             runBlocking {
                 storage().withDatabase { database ->

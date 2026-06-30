@@ -1470,9 +1470,17 @@ fun CreateNodeDialog(type: TagNodeType, parentId: Long?, onDismiss: () -> Unit, 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (type == TagNodeType.TAG) "タグを追加" else "グループを追加") },
-        text = { OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true, label = { Text("名前") }) },
-        confirmButton = { TextButton(onClick = { onCreate(name) }) { Text("追加") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("閉じる") } },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                label = { Text("名前") },
+                modifier = Modifier.testTag("create_node_name"),
+            )
+        },
+        confirmButton = { TextButton(onClick = { onCreate(name) }, modifier = Modifier.testTag("create_node_confirm")) { Text("追加") } },
+        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("create_node_cancel")) { Text("閉じる") } },
     )
 }
 
