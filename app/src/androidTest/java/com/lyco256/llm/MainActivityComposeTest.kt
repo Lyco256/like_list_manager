@@ -735,6 +735,33 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun tagDeleteDialogCancelKeepsTagAndRelations() {
+        val clipId = waitForSeededClip()
+        composeRule.onNodeWithTag("tab_tags").performClick()
+        val tagId = createRootTag("削除キャンセルタグ")
+
+        composeRule.onNodeWithTag("tab_unclassified").performClick()
+        composeRule.onNode(
+            hasTestTag("tag_chip_$tagId") and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
+            useUnmergedTree = true,
+        ).performClick()
+        composeRule.onNodeWithTag("classify_$clipId").performClick()
+        waitUntil { clipTagIds(clipId) == setOf(tagId) }
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("tab_tags").performClick()
+        composeRule.onNodeWithTag("tag_operation_tag_$tagId").performClick()
+        composeRule.onNodeWithText("削除").performClick()
+        composeRule.onNodeWithText("「削除キャンセルタグ」の割り当ても外れます。").assertIsDisplayed()
+        composeRule.onNodeWithTag("tag_delete_cancel_tag_$tagId").performClick()
+
+        composeRule.onNodeWithTag("tag_row_tag_$tagId").assertIsDisplayed()
+        assertTrue(tagExists(tagId))
+        assertEquals(setOf(tagId), clipTagIds(clipId))
+        assertEquals(before, databaseFingerprint())
+    }
+
+    @Test
     fun tagManagementMovesTagToAnotherGroupThroughDialog() {
         composeRule.onNodeWithTag("tab_tags").performClick()
         val sourceGroup = createRootGroup("E2E移動元グループ")

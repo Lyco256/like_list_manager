@@ -1582,12 +1582,20 @@ private fun TagManagementRow(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    if (row.node is TagGroupNode) onDeleteGroup(row.node.group) else onDeleteTag((row.node as TagLeafNode).tag)
-                    deleteOpen = false
-                }) { Text("削除") }
+                TextButton(
+                    onClick = {
+                        if (row.node is TagGroupNode) onDeleteGroup(row.node.group) else onDeleteTag((row.node as TagLeafNode).tag)
+                        deleteOpen = false
+                    },
+                    modifier = Modifier.testTag("tag_delete_confirm_${row.node.ref().type.name.lowercase()}_${row.node.id}"),
+                ) { Text("削除") }
             },
-            dismissButton = { TextButton(onClick = { deleteOpen = false }) { Text("閉じる") } },
+            dismissButton = {
+                TextButton(
+                    onClick = { deleteOpen = false },
+                    modifier = Modifier.testTag("tag_delete_cancel_${row.node.ref().type.name.lowercase()}_${row.node.id}"),
+                ) { Text("閉じる") }
+            },
         )
     }
     if (addAllOpen && row.node is TagLeafNode) {
