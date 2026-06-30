@@ -1588,7 +1588,7 @@ fun ApiSettingsDialog(
                         onValueChange = { settings = settings.copy(clientId = it) },
                         label = { Text("OAuth 2.0 Client ID") },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().testTag("api_settings_client_id"),
                     )
                 }
                 item {
@@ -1609,11 +1609,11 @@ fun ApiSettingsDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { onSave(settings) }) { Text("保存") } },
+        confirmButton = { TextButton(onClick = { onSave(settings) }, modifier = Modifier.testTag("api_settings_save")) { Text("保存") } },
         dismissButton = {
             Row {
-                TextButton(onClick = onClear) { Text("消去") }
-                TextButton(onClick = onDismiss) { Text("閉じる") }
+                TextButton(onClick = onClear, modifier = Modifier.testTag("api_settings_clear")) { Text("消去") }
+                TextButton(onClick = onDismiss, modifier = Modifier.testTag("api_settings_close")) { Text("閉じる") }
             }
         },
     )

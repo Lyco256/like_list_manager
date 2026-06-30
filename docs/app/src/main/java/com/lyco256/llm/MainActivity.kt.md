@@ -16,7 +16,9 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 
 ## UI自動テスト
 
-主要画面、ナビゲーション、メニュー、空状態には安定したCompose `testTag` を設定しています。表示テキストとtestTagを使って画面遷移をassertし、スクリーンショット比較は行いません。
+主要画面、ナビゲーション、メニュー、X API設定Dialog、空状態には安定したCompose `testTag` を設定しています。表示テキストとtestTagを使って画面遷移をassertし、スクリーンショット比較は行いません。
+
+`ApiSettingsDialog` は隔離テスト環境で本番OAuthを開始しないことに加え、Client IDの保存、trim、消去をUI操作から検証できるよう、入力欄、保存、消去、閉じるボタンに `api_settings_*` のtest tagを付けています。
 
 `PostStorageDialog` は保存先移動を開始しない閉じる操作をE2Eで確認できるよう、Dialog本体に `post_storage_dialog`、閉じるボタンに `post_storage_close` を付けています。
 

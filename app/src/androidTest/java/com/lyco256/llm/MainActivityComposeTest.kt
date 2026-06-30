@@ -119,6 +119,30 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun apiSettingsSaveAndClearRoundTripThroughTheUi() {
+        composeRule.onNodeWithTag("main_menu").performClick()
+        composeRule.onNodeWithText("X API設定").performClick()
+        composeRule.onNodeWithTag("api_settings_clear").performClick()
+        waitUntil { apiClientId() == "" }
+
+        composeRule.onNodeWithTag("api_settings_client_id").performTextReplacement("  ui-client-id  ")
+        composeRule.onNodeWithTag("api_settings_save").performClick()
+        waitUntil { apiClientId() == "ui-client-id" }
+
+        composeRule.onNodeWithTag("main_menu").performClick()
+        composeRule.onNodeWithText("X API設定").performClick()
+        composeRule.onNodeWithText("ui-client-id").assertIsDisplayed()
+        composeRule.onNodeWithTag("api_settings_clear").performClick()
+        waitUntil { apiClientId() == "" }
+        composeRule.onNodeWithTag("api_settings_close").performClick()
+
+        composeRule.onNodeWithTag("main_menu").performClick()
+        composeRule.onNodeWithText("X API設定").performClick()
+        assertTrue(composeRule.onAllNodesWithText("ui-client-id").fetchSemanticsNodes().isEmpty())
+        composeRule.onNodeWithTag("api_settings_close").performClick()
+    }
+
+    @Test
     fun storageLocationDialogDismissDoesNotChangeDatabase() {
         waitForSeededClip()
         val before = databaseFingerprint()
@@ -658,6 +682,10 @@ class MainActivityComposeTest {
 
     private fun summaryForClip(clipId: Long): String = runBlocking {
         storage().withDatabase { database -> database.clipDao().getActiveClips().single { it.id == clipId }.summary }
+    }
+
+    private fun apiClientId(): String = runBlocking {
+        (composeRule.activity.application as LikeListManagerApp).container.repository.loadApiSettings().clientId
     }
 
     private data class FilterFixture(
