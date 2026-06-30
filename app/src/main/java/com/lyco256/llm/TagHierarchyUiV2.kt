@@ -1555,7 +1555,11 @@ private fun TagManagementRow(
                                 modifier = Modifier.testTag("tag_rename_open_${row.node.ref().type.name.lowercase()}_${row.node.id}"),
                             )
                             androidx.compose.material3.DropdownMenuItem(text = { Text("別グループへ移動") }, onClick = { menuOpen = false; moveOpen = true })
-                            androidx.compose.material3.DropdownMenuItem(text = { Text("削除") }, onClick = { menuOpen = false; deleteOpen = true })
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text("削除") },
+                                onClick = { menuOpen = false; deleteOpen = true },
+                                modifier = Modifier.testTag("tag_delete_open_${row.node.ref().type.name.lowercase()}_${row.node.id}"),
+                            )
                         }
                     }
             }

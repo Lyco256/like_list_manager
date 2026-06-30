@@ -723,12 +723,12 @@ class MainActivityComposeTest {
         waitUntil { tagsNamed("変更後タグ") == 1 }
 
         composeRule.onNodeWithTag("tag_operation_tag_$firstTag").performClick()
-        composeRule.onNodeWithText("削除").performClick()
+        composeRule.onNodeWithTag("tag_delete_open_tag_$firstTag").performClick()
         composeRule.onNodeWithText("削除").performClick()
         waitUntil { !tagExists(firstTag) }
 
         composeRule.onNodeWithTag("tag_operation_group_$firstGroup").performClick()
-        composeRule.onNodeWithText("削除").performClick()
+        composeRule.onNodeWithTag("tag_delete_open_group_$firstGroup").performClick()
         composeRule.onNodeWithText("削除").performClick()
         waitUntil { !groupExists(firstGroup) }
         assertTrue(groupExists(secondGroup))
@@ -804,13 +804,29 @@ class MainActivityComposeTest {
 
         composeRule.onNodeWithTag("tab_tags").performClick()
         composeRule.onNodeWithTag("tag_operation_tag_$tagId").performClick()
-        composeRule.onNodeWithText("削除").performClick()
+        composeRule.onNodeWithTag("tag_delete_open_tag_$tagId").performClick()
         composeRule.onNodeWithText("「削除キャンセルタグ」の割り当ても外れます。").assertIsDisplayed()
         composeRule.onNodeWithTag("tag_delete_cancel_tag_$tagId").performClick()
 
         composeRule.onNodeWithTag("tag_row_tag_$tagId").assertIsDisplayed()
         assertTrue(tagExists(tagId))
         assertEquals(setOf(tagId), clipTagIds(clipId))
+        assertEquals(before, databaseFingerprint())
+    }
+
+    @Test
+    fun groupDeleteDialogCancelKeepsGroup() {
+        composeRule.onNodeWithTag("tab_tags").performClick()
+        val groupId = createRootGroup("削除キャンセルグループ")
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("tag_operation_group_$groupId").performClick()
+        composeRule.onNodeWithTag("tag_delete_open_group_$groupId").performClick()
+        composeRule.onNodeWithTag("tag_delete_cancel_group_$groupId").performClick()
+
+        composeRule.onNodeWithTag("tag_row_group_$groupId").assertIsDisplayed()
+        assertTrue(groupExists(groupId))
+        assertEquals(1, groupsNamed("削除キャンセルグループ"))
         assertEquals(before, databaseFingerprint())
     }
 
