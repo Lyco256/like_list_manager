@@ -59,7 +59,7 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("tab_tags").performClick()
         composeRule.onNodeWithTag("tags_screen").assertIsDisplayed()
         composeRule.onNodeWithTag("main_menu").performClick()
-        composeRule.onNodeWithText("X API設定").performClick()
+        composeRule.onNodeWithTag("main_menu_api_settings").performClick()
         composeRule.onNodeWithText("OAuth 2.0 Client ID").assertIsDisplayed()
     }
 
@@ -105,15 +105,15 @@ class MainActivityComposeTest {
     @Test
     fun usageAndSettingsSafetyControlsReflectTheIsolatedEnvironment() {
         composeRule.onNodeWithTag("main_menu").performClick()
-        composeRule.onNodeWithText("同期/使用量").performClick()
+        composeRule.onNodeWithTag("main_menu_usage").performClick()
         composeRule.onNodeWithText("月間取得数: 0 / 1800").assertIsDisplayed()
         composeRule.onNodeWithText("警告ライン: 1500").assertIsDisplayed()
         composeRule.onNodeWithText("停止ライン: 2000").assertIsDisplayed()
         composeRule.onNodeWithText("15分制限: - / -").assertIsDisplayed()
-        composeRule.onNodeWithText("閉じる").performClick()
+        composeRule.onNodeWithTag("usage_close").performClick()
 
         composeRule.onNodeWithTag("main_menu").performClick()
-        composeRule.onNodeWithText("X API設定").performClick()
+        composeRule.onNodeWithTag("main_menu_api_settings").performClick()
         composeRule.onNodeWithText("隔離テスト環境ではXログインを実行できません").assertIsDisplayed()
         composeRule.onNode(hasSetTextAction() and hasText("OAuth 2.0 Client ID")).performTextInput("test-client-id")
         composeRule.onNodeWithText("保存してXにログイン").assertIsNotEnabled()
@@ -122,7 +122,7 @@ class MainActivityComposeTest {
     @Test
     fun apiSettingsSaveAndClearRoundTripThroughTheUi() {
         composeRule.onNodeWithTag("main_menu").performClick()
-        composeRule.onNodeWithText("X API設定").performClick()
+        composeRule.onNodeWithTag("main_menu_api_settings").performClick()
         composeRule.onNodeWithTag("api_settings_clear").performClick()
         waitUntil { apiClientId() == "" }
 
@@ -131,14 +131,14 @@ class MainActivityComposeTest {
         waitUntil { apiClientId() == "ui-client-id" }
 
         composeRule.onNodeWithTag("main_menu").performClick()
-        composeRule.onNodeWithText("X API設定").performClick()
+        composeRule.onNodeWithTag("main_menu_api_settings").performClick()
         composeRule.onNodeWithText("ui-client-id").assertIsDisplayed()
         composeRule.onNodeWithTag("api_settings_clear").performClick()
         waitUntil { apiClientId() == "" }
         composeRule.onNodeWithTag("api_settings_close").performClick()
 
         composeRule.onNodeWithTag("main_menu").performClick()
-        composeRule.onNodeWithText("X API設定").performClick()
+        composeRule.onNodeWithTag("main_menu_api_settings").performClick()
         assertTrue(composeRule.onAllNodesWithText("ui-client-id").fetchSemanticsNodes().isEmpty())
         composeRule.onNodeWithTag("api_settings_close").performClick()
     }
@@ -149,7 +149,7 @@ class MainActivityComposeTest {
         val before = databaseFingerprint()
 
         composeRule.onNodeWithTag("main_menu").performClick()
-        composeRule.onNodeWithText("投稿データの保存先").performClick()
+        composeRule.onNodeWithTag("main_menu_storage").performClick()
         composeRule.onNodeWithTag("post_storage_dialog").assertIsDisplayed()
         composeRule.onNodeWithTag("post_storage_close").performClick()
         composeRule.onNodeWithTag("main_screen").assertIsDisplayed()
@@ -1049,11 +1049,16 @@ class MainActivityComposeTest {
     @Test
     fun emptyAndSyncErrorStatesAreAssertedWithoutScreenshots() {
         waitForSeededClip()
+        val beforeSyncError = databaseFingerprint()
+
         composeRule.onNodeWithTag("main_menu").performClick()
-        composeRule.onNodeWithText("同期する").performClick()
+        composeRule.onNodeWithTag("main_menu_sync").performClick()
         waitForText("同期結果")
         composeRule.onNodeWithText("X API設定からXにログインしてください").assertIsDisplayed()
-        composeRule.onNodeWithText("閉じる").performClick()
+        composeRule.onNodeWithTag("sync_result_close").performClick()
+        composeRule.onNodeWithTag("main_screen").assertIsDisplayed()
+
+        assertEquals(beforeSyncError, databaseFingerprint())
 
         runBlocking {
             storage().withDatabase { database ->

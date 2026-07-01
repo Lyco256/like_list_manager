@@ -18,3 +18,7 @@
 - 空状態、同期エラー表示、Activity再作成後のタブ復元と分類済みフィルター復元
 
 変更時は `scripts/run-safe-integration-check.cmd` で、同じ実機上の本番package metadataが前後不変であることも合わせて確認します。
+
+## 2026-07-01 追記: メインメニュー/結果Dialogの安定操作
+
+主要メニュー導線は `main_menu_*` のtest tagで開きます。使用量Dialogの閉じる操作は `usage_close`、同期未ログインエラーの結果Dialogは `sync_result_close` で閉じ、同期エラー表示前後のDB fingerprintが変わらないことも確認します。

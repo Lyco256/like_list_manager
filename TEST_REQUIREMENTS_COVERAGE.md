@@ -41,4 +41,9 @@
 - Macrobenchmark安全実行入口: `scripts/run-safe-macrobenchmark-check.cmd`
 - snapshot任意入口: `scripts/run-safe-snapshot-check.cmd`
 
+## 2026-07-01 追記
+
+- 設定/安全装置とUI状態系の追加E2Eとして、メインメニュー項目を `main_menu_*` test tagで操作するよう固定し、使用量Dialogの `usage_close`、同期結果Dialogの `sync_result_close` を通した閉じる操作を確認する。
+- 未ログイン同期エラーの表示/閉じる操作前後でDB fingerprintが変わらないことを確認し、隔離テスト環境で同期エラー導線が実データへ影響しないことを補強する。
+
 実画像backup、本網羅E2Eが残っている間は、要件定義全体を「完了」と判定しません。

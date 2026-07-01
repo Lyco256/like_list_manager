@@ -48,3 +48,9 @@ UI項目を追加する場合は、対応するViewModel操作、Repository API�
 - `data/PostStorageManager.kt.md`: 保存先状態、移動見積もり、移動結果
 - `data/XOAuthManager.kt.md`: ログインIntentと認証結果交換
 - `../../../../AndroidManifest.xml.md`: MainActivityとcallback Activityの宣言
+
+## 2026-07-01 追記: メニュー/結果DialogのE2E安定化
+
+メインメニュー項目には `main_menu_sync`、`main_menu_usage`、`main_menu_like_refresh`、`main_menu_storage`、`main_menu_api_settings` のtest tagを付け、文言ではなく安定IDで主要ダイアログを開けるようにしています。
+
+`SyncResultDialog` の閉じる操作は `sync_result_close`、`UsageDialog` の閉じる操作は `usage_close` で検証できます。

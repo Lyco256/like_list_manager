@@ -487,6 +487,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                                     viewModel.syncNow { syncMessage = it }
                                     menuOpen = false
                                 },
+                                modifier = Modifier.testTag("main_menu_sync"),
                             )
                             DropdownMenuItem(
                                 text = { Text("同期/使用量") },
@@ -494,6 +495,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                                     usageOpen = true
                                     menuOpen = false
                                 },
+                                modifier = Modifier.testTag("main_menu_usage"),
                             )
                             DropdownMenuItem(
                                 text = { Text("いいね数を再取得") },
@@ -506,6 +508,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                                             .onFailure { syncMessage = it.message ?: "対象件数を確認できませんでした" }
                                     }
                                 },
+                                modifier = Modifier.testTag("main_menu_like_refresh"),
                             )
                             DropdownMenuItem(
                                 text = { Text("投稿データの保存先") },
@@ -514,6 +517,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                                     storageOpen = true
                                     menuOpen = false
                                 },
+                                modifier = Modifier.testTag("main_menu_storage"),
                             )
                             DropdownMenuItem(
                                 text = { Text("X API設定") },
@@ -521,6 +525,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                                     settingsOpen = true
                                     menuOpen = false
                                 },
+                                modifier = Modifier.testTag("main_menu_api_settings"),
                             )
                         }
                     }
@@ -716,7 +721,7 @@ internal fun SyncResultDialog(message: String, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text("同期結果") },
         text = { Text(message) },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("閉じる") } },
+        confirmButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("sync_result_close")) { Text("閉じる") } },
     )
 }
 
@@ -1581,7 +1586,7 @@ fun UsageDialog(syncState: SyncStateEntity?, session: OAuthSession?, onDismiss: 
                 Text("最終同期: ${syncState?.lastSyncAt ?: "未同期"}")
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("閉じる") } },
+        confirmButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("usage_close")) { Text("閉じる") } },
     )
 }
 
