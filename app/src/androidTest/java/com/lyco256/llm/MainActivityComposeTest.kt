@@ -22,6 +22,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import com.lyco256.llm.data.AssetEntity
+import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipTagEntity
 import com.lyco256.llm.data.PostStorageManager
 import com.lyco256.llm.data.TagEntity
@@ -152,6 +153,41 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("main_menu_storage").performClick()
         composeRule.onNodeWithTag("post_storage_dialog").assertIsDisplayed()
         composeRule.onNodeWithTag("post_storage_close").performClick()
+        composeRule.onNodeWithTag("main_screen").assertIsDisplayed()
+
+        assertEquals(before, databaseFingerprint())
+    }
+
+    @Test
+    fun likeRefreshEstimateCancelDoesNotChangeDatabase() {
+        waitForSeededClip()
+        val now = Instant.now().toString()
+        runBlocking {
+            storage().withDatabase { database ->
+                database.clipDao().insertClip(
+                    ClipEntity(
+                        xPostId = "1234567890",
+                        authorName = "like refresh target",
+                        authorUsername = "like_refresh_target",
+                        text = "Like refresh estimate cancel target",
+                        postUrl = "https://x.com/like_refresh_target/status/1234567890",
+                        xCreatedAt = now,
+                        savedAt = now,
+                        syncedAt = now,
+                    ),
+                )
+            }
+        }
+        waitUntil { totalClipCount() == 4 }
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("main_menu").performClick()
+        composeRule.onNodeWithTag("main_menu_like_refresh").performClick()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("like_refresh_estimate_dialog").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("like_refresh_estimate_dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("like_refresh_estimate_cancel").performClick()
         composeRule.onNodeWithTag("main_screen").assertIsDisplayed()
 
         assertEquals(before, databaseFingerprint())

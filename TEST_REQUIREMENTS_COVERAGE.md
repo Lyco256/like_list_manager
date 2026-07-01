@@ -45,5 +45,6 @@
 
 - 設定/安全装置とUI状態系の追加E2Eとして、メインメニュー項目を `main_menu_*` test tagで操作するよう固定し、使用量Dialogの `usage_close`、同期結果Dialogの `sync_result_close` を通した閉じる操作を確認する。
 - 未ログイン同期エラーの表示/閉じる操作前後でDB fingerprintが変わらないことを確認し、隔離テスト環境で同期エラー導線が実データへ影響しないことを補強する。
+- いいね数再取得の見積もりDialogを `main_menu_like_refresh` から開き、`like_refresh_estimate_cancel` で閉じる前後のDB fingerprint不変を確認する。
 
 実画像backup、本網羅E2Eが残っている間は、要件定義全体を「完了」と判定しません。

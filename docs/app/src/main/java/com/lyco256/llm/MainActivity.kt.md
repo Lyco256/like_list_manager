@@ -54,3 +54,5 @@ UI項目を追加する場合は、対応するViewModel操作、Repository API�
 メインメニュー項目には `main_menu_sync`、`main_menu_usage`、`main_menu_like_refresh`、`main_menu_storage`、`main_menu_api_settings` のtest tagを付け、文言ではなく安定IDで主要ダイアログを開けるようにしています。
 
 `SyncResultDialog` の閉じる操作は `sync_result_close`、`UsageDialog` の閉じる操作は `usage_close` で検証できます。
+
+いいね数再取得の見積もりDialogには `like_refresh_estimate_dialog`、実行ボタンには `like_refresh_estimate_confirm`、キャンセルには `like_refresh_estimate_cancel` のtest tagを付け、再取得を開始しないキャンセル導線をE2Eで安定して確認できます。

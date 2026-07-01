@@ -627,6 +627,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
     }
     likeRefreshEstimate?.let { estimate ->
         AlertDialog(
+            modifier = Modifier.testTag("like_refresh_estimate_dialog"),
             onDismissRequest = { likeRefreshEstimate = null },
             title = { Text("いいね数を再取得しますか？") },
             text = {
@@ -648,9 +649,15 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                             syncMessage = it
                         }
                     },
+                    modifier = Modifier.testTag("like_refresh_estimate_confirm"),
                 ) { Text("再取得する") }
             },
-            dismissButton = { TextButton(onClick = { likeRefreshEstimate = null }) { Text("キャンセル") } },
+            dismissButton = {
+                TextButton(
+                    onClick = { likeRefreshEstimate = null },
+                    modifier = Modifier.testTag("like_refresh_estimate_cancel"),
+                ) { Text("キャンセル") }
+            },
         )
     }
     if (storageOpen) {

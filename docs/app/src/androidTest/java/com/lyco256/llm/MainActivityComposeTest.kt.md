@@ -22,3 +22,5 @@
 ## 2026-07-01 追記: メインメニュー/結果Dialogの安定操作
 
 主要メニュー導線は `main_menu_*` のtest tagで開きます。使用量Dialogの閉じる操作は `usage_close`、同期未ログインエラーの結果Dialogは `sync_result_close` で閉じ、同期エラー表示前後のDB fingerprintが変わらないことも確認します。
+
+いいね数再取得の見積もりDialogは、隔離DBに数値post IDの対象clipを追加して `main_menu_like_refresh` から開き、`like_refresh_estimate_cancel` で閉じた前後のDB fingerprintが変わらないことを確認します。
