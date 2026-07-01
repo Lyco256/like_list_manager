@@ -282,7 +282,7 @@ fun EnhancedClassifiedScreen(
                 LazyColumn(
                     state = listState,
                     verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().testTag("clip_list"),
                 ) {
                     items(uiState.classified, key = { it.clip.id }) { clip ->
                         EnhancedTweetCard(
@@ -678,7 +678,10 @@ private fun EnhancedTweetCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = { deleteOpen = true }) {
+                TextButton(
+                    onClick = { deleteOpen = true },
+                    modifier = Modifier.testTag("clip_local_delete_open_${clip.clip.id}"),
+                ) {
                     Text("ローカル削除")
                 }
                 if (requireTagConfirmation) {
@@ -715,6 +718,9 @@ private fun EnhancedTweetCard(
                 onDelete(clip.clip)
                 deleteOpen = false
             },
+            dialogTestTag = "clip_local_delete_dialog_${clip.clip.id}",
+            confirmTestTag = "clip_local_delete_confirm_${clip.clip.id}",
+            dismissTestTag = "clip_local_delete_cancel_${clip.clip.id}",
         )
     }
 }
@@ -2096,7 +2102,8 @@ private fun BoxScope.ScrollToTopButton(listState: LazyListState, hasItems: Boole
         modifier = Modifier
             .align(Alignment.BottomEnd)
             .padding(16.dp)
-            .size(48.dp),
+            .size(48.dp)
+            .testTag("scroll_to_top"),
         shape = CircleShape,
         containerColor = Color.White,
     ) {

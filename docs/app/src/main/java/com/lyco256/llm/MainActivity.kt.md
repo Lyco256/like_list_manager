@@ -56,3 +56,5 @@ UI項目を追加する場合は、対応するViewModel操作、Repository API�
 `SyncResultDialog` の閉じる操作は `sync_result_close`、`UsageDialog` の閉じる操作は `usage_close` で検証できます。
 
 いいね数再取得の見積もりDialogには `like_refresh_estimate_dialog`、実行ボタンには `like_refresh_estimate_confirm`、キャンセルには `like_refresh_estimate_cancel` のtest tagを付け、再取得を開始しないキャンセル導線をE2Eで安定して確認できます。
+
+共通 `ConfirmDialog` は呼び出し側が `dialogTestTag`、`confirmTestTag`、`dismissTestTag` を任意指定でき、文言に依存せず確認/キャンセル操作をE2Eから固定できます。

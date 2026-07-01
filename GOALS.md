@@ -77,4 +77,11 @@ MVPの上記機能は実装済みです。OAuth callback、token暗号化保存�
 - AndroidJUnitRunnerによる実機統合テスト26件を全件成功（Compose UI、環境分離、Room migration、Repository、MockWebServer）
 - SC-56Cで正常終了をクラッシュ扱いするOrchestratorは使わず、各UIテスト前に隔離DBだけを初期化する構成へ変更
 
-次段階では、メインと隔離テストpackageを共存させた実機でAndroidJUnitRunnerの結果を継続確認し、大量データ、Macrobenchmark、property-based testing、より細かなUI状態の自動検査を追加します。SC-56CではOrchestratorが正常終了をクラッシュと誤判定するため採用しません。
+## 2026-07-01 達成済み
+
+- メインと隔離テストpackageを共存させた実機で、安全スクリプト経由のAndroidJUnitRunner結果を継続確認できる状態に更新
+- 大量データ、Macrobenchmark、property-based testing、検索/分類/タグ管理/設定/エラー復旧/軽微UI状態の主要自動検査を追加
+- メインメニュー、結果Dialog、いいね数再取得見積もり、ローカル削除Dialog、スクロール後の検索条件維持、スクロール後の未確定タグ選択維持をtestTagとDB assertで固定
+- SC-56CではOrchestratorが正常終了をクラッシュと誤判定するため採用しない方針を維持
+
+実画像backupの提供がないため、実画像backupによるsnapshot最終確認だけは未完了として残します。

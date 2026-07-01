@@ -64,3 +64,7 @@
 投稿カード、投稿者クリック領域、いいね数表示、分類確定、タグchip、タグ管理row、操作menu、名称変更menu、移動menu、削除menu、一括追加menu、group展開、root追加button、タグ/グループ削除DialogにはIDを含む安定した `testTag` を付けています。Compose E2Eは表示テキストだけに依存せず、操作後のRoom状態もassertします。タグ管理では、operation menuからのタグ名称変更、グループ名称変更、名称変更Dialogキャンセル、タグの別グループ移動、タグ/グループ移動Dialogキャンセル、別タグへの一括追加Dialogキャンセル、タグ/グループ削除DialogのキャンセルをRoom状態で確認します。
 検索/絞り込みDialogには、日付条件、投稿者条件、タグ条件、キャンセル、変更破棄、Dialog内全クリア確認を実機E2Eから安定して操作するため、`filter_options_list`、`filter_start_date`、`filter_end_date`、`filter_date_clear`、`filter_date_picker_apply`、`filter_date_picker_clear`、`filter_author_open`、`filter_author_option_<authorId>_<username>`、`filter_author_confirm`、`filter_author_clear`、`filter_tag_condition_<type>_<id>`、`filter_tag_clear`、`filter_cancel`、`filter_discard_*`、`filter_clear_all_*` を付けています。
 メディアグリッドと全画面画像viewerには、保存済みPhotoのタップと閉じる操作をスクリーンショットなしで検証するため、`media_asset_<assetId>`、`image_viewer`、`image_viewer_close`、`image_viewer_position`、`image_viewer_photo_<index>` を付けています。
+
+投稿カードのローカル削除導線には `clip_local_delete_open_<clipId>`、確認Dialogには `clip_local_delete_dialog_<clipId>`、実行/キャンセルには `clip_local_delete_confirm_<clipId>` / `clip_local_delete_cancel_<clipId>` を付け、E2Eで文言ではなく対象clip IDに紐づけて操作できます。
+
+一覧の先頭へ戻るFloatingActionButtonには `scroll_to_top` を付け、検索条件やタグ選択状態がスクロール後も維持されることをE2Eで確認できます。

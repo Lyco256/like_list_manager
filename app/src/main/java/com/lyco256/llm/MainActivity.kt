@@ -1653,13 +1653,32 @@ fun ApiSettingsDialog(
 }
 
 @Composable
-fun ConfirmDialog(title: String, message: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+fun ConfirmDialog(
+    title: String,
+    message: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+    dialogTestTag: String? = null,
+    confirmTestTag: String? = null,
+    dismissTestTag: String? = null,
+) {
     AlertDialog(
+        modifier = dialogTestTag?.let { Modifier.testTag(it) } ?: Modifier,
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = { Text(message) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("実行") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("戻る") } },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                modifier = confirmTestTag?.let { Modifier.testTag(it) } ?: Modifier,
+            ) { Text("実行") }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = dismissTestTag?.let { Modifier.testTag(it) } ?: Modifier,
+            ) { Text("戻る") }
+        },
     )
 }
 

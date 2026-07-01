@@ -615,6 +615,7 @@ class MainActivityComposeTest {
         val tagId = createRootTag("E2E分類タグ")
 
         composeRule.onNodeWithTag("tab_unclassified").performClick()
+        composeRule.onNodeWithTag("clip_list").performScrollToNode(hasTestTag("clip_card_$clipId"))
         composeRule.onNode(
             hasTestTag("tag_chip_$tagId") and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
             useUnmergedTree = true,
@@ -635,6 +636,63 @@ class MainActivityComposeTest {
         waitForText("未分類 (3)")
         composeRule.onNodeWithTag("clip_list").performScrollToIndex(0)
         composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
+    }
+
+    @Test
+    fun classifiedFilterConditionSurvivesListScrollAndReturnToTop() {
+        waitForSeededClip()
+        val now = Instant.now().toString()
+        val tagId = runBlocking {
+            storage().withDatabase { database ->
+                database.tagDao().insertTag(TagEntity(name = "ScrollFilterTag", createdAt = now, updatedAt = now))
+            }
+        }
+        val clipIds = insertScrollClips(count = 24, textPrefix = "ScrollFilterNeedle", tagId = tagId)
+        waitUntil { activeClipIds().contains(clipIds.last()) }
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("tab_classified").performClick()
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_query").performTextReplacement("ScrollFilterNeedle")
+        composeRule.onNodeWithTag("filter_apply").performClick()
+        waitForText("一致件数:24件")
+        composeRule.onNodeWithText("文字列:\"ScrollFilterNeedle\"", substring = true).assertIsDisplayed()
+
+        composeRule.onNodeWithTag("clip_list").performScrollToIndex(10)
+        composeRule.onNodeWithTag("scroll_to_top").performClick()
+        waitUntil {
+            composeRule.onAllNodesWithTag("clip_card_${clipIds.last()}").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("文字列:\"ScrollFilterNeedle\"", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("clip_card_${clipIds.last()}").assertIsDisplayed()
+
+        assertEquals(before, databaseFingerprint())
+    }
+
+    @Test
+    fun pendingTagSelectionSurvivesListScrollUntilClassification() {
+        val clipId = waitForSeededClip()
+        composeRule.onNodeWithTag("tab_tags").performClick()
+        val tagId = createRootTag("Scroll保持タグ")
+
+        composeRule.onNodeWithTag("tab_unclassified").performClick()
+        composeRule.onNode(
+            hasTestTag("tag_chip_$tagId") and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
+            useUnmergedTree = true,
+        ).performClick()
+        insertScrollClips(count = 24, textPrefix = "ScrollSelectionFiller")
+        waitUntil { totalClipCount() == 27 }
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("clip_list").performScrollToIndex(10)
+        composeRule.onNodeWithTag("clip_list").performScrollToNode(hasTestTag("clip_card_$clipId"))
+        composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
+        composeRule.onNodeWithTag("classify_$clipId").performClick()
+
+        waitUntil { clipTagIds(clipId) == setOf(tagId) }
+        val after = databaseFingerprint()
+        assertTrue(after.containsAll(before))
+        assertTrue(after.contains("relation:$clipId:$tagId"))
     }
 
     @Test
@@ -672,20 +730,16 @@ class MainActivityComposeTest {
         val clipId = waitForSeededClip()
         val totalBefore = totalClipCount()
 
-        composeRule.onNode(
-            hasText("ローカル削除") and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
-            useUnmergedTree = true,
-        ).performClick()
+        composeRule.onNodeWithTag("clip_local_delete_open_$clipId").performClick()
+        composeRule.onNodeWithTag("clip_local_delete_dialog_$clipId").assertIsDisplayed()
         composeRule.onNodeWithText("このツイートをアプリ内の一覧から削除します", substring = true).assertIsDisplayed()
-        composeRule.onNodeWithText("戻る").performClick()
+        composeRule.onNodeWithTag("clip_local_delete_cancel_$clipId").performClick()
         composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
         assertTrue(activeClipIds().contains(clipId))
 
-        composeRule.onNode(
-            hasText("ローカル削除") and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
-            useUnmergedTree = true,
-        ).performClick()
-        composeRule.onNodeWithText("実行").performClick()
+        composeRule.onNodeWithTag("clip_local_delete_open_$clipId").performClick()
+        composeRule.onNodeWithTag("clip_local_delete_dialog_$clipId").assertIsDisplayed()
+        composeRule.onNodeWithTag("clip_local_delete_confirm_$clipId").performClick()
         waitUntil { !activeClipIds().contains(clipId) }
         assertEquals(totalBefore, totalClipCount())
         assertTrue(composeRule.onAllNodesWithTag("clip_card_$clipId").fetchSemanticsNodes().isEmpty())
@@ -1160,6 +1214,31 @@ class MainActivityComposeTest {
 
     private fun totalClipCount(): Int = runBlocking {
         storage().withDatabase { it.clipDao().countClips() }
+    }
+
+    private fun insertScrollClips(count: Int, textPrefix: String, tagId: Long? = null): List<Long> = runBlocking {
+        storage().withDatabase { database ->
+            val base = Instant.now()
+            (0 until count).map { index ->
+                val now = base.plusSeconds(index.toLong()).toString()
+                val clipId = database.clipDao().insertClip(
+                    ClipEntity(
+                        xPostId = "$textPrefix-$index",
+                        authorName = "$textPrefix author",
+                        authorUsername = "${textPrefix.lowercase()}_$index",
+                        text = "$textPrefix item $index",
+                        postUrl = "https://x.com/${textPrefix.lowercase()}/status/$index",
+                        xCreatedAt = now,
+                        savedAt = now,
+                        syncedAt = now,
+                    ),
+                )
+                if (tagId != null) {
+                    database.clipDao().insertClipTag(ClipTagEntity(clipId, tagId, now))
+                }
+                clipId
+            }
+        }
     }
 
     private fun summaryForClip(clipId: Long): String = runBlocking {

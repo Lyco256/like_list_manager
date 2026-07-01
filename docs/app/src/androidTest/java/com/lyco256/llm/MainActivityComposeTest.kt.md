@@ -24,3 +24,7 @@
 主要メニュー導線は `main_menu_*` のtest tagで開きます。使用量Dialogの閉じる操作は `usage_close`、同期未ログインエラーの結果Dialogは `sync_result_close` で閉じ、同期エラー表示前後のDB fingerprintが変わらないことも確認します。
 
 いいね数再取得の見積もりDialogは、隔離DBに数値post IDの対象clipを追加して `main_menu_like_refresh` から開き、`like_refresh_estimate_cancel` で閉じた前後のDB fingerprintが変わらないことを確認します。
+
+投稿カードのローカル削除Dialogは `clip_local_delete_*_<clipId>` のtest tagで開閉/実行し、キャンセル時は保持、確定時は一覧から消えつつDB上はsoft deleteとして残ることを確認します。
+
+分類済み検索では、フィルタ適用後に一覧をスクロールして `scroll_to_top` で戻っても検索条件summaryと対象clipが残りDB fingerprintが変わらないことを確認します。未分類一覧では、タグchip選択後に一覧をスクロールし、対象clipへ戻ってから分類確定できることを確認し、スクロールで未確定選択状態が失われないことを固定します。
