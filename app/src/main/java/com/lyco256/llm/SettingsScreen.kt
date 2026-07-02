@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
@@ -99,12 +100,12 @@ fun SettingsScreen(
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp),
+            verticalArrangement = Arrangement.spacedBy(32.dp),
         ) {
             item {
                 SettingsSection(title = "X API設定", testTag = "settings_x_api_section") {
                     val trimmedClientId = clientIdDraft.trim()
-                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         OutlinedTextField(
                             value = clientIdDraft,
                             onValueChange = { clientIdDraft = it },
@@ -125,8 +126,18 @@ fun SettingsScreen(
                                     }
                                 },
                                 enabled = trimmedClientId.isNotBlank(),
-                                modifier = Modifier.weight(1f).testTag("settings_client_id_save"),
+                                modifier = Modifier.testTag("settings_client_id_save"),
                             ) { Text("保存") }
+                            Button(
+                                onClick = {
+                                    clientIdDraft = ""
+                                    viewModel.clearApiSettings()
+                                },
+                                modifier = Modifier.testTag("settings_client_id_clear"),
+                                colors = ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color(0xFFD32F2F), contentColor = androidx.compose.ui.graphics.Color.White),
+                            ) {
+                                Text("消去")
+                            }
                             Button(
                                 onClick = {
                                     if (uiState.oauthSession != null) {
@@ -139,17 +150,14 @@ fun SettingsScreen(
                                     }
                                 },
                                 enabled = if (uiState.oauthSession != null) true else !BuildConfig.TEST_HARNESS && trimmedClientId.isNotBlank(),
-                                modifier = Modifier.weight(1f).testTag("settings_login_logout"),
+                                modifier = Modifier.testTag("settings_login_logout"),
                             ) {
-                                Text(if (uiState.oauthSession != null) "Xからログアウト" else "保存してXにログイン")
+                                Text(
+                                    if (uiState.oauthSession != null) "Xからログアウト" else "保存してXにログイン",
+                                    maxLines = 1,
+                                    softWrap = false,
+                                )
                             }
-                            TextButton(
-                                onClick = {
-                                    clientIdDraft = ""
-                                    viewModel.clearApiSettings()
-                                },
-                                modifier = Modifier.weight(1f).testTag("settings_client_id_clear"),
-                            ) { Text("消去") }
                         }
                     }
                 }
@@ -157,7 +165,7 @@ fun SettingsScreen(
 
             item {
                 SettingsSection(title = "同期", testTag = "settings_sync_section") {
-                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         Text("最終同期時刻: ${settings.lastSyncAt ?: "未同期"}")
                         Text("15分rate limit: ${rateLimitText(settings.rateLimitRemaining, settings.rateLimitLimit)}")
                         Text("15分rate limitリセット: ${formatResetTime(settings.rateLimitResetEpochSeconds)}")
@@ -189,7 +197,7 @@ fun SettingsScreen(
 
             item {
                 SettingsSection(title = "使用量", testTag = "settings_usage_section") {
-                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         Text("今月のAPI使用量: ${settings.monthlyApiUsage ?: 0L} / ${settings.monthlyStopLimit}")
                         Text("警告ライン: ${settings.monthlyWarningLimit}")
                         Text("停止ライン: ${settings.monthlyStopLimit}")
@@ -210,7 +218,7 @@ fun SettingsScreen(
                     testTag = "settings_data_management_section",
                     showDivider = false,
                 ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         if (storageState.isRefreshing || storageState.isMigrating) {
                             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                 CircularProgressIndicator(Modifier.size(20.dp))
