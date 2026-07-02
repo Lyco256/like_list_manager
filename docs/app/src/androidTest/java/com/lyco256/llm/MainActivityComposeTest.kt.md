@@ -35,3 +35,8 @@
 - 同期系の表示確認では `いいね数を更新しますか？` の確認Dialogを使う
 - `settings_client_id_save` / `settings_client_id_clear` は横並びのボタンとして確認する
 - 既存の設定画面系テストは、項目間の余白や見出し表示の変更後も `settings_screen` / `settings_x_api_section` / `settings_sync_section` / `settings_usage_section` / `settings_data_management_section` を基準に検証する
+- ## 2026-07-02 設定画面UI微修正
+-
+- - 使用量セクションの確認では `警告ライン` と `停止ライン` が出ないことを確認する
+- - いいね数更新の確認Dialogは `いいね数を更新しますか？` を使う
+- - 設定画面の表示検証は `settings_screen` / `settings_x_api_section` / `settings_sync_section` / `settings_usage_section` / `settings_data_management_section` を基準にする

@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -22,7 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -48,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -102,9 +104,9 @@ fun SettingsScreen(
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(top = 12.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(32.dp),
         ) {
-            item { Spacer(Modifier.height(16.dp)) }
             item {
                 SettingsSection(title = "X API設定", testTag = "settings_x_api_section") {
                     val trimmedClientId = clientIdDraft.trim()
@@ -116,8 +118,6 @@ fun SettingsScreen(
                             label = { Text("OAuth 2.0 Client ID") },
                             singleLine = true,
                         )
-                        Text("Callback URI: likelistmanager://oauth/x/callback")
-                        Text("Scope: tweet.read users.read like.read offline.access")
                         Text(uiState.oauthSession?.let { "@${it.username} でログイン中" } ?: "未ログイン")
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                             TextButton(
@@ -180,12 +180,12 @@ fun SettingsScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                             Button(
                                 onClick = { viewModel.syncNow { message -> messageTitle = "同期"; messageBody = message } },
-                                modifier = Modifier.weight(1f).testTag("settings_sync_now"),
+                                modifier = Modifier.testTag("settings_sync_now"),
                             ) {
                                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                     Icon(Icons.Filled.Download, contentDescription = null)
                                     Spacer(Modifier.width(8.dp))
-                                    Text("同期する")
+                                    Text("同期する", maxLines = 1, softWrap = false)
                                 }
                             }
                             Button(
@@ -199,12 +199,12 @@ fun SettingsScreen(
                                         }
                                     }
                                 },
-                                modifier = Modifier.weight(1f).testTag("settings_like_refresh"),
+                                modifier = Modifier.testTag("settings_like_refresh"),
                             ) {
                                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                    Icon(Icons.Filled.Favorite, contentDescription = null)
+                                    Icon(Icons.Filled.Refresh, contentDescription = null)
                                     Spacer(Modifier.width(8.dp))
-                                    Text("いいね数を更新")
+                                    Text("いいね数を更新", maxLines = 1, softWrap = false)
                                 }
                             }
                         }
@@ -216,12 +216,11 @@ fun SettingsScreen(
                 SettingsSection(title = "使用量", testTag = "settings_usage_section") {
                     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         Text("今月のAPI使用量: ${settings.monthlyApiUsage ?: 0L} / ${settings.monthlyStopLimit}")
-                        Text("警告ライン: ${settings.monthlyWarningLimit}")
-                        Text("停止ライン: ${settings.monthlyStopLimit}")
                         LinearProgressIndicator(
                             progress = usageProgress(settings.monthlyApiUsage, settings.monthlyStopLimit),
                             modifier = Modifier.fillMaxWidth().testTag("settings_monthly_api_usage_progress"),
                         )
+                        Spacer(Modifier.height(8.dp))
                         Text("推定今月料金: ${formatUsd((settings.monthlyApiUsage ?: 0L) * 0.001)}")
                         Text("累計API使用量: ${settings.cumulativeApiUsage}")
                         Text("推定累計料金: ${formatUsd(settings.cumulativeApiUsage * 0.001)}")
@@ -243,13 +242,16 @@ fun SettingsScreen(
                                 Text(storageState.migrationMessage ?: "計算中")
                             }
                         }
-                        Text("保存件数: ${settings.saveCount ?: 0}")
-                        Text("画像枚数: ${settings.imageCount ?: 0}")
-                        Text("ツイートデータ容量: ${settings.tweetDataBytes?.let(::formatBytes) ?: "計算中"}")
+                        Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                            Text("保存件数: ${settings.saveCount ?: 0}")
+                            Text("画像枚数: ${settings.imageCount ?: 0}")
+                        }
+                        Spacer(Modifier.height(6.dp))
                         val currentLocation = storageState.locations.firstOrNull { it.isCurrent }
                         if (currentLocation != null) {
-                            Text("現在の保存場所: ${currentLocation.displayName}")
-                            Text(currentLocation.path)
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("保存先の使用状況", style = MaterialTheme.typography.titleSmall)
+                            }
                             currentLocation.usedBytes?.let { usedBytes ->
                                 SegmentedStorageUsageBar(
                                     appBytes = usedBytes,
@@ -263,7 +265,6 @@ fun SettingsScreen(
                             )
                         }
 
-                        Text("保存場所候補", style = MaterialTheme.typography.titleMedium)
                         var sdCardIndex = 0
                         storageState.locations.forEach { location ->
                             val locationIndex = if (location.type == PostStorageType.EXTERNAL) sdCardIndex++ else 0
@@ -423,8 +424,8 @@ fun SettingsSection(
     content: @Composable () -> Unit,
 ) {
     Column(modifier.fillMaxWidth().testTag(testTag)) {
-        Text(title, style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(32.dp))
+        Text(title, style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Normal))
+        Spacer(Modifier.height(40.dp))
         content()
         if (showDivider) {
             Spacer(Modifier.height(36.dp))
@@ -470,7 +471,7 @@ fun SegmentedStorageUsageBar(
 
 @Composable
 fun StorageUsageLegend(modifier: Modifier = Modifier) {
-    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         LegendRow(Color.White, "他のデータ")
         LegendRow(AppDataColor, "アプリデータ")
         LegendRow(FreeSpaceColor, "空き容量")
@@ -519,9 +520,6 @@ private fun StorageLocationRow(
             if (location.isAvailable) {
                 Text("使用中: ${location.usedBytes?.let(::formatBytes) ?: "計算中"}")
                 Text("空き容量: ${formatBytes(location.freeBytes)}")
-                Text("移動可能: ${if (location.isCurrent) "現在地" else "はい"}")
-            } else {
-                Text("移動可能: いいえ")
             }
             Button(
                 onClick = { onMove(location) },
