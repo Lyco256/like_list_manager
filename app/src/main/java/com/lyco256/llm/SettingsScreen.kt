@@ -407,10 +407,10 @@ fun SettingsSection(
 ) {
     Column(modifier.fillMaxWidth().testTag(testTag)) {
         Text(title, style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(20.dp))
         content()
         if (showDivider) {
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(28.dp))
             Divider()
         }
     }
@@ -453,7 +453,7 @@ fun SegmentedStorageUsageBar(
 
 @Composable
 fun StorageUsageLegend(modifier: Modifier = Modifier) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         LegendRow(Color.White, "他のデータ")
         LegendRow(AppDataColor, "アプリデータ")
         LegendRow(FreeSpaceColor, "空き容量")
