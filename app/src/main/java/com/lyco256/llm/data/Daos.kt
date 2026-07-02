@@ -13,6 +13,9 @@ interface ClipDao {
     @Query("SELECT COUNT(*) FROM clips")
     suspend fun countClips(): Int
 
+    @Query("SELECT COUNT(*) FROM clips WHERE isDeleted = 0")
+    suspend fun countActiveClips(): Int
+
     @Query("SELECT * FROM clips WHERE isDeleted = 0 ORDER BY savedAt DESC")
     fun observeActiveClips(): Flow<List<ClipEntity>>
 
@@ -69,6 +72,22 @@ interface ClipDao {
 
     @Query("SELECT * FROM sync_state WHERE id = 1")
     suspend fun getSyncState(): SyncStateEntity?
+
+    @Query("SELECT * FROM api_usage_months ORDER BY usageMonth DESC")
+    fun observeApiUsageMonths(): Flow<List<ApiUsageMonthEntity>>
+
+    @Query("SELECT * FROM api_usage_months WHERE usageMonth = :usageMonth")
+    suspend fun getApiUsageMonth(usageMonth: String): ApiUsageMonthEntity?
+
+    @Query("SELECT COALESCE(SUM(billableReadCount), 0) FROM api_usage_months")
+    suspend fun getTotalBillableReadCount(): Long
+
+    @Query(
+        "INSERT INTO api_usage_months (usageMonth, billableReadCount, createdAt, updatedAt) " +
+            "VALUES (:usageMonth, :delta, :now, :now) " +
+            "ON CONFLICT(usageMonth) DO UPDATE SET billableReadCount = billableReadCount + excluded.billableReadCount, updatedAt = excluded.updatedAt",
+    )
+    suspend fun incrementApiUsageMonth(usageMonth: String, delta: Long, now: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertSyncState(syncState: SyncStateEntity)

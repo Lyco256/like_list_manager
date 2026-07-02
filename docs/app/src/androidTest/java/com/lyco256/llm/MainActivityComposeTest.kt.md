@@ -28,3 +28,15 @@
 投稿カードのローカル削除Dialogは `clip_local_delete_*_<clipId>` のtest tagで開閉/実行し、キャンセル時は保持、確定時は一覧から消えつつDB上はsoft deleteとして残ることを確認します。
 
 分類済み検索では、フィルタ適用後に一覧をスクロールして `scroll_to_top` で戻っても検索条件summaryと対象clipが残りDB fingerprintが変わらないことを確認します。未分類一覧では、タグchip選択後に一覧をスクロールし、対象clipへ戻ってから分類確定できることを確認し、スクロールで未確定選択状態が失われないことを固定します。
+
+## 2026-07-02 追記: 設定画面UI調整
+
+- 設定画面の検証では `settings_login_logout` を使い、未ログイン時の「保存してXにログイン」とログイン中の「Xからログアウト」を同一ボタンで扱う
+- 同期系の表示確認では `いいね数を更新しますか？` の確認Dialogを使う
+- `settings_client_id_save` / `settings_client_id_clear` は横並びのボタンとして確認する
+- 既存の設定画面系テストは、項目間の余白や見出し表示の変更後も `settings_screen` / `settings_x_api_section` / `settings_sync_section` / `settings_usage_section` / `settings_data_management_section` を基準に検証する
+- ## 2026-07-02 設定画面UI微修正
+-
+- - 使用量セクションの確認では `警告ライン` と `停止ライン` が出ないことを確認する
+- - いいね数更新の確認Dialogは `いいね数を更新しますか？` を使う
+- - 設定画面の表示検証は `settings_screen` / `settings_x_api_section` / `settings_sync_section` / `settings_usage_section` / `settings_data_management_section` を基準にする

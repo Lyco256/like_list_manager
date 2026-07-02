@@ -11,10 +11,13 @@
 ## 主な処理
 
 - OAuth: 認証Intent生成、code交換、`/users/me`、session保存、token更新、logout/revoke
+- OAuth: 認証Intent生成、code交換、`/users/me`、session保存、token更新、logout/revoke。logoutはrevoke失敗を呼び出し側へ返し、ローカルのsessionは必ず削除する
 - 同期: 月間上限確認、liked postsのpagination、新規投稿だけ保存、rate limit保存
 - media: photoは回線を問わずWebP lossy quality 85へ変換して保存、video/GIF thumbnailはWi-Fi時だけ元形式で保存
+- 設定画面: Client ID、ログイン状態、月間/API使用量、保存件数、画像枚数、ツイートデータ容量のスナップショットを公開
 - `PostStorageManager` の現在DBへFlowと更新操作を接続し、保存先変更後は新しいDBへ自動で切り替える
 - 保存先一覧、移動見積もり、移動実行をViewModelへ公開
+- 設定画面向けに月間/API使用量、保存件数、画像枚数、ツイートデータ容量のスナップショットを取得する
 - 初期化: DBが空の初回だけサンプルを投入し、既存同期状態は上書きしない
 - タグ/概要: グループとタグの作成、同一親での重複名禁止、名称変更、移動、兄弟並び替え、空グループ削除、タグ削除、一括追加、投稿ごとの再割り当て、概要更新
 - `moveNodeToParentAt`: タグまたはグループを、指定親の指定位置へ移動する。ルート直下の `parentGroupId = null` を正常な所属として扱い、同一親内の下方向移動では元要素除外後の挿入位置へ補正する
@@ -24,6 +27,7 @@
 - エラー: 401、403、429、5xxをユーザー向け文言へ変換
 - refresh通信自体が失敗した場合は旧sessionを消去せず、次回同期で再試行可能にする。refresh後のtokenでも401になった場合だけsessionを無効化する
 - page取得に失敗する直前のpagination tokenを同期状態へcheckpointし、次回同期を失敗pageから再開できるようにする
+- 月別API使用量履歴: `api_usage_months` に月単位の累積を保存し、累計使用量を履歴の合計から算出する
 
 ## 関連ファイル
 
