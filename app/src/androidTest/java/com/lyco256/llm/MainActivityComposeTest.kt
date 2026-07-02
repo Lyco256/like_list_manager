@@ -111,7 +111,7 @@ class MainActivityComposeTest {
         composeRule.onNodeWithText("警告ライン: 1500").assertIsDisplayed()
         composeRule.onNodeWithText("停止ライン: 2000").assertIsDisplayed()
         composeRule.onNodeWithText("15分rate limit: 未取得").assertIsDisplayed()
-        composeRule.onNodeWithTag("settings_login").assertIsNotEnabled()
+        composeRule.onNodeWithTag("settings_login_logout").assertIsNotEnabled()
         composeRule.onNode(hasSetTextAction() and hasText("OAuth 2.0 Client ID")).performTextInput("test-client-id")
         composeRule.onNodeWithText("保存してXにログイン").assertIsNotEnabled()
     }

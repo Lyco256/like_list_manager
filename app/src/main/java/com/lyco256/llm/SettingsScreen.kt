@@ -46,8 +46,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.lyco256.llm.data.ApiSettings
 import com.lyco256.llm.data.LikeCountRefreshEstimate
 import com.lyco256.llm.data.PostStorageEstimate
@@ -88,7 +88,7 @@ fun SettingsScreen(
         modifier = Modifier.fillMaxSize().testTag("settings_screen"),
         topBar = {
             TopAppBar(
-                title = { Text("設定", fontWeight = FontWeight.SemiBold) },
+                title = { Text("設定", fontSize = 22.sp) },
                 navigationIcon = {
                     IconButton(onClick = onBack, modifier = Modifier.testTag("settings_back")) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "戻る")
@@ -99,12 +99,12 @@ fun SettingsScreen(
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
             item {
                 SettingsSection(title = "X API設定", testTag = "settings_x_api_section") {
                     val trimmedClientId = clientIdDraft.trim()
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         OutlinedTextField(
                             value = clientIdDraft,
                             onValueChange = { clientIdDraft = it },
@@ -114,53 +114,50 @@ fun SettingsScreen(
                         )
                         Text("Callback URI: likelistmanager://oauth/x/callback")
                         Text("Scope: tweet.read users.read like.read offline.access")
-                        Text(
-                            uiState.oauthSession?.let { "@${it.username} でログイン中" } ?: "未ログイン",
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        TextButton(
-                            onClick = {
-                                if (uiState.oauthSession != null && trimmedClientId.isNotBlank() && trimmedClientId != uiState.apiSettings.clientId) {
-                                    changeClientIdConfirm = true
-                                } else if (trimmedClientId.isNotBlank()) {
-                                    viewModel.saveApiSettings(ApiSettings(trimmedClientId))
-                                }
-                            },
-                            enabled = trimmedClientId.isNotBlank(),
-                            modifier = Modifier.testTag("settings_client_id_save"),
-                        ) { Text("保存") }
-                        TextButton(
-                            onClick = {
-                                clientIdDraft = ""
-                                viewModel.clearApiSettings()
-                            },
-                            modifier = Modifier.testTag("settings_client_id_clear"),
-                        ) { Text("消去") }
-                        Button(
-                            onClick = {
-                                val clientId = clientIdDraft.trim()
-                                onLogin(ApiSettings(clientId))
-                            },
-                            enabled = !BuildConfig.TEST_HARNESS && uiState.oauthSession == null && trimmedClientId.isNotBlank(),
-                            modifier = Modifier.testTag("settings_login"),
-                        ) { Text("保存してXにログイン") }
-                        Button(
-                            onClick = {
-                                viewModel.logout { message ->
-                                    messageTitle = "ログアウト"
-                                    messageBody = message
-                                }
-                            },
-                            enabled = uiState.oauthSession != null,
-                            modifier = Modifier.testTag("settings_logout"),
-                        ) { Text("Xからログアウト") }
+                        Text(uiState.oauthSession?.let { "@${it.username} でログイン中" } ?: "未ログイン")
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                            TextButton(
+                                onClick = {
+                                    if (uiState.oauthSession != null && trimmedClientId.isNotBlank() && trimmedClientId != uiState.apiSettings.clientId) {
+                                        changeClientIdConfirm = true
+                                    } else if (trimmedClientId.isNotBlank()) {
+                                        viewModel.saveApiSettings(ApiSettings(trimmedClientId))
+                                    }
+                                },
+                                enabled = trimmedClientId.isNotBlank(),
+                                modifier = Modifier.weight(1f).testTag("settings_client_id_save"),
+                            ) { Text("保存") }
+                            Button(
+                                onClick = {
+                                    if (uiState.oauthSession != null) {
+                                        viewModel.logout { message ->
+                                            messageTitle = "ログアウト"
+                                            messageBody = message
+                                        }
+                                    } else {
+                                        onLogin(ApiSettings(trimmedClientId))
+                                    }
+                                },
+                                enabled = if (uiState.oauthSession != null) true else !BuildConfig.TEST_HARNESS && trimmedClientId.isNotBlank(),
+                                modifier = Modifier.weight(1f).testTag("settings_login_logout"),
+                            ) {
+                                Text(if (uiState.oauthSession != null) "Xからログアウト" else "保存してXにログイン")
+                            }
+                            TextButton(
+                                onClick = {
+                                    clientIdDraft = ""
+                                    viewModel.clearApiSettings()
+                                },
+                                modifier = Modifier.weight(1f).testTag("settings_client_id_clear"),
+                            ) { Text("消去") }
+                        }
                     }
                 }
             }
 
             item {
                 SettingsSection(title = "同期", testTag = "settings_sync_section") {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Text("最終同期時刻: ${settings.lastSyncAt ?: "未同期"}")
                         Text("15分rate limit: ${rateLimitText(settings.rateLimitRemaining, settings.rateLimitLimit)}")
                         Text("15分rate limitリセット: ${formatResetTime(settings.rateLimitResetEpochSeconds)}")
@@ -192,7 +189,7 @@ fun SettingsScreen(
 
             item {
                 SettingsSection(title = "使用量", testTag = "settings_usage_section") {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Text("今月のAPI使用量: ${settings.monthlyApiUsage ?: 0L} / ${settings.monthlyStopLimit}")
                         Text("警告ライン: ${settings.monthlyWarningLimit}")
                         Text("停止ライン: ${settings.monthlyStopLimit}")
@@ -213,7 +210,7 @@ fun SettingsScreen(
                     testTag = "settings_data_management_section",
                     showDivider = false,
                 ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         if (storageState.isRefreshing || storageState.isMigrating) {
                             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                 CircularProgressIndicator(Modifier.size(20.dp))
@@ -241,7 +238,7 @@ fun SettingsScreen(
                             )
                         }
 
-                        Text("保存場所候補", fontWeight = FontWeight.SemiBold)
+                        Text("保存場所候補", style = MaterialTheme.typography.titleMedium)
                         var sdCardIndex = 0
                         storageState.locations.forEach { location ->
                             val locationIndex = if (location.type == PostStorageType.EXTERNAL) sdCardIndex++ else 0
@@ -401,11 +398,11 @@ fun SettingsSection(
     content: @Composable () -> Unit,
 ) {
     Column(modifier.fillMaxWidth().testTag(testTag)) {
-        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
+        Text(title, style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(12.dp))
         content()
         if (showDivider) {
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(20.dp))
             Divider()
         }
     }
@@ -488,10 +485,10 @@ private fun StorageLocationRow(
         color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
                 location.displayName + if (location.isCurrent) "（現在地）" else "",
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.titleMedium,
             )
             Text(if (location.isAvailable) location.path else "未装着または読み取り不可")
             if (location.isAvailable) {
