@@ -8,8 +8,8 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 - `MainViewModel`: RepositoryのFlowをUI stateへ合成し、ユーザー操作をRepositoryへ渡す
 - `MainUiState`: 未分類、分類済み、検索条件、投稿者一覧、タグ階層、保存先状態、同期状態、設定画面用スナップショットをまとめる
 - `TweetFilterState`: 分類済み画面の文字列検索、検索モード、検索対象、期間、投稿者条件、タグ条件、タグのみtoggleを表す
-- `PostStorageDialog`: 内部/SDカードの一覧、現在地、使用量、空き容量、移動開始入口を表示する
-- `StorageMoveEstimateDialog`: 保存先移動見積もりの内容確認と、移動開始/キャンセル操作を扱う
+- `SettingsScreen`: X API設定、同期、使用量、データ管理、保存先候補、移動開始入口を全画面で表示する
+- `StorageMoveEstimateDialog`: 保存先移動の最終確認内容と、移動開始/キャンセル操作を扱う
 - `StorageProgressDialog`: 保存先見積もり中、移動開始準備中、移動中などの待機表示を行う
 
 保存先移動中は投稿一覧の代わりに待機画面を表示し、編集や同期を行わせません。SDカード未装着時は投稿一覧と編集・同期を停止し、保存先確認を案内します。
@@ -47,12 +47,12 @@ UI項目を追加する場合は、対応するViewModel操作、Repository API�
 - `data/XOAuthManager.kt.md`: ログインIntentと認証結果交換
 - `../../../../AndroidManifest.xml.md`: MainActivityとcallback Activityの宣言
 
-## 2026-07-01 追記: メニュー/結果DialogのE2E安定化
+## 2026-07-01 追記: 設定画面/結果DialogのE2E安定化
 
-メインメニュー項目には `main_menu_sync`、`main_menu_usage`、`main_menu_like_refresh`、`main_menu_storage`、`main_menu_api_settings` のtest tagを付け、文言ではなく安定IDで主要ダイアログを開けるようにしています。
+右上導線は `top_settings_button` から全画面の `settings_screen` を開き、`settings_sync_now`、`settings_like_refresh`、`settings_client_id_*`、`settings_storage_move_*` などのtest tagで設定画面内の操作を安定して検証します。
 
-`SyncResultDialog` の閉じる操作は `sync_result_close`、`UsageDialog` の閉じる操作は `usage_close` で検証できます。
+`SyncResultDialog` は設定画面上の同期操作から表示し、結果の閉じる操作とDB不変をUIテストで検証します。使用量表示は独立Dialogではなく `settings_usage_section` に統合しています。
 
-いいね数再取得の見積もりDialogには `like_refresh_estimate_dialog`、実行ボタンには `like_refresh_estimate_confirm`、キャンセルには `like_refresh_estimate_cancel` のtest tagを付け、再取得を開始しないキャンセル導線をE2Eで安定して確認できます。
+いいね数更新は `settings_like_refresh` から確認Dialogを開き、`settings_like_refresh_confirm` / `settings_like_refresh_cancel` で再取得の実行・キャンセル導線をE2Eで安定して確認できます。
 
 共通 `ConfirmDialog` は呼び出し側が `dialogTestTag`、`confirmTestTag`、`dismissTestTag` を任意指定でき、文言に依存せず確認/キャンセル操作をE2Eから固定できます。

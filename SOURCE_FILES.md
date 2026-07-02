@@ -40,7 +40,7 @@ MainActivity / Compose UI
 - 投稿カード上では投稿URLを文字列として表示せず、メディア付き投稿の本文末尾t.coもUI上だけ省略する。本文中URLと「Xで開く」機能は維持
 - 未分類、分類済み、タグ管理でスクロールバー、スクロール位置維持、一番上へ移動ボタンを表示
 - Xで開く、ローカル削除
-- メニューから同期、API使用量、X API設定、投稿データ保存先を表示
+- 右上設定アイコンから全画面の設定画面を開き、同期、いいね数更新、API使用量、X API設定、投稿データ保存先をまとめて表示
 
 ### X連携
 
@@ -58,7 +58,7 @@ MainActivity / Compose UI
 ### 保存と同期
 
 - Roomで投稿、画像情報、タググループ、タグ、投稿タグ関連、同期状態を保存
-- DB version 4でタグ階層、いいね数、同期継続tokenを保持し、version 1→2、2→3、3→4を非破壊移行
+- DB version 5でタグ階層、いいね数、同期継続token、月別API使用量履歴を保持し、version 1→2、2→3、3→4、4→5を非破壊移行
 - Client IDとOAuth tokenは暗号化SharedPreferencesへ保存
 - Room DBと画像は内部ストレージまたはSDカードのアプリ専用領域へまとめて保存
 - 保存先変更時はコピー、容量・件数・DB整合性検証、切り替え、旧データ削除を行う
@@ -67,7 +67,7 @@ MainActivity / Compose UI
 - PhotoはWebP lossy quality 85で保存
 - 動画/GIF本体は保存せず、preview thumbnailをWi-Fi時だけ元形式で保存
 - 投稿IDのunique制約で重複保存を防止
-- 月間取得数、警告ライン、停止ライン、15分rate limitを記録
+- 月間取得数、月別API使用量履歴、警告/停止判定値、15分rate limitを記録
 - 初回サンプルデータはDBが空の場合だけ投入
 
 ## 変更目的別の入口
@@ -158,8 +158,8 @@ MainActivity / Compose UI
 - 任意フォルダへの保存とアンインストール後の投稿データ保持は未実装
 - タグ色変更は未実装
 - 動画/GIF本体は保存しない
-- DBはversion 2で、version 1からタグと割り当てを保持するmigrationを実装済み
-- 階層・複合絞り込み・制約・件数表示の単体テストと、version 1→2・2→3・3→4のmigration testを実装済み
+- DBはversion 5で、version 1→2・2→3・3→4・4→5のmigrationを実装済み
+- 階層・複合絞り込み・制約・件数表示の単体テストと、version 1→2・2→3・3→4・4→5のmigration testを実装済み
 - 実際のXログインとliked posts同期はユーザーのClient IDとXアカウントで実機確認が必要
 
 ## 関連文書
@@ -175,9 +175,9 @@ MainActivity / Compose UI
 ## 2026-06-20 いいね数・件数表示
 
 - 新規同期投稿へ `public_metrics.like_count` と取得日時を保存し、既存投稿は明示再取得だけで更新します。
-- 右上メニューから未取得／期限到来した暫定値を月間残り枠内で一括再取得できます。
+- 設定画面から未取得／期限到来した暫定値を月間残り枠内で一括再取得できます。
 - 投稿カードのいいね数・暫定警告、投稿者件数順、タグ投稿数、グループ直下要素数を表示します。
-- Room schema versionは4で、version 2→3と3→4 migrationを登録しています。
+- Room schema versionは5で、version 2→3、3→4、4→5 migrationを登録しています。
 
 ## 2026-06-22 高リスク統合テスト基盤
 

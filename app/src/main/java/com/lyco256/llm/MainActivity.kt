@@ -482,13 +482,7 @@ fun LikeListManagerUi(viewModel: MainViewModel, onLogin: (ApiSettings) -> Unit) 
 fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSettings) -> Unit) {
     var tab by rememberSaveable { mutableStateOf(AppTab.Unclassified) }
     var settingsOpen by remember { mutableStateOf(false) }
-    var usageOpen by remember { mutableStateOf(false) }
-    var storageOpen by remember { mutableStateOf(false) }
-    var storageEstimate by remember { mutableStateOf<PostStorageEstimate?>(null) }
-    var storageEstimating by remember { mutableStateOf(false) }
-    var storageMoveStarting by remember { mutableStateOf(false) }
     var syncMessage by remember { mutableStateOf<String?>(null) }
-    var likeRefreshEstimate by remember { mutableStateOf<LikeCountRefreshEstimate?>(null) }
     var likeRefreshEstimating by remember { mutableStateOf(false) }
     var likeRefreshRunning by remember { mutableStateOf(false) }
     val unclassifiedListState = rememberLazyListState()
@@ -511,9 +505,6 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
     val topBarTitle = screenTitle(
         tab = tab,
         uiState = uiState,
-        settingsOpen = settingsOpen,
-        usageOpen = usageOpen,
-        storageOpen = storageOpen,
     )
 
     Scaffold(
@@ -570,11 +561,11 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
             ) {
                 Text("選択したSDカードを利用できません", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(12.dp))
-                Text("SDカードを再装着するか、メニューから投稿データの保存先を変更してください")
+                Text("SDカードを再装着するか、設定画面から投稿データの保存先を変更してください")
                 Spacer(Modifier.height(16.dp))
                 Button(onClick = {
                     viewModel.refreshStorageLocations()
-                    storageOpen = true
+                    settingsOpen = true
                 }) { Text("保存先を確認") }
             }
         } else when (tab) {
@@ -622,107 +613,14 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
         }
     }
 
-    if (usageOpen) UsageDialog(uiState.syncState, uiState.oauthSession, onDismiss = { usageOpen = false })
     if (likeRefreshEstimating || likeRefreshRunning) {
         StorageProgressDialog(
             title = if (likeRefreshRunning) "いいね数を再取得しています" else "再取得対象を確認しています",
             message = if (likeRefreshRunning) "完了するまでお待ちください" else "ローカル投稿を集計しています",
         )
     }
-    likeRefreshEstimate?.let { estimate ->
-        AlertDialog(
-            modifier = Modifier.testTag("like_refresh_estimate_dialog"),
-            onDismissRequest = { likeRefreshEstimate = null },
-            title = { Text("いいね数を再取得しますか？") },
-            text = {
-                Text(
-                    "対象: ${estimate.totalTargets}件\n" +
-                        "今回実行: ${estimate.executableTargets}件\n" +
-                        "推定API料金: \$${"%.3f".format(estimate.estimatedCostUsd)}" +
-                        if (estimate.executableTargets < estimate.totalTargets) "\n\n月間残り枠の範囲で実行します。" else "",
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = estimate.executableTargets > 0,
-                    onClick = {
-                        likeRefreshEstimate = null
-                        likeRefreshRunning = true
-                        viewModel.refreshLikeCounts {
-                            likeRefreshRunning = false
-                            syncMessage = it
-                        }
-                    },
-                    modifier = Modifier.testTag("like_refresh_estimate_confirm"),
-                ) { Text("再取得する") }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { likeRefreshEstimate = null },
-                    modifier = Modifier.testTag("like_refresh_estimate_cancel"),
-                ) { Text("キャンセル") }
-            },
-        )
-    }
-    if (storageOpen) {
-        PostStorageDialog(
-            state = uiState.storageState,
-            onDismiss = { storageOpen = false },
-            onSelect = { targetId ->
-                storageEstimating = true
-                viewModel.estimateStorageMove(targetId) { result ->
-                    storageEstimating = false
-                    result.onSuccess { storageEstimate = it }
-                        .onFailure { syncMessage = it.message ?: "移動量を確認できませんでした" }
-                }
-            },
-        )
-    }
-    if (storageEstimating) {
-        StorageProgressDialog(
-            title = "移動するデータを確認しています",
-            message = "投稿件数とファイル容量を計算しています",
-        )
-    }
-    storageEstimate?.let { estimate ->
-        StorageMoveEstimateDialog(
-            estimate = estimate,
-            onConfirm = {
-                val targetId = estimate.target.id
-                storageEstimate = null
-                storageOpen = false
-                storageMoveStarting = true
-                viewModel.movePostStorage(targetId) {
-                    storageMoveStarting = false
-                    syncMessage = it
-                }
-            },
-            onDismiss = { storageEstimate = null },
-        )
-    }
-    if (storageMoveStarting && !uiState.storageState.isMigrating) {
-        StorageProgressDialog(
-            title = "移動を開始しています",
-            message = "保存先を準備しています",
-        )
-    }
     syncMessage?.let { message ->
         SyncResultDialog(message = message, onDismiss = { syncMessage = null })
-    }
-    if (settingsOpen) {
-        ApiSettingsDialog(
-            initial = uiState.apiSettings,
-            session = uiState.oauthSession,
-            loginEnabled = !BuildConfig.TEST_HARNESS,
-            onDismiss = { settingsOpen = false },
-            onSave = {
-                viewModel.saveApiSettings(it)
-                settingsOpen = false
-            },
-            onClear = viewModel::clearApiSettings,
-            onLogin = onLogin,
-            onLogout = { viewModel.logout { syncMessage = it } },
-        )
     }
 }
 
@@ -867,73 +765,6 @@ internal fun StorageMoveEstimateDialog(
 }
 
 @Composable
-fun PostStorageDialog(
-    state: PostStorageState,
-    onDismiss: () -> Unit,
-    onSelect: (String) -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        modifier = Modifier.testTag("post_storage_dialog"),
-        title = { Text("投稿データの保存先") },
-        text = {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                item {
-                    Text("投稿、タグ、概要、同期状態、保存画像を同じストレージへ保存します。認証情報とアプリ設定は内部ストレージに残ります。")
-                }
-                if (state.isRefreshing) {
-                    item {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 3.dp)
-                            Spacer(Modifier.width(12.dp))
-                            Text("使用容量を計算しています")
-                        }
-                    }
-                }
-                items(state.locations, key = { it.id }) { location ->
-                    StorageLocationCard(
-                        location = location,
-                        enabled = !state.isRefreshing && !state.isMigrating,
-                        onSelect = onSelect,
-                    )
-                }
-                if (state.isMigrating) item { Text(state.migrationMessage ?: "移動中です") }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("post_storage_close")) { Text("閉じる") } },
-    )
-}
-
-@Composable
-private fun StorageLocationCard(
-    location: PostStorageLocation,
-    enabled: Boolean,
-    onSelect: (String) -> Unit,
-) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                location.displayName + if (location.isCurrent) "（現在）" else "",
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(if (location.isAvailable) location.path else "未装着または読み取り不可")
-            if (location.isAvailable) {
-                Text(
-                    "使用中: ${location.usedBytes?.let(::formatBytes) ?: "計算中"} / " +
-                        "空き: ${formatBytes(location.freeBytes)}",
-                )
-            }
-            if (!location.isCurrent && location.isAvailable) {
-                TextButton(
-                    onClick = { onSelect(location.id) },
-                    enabled = enabled,
-                ) { Text("ここへ移動") }
-            }
-        }
-    }
-}
-
-@Composable
 internal fun StorageProgressDialog(title: String, message: String) {
     AlertDialog(
         onDismissRequest = {},
@@ -959,13 +790,7 @@ private fun formatBytes(bytes: Long): String = when {
 private fun screenTitle(
     tab: AppTab,
     uiState: MainUiState,
-    settingsOpen: Boolean,
-    usageOpen: Boolean,
-    storageOpen: Boolean,
 ): String = when {
-    settingsOpen -> "X API設定"
-    usageOpen -> "同期/使用量"
-    storageOpen -> "投稿データ保存先"
     uiState.storageState.isMigrating -> "投稿データ移動中"
     !uiState.storageState.isAvailable -> "投稿データ保存先"
     tab == AppTab.Unclassified -> "未分類 (${uiState.unclassified.size})"
@@ -1578,81 +1403,6 @@ fun AddAllTagsDialog(source: TagEntity, targets: List<TagEntity>, onDismiss: () 
         },
         confirmButton = {},
         dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("add_all_cancel")) { Text("閉じる") } },
-    )
-}
-
-@Composable
-fun UsageDialog(syncState: SyncStateEntity?, session: OAuthSession?, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("同期/使用量") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("X認証: ${session?.let { "@${it.username} でログイン中" } ?: "未ログイン"}")
-                Text("月間取得数: ${syncState?.monthlyFetchedCount ?: 0} / ${syncState?.monthlyBudgetLimit ?: 1800}")
-                Text("警告ライン: ${syncState?.monthlyWarningLimit ?: 1500}")
-                Text("停止ライン: ${syncState?.monthlyStopLimit ?: 2000}")
-                Text("15分制限: ${syncState?.rateLimitRemaining ?: "-"} / ${syncState?.rateLimitLimit ?: "-"}")
-                Text("次回回復: ${syncState?.rateLimitResetEpochSeconds?.let { Instant.ofEpochSecond(it).toString() } ?: "未取得"}")
-                Text("最終同期: ${syncState?.lastSyncAt ?: "未同期"}")
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("usage_close")) { Text("閉じる") } },
-    )
-}
-
-@Composable
-fun ApiSettingsDialog(
-    initial: ApiSettings,
-    session: OAuthSession?,
-    loginEnabled: Boolean = true,
-    onDismiss: () -> Unit,
-    onSave: (ApiSettings) -> Unit,
-    onClear: () -> Unit,
-    onLogin: (ApiSettings) -> Unit,
-    onLogout: () -> Unit,
-) {
-    var settings by remember(initial) { mutableStateOf(initial) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("X API設定") },
-        text = {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                item { Text("Callback URI: likelistmanager://oauth/x/callback") }
-                item {
-                    OutlinedTextField(
-                        value = settings.clientId,
-                        onValueChange = { settings = settings.copy(clientId = it) },
-                        label = { Text("OAuth 2.0 Client ID") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().testTag("api_settings_client_id"),
-                    )
-                }
-                item {
-                    Text(session?.let { "ログイン中: ${it.displayName} (@${it.username})" } ?: "Xにはまだログインしていません")
-                }
-                if (!loginEnabled) {
-                    item { Text("隔離テスト環境ではXログインを実行できません") }
-                }
-                item {
-                    Button(
-                        onClick = {
-                            if (session == null) onLogin(settings) else onLogout()
-                        },
-                        enabled = loginEnabled && (session != null || settings.clientId.isNotBlank()),
-                    ) {
-                        Text(if (session == null) "保存してXにログイン" else "Xからログアウト")
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = { onSave(settings) }, modifier = Modifier.testTag("api_settings_save")) { Text("保存") } },
-        dismissButton = {
-            Row {
-                TextButton(onClick = onClear, modifier = Modifier.testTag("api_settings_clear")) { Text("消去") }
-                TextButton(onClick = onDismiss, modifier = Modifier.testTag("api_settings_close")) { Text("閉じる") }
-            }
-        },
     )
 }
 
