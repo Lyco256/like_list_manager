@@ -4,7 +4,7 @@
 
 主な検証内容:
 
-- 主要タブ、設定画面、使用量セクション、隔離環境でのXログイン無効化、X API設定の保存/trim/消去UI
+- 主要タブ、設定画面、設定画面表示中のタブ非表示、Android戻るでの元タブ復帰、使用量セクション、隔離環境でのXログイン無効化、X API設定の保存/trim/消去UI
 - 設定画面の開閉操作とDB fingerprint不変
 - 検索/絞り込みの適用、日付条件、DatePicker内解除、投稿者条件とタグ条件の複合E2E、投稿者Dialogクリア、タグ条件のみクリア、投稿者クリックによる分類済み投稿者フィルター遷移、キャンセル、BackHandler破棄、Dialog内全クリア確認キャンセル、全クリアとDB fingerprint不変
 - 投稿カードのいいね数ポップアップが詳細と暫定警告を表示し、開閉でDB fingerprintを変えないこと
@@ -40,3 +40,9 @@
 - 使用量セクションの確認では `警告ライン` と `停止ライン` が出ないことを確認する
 - いいね数更新の確認Dialogは `いいね数を更新しますか？` を使う
 - 設定画面の表示検証は `settings_screen` / `settings_x_api_section` / `settings_sync_section` / `settings_usage_section` / `settings_data_management_section` を基準にする
+
+## 2026-07-03 追記: 設定画面表示状態
+
+- `settings_content` をスクロールして4セクションを表示確認する
+- 設定画面表示中は `tab_unclassified` / `tab_classified` / `tab_tags` が存在しないことを確認する
+- Android戻るボタン相当で設定画面を閉じ、開く前のタブへ戻ることを確認する

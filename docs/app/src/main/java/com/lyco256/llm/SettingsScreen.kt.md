@@ -8,6 +8,7 @@
 - `SettingsSection`: 見出しと区切り線を持つ共通セクション枠
 - `SegmentedStorageUsageBar`: ストレージ全体を「他のデータ」「アプリデータ」「空き容量」の3区分で可視化する
 - `StorageUsageLegend`: ストレージバーの凡例を表示する
+- セクションを含むスクロール本体には、UIテスト用に `settings_content` test tagを付ける
 
 設定画面では Repository の業務ロジックは実行せず、`MainViewModel` が公開する状態とイベントだけを使って表示と操作を行います。Client ID の保存、ログイン、ログアウト、同期、いいね数再取得、保存先移動は ViewModel 経由で実行します。
 

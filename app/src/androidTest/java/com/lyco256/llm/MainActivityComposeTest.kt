@@ -65,6 +65,33 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun settingsScreenHidesTabsShowsSectionsAndAndroidBackRestoresPreviousTab() {
+        composeRule.onNodeWithTag("tab_tags").performClick()
+        composeRule.onNodeWithTag("tags_screen").assertIsDisplayed()
+
+        openSettingsScreen()
+
+        composeRule.onNodeWithTag("settings_screen").assertIsDisplayed()
+        assertTrue(composeRule.onAllNodesWithTag("tab_unclassified").fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithTag("tab_classified").fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithTag("tab_tags").fetchSemanticsNodes().isEmpty())
+        assertSettingsSectionVisible("settings_x_api_section")
+        assertSettingsSectionVisible("settings_sync_section")
+        assertSettingsSectionVisible("settings_usage_section")
+        assertSettingsSectionVisible("settings_data_management_section")
+
+        composeRule.activityRule.scenario.onActivity { activity ->
+            activity.onBackPressedDispatcher.onBackPressed()
+        }
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("settings_screen").fetchSemanticsNodes().isEmpty()
+        }
+
+        composeRule.onNodeWithTag("tags_screen").assertIsDisplayed()
+        composeRule.onNodeWithTag("tab_tags").assertIsDisplayed()
+    }
+
+    @Test
     fun selectedTabSurvivesActivityRecreation() {
         composeRule.onNodeWithTag("tab_tags").performClick()
         composeRule.onNodeWithTag("tags_screen").assertIsDisplayed()
@@ -1203,6 +1230,11 @@ class MainActivityComposeTest {
         composeRule.waitUntil(10_000) {
             composeRule.onAllNodesWithTag("settings_screen").fetchSemanticsNodes().isNotEmpty()
         }
+    }
+
+    private fun assertSettingsSectionVisible(testTag: String) {
+        composeRule.onNodeWithTag("settings_content").performScrollToNode(hasTestTag(testTag))
+        composeRule.onNodeWithTag(testTag).assertIsDisplayed()
     }
 
     private fun clipTagIds(clipId: Long): Set<Long> = runBlocking {
