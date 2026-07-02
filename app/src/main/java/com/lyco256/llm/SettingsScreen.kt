@@ -21,6 +21,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -102,6 +104,7 @@ fun SettingsScreen(
             modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(32.dp),
         ) {
+            item { Spacer(Modifier.height(16.dp)) }
             item {
                 SettingsSection(title = "X API設定", testTag = "settings_x_api_section") {
                     val trimmedClientId = clientIdDraft.trim()
@@ -174,23 +177,37 @@ fun SettingsScreen(
                             limit = settings.rateLimitLimit,
                             modifier = Modifier.fillMaxWidth().testTag("settings_rate_limit_progress"),
                         )
-                        TextButton(
-                            onClick = { viewModel.syncNow { message -> messageTitle = "同期"; messageBody = message } },
-                            modifier = Modifier.testTag("settings_sync_now"),
-                        ) { Text("同期する") }
-                        TextButton(
-                            onClick = {
-                                viewModel.estimateLikeCountRefresh { result ->
-                                    result.onSuccess { estimate ->
-                                        likeRefreshEstimate = estimate
-                                    }.onFailure {
-                                        messageTitle = "いいね数を再取得"
-                                        messageBody = it.message ?: "対象件数を確認できませんでした"
-                                    }
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                            Button(
+                                onClick = { viewModel.syncNow { message -> messageTitle = "同期"; messageBody = message } },
+                                modifier = Modifier.weight(1f).testTag("settings_sync_now"),
+                            ) {
+                                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                    Icon(Icons.Filled.Download, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("同期する")
                                 }
-                            },
-                            modifier = Modifier.testTag("settings_like_refresh"),
-                        ) { Text("いいね数を再取得") }
+                            }
+                            Button(
+                                onClick = {
+                                    viewModel.estimateLikeCountRefresh { result ->
+                                        result.onSuccess { estimate ->
+                                            likeRefreshEstimate = estimate
+                                        }.onFailure {
+                                            messageTitle = "いいね数を更新"
+                                            messageBody = it.message ?: "対象件数を確認できませんでした"
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.weight(1f).testTag("settings_like_refresh"),
+                            ) {
+                                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                    Icon(Icons.Filled.Favorite, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("いいね数を更新")
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -347,7 +364,7 @@ fun SettingsScreen(
     likeRefreshEstimate?.let { estimate ->
         AlertDialog(
             onDismissRequest = { likeRefreshEstimate = null },
-            title = { Text("いいね数を再取得しますか？") },
+            title = { Text("いいね数を更新しますか？") },
             text = {
                 Text(
                     "対象: ${estimate.totalTargets}件\n" +
@@ -360,7 +377,7 @@ fun SettingsScreen(
                     onClick = {
                         likeRefreshEstimate = null
                         viewModel.refreshLikeCounts { message ->
-                            messageTitle = "いいね数を再取得"
+                        messageTitle = "いいね数を更新"
                             messageBody = message
                         }
                     },
@@ -407,10 +424,10 @@ fun SettingsSection(
 ) {
     Column(modifier.fillMaxWidth().testTag(testTag)) {
         Text(title, style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(32.dp))
         content()
         if (showDivider) {
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(36.dp))
             Divider()
         }
     }
@@ -453,7 +470,7 @@ fun SegmentedStorageUsageBar(
 
 @Composable
 fun StorageUsageLegend(modifier: Modifier = Modifier) {
-    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
         LegendRow(Color.White, "他のデータ")
         LegendRow(AppDataColor, "アプリデータ")
         LegendRow(FreeSpaceColor, "空き容量")
@@ -463,9 +480,9 @@ fun StorageUsageLegend(modifier: Modifier = Modifier) {
 @Composable
 private fun LegendRow(color: Color, label: String) {
     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-        Text("●", color = color)
-        Spacer(Modifier.width(6.dp))
-        Text(label)
+        Text("●", color = color, fontSize = 10.sp)
+        Spacer(Modifier.width(4.dp))
+        Text(label, fontSize = 12.sp)
     }
 }
 

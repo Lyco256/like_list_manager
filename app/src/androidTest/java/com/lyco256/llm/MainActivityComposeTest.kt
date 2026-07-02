@@ -177,7 +177,7 @@ class MainActivityComposeTest {
         openSettingsScreen()
         composeRule.onNodeWithTag("settings_like_refresh").performClick()
         composeRule.waitUntil(10_000) {
-            composeRule.onAllNodesWithText("いいね数を再取得しますか？").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText("いいね数を更新しますか？").fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithTag("settings_like_refresh_cancel").performClick()
         composeRule.onNodeWithTag("settings_screen").assertIsDisplayed()
