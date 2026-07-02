@@ -345,6 +345,59 @@ class RepositoryIntegrationTest {
     }
 
     @Test
+    fun settingsSnapshotCountsOnlyActiveClipsAndExistingManagedImages() = runBlocking {
+        val now = Instant.now().toString()
+        val image = File(storage.imageDirectory(), "snapshot-counted.webp").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        storage.withDatabase { database ->
+            val activeId = database.clipDao().insertClip(clip("801"))
+            val deletedId = database.clipDao().insertClip(clip("802"))
+            val deleted = database.clipDao().getActiveClips().single { it.id == deletedId }.copy(isDeleted = true)
+            database.clipDao().updateClip(deleted)
+            database.clipDao().insertAssets(
+                listOf(
+                    AssetEntity(
+                        clipId = activeId,
+                        mediaKey = "counted",
+                        type = "photo",
+                        remoteUrl = null,
+                        previewUrl = null,
+                        localPath = image.absolutePath,
+                        sizeBytes = image.length(),
+                        downloadState = "downloaded",
+                        createdAt = now,
+                    ),
+                    AssetEntity(
+                        clipId = activeId,
+                        mediaKey = "failed",
+                        type = "photo",
+                        remoteUrl = null,
+                        previewUrl = null,
+                        localPath = null,
+                        downloadState = "failed",
+                        createdAt = now,
+                    ),
+                    AssetEntity(
+                        clipId = activeId,
+                        mediaKey = "missing",
+                        type = "photo",
+                        remoteUrl = null,
+                        previewUrl = null,
+                        localPath = File(storage.imageDirectory(), "missing.webp").absolutePath,
+                        sizeBytes = 99,
+                        downloadState = "downloaded",
+                        createdAt = now,
+                    ),
+                ),
+            )
+        }
+
+        val snapshot = repository.loadSettingsSnapshot()
+
+        assertEquals(1, snapshot.saveCount)
+        assertEquals(1, snapshot.imageCount)
+    }
+
+    @Test
     fun scopeAndServerErrorsDoNotWritePartialPosts() = runBlocking {
         listOf(403, 500).forEach { status ->
             api.likedResponses += XApiException(status, "error-$status")
