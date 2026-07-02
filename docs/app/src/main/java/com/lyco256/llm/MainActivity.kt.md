@@ -1,12 +1,12 @@
 # `app/src/main/java/com/lyco256/llm/MainActivity.kt`
 
-Activity、ViewModel、UI state、Compose画面の接続入口です。未分類、分類済み、タグ管理、同期/使用量、X API設定、投稿データ保存先設定へ状態とイベントを流します。画面本体のタグ階層UIは `TagHierarchyUiV2.kt` に分離されています。
+Activity、ViewModel、UI state、Compose画面の接続入口です。未分類、分類済み、タグ管理、本体の設定アイコンから開く全画面の `SettingsScreen` へ状態とイベントを流します。画面本体のタグ階層UIは `TagHierarchyUiV2.kt` に分離されています。
 
 ## 主な責務
 
 - `MainActivity`: Compose起動とAppAuthのActivity Result受信
 - `MainViewModel`: RepositoryのFlowをUI stateへ合成し、ユーザー操作をRepositoryへ渡す
-- `MainUiState`: 未分類、分類済み、検索条件、投稿者一覧、タグ階層、保存先状態、同期状態をまとめる
+- `MainUiState`: 未分類、分類済み、検索条件、投稿者一覧、タグ階層、保存先状態、同期状態、設定画面用スナップショットをまとめる
 - `TweetFilterState`: 分類済み画面の文字列検索、検索モード、検索対象、期間、投稿者条件、タグ条件、タグのみtoggleを表す
 - `PostStorageDialog`: 内部/SDカードの一覧、現在地、使用量、空き容量、移動開始入口を表示する
 - `StorageMoveEstimateDialog`: 保存先移動見積もりの内容確認と、移動開始/キャンセル操作を扱う
@@ -16,13 +16,11 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 
 ## UI自動テスト
 
-主要画面、ナビゲーション、メニュー、X API設定Dialog、空状態には安定したCompose `testTag` を設定しています。表示テキストとtestTagを使って画面遷移をassertし、スクリーンショット比較は行いません。
+主要画面、設定アイコン、設定画面、空状態には安定したCompose `testTag` を設定しています。表示テキストとtestTagを使って画面遷移をassertし、スクリーンショット比較は行いません。
 
-`ApiSettingsDialog` は隔離テスト環境で本番OAuthを開始しないことに加え、Client IDの保存、trim、消去をUI操作から検証できるよう、入力欄、保存、消去、閉じるボタンに `api_settings_*` のtest tagを付けています。
+`SettingsScreen` は隔離テスト環境で本番OAuthを開始しないことに加え、Client IDの保存、trim、消去、ログイン可否の切り替え、同期、使用量、保存先移動をUI操作から検証できるよう、入力欄や各ボタンに `settings_*` のtest tagを付けています。
 
-`PostStorageDialog` は保存先移動を開始しない閉じる操作をE2Eで確認できるよう、Dialog本体に `post_storage_dialog`、閉じるボタンに `post_storage_close` を付けています。
-
-`StorageMoveEstimateDialog` は移動開始を伴わないキャンセルUIをandroidTestから直接renderできます。`StorageProgressDialog` はandroidTestからloading表示を直接renderできるinternal composableです。
+`StorageMoveEstimateDialog` は保存先移動の最終確認UIを、`StorageProgressDialog` は待機表示を直接renderできるinternal composableです。
 
 `SyncResultDialog` は同期成功/失敗の結果表示を直接renderできるinternal composableです。権限不足などのエラーメッセージ表示と閉じる操作をUIテストで固定します。
 

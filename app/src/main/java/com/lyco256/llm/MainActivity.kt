@@ -8,6 +8,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +37,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +50,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -80,6 +84,7 @@ import com.lyco256.llm.data.OAuthSession
 import com.lyco256.llm.data.PostStorageEstimate
 import com.lyco256.llm.data.PostStorageLocation
 import com.lyco256.llm.data.PostStorageState
+import com.lyco256.llm.data.SettingsSnapshot
 import com.lyco256.llm.data.SyncStateEntity
 import com.lyco256.llm.data.TagEntity
 import com.lyco256.llm.data.TagFilterState
@@ -195,6 +200,7 @@ data class MainUiState(
     val apiSettings: ApiSettings = ApiSettings(),
     val oauthSession: OAuthSession? = null,
     val storageState: PostStorageState = PostStorageState(),
+    val settingsSnapshot: SettingsSnapshot = SettingsSnapshot(),
     val filters: TweetFilterState = TweetFilterState(),
 ) {
     val unclassified: List<ClipWithDetails> = clips.filter { it.tags.isEmpty() }
@@ -217,6 +223,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val filters = MutableStateFlow(TweetFilterState())
     private val apiSettings = MutableStateFlow(ApiSettings())
     private val oauthSession = MutableStateFlow<OAuthSession?>(null)
+    private val settingsSnapshot = MutableStateFlow(SettingsSnapshot())
 
     private val repositoryState = combine(
         repository.clipsWithDetails,
@@ -233,7 +240,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         apiSettings,
         oauthSession,
         filters,
-    ) { repositoryState, settings, session, filterValue ->
+        settingsSnapshot,
+    ) { repositoryState, settings, session, filterValue, snapshot ->
         MainUiState(
             clips = repositoryState.clips,
             tags = repositoryState.tags,
@@ -242,6 +250,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             apiSettings = settings,
             oauthSession = session,
             storageState = repositoryState.storageState,
+            settingsSnapshot = snapshot,
             filters = filterValue,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
@@ -251,6 +260,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             apiSettings.value = repository.loadApiSettings()
             oauthSession.value = repository.loadOAuthSession()
             repository.ensureSeedData()
+            refreshSettingsSnapshotInternal()
         }
     }
 
@@ -344,6 +354,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         onSaved?.invoke()
     }
 
+    fun replaceApiSettings(settings: ApiSettings, onSaved: (() -> Unit)? = null) = viewModelScope.launch {
+        repository.clearApiSettings()
+        repository.saveApiSettings(settings)
+        apiSettings.value = repository.loadApiSettings()
+        oauthSession.value = null
+        onSaved?.invoke()
+    }
+
     fun createAuthorizationIntent(): Intent = repository.createAuthorizationIntent()
 
     fun completeAuthorization(intent: Intent, onMessage: (String) -> Unit) = viewModelScope.launch {
@@ -356,9 +374,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun logout(onMessage: (String) -> Unit) = viewModelScope.launch {
-        repository.logout()
+        val revokeFailed = repository.logout()
         oauthSession.value = null
-        onMessage("Xからログアウトしました")
+        onMessage(
+            if (revokeFailed) {
+                "X側の解除確認には失敗した可能性があります。\nこの端末のログイン情報は削除済みです。"
+            } else {
+                "Xからログアウトしました"
+            },
+        )
     }
 
     fun syncNow(onMessage: (String) -> Unit) = viewModelScope.launch {
@@ -367,6 +391,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } catch (error: Exception) {
             oauthSession.value = repository.loadOAuthSession()
             onMessage(error.message ?: "同期に失敗しました")
+        } finally {
+            refreshSettingsSnapshotInternal()
         }
     }
 
@@ -380,6 +406,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } catch (error: Exception) {
             oauthSession.value = repository.loadOAuthSession()
             onMessage(error.message ?: "いいね数の再取得に失敗しました")
+        } finally {
+            refreshSettingsSnapshotInternal()
         }
     }
 
@@ -388,7 +416,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refreshStorageLocations(onComplete: (() -> Unit)? = null) = viewModelScope.launch {
-        repository.refreshStorageLocations()
+        refreshSettingsSnapshotInternal()
         onComplete?.invoke()
     }
 
@@ -401,7 +429,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun movePostStorage(targetId: String, onMessage: (String) -> Unit) = viewModelScope.launch {
         repository.movePostStorage(targetId)
-            .onSuccess { onMessage("投稿データの保存先を変更しました") }
+            .onSuccess {
+                refreshSettingsSnapshotInternal()
+                onMessage("投稿データの保存先を変更しました")
+            }
             .onFailure { onMessage(it.message ?: "保存先の変更に失敗しました") }
     }
 
@@ -409,6 +440,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         repository.clearApiSettings()
         apiSettings.value = repository.loadApiSettings()
         oauthSession.value = null
+    }
+
+    fun refreshSettingsSnapshot() = viewModelScope.launch {
+        refreshSettingsSnapshotInternal()
+    }
+
+    private suspend fun refreshSettingsSnapshotInternal() {
+        repository.refreshStorageLocations()
+        settingsSnapshot.value = repository.loadSettingsSnapshot()
     }
 
     companion object {
@@ -441,7 +481,6 @@ fun LikeListManagerUi(viewModel: MainViewModel, onLogin: (ApiSettings) -> Unit) 
 @Composable
 fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSettings) -> Unit) {
     var tab by rememberSaveable { mutableStateOf(AppTab.Unclassified) }
-    var menuOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var usageOpen by remember { mutableStateOf(false) }
     var storageOpen by remember { mutableStateOf(false) }
@@ -459,6 +498,16 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
     val classifiedListState = remember(classifiedScrollKey) {
         classifiedListStates.getOrPut(classifiedScrollKey) { LazyListState() }
     }
+    if (settingsOpen) {
+        BackHandler { settingsOpen = false }
+        SettingsScreen(
+            uiState = uiState,
+            viewModel = viewModel,
+            onBack = { settingsOpen = false },
+            onLogin = onLogin,
+        )
+        return
+    }
     val topBarTitle = screenTitle(
         tab = tab,
         uiState = uiState,
@@ -473,61 +522,16 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
             TopAppBar(
                 title = { Text(topBarTitle, fontWeight = FontWeight.SemiBold) },
                 actions = {
-                    Box {
-                        IconButton(
-                            onClick = { menuOpen = true },
-                            modifier = Modifier.testTag("main_menu"),
-                        ) {
-                            Text("...")
-                        }
-                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                            DropdownMenuItem(
-                                text = { Text("同期する") },
-                                onClick = {
-                                    viewModel.syncNow { syncMessage = it }
-                                    menuOpen = false
-                                },
-                                modifier = Modifier.testTag("main_menu_sync"),
-                            )
-                            DropdownMenuItem(
-                                text = { Text("同期/使用量") },
-                                onClick = {
-                                    usageOpen = true
-                                    menuOpen = false
-                                },
-                                modifier = Modifier.testTag("main_menu_usage"),
-                            )
-                            DropdownMenuItem(
-                                text = { Text("いいね数を再取得") },
-                                onClick = {
-                                    menuOpen = false
-                                    likeRefreshEstimating = true
-                                    viewModel.estimateLikeCountRefresh { result ->
-                                        likeRefreshEstimating = false
-                                        result.onSuccess { likeRefreshEstimate = it }
-                                            .onFailure { syncMessage = it.message ?: "対象件数を確認できませんでした" }
-                                    }
-                                },
-                                modifier = Modifier.testTag("main_menu_like_refresh"),
-                            )
-                            DropdownMenuItem(
-                                text = { Text("投稿データの保存先") },
-                                onClick = {
-                                    viewModel.refreshStorageLocations()
-                                    storageOpen = true
-                                    menuOpen = false
-                                },
-                                modifier = Modifier.testTag("main_menu_storage"),
-                            )
-                            DropdownMenuItem(
-                                text = { Text("X API設定") },
-                                onClick = {
-                                    settingsOpen = true
-                                    menuOpen = false
-                                },
-                                modifier = Modifier.testTag("main_menu_api_settings"),
-                            )
-                        }
+                    IconButton(
+                        onClick = {
+                            settingsOpen = true
+                        },
+                        modifier = Modifier.testTag("top_settings_button"),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "設定",
+                        )
                     }
                 },
             )

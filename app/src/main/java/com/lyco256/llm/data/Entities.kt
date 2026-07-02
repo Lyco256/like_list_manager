@@ -140,6 +140,28 @@ data class SyncStateEntity(
     val rateLimitResetEpochSeconds: Long? = null,
 )
 
+@Entity(tableName = "api_usage_months")
+data class ApiUsageMonthEntity(
+    @PrimaryKey val usageMonth: String,
+    val billableReadCount: Long = 0L,
+    val createdAt: String,
+    val updatedAt: String,
+)
+
+data class SettingsSnapshot(
+    val monthlyApiUsage: Long? = null,
+    val cumulativeApiUsage: Long = 0L,
+    val monthlyWarningLimit: Int = 1500,
+    val monthlyStopLimit: Int = 2000,
+    val rateLimitRemaining: Int? = null,
+    val rateLimitLimit: Int? = null,
+    val rateLimitResetEpochSeconds: Long? = null,
+    val lastSyncAt: String? = null,
+    val saveCount: Int? = null,
+    val imageCount: Int? = null,
+    val tweetDataBytes: Long? = null,
+)
+
 data class ClipWithDetails(
     val clip: ClipEntity,
     val assets: List<AssetEntity>,

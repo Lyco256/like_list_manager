@@ -59,9 +59,9 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("classified_screen").assertIsDisplayed()
         composeRule.onNodeWithTag("tab_tags").performClick()
         composeRule.onNodeWithTag("tags_screen").assertIsDisplayed()
-        composeRule.onNodeWithTag("main_menu").performClick()
-        composeRule.onNodeWithTag("main_menu_api_settings").performClick()
-        composeRule.onNodeWithText("OAuth 2.0 Client ID").assertIsDisplayed()
+        openSettingsScreen()
+        composeRule.onNodeWithTag("settings_screen").assertIsDisplayed()
+        composeRule.onNodeWithText("設定").assertIsDisplayed()
     }
 
     @Test
@@ -105,43 +105,37 @@ class MainActivityComposeTest {
 
     @Test
     fun usageAndSettingsSafetyControlsReflectTheIsolatedEnvironment() {
-        composeRule.onNodeWithTag("main_menu").performClick()
-        composeRule.onNodeWithTag("main_menu_usage").performClick()
-        composeRule.onNodeWithText("月間取得数: 0 / 1800").assertIsDisplayed()
+        openSettingsScreen()
+        composeRule.onNodeWithTag("settings_usage_section").assertIsDisplayed()
+        composeRule.onNodeWithText("今月のAPI使用量: 0 / 2000").assertIsDisplayed()
         composeRule.onNodeWithText("警告ライン: 1500").assertIsDisplayed()
         composeRule.onNodeWithText("停止ライン: 2000").assertIsDisplayed()
-        composeRule.onNodeWithText("15分制限: - / -").assertIsDisplayed()
-        composeRule.onNodeWithTag("usage_close").performClick()
-
-        composeRule.onNodeWithTag("main_menu").performClick()
-        composeRule.onNodeWithTag("main_menu_api_settings").performClick()
-        composeRule.onNodeWithText("隔離テスト環境ではXログインを実行できません").assertIsDisplayed()
+        composeRule.onNodeWithText("15分rate limit: 未取得").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_login").assertIsNotEnabled()
         composeRule.onNode(hasSetTextAction() and hasText("OAuth 2.0 Client ID")).performTextInput("test-client-id")
         composeRule.onNodeWithText("保存してXにログイン").assertIsNotEnabled()
     }
 
     @Test
     fun apiSettingsSaveAndClearRoundTripThroughTheUi() {
-        composeRule.onNodeWithTag("main_menu").performClick()
-        composeRule.onNodeWithTag("main_menu_api_settings").performClick()
-        composeRule.onNodeWithTag("api_settings_clear").performClick()
+        openSettingsScreen()
+        composeRule.onNodeWithTag("settings_client_id_clear").performClick()
         waitUntil { apiClientId() == "" }
 
-        composeRule.onNodeWithTag("api_settings_client_id").performTextReplacement("  ui-client-id  ")
-        composeRule.onNodeWithTag("api_settings_save").performClick()
+        composeRule.onNodeWithTag("settings_client_id_input").performTextReplacement("  ui-client-id  ")
+        composeRule.onNodeWithTag("settings_client_id_save").performClick()
         waitUntil { apiClientId() == "ui-client-id" }
 
-        composeRule.onNodeWithTag("main_menu").performClick()
-        composeRule.onNodeWithTag("main_menu_api_settings").performClick()
+        composeRule.onNodeWithTag("settings_back").performClick()
+        openSettingsScreen()
         composeRule.onNodeWithText("ui-client-id").assertIsDisplayed()
-        composeRule.onNodeWithTag("api_settings_clear").performClick()
+        composeRule.onNodeWithTag("settings_client_id_clear").performClick()
         waitUntil { apiClientId() == "" }
-        composeRule.onNodeWithTag("api_settings_close").performClick()
+        composeRule.onNodeWithTag("settings_back").performClick()
 
-        composeRule.onNodeWithTag("main_menu").performClick()
-        composeRule.onNodeWithTag("main_menu_api_settings").performClick()
+        openSettingsScreen()
         assertTrue(composeRule.onAllNodesWithText("ui-client-id").fetchSemanticsNodes().isEmpty())
-        composeRule.onNodeWithTag("api_settings_close").performClick()
+        composeRule.onNodeWithTag("settings_back").performClick()
     }
 
     @Test
@@ -149,10 +143,9 @@ class MainActivityComposeTest {
         waitForSeededClip()
         val before = databaseFingerprint()
 
-        composeRule.onNodeWithTag("main_menu").performClick()
-        composeRule.onNodeWithTag("main_menu_storage").performClick()
-        composeRule.onNodeWithTag("post_storage_dialog").assertIsDisplayed()
-        composeRule.onNodeWithTag("post_storage_close").performClick()
+        openSettingsScreen()
+        composeRule.onNodeWithTag("settings_screen").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_back").performClick()
         composeRule.onNodeWithTag("main_screen").assertIsDisplayed()
 
         assertEquals(before, databaseFingerprint())
@@ -181,14 +174,13 @@ class MainActivityComposeTest {
         waitUntil { totalClipCount() == 4 }
         val before = databaseFingerprint()
 
-        composeRule.onNodeWithTag("main_menu").performClick()
-        composeRule.onNodeWithTag("main_menu_like_refresh").performClick()
+        openSettingsScreen()
+        composeRule.onNodeWithTag("settings_like_refresh").performClick()
         composeRule.waitUntil(10_000) {
-            composeRule.onAllNodesWithTag("like_refresh_estimate_dialog").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText("いいね数を再取得しますか？").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithTag("like_refresh_estimate_dialog").assertIsDisplayed()
-        composeRule.onNodeWithTag("like_refresh_estimate_cancel").performClick()
-        composeRule.onNodeWithTag("main_screen").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_like_refresh_cancel").performClick()
+        composeRule.onNodeWithTag("settings_screen").assertIsDisplayed()
 
         assertEquals(before, databaseFingerprint())
     }
@@ -1141,11 +1133,13 @@ class MainActivityComposeTest {
         waitForSeededClip()
         val beforeSyncError = databaseFingerprint()
 
-        composeRule.onNodeWithTag("main_menu").performClick()
-        composeRule.onNodeWithTag("main_menu_sync").performClick()
-        waitForText("同期結果")
+        openSettingsScreen()
+        composeRule.onNodeWithTag("settings_sync_now").performClick()
+        waitForText("同期")
         composeRule.onNodeWithText("X API設定からXにログインしてください").assertIsDisplayed()
-        composeRule.onNodeWithTag("sync_result_close").performClick()
+        composeRule.onNodeWithText("閉じる").performClick()
+        composeRule.onNodeWithTag("settings_screen").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_back").performClick()
         composeRule.onNodeWithTag("main_screen").assertIsDisplayed()
 
         assertEquals(beforeSyncError, databaseFingerprint())
@@ -1203,6 +1197,13 @@ class MainActivityComposeTest {
 
     private fun storage(): PostStorageManager =
         (composeRule.activity.application as LikeListManagerApp).container.postStorageManager
+
+    private fun openSettingsScreen() {
+        composeRule.onNodeWithTag("top_settings_button").performClick()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("settings_screen").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
 
     private fun clipTagIds(clipId: Long): Set<Long> = runBlocking {
         storage().withDatabase { it.clipDao().clipTagsForClipIds(listOf(clipId)).map { relation -> relation.tagId }.toSet() }

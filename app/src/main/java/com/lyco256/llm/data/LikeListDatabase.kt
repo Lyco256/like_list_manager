@@ -13,8 +13,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TagEntity::class,
         ClipTagEntity::class,
         SyncStateEntity::class,
+        ApiUsageMonthEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class LikeListDatabase : RoomDatabase() {
@@ -22,6 +23,32 @@ abstract class LikeListDatabase : RoomDatabase() {
     abstract fun tagDao(): TagDao
 
     companion object {
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                val currentMonth = java.time.YearMonth.now().toString()
+                val now = java.time.Instant.now().toString()
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `api_usage_months` (
+                        `usageMonth` TEXT NOT NULL,
+                        `billableReadCount` INTEGER NOT NULL,
+                        `createdAt` TEXT NOT NULL,
+                        `updatedAt` TEXT NOT NULL,
+                        PRIMARY KEY(`usageMonth`)
+                    )
+                    """.trimIndent(),
+                )
+                database.execSQL(
+                    """
+                    INSERT INTO `api_usage_months` (`usageMonth`, `billableReadCount`, `createdAt`, `updatedAt`)
+                    SELECT COALESCE(NULLIF(`usageMonth`, ''), '$currentMonth'), COALESCE(`monthlyFetchedCount`, 0), '$now', '$now'
+                    FROM `sync_state`
+                    WHERE `id` = 1
+                    """.trimIndent(),
+                )
+            }
+        }
+
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE `sync_state` ADD COLUMN `likedPostsNextToken` TEXT")

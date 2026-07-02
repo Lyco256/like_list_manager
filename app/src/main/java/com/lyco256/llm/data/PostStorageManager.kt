@@ -99,20 +99,23 @@ class PostStorageManager(
     suspend fun refreshLocations() {
         _state.value = _state.value.copy(isRefreshing = true, migrationMessage = null)
         val currentDatabase = _database.value
-        val currentUsage = if (currentDatabase != null) managedUsage(currentDatabase) else null
+        val currentUsage = if (currentDatabase != null) managedUsage() else null
         publishState(currentUsageBytes = currentUsage)
+    }
+
+    suspend fun countManagedImages(): Int = withDatabase {
+        imageFiles(selectedPaths()).count { it.isFile }
     }
 
     suspend fun estimateMove(targetId: String): PostStorageEstimate = withDatabase { database ->
         val target = locationForId(targetId) ?: error("移動先を利用できません")
         val source = selectedPaths()
-        val assetStats = database.clipDao().getStoredAssetStats()
-        val databaseFiles = databaseFiles(source).filter(File::exists)
+        val managedFiles = dataFiles(source)
         val estimate = PostStorageEstimate(
             target = target,
             clipCount = database.clipDao().countClips(),
-            fileCount = assetStats.count + databaseFiles.size,
-            totalBytes = assetStats.totalBytes + databaseFiles.sumOf(File::length),
+            fileCount = managedFiles.size,
+            totalBytes = managedFiles.sumOf(File::length),
         )
         pendingEstimateSourceId = source.id
         pendingEstimateTargetId = target.id
@@ -136,9 +139,9 @@ class PostStorageManager(
             pendingEstimateSourceId == source.id &&
             pendingEstimateTargetId == target.id
         ) {
-            pendingEstimateBytes ?: managedUsage(sourceDatabase)
+            pendingEstimateBytes ?: managedUsage()
         } else {
-            managedUsage(sourceDatabase)
+            managedUsage()
         }
         pendingEstimateSourceId = null
         pendingEstimateTargetId = null
@@ -206,7 +209,7 @@ class PostStorageManager(
             _database.value = targetDatabase
             deleteStorageData(source)
             clearMigrationState()
-            publishState(currentUsageBytes = managedUsage(targetDatabase))
+            publishState(currentUsageBytes = managedUsage())
             Result.success(Unit)
         } catch (error: Exception) {
             deleteDatabaseFiles(tempDatabase)
@@ -220,7 +223,7 @@ class PostStorageManager(
             _database.value = sourceDatabase
             publishState(
                 message = error.message ?: "投稿データの移動に失敗しました",
-                currentUsageBytes = sourceDatabase?.let { managedUsage(it) },
+                currentUsageBytes = sourceDatabase?.let { managedUsage() },
             )
             Result.failure(error)
         }
@@ -243,11 +246,12 @@ class PostStorageManager(
         context,
         LikeListDatabase::class.java,
         file.absolutePath,
-    ).addMigrations(
-        LikeListDatabase.MIGRATION_1_2,
-        LikeListDatabase.MIGRATION_2_3,
-        LikeListDatabase.MIGRATION_3_4,
-    ).build()
+        ).addMigrations(
+            LikeListDatabase.MIGRATION_1_2,
+            LikeListDatabase.MIGRATION_2_3,
+            LikeListDatabase.MIGRATION_3_4,
+            LikeListDatabase.MIGRATION_4_5,
+        ).build()
 
     private fun selectedPaths(): StoragePaths {
         val selectedId = preferences.getString(KEY_SELECTED_ID, PostStorageState.INTERNAL_ID).orEmpty()
@@ -359,11 +363,13 @@ class PostStorageManager(
         File(paths.database.path + "-shm"),
     )
 
-    private suspend fun managedUsage(database: LikeListDatabase): Long {
+    private suspend fun managedUsage(): Long {
         val selected = selectedPaths()
-        return database.clipDao().getStoredAssetStats().totalBytes +
-            databaseFiles(selected).filter(File::exists).sumOf(File::length)
+        return dataFiles(selected).sumOf(File::length)
     }
+
+    private fun imageFiles(paths: StoragePaths): List<File> =
+        if (!paths.images.exists()) emptyList() else paths.images.walkTopDown().filter { it.isFile }.toList()
 
     private fun copyDirectory(source: File, target: File) {
         if (!source.exists()) return

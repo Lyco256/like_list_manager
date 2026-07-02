@@ -109,6 +109,7 @@ MainActivity / Compose UI
 
 - `docs/app/src/main/java/com/lyco256/llm/LikeListManagerApp.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/MainActivity.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/SettingsScreen.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt.md`
 
 ### Data・API

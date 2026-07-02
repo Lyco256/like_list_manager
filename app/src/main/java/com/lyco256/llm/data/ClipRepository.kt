@@ -8,6 +8,7 @@ import android.graphics.Canvas
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
+import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -51,6 +52,30 @@ class ClipRepository(
         apiSettingsStore.loadSession()
     }
 
+    suspend fun loadSettingsSnapshot(): SettingsSnapshot = withContext(Dispatchers.IO) {
+        val database = postStorageManager.database.value ?: return@withContext SettingsSnapshot()
+        val clipDao = database.clipDao()
+        val syncState = clipDao.getSyncState() ?: SyncStateEntity()
+        val monthState = currentMonthState(syncState)
+        SettingsSnapshot(
+            monthlyApiUsage = monthState.monthlyFetchedCount.toLong(),
+            cumulativeApiUsage = clipDao.getTotalBillableReadCount(),
+            monthlyWarningLimit = syncState.monthlyWarningLimit,
+            monthlyStopLimit = syncState.monthlyStopLimit,
+            rateLimitRemaining = syncState.rateLimitRemaining,
+            rateLimitLimit = syncState.rateLimitLimit,
+            rateLimitResetEpochSeconds = syncState.rateLimitResetEpochSeconds,
+            lastSyncAt = syncState.lastSyncAt,
+            saveCount = clipDao.countActiveClips(),
+            imageCount = try {
+                postStorageManager.countManagedImages()
+            } catch (_: Exception) {
+                0
+            },
+            tweetDataBytes = postStorageManager.state.value.locations.firstOrNull { it.isCurrent }?.usedBytes,
+        )
+    }
+
     fun createAuthorizationIntent(): Intent = xOAuthManager.createAuthorizationIntent(apiSettingsStore.load().clientId)
 
     suspend fun completeAuthorization(intent: Intent): OAuthSession = withContext(Dispatchers.IO) {
@@ -67,13 +92,15 @@ class ClipRepository(
         ).also(apiSettingsStore::saveSession)
     }
 
-    suspend fun logout() = withContext(Dispatchers.IO) {
+    suspend fun logout(): Boolean = withContext(Dispatchers.IO) {
         val settings = apiSettingsStore.load()
         val session = apiSettingsStore.loadSession()
+        var revokeFailed = false
         if (settings.clientId.isNotBlank() && session != null) {
-            runCatching { xApiClient.revokeToken(settings.clientId, session.refreshToken ?: session.accessToken) }
+            revokeFailed = runCatching { xApiClient.revokeToken(settings.clientId, session.refreshToken ?: session.accessToken) }.isFailure
         }
         apiSettingsStore.clearSession()
+        revokeFailed
     }
 
     val storageState = postStorageManager.state
@@ -346,14 +373,15 @@ class ClipRepository(
                 }
             }
             paginationToken = if (pageReachedBoundary) null else result.nextToken
-            state = state.copy(
-                monthlyFetchedCount = state.monthlyFetchedCount + result.posts.size,
-                likedPostsNextToken = paginationToken,
-                rateLimitLimit = result.rateLimitLimit,
-                rateLimitRemaining = result.rateLimitRemaining,
-                rateLimitResetEpochSeconds = result.rateLimitReset,
+            state = recordApiUsage(database, state, result.posts.size)
+            clipDao.upsertSyncState(
+                state.copy(
+                    likedPostsNextToken = paginationToken,
+                    rateLimitLimit = result.rateLimitLimit,
+                    rateLimitRemaining = result.rateLimitRemaining,
+                    rateLimitResetEpochSeconds = result.rateLimitReset,
+                ),
             )
-            clipDao.upsertSyncState(state)
 
             if (paginationToken == null) {
                 if (resumingContinuation && fetched < remainingBudget) {
@@ -395,7 +423,7 @@ class ClipRepository(
             val targets = likeCountRefreshTargets(dao.getActiveClips(), Instant.now())
             val remaining = (state.monthlyBudgetLimit - state.monthlyFetchedCount).coerceAtLeast(0)
             val executable = if (state.monthlyFetchedCount >= state.monthlyStopLimit) 0 else minOf(targets.size, remaining)
-            LikeCountRefreshEstimate(targets.size, executable, executable * 0.005)
+            LikeCountRefreshEstimate(targets.size, executable, executable * 0.001)
         }
     }
 
@@ -423,8 +451,6 @@ class ClipRepository(
                     xApiClient.fetchPostMetrics(session.accessToken, batch.map { it.xPostId })
                 } catch (error: Exception) {
                     if (error is XApiException && error.statusCode == 401) apiSettingsStore.clearSession()
-                    state = state.copy(monthlyFetchedCount = state.monthlyFetchedCount + batch.size)
-                    dao.upsertSyncState(state)
                     interruptedMessage = if (error is XApiException) error.toUserMessage() else "通信エラーにより中断しました"
                     break
                 }
@@ -439,13 +465,14 @@ class ClipRepository(
                         permanentFailures += 1
                     }
                 }
-                state = state.copy(
-                    monthlyFetchedCount = state.monthlyFetchedCount + batch.size,
-                    rateLimitLimit = result.rateLimitLimit,
-                    rateLimitRemaining = result.rateLimitRemaining,
-                    rateLimitResetEpochSeconds = result.rateLimitReset,
+                state = recordApiUsage(database, state, result.posts.size)
+                dao.upsertSyncState(
+                    state.copy(
+                        rateLimitLimit = result.rateLimitLimit,
+                        rateLimitRemaining = result.rateLimitRemaining,
+                        rateLimitResetEpochSeconds = result.rateLimitReset,
+                    ),
                 )
-                dao.upsertSyncState(state)
             }
 
             buildString {
@@ -455,6 +482,18 @@ class ClipRepository(
                 if (attempted < allTargets.size) append("\n月間残り枠の範囲で${attempted}件を処理しました。")
             }
         }
+    }
+
+    private suspend fun recordApiUsage(database: LikeListDatabase, state: SyncStateEntity, delta: Int): SyncStateEntity {
+        if (delta <= 0) return state
+        val current = currentMonthState(state)
+        val next = current.copy(monthlyFetchedCount = current.monthlyFetchedCount + delta)
+        val now = Instant.now().toString()
+        database.withTransaction {
+            database.clipDao().upsertSyncState(next)
+            database.clipDao().incrementApiUsageMonth(next.usageMonth ?: YearMonth.now().toString(), delta.toLong(), now)
+        }
+        return next
     }
 
     private fun currentMonthState(state: SyncStateEntity): SyncStateEntity {
