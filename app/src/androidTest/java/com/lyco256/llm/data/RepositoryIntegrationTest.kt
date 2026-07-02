@@ -141,6 +141,8 @@ class RepositoryIntegrationTest {
             assertEquals(setOf("201", "202"), database.clipDao().getActiveClips().map { it.xPostId }.toSet())
             val state = database.clipDao().getSyncState()
             assertEquals(3, state?.monthlyFetchedCount)
+            assertEquals(3L, database.clipDao().getApiUsageMonth(requireNotNull(state?.usageMonth))?.billableReadCount)
+            assertEquals(3L, database.clipDao().getTotalBillableReadCount())
             assertEquals(null, state?.likedPostsNextToken)
             assertEquals(2, api.likedCalls.size)
         }
@@ -282,6 +284,7 @@ class RepositoryIntegrationTest {
         }
 
         storage.withDatabase { database -> assertTrue(database.clipDao().getActiveClips().isEmpty()) }
+        storage.withDatabase { database -> assertEquals(0L, database.clipDao().getTotalBillableReadCount()) }
         assertEquals(2, api.likedCalls.size)
     }
 

@@ -6,10 +6,10 @@
 
 - 再同期時に手動概要・タグ・分類を保持し、新規投稿だけを追加すること
 - ローカル削除済み投稿がAPIから再登場しても復活せず、新規投稿だけを追加すること
-- pagination、continuation再開、重複投稿防止、月間使用量/rate limit保存
+- pagination、continuation再開、重複投稿防止、月間使用量/rate limit保存、月別API使用量履歴と累計使用量の保存
 - 固定seedで生成した複数ページ・ページ内重複でも、投稿ID集合の一意性、取得数加算、continuation消去が成立すること
 - 401時の1回refreshと、refresh失敗時に旧sessionを保持すること
-- 403/429/500や空ページで部分投稿や無限retryを発生させないこと
+- 403/429/500や空ページで部分投稿や無限retry、API使用量の誤加算を発生させないこと
 - photo保存をWebP化し、既存投稿の画像を重複downloadしないこと
 - 複数photoを別WebPとして保存し、破損画像だけを `failed` asset として記録すること
 - Repository経由のタグ/グループ移動API全種で、親と兄弟順がRoomへ永続化されること
