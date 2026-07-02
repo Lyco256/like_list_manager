@@ -88,6 +88,7 @@ fun SettingsScreen(
     var storageMoveInProgress by remember { mutableStateOf(false) }
     var messageTitle by remember { mutableStateOf<String?>(null) }
     var messageBody by remember { mutableStateOf<String?>(null) }
+    val storageBusy = storageState.isMigrating || storageEstimating || storageMoveInProgress
 
     Scaffold(
         modifier = Modifier.fillMaxSize().testTag("settings_screen"),
@@ -181,6 +182,7 @@ fun SettingsScreen(
                             Button(
                                 onClick = { viewModel.syncNow { message -> messageTitle = "同期"; messageBody = message } },
                                 modifier = Modifier.testTag("settings_sync_now"),
+                                enabled = !storageBusy,
                             ) {
                                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                     Icon(Icons.Filled.Download, contentDescription = null)
@@ -200,6 +202,7 @@ fun SettingsScreen(
                                     }
                                 },
                                 modifier = Modifier.testTag("settings_like_refresh"),
+                                enabled = !storageBusy,
                             ) {
                                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                     Icon(Icons.Filled.Refresh, contentDescription = null)
