@@ -246,6 +246,38 @@ class RepositoryIntegrationTest {
     }
 
     @Test
+    fun likedPostSyncFailuresDoNotIncrementApiUsage() = runBlocking {
+        val failures = listOf(
+            XApiException(401, "expired"),
+            XApiException(403, "forbidden"),
+            XApiException(429, "limited", 75, 0, 9999),
+            XApiException(500, "server"),
+            IllegalStateException("parse failed"),
+        )
+
+        failures.forEach { failure ->
+            storage.withDatabase { database -> database.clearAllTables() }
+            settings.saveSession(testSession())
+            oauth.refreshFailure = if (failure is XApiException && failure.statusCode == 401) {
+                IllegalStateException("refresh failed")
+            } else {
+                null
+            }
+            api.likedResponses.clear()
+            api.likedResponses += failure
+
+            assertNotNull(runCatching { repository.syncNow() }.exceptionOrNull())
+
+            storage.withDatabase { database ->
+                assertTrue(database.clipDao().getActiveClips().isEmpty())
+                assertEquals(0L, database.clipDao().getTotalBillableReadCount())
+                assertEquals(0, database.clipDao().getSyncState()?.monthlyFetchedCount ?: 0)
+            }
+        }
+        oauth.refreshFailure = null
+    }
+
+    @Test
     fun monthlyStopLinePreventsAnyApiCall() = runBlocking {
         storage.withDatabase { database ->
             database.clipDao().upsertSyncState(
