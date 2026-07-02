@@ -144,6 +144,30 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun settingsScreenOmitsHiddenLabelsAndShowsDataManagementSummary() {
+        openSettingsScreen()
+
+        assertTrue(composeRule.onAllNodesWithText("Callback URI", substring = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithText("Scope", substring = true).fetchSemanticsNodes().isEmpty())
+
+        assertSettingsSectionVisible("settings_data_management_section")
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("settings_storage_usage_progress").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        composeRule.onNodeWithText("保存件数: 3").assertIsDisplayed()
+        composeRule.onNodeWithText("画像枚数: 0").assertIsDisplayed()
+        composeRule.onNodeWithText("保存先の使用状況").assertIsDisplayed()
+        composeRule.onNodeWithText("他のデータ").assertIsDisplayed()
+        composeRule.onNodeWithText("アプリデータ").assertIsDisplayed()
+        composeRule.onNodeWithText("空き容量").assertIsDisplayed()
+        assertTrue(composeRule.onAllNodesWithText("ツイートデータ容量", substring = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithText("現在の保存場所", substring = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithText("保存場所候補", substring = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithText("移動可能:", substring = true).fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
     fun apiSettingsSaveAndClearRoundTripThroughTheUi() {
         openSettingsScreen()
         composeRule.onNodeWithTag("settings_client_id_clear").performClick()
