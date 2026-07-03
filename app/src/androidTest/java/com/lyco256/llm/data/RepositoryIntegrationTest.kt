@@ -208,6 +208,26 @@ class RepositoryIntegrationTest {
     }
 
     @Test
+    fun logoutKeepsClientIdAndClearsSessionEvenWhenRevokeFails() = runBlocking {
+        api.revokeFailure = IllegalStateException("revoke failed")
+
+        val revokeFailed = repository.logout()
+
+        assertTrue(revokeFailed)
+        assertEquals(ApiSettings("test-client"), settings.load())
+        assertEquals(null, settings.loadSession())
+        assertEquals(listOf("test-client:test-refresh"), api.revokeCalls)
+    }
+
+    @Test
+    fun clearApiSettingsRemovesClientIdAndSessionTogether() = runBlocking {
+        repository.clearApiSettings()
+
+        assertEquals(ApiSettings(), settings.load())
+        assertEquals(null, settings.loadSession())
+    }
+
+    @Test
     fun failedSecondPagePersistsContinuationAndNextRunResumesWithoutDuplicating() = runBlocking {
         api.likedResponses += XApiResult(listOf(post("251")), "next-251", 75, 74, 1234)
         api.likedResponses += XApiException(500, "second page failed")
@@ -701,6 +721,8 @@ private class RecordingXApiGateway : XApiGateway {
     val metricResponses = ArrayDeque<Any>()
     val likedCalls = mutableListOf<LikedCall>()
     val metricCalls = mutableListOf<MetricCall>()
+    val revokeCalls = mutableListOf<String>()
+    var revokeFailure: Throwable? = null
 
     override fun fetchLikedPosts(accessToken: String, xUserId: String, maxResults: Int, paginationToken: String?): XApiResult {
         likedCalls += LikedCall(accessToken, paginationToken)
@@ -717,7 +739,10 @@ private class RecordingXApiGateway : XApiGateway {
     }
 
     override fun getMyUser(accessToken: String) = XUser("user-1", "Tester", "tester")
-    override fun revokeToken(clientId: String, token: String) = Unit
+    override fun revokeToken(clientId: String, token: String) {
+        revokeCalls += "$clientId:$token"
+        revokeFailure?.let { throw it }
+    }
 }
 
 private class RecordingOAuthGateway : OAuthGateway {

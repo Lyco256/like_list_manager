@@ -10,6 +10,8 @@
 - いいね数更新成功時に保存件数を増やさずAPI使用量だけを加算し、失敗時はAPI使用量を加算しないこと
 - 複数月の `api_usage_months.billableReadCount` 合計が設定画面向け累計API使用量になること
 - 設定画面向けスナップショットで、有効投稿だけを保存件数に含め、実在する管理対象画像だけを画像枚数に含めること
+- Repository経由のログアウトではClient IDを残してsessionだけを消し、revoke失敗時もローカルsessionを消すこと
+- Repository経由のClient ID消去ではClient IDとOAuth sessionを同時に消すこと
 - 固定seedで生成した複数ページ・ページ内重複でも、投稿ID集合の一意性、取得数加算、continuation消去が成立すること
 - 401時の1回refreshと、refresh失敗時に旧sessionを保持すること
 - liked posts同期の401/403/429/500/parse失敗や空ページで、部分投稿、無限retry、API使用量の誤加算を発生させないこと
