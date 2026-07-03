@@ -138,6 +138,7 @@ class MainActivityComposeTest {
         composeRule.onNodeWithText("15分rate limit: 未取得").assertIsDisplayed()
         assertTrue(composeRule.onAllNodesWithText("警告ライン").fetchSemanticsNodes().isEmpty())
         assertTrue(composeRule.onAllNodesWithText("停止ライン").fetchSemanticsNodes().isEmpty())
+        assertSettingsSectionVisible("settings_x_api_section")
         composeRule.onNodeWithTag("settings_login_logout").assertIsNotEnabled()
         composeRule.onNode(hasSetTextAction() and hasText("OAuth 2.0 Client ID")).performTextInput("test-client-id")
         composeRule.onNodeWithText("保存してXにログイン").assertIsNotEnabled()
