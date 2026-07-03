@@ -134,14 +134,14 @@ class MainActivityComposeTest {
     fun usageAndSettingsSafetyControlsReflectTheIsolatedEnvironment() {
         openSettingsScreen()
         assertSettingsSectionVisible("settings_usage_section")
-        composeRule.onNodeWithText("今月のAPI使用量: 0 / 2000").assertIsDisplayed()
-        composeRule.onNodeWithText("15分rate limit: 未取得").assertIsDisplayed()
+        assertSettingsTextVisible("今月のAPI使用量: 0 / 2000")
+        assertSettingsTextVisible("15分rate limit: 未取得")
         assertTrue(composeRule.onAllNodesWithText("警告ライン").fetchSemanticsNodes().isEmpty())
         assertTrue(composeRule.onAllNodesWithText("停止ライン").fetchSemanticsNodes().isEmpty())
         assertSettingsSectionVisible("settings_x_api_section")
         composeRule.onNodeWithTag("settings_login_logout").assertIsNotEnabled()
-        composeRule.onNode(hasSetTextAction() and hasText("OAuth 2.0 Client ID")).performTextInput("test-client-id")
-        composeRule.onNodeWithText("保存してXにログイン").assertIsNotEnabled()
+        composeRule.onNodeWithTag("settings_client_id_input").performTextInput("test-client-id")
+        composeRule.onNodeWithTag("settings_login_logout").assertIsNotEnabled()
     }
 
     @Test
@@ -1260,6 +1260,11 @@ class MainActivityComposeTest {
     private fun assertSettingsSectionVisible(testTag: String) {
         composeRule.onNodeWithTag("settings_content").performScrollToNode(hasTestTag(testTag))
         composeRule.onNodeWithTag(testTag).assertIsDisplayed()
+    }
+
+    private fun assertSettingsTextVisible(text: String) {
+        composeRule.onNodeWithTag("settings_content").performScrollToNode(hasText(text))
+        composeRule.onNodeWithText(text).assertIsDisplayed()
     }
 
     private fun clipTagIds(clipId: Long): Set<Long> = runBlocking {
