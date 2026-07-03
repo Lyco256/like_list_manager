@@ -13,6 +13,8 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.time.Instant
+import kotlinx.coroutines.runBlocking
 
 @RunWith(AndroidJUnit4::class)
 class PostStorageManagerRecoveryTest {
@@ -94,6 +96,49 @@ class PostStorageManagerRecoveryTest {
         manager.database.value?.close()
     }
 
+    @Test
+    fun refreshLocationsKeepsUsageUnknownUntilRefreshAndExcludesUserPreferences() = runBlocking {
+        val manager = PostStorageManager(context, storageConfig)
+        try {
+            assertNull(manager.state.value.locations.single { it.isCurrent }.usedBytes)
+            val now = Instant.now().toString()
+            manager.withDatabase { database ->
+                database.clipDao().insertClip(
+                    ClipEntity(
+                        xPostId = "usage-1",
+                        authorName = "usage author",
+                        authorUsername = "usage_author",
+                        text = "usage text",
+                        postUrl = "https://x.com/usage_author/status/usage-1",
+                        xCreatedAt = now,
+                        savedAt = now,
+                        syncedAt = now,
+                    ),
+                )
+            }
+            val image = File(manager.imageDirectory(), "usage-counted.webp").apply {
+                writeBytes(byteArrayOf(1, 2, 3, 4, 5))
+            }
+
+            manager.refreshLocations()
+
+            val usedBeforeUserPrefs = requireNotNull(manager.state.value.locations.single { it.isCurrent }.usedBytes)
+            assertTrue(usedBeforeUserPrefs >= image.length())
+            assertEquals(1, manager.countManagedImages())
+
+            context.getSharedPreferences("post_storage_user_data_preferences", Context.MODE_PRIVATE)
+                .edit()
+                .putString("large_user_setting", "x".repeat(50_000))
+                .commit()
+            manager.refreshLocations()
+
+            val usedAfterUserPrefs = requireNotNull(manager.state.value.locations.single { it.isCurrent }.usedBytes)
+            assertEquals(usedBeforeUserPrefs, usedAfterUserPrefs)
+        } finally {
+            manager.database.value?.close()
+        }
+    }
+
     private fun cleanup() {
         context.deleteDatabase(storageConfig.databaseName)
         File(context.getDatabasePath(storageConfig.databaseName).path + ".moving").delete()
@@ -104,5 +149,6 @@ class PostStorageManagerRecoveryTest {
         File(context.filesDir, storageConfig.dataDirectory).deleteRecursively()
         File(context.filesDir, "missing_after_switch").deleteRecursively()
         context.getSharedPreferences(storageConfig.preferencesName, Context.MODE_PRIVATE).edit().clear().commit()
+        context.getSharedPreferences("post_storage_user_data_preferences", Context.MODE_PRIVATE).edit().clear().commit()
     }
 }

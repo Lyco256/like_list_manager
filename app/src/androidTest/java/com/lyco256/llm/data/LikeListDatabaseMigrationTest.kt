@@ -130,4 +130,69 @@ class LikeListDatabaseMigrationTest {
         helper.close()
         context.deleteDatabase(name)
     }
+
+    @Test
+    fun migration4To5BackfillsCurrentMonthlyUsageHistory() {
+        val name = "migration-4-5-test.db"
+        context.deleteDatabase(name)
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name(name)
+                .callback(object : SupportSQLiteOpenHelper.Callback(4) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL(
+                            """
+                            CREATE TABLE sync_state (
+                                id INTEGER PRIMARY KEY NOT NULL,
+                                xUserId TEXT,
+                                newestSeenPostId TEXT,
+                                likedPostsNextToken TEXT,
+                                lastSyncAt TEXT,
+                                monthlyFetchedCount INTEGER NOT NULL,
+                                monthlyBudgetLimit INTEGER NOT NULL,
+                                monthlyWarningLimit INTEGER NOT NULL,
+                                monthlyStopLimit INTEGER NOT NULL,
+                                usageMonth TEXT,
+                                rateLimitRemaining INTEGER,
+                                rateLimitLimit INTEGER,
+                                rateLimitResetEpochSeconds INTEGER
+                            )
+                            """.trimIndent(),
+                        )
+                    }
+
+                    override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+                })
+                .build(),
+        )
+        helper.writableDatabase.apply {
+            execSQL(
+                """
+                INSERT INTO sync_state (
+                    id, xUserId, newestSeenPostId, likedPostsNextToken, lastSyncAt,
+                    monthlyFetchedCount, monthlyBudgetLimit, monthlyWarningLimit, monthlyStopLimit,
+                    usageMonth, rateLimitRemaining, rateLimitLimit, rateLimitResetEpochSeconds
+                ) VALUES (
+                    1, 'user-1', 'post-9', 'next-token', '2026-07-02T00:00:00Z',
+                    321, 1800, 1500, 2000,
+                    '2026-06', 12, 15, 1234567890
+                )
+                """.trimIndent(),
+            )
+            LikeListDatabase.MIGRATION_4_5.migrate(this)
+            query("SELECT billableReadCount, createdAt, updatedAt FROM api_usage_months WHERE usageMonth = '2026-06'").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(321L, cursor.getLong(0))
+                assertTrue(cursor.getString(1).isNotBlank())
+                assertTrue(cursor.getString(2).isNotBlank())
+            }
+            query("SELECT monthlyFetchedCount, likedPostsNextToken FROM sync_state WHERE id = 1").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(321, cursor.getInt(0))
+                assertEquals("next-token", cursor.getString(1))
+            }
+        }
+        helper.close()
+        context.deleteDatabase(name)
+    }
 }

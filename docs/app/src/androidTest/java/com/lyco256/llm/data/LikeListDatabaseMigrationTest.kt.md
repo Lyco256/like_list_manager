@@ -15,3 +15,6 @@ version 1相当のタグDB、version 2相当の投稿DB、version 3相当の同�
 version 2→3についても、既存投稿保持、4つのnullable列、未取得NULL状態、migration後の更新を検証します。蓄積データのある日常利用端末では実行しません。
 
 version 3→4では既存使用量の保持、継続token列のNULL初期値、migration後のtoken更新を検証します。
+## 2026-07-03 追加確認
+
+- version 4->5では `api_usage_months` の作成、既存 `sync_state.usageMonth` と `monthlyFetchedCount` のバックフィル、既存 `sync_state` の保持を検証します。

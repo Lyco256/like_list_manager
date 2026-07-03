@@ -28,7 +28,7 @@ Entity追加・列変更時はversionを更新し、既存実機データを保�
 
 ## Migration 2→3（2026-06-20）
 
-- schema versionは3です。
+- version 2から3へ更新します。
 - `clips` にいいね数、取得日時、恒久失敗日時、失敗理由のnullable列を追加します。
 - 既存投稿は全列NULLの未取得状態で保持します。
 

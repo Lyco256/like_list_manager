@@ -4,8 +4,8 @@
 
 主な検証内容:
 
-- 主要タブ、設定/使用量ダイアログ、隔離環境でのXログイン無効化、X API設定の保存/trim/消去UI
-- 投稿データ保存先Dialogの閉じる操作とDB fingerprint不変
+- 主要タブ、設定画面、設定画面表示中のタブ非表示、Android戻るでの元タブ復帰、使用量セクション、データ管理セクション、隔離環境でのXログイン無効化、X API設定の保存/trim/消去UI
+- 設定画面の開閉操作とDB fingerprint不変
 - 検索/絞り込みの適用、日付条件、DatePicker内解除、投稿者条件とタグ条件の複合E2E、投稿者Dialogクリア、タグ条件のみクリア、投稿者クリックによる分類済み投稿者フィルター遷移、キャンセル、BackHandler破棄、Dialog内全クリア確認キャンセル、全クリアとDB fingerprint不変
 - 投稿カードのいいね数ポップアップが詳細と暫定警告を表示し、開閉でDB fingerprintを変えないこと
 - 未分類から分類済みへの移動、分類解除、Roomの `clip_tags` 更新
@@ -19,11 +19,11 @@
 
 変更時は `scripts/run-safe-integration-check.cmd` で、同じ実機上の本番package metadataが前後不変であることも合わせて確認します。
 
-## 2026-07-01 追記: メインメニュー/結果Dialogの安定操作
+## 2026-07-01 追記: 設定画面/結果Dialogの安定操作
 
-主要メニュー導線は `main_menu_*` のtest tagで開きます。使用量Dialogの閉じる操作は `usage_close`、同期未ログインエラーの結果Dialogは `sync_result_close` で閉じ、同期エラー表示前後のDB fingerprintが変わらないことも確認します。
+主要導線は `top_settings_button` から `settings_screen` を開き、設定画面内の `settings_*` test tagで操作します。同期未ログインエラーの結果Dialogを閉じ、同期エラー表示前後のDB fingerprintが変わらないことも確認します。
 
-いいね数再取得の見積もりDialogは、隔離DBに数値post IDの対象clipを追加して `main_menu_like_refresh` から開き、`like_refresh_estimate_cancel` で閉じた前後のDB fingerprintが変わらないことを確認します。
+いいね数更新の確認Dialogは、隔離DBに数値post IDの対象clipを追加して `settings_like_refresh` から開き、`settings_like_refresh_cancel` で閉じた前後のDB fingerprintが変わらないことを確認します。
 
 投稿カードのローカル削除Dialogは `clip_local_delete_*_<clipId>` のtest tagで開閉/実行し、キャンセル時は保持、確定時は一覧から消えつつDB上はsoft deleteとして残ることを確認します。
 
@@ -35,8 +35,16 @@
 - 同期系の表示確認では `いいね数を更新しますか？` の確認Dialogを使う
 - `settings_client_id_save` / `settings_client_id_clear` は横並びのボタンとして確認する
 - 既存の設定画面系テストは、項目間の余白や見出し表示の変更後も `settings_screen` / `settings_x_api_section` / `settings_sync_section` / `settings_usage_section` / `settings_data_management_section` を基準に検証する
-- ## 2026-07-02 設定画面UI微修正
--
-- - 使用量セクションの確認では `警告ライン` と `停止ライン` が出ないことを確認する
-- - いいね数更新の確認Dialogは `いいね数を更新しますか？` を使う
-- - 設定画面の表示検証は `settings_screen` / `settings_x_api_section` / `settings_sync_section` / `settings_usage_section` / `settings_data_management_section` を基準にする
+## 2026-07-02 設定画面UI微修正
+
+- 使用量セクションの確認では `警告ライン` と `停止ライン` が出ないことを確認する
+- いいね数更新の確認Dialogは `いいね数を更新しますか？` を使う
+- 設定画面の表示検証は `settings_screen` / `settings_x_api_section` / `settings_sync_section` / `settings_usage_section` / `settings_data_management_section` を基準にする
+
+## 2026-07-03 追記: 設定画面表示状態
+
+- `settings_content` をスクロールして4セクションを表示確認する
+- 設定画面表示中は `tab_unclassified` / `tab_classified` / `tab_tags` が存在しないことを確認する
+- Android戻るボタン相当で設定画面を閉じ、開く前のタブへ戻ることを確認する
+- X API設定に `Callback URI` / `Scope` が出ないことを確認する
+- データ管理に保存件数、画像枚数、保存先の使用状況、ストレージ凡例が表示され、旧ラベルが出ないことを確認する

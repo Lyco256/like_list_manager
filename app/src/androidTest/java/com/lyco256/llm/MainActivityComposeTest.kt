@@ -65,6 +65,33 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun settingsScreenHidesTabsShowsSectionsAndAndroidBackRestoresPreviousTab() {
+        composeRule.onNodeWithTag("tab_tags").performClick()
+        composeRule.onNodeWithTag("tags_screen").assertIsDisplayed()
+
+        openSettingsScreen()
+
+        composeRule.onNodeWithTag("settings_screen").assertIsDisplayed()
+        assertTrue(composeRule.onAllNodesWithTag("tab_unclassified").fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithTag("tab_classified").fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithTag("tab_tags").fetchSemanticsNodes().isEmpty())
+        assertSettingsSectionVisible("settings_x_api_section")
+        assertSettingsSectionVisible("settings_sync_section")
+        assertSettingsSectionVisible("settings_usage_section")
+        assertSettingsSectionVisible("settings_data_management_section")
+
+        composeRule.activityRule.scenario.onActivity { activity ->
+            activity.onBackPressedDispatcher.onBackPressed()
+        }
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("settings_screen").fetchSemanticsNodes().isEmpty()
+        }
+
+        composeRule.onNodeWithTag("tags_screen").assertIsDisplayed()
+        composeRule.onNodeWithTag("tab_tags").assertIsDisplayed()
+    }
+
+    @Test
     fun selectedTabSurvivesActivityRecreation() {
         composeRule.onNodeWithTag("tab_tags").performClick()
         composeRule.onNodeWithTag("tags_screen").assertIsDisplayed()
@@ -106,14 +133,39 @@ class MainActivityComposeTest {
     @Test
     fun usageAndSettingsSafetyControlsReflectTheIsolatedEnvironment() {
         openSettingsScreen()
-        composeRule.onNodeWithTag("settings_usage_section").assertIsDisplayed()
-        composeRule.onNodeWithText("今月のAPI使用量: 0 / 2000").assertIsDisplayed()
-        composeRule.onNodeWithText("15分rate limit: 未取得").assertIsDisplayed()
+        assertSettingsSectionVisible("settings_usage_section")
+        assertSettingsTextVisible("今月のAPI使用量: 0 / 2000")
+        assertSettingsTextVisible("15分rate limit: 未取得")
         assertTrue(composeRule.onAllNodesWithText("警告ライン").fetchSemanticsNodes().isEmpty())
         assertTrue(composeRule.onAllNodesWithText("停止ライン").fetchSemanticsNodes().isEmpty())
+        assertSettingsSectionVisible("settings_x_api_section")
         composeRule.onNodeWithTag("settings_login_logout").assertIsNotEnabled()
-        composeRule.onNode(hasSetTextAction() and hasText("OAuth 2.0 Client ID")).performTextInput("test-client-id")
-        composeRule.onNodeWithText("保存してXにログイン").assertIsNotEnabled()
+        composeRule.onNodeWithTag("settings_client_id_input").performTextInput("test-client-id")
+        composeRule.onNodeWithTag("settings_login_logout").assertIsNotEnabled()
+    }
+
+    @Test
+    fun settingsScreenOmitsHiddenLabelsAndShowsDataManagementSummary() {
+        openSettingsScreen()
+
+        assertTrue(composeRule.onAllNodesWithText("Callback URI", substring = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithText("Scope", substring = true).fetchSemanticsNodes().isEmpty())
+
+        assertSettingsSectionVisible("settings_data_management_section")
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("settings_storage_usage_progress").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        composeRule.onNodeWithText("保存件数: 3").assertIsDisplayed()
+        composeRule.onNodeWithText("画像枚数: 0").assertIsDisplayed()
+        composeRule.onNodeWithText("保存先の使用状況").assertIsDisplayed()
+        composeRule.onNodeWithText("他のデータ").assertIsDisplayed()
+        composeRule.onNodeWithText("アプリデータ").assertIsDisplayed()
+        composeRule.onNodeWithText("空き容量").assertIsDisplayed()
+        assertTrue(composeRule.onAllNodesWithText("ツイートデータ容量", substring = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithText("現在の保存場所", substring = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithText("保存場所候補", substring = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithText("移動可能:", substring = true).fetchSemanticsNodes().isEmpty())
     }
 
     @Test
@@ -1203,6 +1255,16 @@ class MainActivityComposeTest {
         composeRule.waitUntil(10_000) {
             composeRule.onAllNodesWithTag("settings_screen").fetchSemanticsNodes().isNotEmpty()
         }
+    }
+
+    private fun assertSettingsSectionVisible(testTag: String) {
+        composeRule.onNodeWithTag("settings_content").performScrollToNode(hasTestTag(testTag))
+        composeRule.onNodeWithTag(testTag).assertIsDisplayed()
+    }
+
+    private fun assertSettingsTextVisible(text: String) {
+        composeRule.onNodeWithTag("settings_content").performScrollToNode(hasText(text))
+        composeRule.onNodeWithText(text).assertIsDisplayed()
     }
 
     private fun clipTagIds(clipId: Long): Set<Long> = runBlocking {

@@ -141,6 +141,8 @@ class RepositoryIntegrationTest {
             assertEquals(setOf("201", "202"), database.clipDao().getActiveClips().map { it.xPostId }.toSet())
             val state = database.clipDao().getSyncState()
             assertEquals(3, state?.monthlyFetchedCount)
+            assertEquals(3L, database.clipDao().getApiUsageMonth(requireNotNull(state?.usageMonth))?.billableReadCount)
+            assertEquals(3L, database.clipDao().getTotalBillableReadCount())
             assertEquals(null, state?.likedPostsNextToken)
             assertEquals(2, api.likedCalls.size)
         }
@@ -206,6 +208,26 @@ class RepositoryIntegrationTest {
     }
 
     @Test
+    fun logoutKeepsClientIdAndClearsSessionEvenWhenRevokeFails() = runBlocking {
+        api.revokeFailure = IllegalStateException("revoke failed")
+
+        val revokeFailed = repository.logout()
+
+        assertTrue(revokeFailed)
+        assertEquals(ApiSettings("test-client"), settings.load())
+        assertEquals(null, settings.loadSession())
+        assertEquals(listOf("test-client:test-refresh"), api.revokeCalls)
+    }
+
+    @Test
+    fun clearApiSettingsRemovesClientIdAndSessionTogether() = runBlocking {
+        repository.clearApiSettings()
+
+        assertEquals(ApiSettings(), settings.load())
+        assertEquals(null, settings.loadSession())
+    }
+
+    @Test
     fun failedSecondPagePersistsContinuationAndNextRunResumesWithoutDuplicating() = runBlocking {
         api.likedResponses += XApiResult(listOf(post("251")), "next-251", 75, 74, 1234)
         api.likedResponses += XApiException(500, "second page failed")
@@ -244,6 +266,38 @@ class RepositoryIntegrationTest {
     }
 
     @Test
+    fun likedPostSyncFailuresDoNotIncrementApiUsage() = runBlocking {
+        val failures = listOf(
+            XApiException(401, "expired"),
+            XApiException(403, "forbidden"),
+            XApiException(429, "limited", 75, 0, 9999),
+            XApiException(500, "server"),
+            IllegalStateException("parse failed"),
+        )
+
+        failures.forEach { failure ->
+            storage.withDatabase { database -> database.clearAllTables() }
+            settings.saveSession(testSession())
+            oauth.refreshFailure = if (failure is XApiException && failure.statusCode == 401) {
+                IllegalStateException("refresh failed")
+            } else {
+                null
+            }
+            api.likedResponses.clear()
+            api.likedResponses += failure
+
+            assertNotNull(runCatching { repository.syncNow() }.exceptionOrNull())
+
+            storage.withDatabase { database ->
+                assertTrue(database.clipDao().getActiveClips().isEmpty())
+                assertEquals(0L, database.clipDao().getTotalBillableReadCount())
+                assertEquals(0, database.clipDao().getSyncState()?.monthlyFetchedCount ?: 0)
+            }
+        }
+        oauth.refreshFailure = null
+    }
+
+    @Test
     fun monthlyStopLinePreventsAnyApiCall() = runBlocking {
         storage.withDatabase { database ->
             database.clipDao().upsertSyncState(
@@ -274,6 +328,128 @@ class RepositoryIntegrationTest {
     }
 
     @Test
+    fun likeCountRefreshAddsApiUsageWithoutIncreasingSavedCount() = runBlocking {
+        val firstId = storage.withDatabase { database -> database.clipDao().insertClip(clip("601")) }
+        val secondId = storage.withDatabase { database -> database.clipDao().insertClip(clip("602")) }
+        api.metricResponses += XPostMetricsResult(
+            posts = listOf(XPostMetric("601", 11), XPostMetric("602", 22)),
+            errors = emptyList(),
+            rateLimitLimit = 75,
+            rateLimitRemaining = 73,
+            rateLimitReset = 1234,
+        )
+
+        val message = repository.refreshLikeCounts()
+
+        assertTrue(message.contains("取得成功: 2件"))
+        assertEquals(setOf("601", "602"), api.metricCalls.single().postIds.toSet())
+        storage.withDatabase { database ->
+            assertEquals(2, database.clipDao().countActiveClips())
+            val clips = database.clipDao().getActiveClips().associateBy { it.id }
+            assertEquals(11L, clips.getValue(firstId).likeCount)
+            assertEquals(22L, clips.getValue(secondId).likeCount)
+            val state = database.clipDao().getSyncState()
+            assertEquals(2, state?.monthlyFetchedCount)
+            assertEquals(2L, database.clipDao().getApiUsageMonth(requireNotNull(state?.usageMonth))?.billableReadCount)
+            assertEquals(2L, database.clipDao().getTotalBillableReadCount())
+        }
+    }
+
+    @Test
+    fun likeCountRefreshFailuresDoNotIncrementApiUsage() = runBlocking {
+        val failures = listOf(
+            XApiException(401, "expired"),
+            XApiException(403, "forbidden"),
+            XApiException(429, "limited"),
+            XApiException(500, "server"),
+            IllegalStateException("parse failed"),
+        )
+
+        failures.forEachIndexed { index, failure ->
+            storage.withDatabase { database ->
+                database.clearAllTables()
+                database.clipDao().insertClip(clip("${700 + index}"))
+            }
+            settings.saveSession(testSession())
+            api.metricResponses.clear()
+            api.metricResponses += failure
+
+            repository.refreshLikeCounts()
+
+            storage.withDatabase { database ->
+                assertEquals(0L, database.clipDao().getTotalBillableReadCount())
+                assertEquals(0, database.clipDao().getSyncState()?.monthlyFetchedCount ?: 0)
+            }
+        }
+    }
+
+    @Test
+    fun settingsSnapshotUsesApiUsageMonthHistoryForCumulativeUsage() = runBlocking {
+        val now = Instant.now().toString()
+        storage.withDatabase { database ->
+            database.clipDao().incrementApiUsageMonth("2026-01", 4, now)
+            database.clipDao().incrementApiUsageMonth("2026-02", 5, now)
+        }
+
+        val snapshot = repository.loadSettingsSnapshot()
+
+        assertEquals(9L, snapshot.cumulativeApiUsage)
+    }
+
+    @Test
+    fun settingsSnapshotCountsOnlyActiveClipsAndExistingManagedImages() = runBlocking {
+        val now = Instant.now().toString()
+        val image = File(storage.imageDirectory(), "snapshot-counted.webp").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        storage.withDatabase { database ->
+            val activeId = database.clipDao().insertClip(clip("801"))
+            val deletedId = database.clipDao().insertClip(clip("802"))
+            val deleted = database.clipDao().getActiveClips().single { it.id == deletedId }.copy(isDeleted = true)
+            database.clipDao().updateClip(deleted)
+            database.clipDao().insertAssets(
+                listOf(
+                    AssetEntity(
+                        clipId = activeId,
+                        mediaKey = "counted",
+                        type = "photo",
+                        remoteUrl = null,
+                        previewUrl = null,
+                        localPath = image.absolutePath,
+                        sizeBytes = image.length(),
+                        downloadState = "downloaded",
+                        createdAt = now,
+                    ),
+                    AssetEntity(
+                        clipId = activeId,
+                        mediaKey = "failed",
+                        type = "photo",
+                        remoteUrl = null,
+                        previewUrl = null,
+                        localPath = null,
+                        downloadState = "failed",
+                        createdAt = now,
+                    ),
+                    AssetEntity(
+                        clipId = activeId,
+                        mediaKey = "missing",
+                        type = "photo",
+                        remoteUrl = null,
+                        previewUrl = null,
+                        localPath = File(storage.imageDirectory(), "missing.webp").absolutePath,
+                        sizeBytes = 99,
+                        downloadState = "downloaded",
+                        createdAt = now,
+                    ),
+                ),
+            )
+        }
+
+        val snapshot = repository.loadSettingsSnapshot()
+
+        assertEquals(1, snapshot.saveCount)
+        assertEquals(1, snapshot.imageCount)
+    }
+
+    @Test
     fun scopeAndServerErrorsDoNotWritePartialPosts() = runBlocking {
         listOf(403, 500).forEach { status ->
             api.likedResponses += XApiException(status, "error-$status")
@@ -282,6 +458,7 @@ class RepositoryIntegrationTest {
         }
 
         storage.withDatabase { database -> assertTrue(database.clipDao().getActiveClips().isEmpty()) }
+        storage.withDatabase { database -> assertEquals(0L, database.clipDao().getTotalBillableReadCount()) }
         assertEquals(2, api.likedCalls.size)
     }
 
@@ -489,6 +666,16 @@ class RepositoryIntegrationTest {
         likeCount = 1,
     )
 
+    private fun testSession() = OAuthSession(
+        accessToken = "test-access",
+        refreshToken = "test-refresh",
+        expiresAtEpochMillis = System.currentTimeMillis() + 3_600_000,
+        scopes = XOAuthManager.SCOPES,
+        xUserId = "user-1",
+        username = "tester",
+        displayName = "Tester",
+    )
+
     private fun pngBytes(color: Int): ByteArray = ByteArrayOutputStream().use { output ->
         Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888).run {
             eraseColor(color)
@@ -527,10 +714,15 @@ class RepositoryIntegrationTest {
 }
 
 private data class LikedCall(val accessToken: String, val paginationToken: String?)
+private data class MetricCall(val accessToken: String, val postIds: List<String>)
 
 private class RecordingXApiGateway : XApiGateway {
     val likedResponses = ArrayDeque<Any>()
+    val metricResponses = ArrayDeque<Any>()
     val likedCalls = mutableListOf<LikedCall>()
+    val metricCalls = mutableListOf<MetricCall>()
+    val revokeCalls = mutableListOf<String>()
+    var revokeFailure: Throwable? = null
 
     override fun fetchLikedPosts(accessToken: String, xUserId: String, maxResults: Int, paginationToken: String?): XApiResult {
         likedCalls += LikedCall(accessToken, paginationToken)
@@ -539,11 +731,18 @@ private class RecordingXApiGateway : XApiGateway {
         return response as XApiResult
     }
 
-    override fun fetchPostMetrics(accessToken: String, postIds: List<String>) =
-        XPostMetricsResult(emptyList(), emptyList(), null, null, null)
+    override fun fetchPostMetrics(accessToken: String, postIds: List<String>): XPostMetricsResult {
+        metricCalls += MetricCall(accessToken, postIds)
+        val response = metricResponses.removeFirstOrNull() ?: XPostMetricsResult(emptyList(), emptyList(), null, null, null)
+        if (response is Throwable) throw response
+        return response as XPostMetricsResult
+    }
 
     override fun getMyUser(accessToken: String) = XUser("user-1", "Tester", "tester")
-    override fun revokeToken(clientId: String, token: String) = Unit
+    override fun revokeToken(clientId: String, token: String) {
+        revokeCalls += "$clientId:$token"
+        revokeFailure?.let { throw it }
+    }
 }
 
 private class RecordingOAuthGateway : OAuthGateway {
