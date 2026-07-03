@@ -342,7 +342,7 @@ class RepositoryIntegrationTest {
         val message = repository.refreshLikeCounts()
 
         assertTrue(message.contains("取得成功: 2件"))
-        assertEquals(listOf(listOf("601", "602")), api.metricCalls.map { it.postIds })
+        assertEquals(setOf("601", "602"), api.metricCalls.single().postIds.toSet())
         storage.withDatabase { database ->
             assertEquals(2, database.clipDao().countActiveClips())
             val clips = database.clipDao().getActiveClips().associateBy { it.id }

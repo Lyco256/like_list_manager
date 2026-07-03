@@ -133,7 +133,7 @@ class MainActivityComposeTest {
     @Test
     fun usageAndSettingsSafetyControlsReflectTheIsolatedEnvironment() {
         openSettingsScreen()
-        composeRule.onNodeWithTag("settings_usage_section").assertIsDisplayed()
+        assertSettingsSectionVisible("settings_usage_section")
         composeRule.onNodeWithText("今月のAPI使用量: 0 / 2000").assertIsDisplayed()
         composeRule.onNodeWithText("15分rate limit: 未取得").assertIsDisplayed()
         assertTrue(composeRule.onAllNodesWithText("警告ライン").fetchSemanticsNodes().isEmpty())
