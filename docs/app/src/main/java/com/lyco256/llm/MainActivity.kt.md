@@ -63,6 +63,11 @@ UI項目を追加する場合は、対応するViewModel操作、Repository API�
 - `Xで開く` はテキストボタンではなく X ロゴのアイコンボタンに変えた。
 - 旧カード表示の画像まわりは左右に少し余白を入れた。
 
+## 2026-07-06 Update
+
+- `MediaGrid` の画像カードは左右 `16dp` の余白に広げ、見た目を少し小さくした。
+- 画像セルに test tag を付け、Compose テストからカードの幅と並びを測定しやすくした。
+
 ## 2026-07-05 Update
 
 - The X logo buttons now preserve the black/white vector colors instead of being tinted by the theme, and the icon is rendered larger so it reads clearly in the button.

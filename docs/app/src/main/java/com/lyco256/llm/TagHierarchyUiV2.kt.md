@@ -84,3 +84,7 @@
 ## 2026-07-05 Update
 
 - The group-add menu continues to use a Google Material icon, and the bulk-add action uses an outlined chat-bubble style icon from the existing icon set.
+
+## 2026-07-06 Update
+
+- `EnhancedMediaGrid` now uses wider `16dp` side padding so the in-card image grid reads slightly smaller and matches the main feed image grid.

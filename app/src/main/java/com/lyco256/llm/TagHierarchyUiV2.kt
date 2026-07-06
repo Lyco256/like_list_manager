@@ -2195,7 +2195,7 @@ fun EnhancedMediaGrid(assets: List<AssetEntity>) {
     var initialViewerPage by remember { mutableStateOf<Int?>(null) }
 
     Column(
-        modifier = Modifier.padding(horizontal = 4.dp),
+        modifier = Modifier.padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         when (shown.size) {

@@ -1049,20 +1049,20 @@ fun TweetCard(
 fun MediaGrid(urls: List<String>) {
     val shown = urls.take(4)
     Column(
-        modifier = Modifier.padding(horizontal = 4.dp),
+        modifier = Modifier.padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         when (shown.size) {
-            1 -> MediaCell(shown[0], Modifier.fillMaxWidth().aspectRatio(16f / 10f))
+            1 -> MediaCell(shown[0], Modifier.fillMaxWidth().aspectRatio(16f / 10f), testTag = "media_grid_cell_0")
             2 -> Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                shown.forEach { MediaCell(it, Modifier.weight(1f).aspectRatio(1f)) }
+                shown.forEachIndexed { index, url -> MediaCell(url, Modifier.weight(1f).aspectRatio(1f), testTag = "media_grid_cell_$index") }
             }
             else -> {
                 Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    shown.take(2).forEach { MediaCell(it, Modifier.weight(1f).aspectRatio(1f)) }
+                    shown.take(2).forEachIndexed { index, url -> MediaCell(url, Modifier.weight(1f).aspectRatio(1f), testTag = "media_grid_cell_$index") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    shown.drop(2).forEach { MediaCell(it, Modifier.weight(1f).aspectRatio(1f)) }
+                    shown.drop(2).forEachIndexed { index, url -> MediaCell(url, Modifier.weight(1f).aspectRatio(1f), testTag = "media_grid_cell_${index + 2}") }
                     if (shown.size == 3) Spacer(Modifier.weight(1f))
                 }
             }
@@ -1071,12 +1071,13 @@ fun MediaGrid(urls: List<String>) {
 }
 
 @Composable
-fun MediaCell(url: String, modifier: Modifier) {
+fun MediaCell(url: String, modifier: Modifier, testTag: String? = null) {
     AsyncImage(
         model = url,
         contentDescription = null,
         contentScale = ContentScale.Fit,
         modifier = modifier
+            .then(testTag?.let { Modifier.testTag(it) } ?: Modifier)
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant),
     )
