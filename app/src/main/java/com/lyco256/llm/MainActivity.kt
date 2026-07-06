@@ -174,6 +174,28 @@ data class TweetAuthorOption(
     val count: Int,
 )
 
+enum class ClassifiedSortPriority(val label: String) {
+    TagFirst("タグ優先"),
+    UserFirst("ユーザー優先"),
+}
+
+enum class ClassifiedSortBase(val label: String) {
+    Default("保存順"),
+    LikeCount("いいね順"),
+    PostTime("投稿時間順"),
+}
+
+data class ClassifiedSortState(
+    val tagEnabled: Boolean = false,
+    val tagDescending: Boolean = false,
+    val userEnabled: Boolean = false,
+    val userDescending: Boolean = true,
+    val priority: ClassifiedSortPriority = ClassifiedSortPriority.TagFirst,
+    val baseOrder: ClassifiedSortBase = ClassifiedSortBase.Default,
+    val likeCountDescending: Boolean = true,
+    val postTimeDescending: Boolean = true,
+)
+
 data class TweetFilterState(
     val query: String = "",
     val searchMode: SearchMode = SearchMode.Literal,
@@ -209,10 +231,16 @@ data class MainUiState(
     val storageState: PostStorageState = PostStorageState(),
     val settingsSnapshot: SettingsSnapshot = SettingsSnapshot(),
     val filters: TweetFilterState = TweetFilterState(),
+    val sort: ClassifiedSortState = ClassifiedSortState(),
 ) {
     val unclassified: List<ClipWithDetails> = clips.filter { it.tags.isEmpty() }
     val authorOptions: List<TweetAuthorOption> = buildAuthorOptions(clips)
-    val classified: List<ClipWithDetails> = filterClipsForSearch(clips, tagHierarchy, filters)
+    val classified: List<ClipWithDetails> = sortClipsForDisplay(
+        clips = filterClipsForSearch(clips, tagHierarchy, filters),
+        hierarchy = tagHierarchy,
+        filters = filters,
+        sort = sort,
+    )
     val query: String = filters.query
     val tagFilters: Map<TagNodeRef, TagFilterState> = filters.tagFilters
 }
@@ -228,6 +256,7 @@ private data class RepositoryUiState(
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = (application as LikeListManagerApp).container.repository
     private val filters = MutableStateFlow(TweetFilterState())
+    private val sort = MutableStateFlow(ClassifiedSortState())
     private val apiSettings = MutableStateFlow(ApiSettings())
     private val oauthSession = MutableStateFlow<OAuthSession?>(null)
     private val settingsSnapshot = MutableStateFlow(SettingsSnapshot())
@@ -242,13 +271,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         RepositoryUiState(clips, tags, hierarchy, syncState, storageState)
     }
 
-    val uiState: StateFlow<MainUiState> = combine(
+    private val uiStateBase = combine(
         repositoryState,
         apiSettings,
         oauthSession,
         filters,
-        settingsSnapshot,
-    ) { repositoryState, settings, session, filterValue, snapshot ->
+        sort,
+    ) { repositoryState, settings, session, filterValue, sortValue ->
         MainUiState(
             clips = repositoryState.clips,
             tags = repositoryState.tags,
@@ -257,9 +286,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             apiSettings = settings,
             oauthSession = session,
             storageState = repositoryState.storageState,
-            settingsSnapshot = snapshot,
             filters = filterValue,
+            sort = sortValue,
         )
+    }
+
+    val uiState: StateFlow<MainUiState> = combine(
+        uiStateBase,
+        settingsSnapshot,
+    ) { baseState, snapshot ->
+        baseState.copy(settingsSnapshot = snapshot)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 
     init {
@@ -329,6 +365,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun clearAllFilters() { filters.value = TweetFilterState() }
 
     fun applyFilters(value: TweetFilterState) { filters.value = value }
+
+    fun applySort(value: ClassifiedSortState) { sort.value = value }
+
+    fun clearSort() { sort.value = ClassifiedSortState() }
 
     fun createTag(name: String, parentGroupId: Long?, colorId: String, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.createTag(name, parentGroupId, colorId) }
     fun createGroup(name: String, parentGroupId: Long?, colorId: String, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.createGroup(name, parentGroupId, colorId) }
@@ -617,6 +657,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                 listState = classifiedListState,
                 modifier = Modifier.padding(padding).testTag("classified_screen"),
                 onApplyFilters = viewModel::applyFilters,
+                onApplySort = viewModel::applySort,
                 onClearAllFilters = viewModel::clearAllFilters,
                 onTagsChange = viewModel::setClipTags,
                 onSummaryChange = viewModel::updateSummary,
@@ -747,6 +788,191 @@ private fun buildAuthorOptions(clips: List<ClipWithDetails>): List<TweetAuthorOp
         }
         .sortedWith(compareBy<TweetAuthorOption> { it.displayName.lowercase() }.thenBy { it.username.lowercase() })
 
+internal fun sortClipsForDisplay(
+    clips: List<ClipWithDetails>,
+    hierarchy: TagHierarchy,
+    filters: TweetFilterState,
+    sort: ClassifiedSortState,
+): List<ClipWithDetails> {
+    if (clips.size <= 1) return clips
+
+    val authorCounts = clips.groupingBy { it.clip.authorKey() }.eachCount()
+    val tagOrderIndexById = hierarchy.tagDisplayOrderIndexById()
+    val candidateTagIds = filters.sortTagCandidateIds(hierarchy)
+
+    return clips.sortedWith(java.util.Comparator { left, right ->
+        compareClassifiedClips(
+            left = left,
+            right = right,
+            sort = sort,
+            authorCounts = authorCounts,
+            tagOrderIndexById = tagOrderIndexById,
+            candidateTagIds = candidateTagIds,
+        )
+    })
+}
+
+private fun compareClassifiedClips(
+    left: ClipWithDetails,
+    right: ClipWithDetails,
+    sort: ClassifiedSortState,
+    authorCounts: Map<TweetAuthorKey, Int>,
+    tagOrderIndexById: Map<Long, Int>,
+    candidateTagIds: Set<Long>,
+): Int {
+    fun compareTagSort(): Int {
+        if (!sort.tagEnabled) return 0
+        val leftKey = left.representativeTagOrder(tagOrderIndexById, candidateTagIds)
+        val rightKey = right.representativeTagOrder(tagOrderIndexById, candidateTagIds)
+        return compareNullableInt(leftKey, rightKey, sort.tagDescending)
+    }
+
+    fun compareUserSort(): Int {
+        if (!sort.userEnabled) return 0
+        val leftCount = authorCounts[left.clip.authorKey()] ?: 0
+        val rightCount = authorCounts[right.clip.authorKey()] ?: 0
+        val primary = if (sort.userDescending) rightCount.compareTo(leftCount) else leftCount.compareTo(rightCount)
+        if (primary != 0) return primary
+
+        val name = left.clip.authorUsername.lowercase().compareTo(right.clip.authorUsername.lowercase())
+        if (name != 0) return name
+
+        val id = left.clip.authorId.orEmpty().compareTo(right.clip.authorId.orEmpty())
+        if (id != 0) return id
+
+        val savedAt = right.clip.savedAt.compareTo(left.clip.savedAt)
+        if (savedAt != 0) return savedAt
+
+        return left.clip.id.compareTo(right.clip.id)
+    }
+
+    fun compareBaseSort(): Int = when (sort.baseOrder) {
+        ClassifiedSortBase.Default -> 0
+        ClassifiedSortBase.LikeCount -> {
+            val leftLike = left.clip.likeCount.sortableLikeCount()
+            val rightLike = right.clip.likeCount.sortableLikeCount()
+            if (sort.likeCountDescending) rightLike.compareTo(leftLike) else leftLike.compareTo(rightLike)
+        }
+        ClassifiedSortBase.PostTime -> {
+            val leftPost = left.clip.postTimeMillisOrNull().sortablePostTime()
+            val rightPost = right.clip.postTimeMillisOrNull().sortablePostTime()
+            if (sort.postTimeDescending) rightPost.compareTo(leftPost) else leftPost.compareTo(rightPost)
+        }
+    }
+
+    val first = when {
+        sort.tagEnabled && sort.userEnabled -> when (sort.priority) {
+            ClassifiedSortPriority.TagFirst -> compareTagSort().takeIf { it != 0 } ?: compareUserSort()
+            ClassifiedSortPriority.UserFirst -> compareUserSort().takeIf { it != 0 } ?: compareTagSort()
+        }
+        sort.tagEnabled -> compareTagSort()
+        sort.userEnabled -> compareUserSort()
+        else -> 0
+    }
+    if (first != 0) return first
+
+    val base = compareBaseSort()
+    if (base != 0) return base
+
+    val savedAt = right.clip.savedAt.compareTo(left.clip.savedAt)
+    if (savedAt != 0) return savedAt
+
+    return left.clip.id.compareTo(right.clip.id)
+}
+
+private fun compareNullableInt(left: Int?, right: Int?, descending: Boolean): Int = when {
+    left == null && right == null -> 0
+    left == null -> if (descending) -1 else 1
+    right == null -> if (descending) 1 else -1
+    descending -> right.compareTo(left)
+    else -> left.compareTo(right)
+}
+
+private fun ClipWithDetails.representativeTagOrder(
+    tagOrderIndexById: Map<Long, Int>,
+    candidateTagIds: Set<Long>,
+): Int? {
+    val candidateTags = tags.filter { candidateTagIds.isEmpty() || it.id in candidateTagIds }
+    if (candidateTags.isEmpty()) return null
+    val representativeTag = candidateTags.minByOrNull { tagOrderIndexById[it.id] ?: Int.MAX_VALUE } ?: return null
+    return tagOrderIndexById[representativeTag.id]
+}
+
+private fun TweetFilterState.sortTagCandidateIds(hierarchy: TagHierarchy): Set<Long> {
+    val relevant = tagFilters.filterValues { it == TagFilterState.INCLUDED || it == TagFilterState.REQUIRED }
+    if (relevant.isEmpty()) return emptySet()
+    return buildSet {
+        relevant.forEach { (ref, _) ->
+            when (ref.type) {
+                TagNodeType.TAG -> add(ref.id)
+                TagNodeType.GROUP -> addAll(hierarchy.descendantTagIdsByGroup[ref.id].orEmpty())
+            }
+        }
+    }
+}
+
+private fun TagHierarchy.tagDisplayOrderIndexById(): Map<Long, Int> {
+    val result = mutableMapOf<Long, Int>()
+    var index = 0
+    fun visit(parentGroupId: Long?) {
+        children(parentGroupId).forEach { node ->
+            when (node) {
+                is TagGroupNode -> visit(node.id)
+                is TagLeafNode -> result[node.id] = index++
+            }
+        }
+    }
+    visit(null)
+    return result
+}
+
+private fun Long?.sortableLikeCount(): Long = this ?: Long.MIN_VALUE
+
+private fun Long?.sortablePostTime(): Long = this ?: Long.MIN_VALUE
+
+private fun ClipEntity.postTimeMillisOrNull(): Long? = runCatching { Instant.parse(xCreatedAt).toEpochMilli() }.getOrNull()
+
+internal fun sortConditionSummary(sort: ClassifiedSortState): String {
+    val parts = mutableListOf<String>()
+    val tagLabel = if (sort.tagDescending) "タグ下から" else "タグ上から"
+    val userLabel = if (sort.userDescending) "ユーザー件数多い順" else "ユーザー件数少ない順"
+    val likeLabel = if (sort.likeCountDescending) "いいね多い順" else "いいね少ない順"
+    val postLabel = if (sort.postTimeDescending) "投稿時間新しい順" else "投稿時間古い順"
+
+    when {
+        sort.tagEnabled && sort.userEnabled -> when (sort.priority) {
+            ClassifiedSortPriority.TagFirst -> {
+                parts += tagLabel
+                parts += userLabel
+            }
+            ClassifiedSortPriority.UserFirst -> {
+                parts += userLabel
+                parts += tagLabel
+            }
+        }
+        sort.tagEnabled -> parts += tagLabel
+        sort.userEnabled -> parts += userLabel
+    }
+
+    when (sort.baseOrder) {
+        ClassifiedSortBase.Default -> if (parts.isEmpty()) parts += "保存順"
+        ClassifiedSortBase.LikeCount -> parts += likeLabel
+        ClassifiedSortBase.PostTime -> parts += postLabel
+    }
+
+    return "並び:${parts.joinToString(" → ")}"
+}
+
+internal fun classifiedConditionSummary(
+    filters: TweetFilterState,
+    sort: ClassifiedSortState,
+    hierarchy: TagHierarchy,
+    authors: List<TweetAuthorOption>,
+): String = listOf(
+    filterConditionSummary(filters, hierarchy, authors),
+    sortConditionSummary(sort),
+).joinToString("｜")
+
 private fun ClipEntity.authorKey(): TweetAuthorKey =
     TweetAuthorKey(authorId = authorId?.takeIf { it.isNotBlank() }, username = authorUsername.lowercase())
 
@@ -832,7 +1058,17 @@ private fun MainUiState.classifiedScrollKey(): String {
         .joinToString("|") { "${it.key.type.name}:${it.key.id}:${it.value.name}" }
     val authors = filters.selectedAuthors.sortedWith(compareBy({ it.authorId.orEmpty() }, { it.username }))
         .joinToString("|") { "${it.authorId}:${it.username}" }
-    return "classified:${filters.query.trim()}:${filters.searchMode.name}:${filters.searchTargets.sortedBy { it.name }}:${filters.startDate}:${filters.endDate}:$authors:${filters.taggedOnly}:$filterKey"
+    val sortKey = listOf(
+        sort.tagEnabled,
+        sort.tagDescending,
+        sort.userEnabled,
+        sort.userDescending,
+        sort.priority.name,
+        sort.baseOrder.name,
+        sort.likeCountDescending,
+        sort.postTimeDescending,
+    ).joinToString("|")
+    return "classified:${filters.query.trim()}:${filters.searchMode.name}:${filters.searchTargets.sortedBy { it.name }}:${filters.startDate}:${filters.endDate}:$authors:${filters.taggedOnly}:$filterKey:$sortKey"
 }
 
 fun tabIcon(tab: AppTab): String = when (tab) {

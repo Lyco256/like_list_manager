@@ -134,6 +134,29 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun classifiedSortDialogOpensClearsAndAppliesSelection() {
+        waitForSeededClip()
+
+        composeRule.onNodeWithTag("tab_classified").performClick()
+        composeRule.onNodeWithTag("sort_open").performClick()
+        composeRule.onNodeWithTag("sort_dialog").assertExists()
+
+        composeRule.onNodeWithTag("sort_base_like").performClick()
+        composeRule.onNodeWithTag("sort_like_direction_high").performClick()
+
+        composeRule.onNodeWithTag("sort_clear_all_open").performClick()
+
+        composeRule.onNodeWithTag("sort_cancel").performClick()
+        composeRule.onAllNodesWithTag("sort_dialog").assertCountEquals(0)
+
+        composeRule.onNodeWithTag("sort_open").performClick()
+        composeRule.onNodeWithTag("sort_base_like").performClick()
+        composeRule.onNodeWithTag("sort_like_direction_high").performClick()
+        composeRule.onNodeWithTag("sort_apply").performClick()
+        composeRule.onNodeWithText("並び:いいね多い順", substring = true).assertExists()
+    }
+
+    @Test
     fun usageAndSettingsSafetyControlsReflectTheIsolatedEnvironment() {
         openSettingsScreen()
         assertSettingsSectionVisible("settings_usage_section")
