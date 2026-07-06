@@ -42,16 +42,20 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.outlined.Input
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
@@ -105,6 +109,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -124,6 +129,9 @@ import com.lyco256.llm.data.TagLeafNode
 import com.lyco256.llm.data.TagNodeRef
 import com.lyco256.llm.data.TagNodeType
 import com.lyco256.llm.data.TagTreeNode
+import com.lyco256.llm.data.tagColor
+import com.lyco256.llm.data.tagColorSpec
+import com.lyco256.llm.data.tagGradient
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
@@ -335,10 +343,10 @@ fun EnhancedTagListScreen(
     hierarchy: TagHierarchy,
     listState: LazyListState,
     modifier: Modifier = Modifier,
-    onCreateTag: (String, Long?) -> Unit,
-    onCreateGroup: (String, Long?) -> Unit,
-    onRenameTag: (TagEntity, String) -> Unit,
-    onRenameGroup: (TagGroupEntity, String) -> Unit,
+    onCreateTag: (String, Long?, String) -> Unit,
+    onCreateGroup: (String, Long?, String) -> Unit,
+    onRenameTag: (TagEntity, String, String) -> Unit,
+    onRenameGroup: (TagGroupEntity, String, String) -> Unit,
     onDeleteTag: (TagEntity) -> Unit,
     onDeleteGroup: (TagGroupEntity) -> Unit,
     onMove: (TagNodeRef, Long?) -> Unit,
@@ -498,6 +506,7 @@ fun EnhancedTagListScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier
                     .fillMaxSize()
+                    .testTag("tag_list")
                     .onGloballyPositioned { listBounds = it.boundsInRoot() },
             ) {
                 items(displayItems, key = { it.key }) { item ->
@@ -540,10 +549,10 @@ fun EnhancedTagListScreen(
     }
 
     createRequest?.let { (type, parentId) ->
-        CreateNodeDialog(type, parentId, onDismiss = { createRequest = null }) { name ->
-            if (type == TagNodeType.TAG) onCreateTag(name, parentId) else onCreateGroup(name, parentId)
+        CreateNodeDialog(type, parentId, onDismiss = { createRequest = null }, onCreate = { name, colorId ->
+            if (type == TagNodeType.TAG) onCreateTag(name, parentId, colorId) else onCreateGroup(name, parentId, colorId)
             createRequest = null
-        }
+        })
     }
 }
 
@@ -629,11 +638,19 @@ private fun EnhancedTweetCard(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                TextButton(
+                IconButton(
                     onClick = {
                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(clip.clip.postUrl)))
                     },
-                ) { Text("Xで開く") }
+                    modifier = Modifier.testTag("clip_open_x_${clip.clip.id}"),
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_x_logo),
+                        contentDescription = "Xで開く",
+                        tint = Color.Unspecified,
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
             }
             Spacer(Modifier.height(8.dp))
             Text(
@@ -1156,7 +1173,7 @@ private fun SearchFilterDialog(
                                                             Icon(
                                                                 Icons.Filled.LocalOffer,
                                                                 contentDescription = null,
-                                                                tint = Color((node as TagLeafNode).tag.color),
+                                                                tint = tagColor((node as TagLeafNode).tag.colorId),
                                                                 modifier = Modifier.size(18.dp),
                                                             )
                                                             Spacer(Modifier.width(6.dp))
@@ -1396,15 +1413,18 @@ private fun TagHierarchyChip(
     val shape = RoundedCornerShape(8.dp)
     if (node is TagGroupNode) {
         val selectedCount = hierarchy.descendantTagIdsByGroup[node.id].orEmpty().count { it in selectedTagIds }
+        val spec = tagColorSpec(node.group.colorId)
         Surface(
             modifier = modifier
                 .testTag("tag_group_chip_${node.id}")
                 .heightIn(min = 32.dp)
+                .then(if (selectedCount > 0) Modifier.background(tagGradient(node.group.colorId), shape) else Modifier)
                 .clip(shape)
                 .clickable { onOpenGroup(node.id) },
             shape = shape,
-            color = if (selectedCount > 0) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            color = Color.Transparent,
+            contentColor = if (selectedCount > 0) spec.selectedContentColor else MaterialTheme.colorScheme.onSurfaceVariant,
+            border = androidx.compose.foundation.BorderStroke(1.dp, tagGradient(node.group.colorId)),
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
@@ -1415,7 +1435,7 @@ private fun TagHierarchyChip(
                     Icons.Filled.KeyboardArrowDown,
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = if (selectedCount > 0) spec.selectedContentColor else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
                     node.name,
@@ -1429,15 +1449,18 @@ private fun TagHierarchyChip(
     } else {
         val tag = (node as TagLeafNode).tag
         val selected = tag.id in selectedTagIds
+        val spec = tagColorSpec(tag.colorId)
         Surface(
             modifier = modifier
                 .testTag("tag_chip_${tag.id}")
                 .heightIn(min = 32.dp)
+                .then(if (selected) Modifier.background(tagGradient(tag.colorId), shape) else Modifier)
                 .clip(shape)
                 .clickable { onToggleTag(tag.id) },
             shape = shape,
-            color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-            border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) Color(tag.color) else MaterialTheme.colorScheme.outlineVariant),
+            color = Color.Transparent,
+            contentColor = if (selected) spec.selectedContentColor else MaterialTheme.colorScheme.onSurfaceVariant,
+            border = androidx.compose.foundation.BorderStroke(1.dp, tagGradient(tag.colorId)),
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
@@ -1449,7 +1472,7 @@ private fun TagHierarchyChip(
                         .width(3.dp)
                         .height(18.dp)
                         .clip(RoundedCornerShape(2.dp))
-                        .background(Color(tag.color)),
+                        .background(tagGradient(tag.colorId)),
                 )
                 Text(
                     node.name,
@@ -1471,17 +1494,16 @@ private fun TagManagementRow(
     onToggleExpanded: () -> Unit,
     onMove: (TagNodeRef, Long?) -> Unit,
     onCreate: (TagNodeType, Long?) -> Unit,
-    onRenameTag: (TagEntity, String) -> Unit,
-    onRenameGroup: (TagGroupEntity, String) -> Unit,
+    onRenameTag: (TagEntity, String, String) -> Unit,
+    onRenameGroup: (TagGroupEntity, String, String) -> Unit,
     onDeleteTag: (TagEntity) -> Unit,
     onDeleteGroup: (TagGroupEntity) -> Unit,
     onAddAll: (TagEntity, TagEntity) -> Unit,
 ) {
     var renameOpen by remember(row.node.ref()) { mutableStateOf(false) }
-    var moveOpen by remember(row.node.ref()) { mutableStateOf(false) }
     var deleteOpen by remember(row.node.ref()) { mutableStateOf(false) }
     var addAllOpen by remember(row.node.ref()) { mutableStateOf(false) }
-    var menuOpen by remember(row.node.ref()) { mutableStateOf(false) }
+    var createMenuOpen by remember(row.node.ref()) { mutableStateOf(false) }
     val rowColor = when {
         isGroupDropTarget -> MaterialTheme.colorScheme.primaryContainer
         else -> MaterialTheme.colorScheme.surface
@@ -1500,110 +1522,137 @@ private fun TagManagementRow(
                 Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                    if (row.node is TagGroupNode) {
-                        IconButton(
-                            onClick = onToggleExpanded,
-                            modifier = Modifier.testTag("tag_expand_group_${row.node.id}"),
-                        ) {
-                            Icon(
-                                Icons.Filled.KeyboardArrowRight,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.graphicsLayer(rotationZ = if (expanded[row.node.id] == true) 90f else 0f),
-                            )
-                        }
+                if (row.node is TagGroupNode) {
+                    IconButton(
+                        onClick = onToggleExpanded,
+                        modifier = Modifier.testTag("tag_expand_group_${row.node.id}").size(32.dp),
+                    ) {
                         Icon(
-                            Icons.Filled.Folder,
-                            contentDescription = null,
-                            tint = if (expanded[row.node.id] == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(24.dp),
+                            Icons.Filled.KeyboardArrowRight,
+                            contentDescription = "展開",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp).graphicsLayer(rotationZ = if (expanded[row.node.id] == true) 90f else 0f),
                         )
-                        Spacer(Modifier.width(10.dp))
-                    } else {
-                        val tag = (row.node as TagLeafNode).tag
-                        Icon(
-                            Icons.Filled.LocalOffer,
-                            contentDescription = null,
-                            tint = Color(tag.color),
-                            modifier = Modifier.size(24.dp),
-                        )
-                        Spacer(Modifier.width(10.dp))
                     }
-                    Column(Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                row.node.name,
-                                fontWeight = FontWeight.SemiBold,
-                                style = if (row.node.name.length > 16) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                "${row.node.count}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                    Icon(
+                        Icons.Filled.Folder,
+                        contentDescription = null,
+                        tint = if (expanded[row.node.id] == true) tagColor(row.node.group.colorId) else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(24.dp),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                } else {
+                    val tag = (row.node as TagLeafNode).tag
+                    Icon(
+                        Icons.Filled.LocalOffer,
+                        contentDescription = null,
+                        tint = tagColor(tag.colorId),
+                        modifier = Modifier.size(24.dp),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            if (row.node is TagGroupNode) "グループ" else "タグ",
-                            style = MaterialTheme.typography.bodySmall,
+                            row.node.name,
+                            fontWeight = FontWeight.SemiBold,
+                            style = if (row.node.name.length > 16) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "${row.node.count}",
+                            style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Box {
-                        TextButton(
-                            onClick = { menuOpen = true },
-                            modifier = Modifier.testTag("tag_operation_${row.node.ref().type.name.lowercase()}_${row.node.id}"),
-                        ) { Text("操作") }
-                        androidx.compose.material3.DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                            if (row.node is TagGroupNode) {
-                                androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text("子グループを追加") },
-                                    onClick = { menuOpen = false; onCreate(TagNodeType.GROUP, row.node.id) },
-                                )
-                                androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text("子タグを追加") },
-                                    onClick = { menuOpen = false; onCreate(TagNodeType.TAG, row.node.id) },
-                                )
-                            } else {
-                                androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text("別タグへ一括追加") },
-                                    onClick = { menuOpen = false; addAllOpen = true },
-                                    modifier = Modifier.testTag("tag_add_all_open_${row.node.id}"),
+                    Text(
+                        if (row.node is TagGroupNode) "グループ" else "タグ",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    if (row.node is TagGroupNode) {
+                        Box {
+                            IconButton(
+                                onClick = { createMenuOpen = true },
+                                modifier = Modifier.size(32.dp).testTag("tag_add_open_${row.node.id}"),
+                            ) {
+                                Icon(
+                                    Icons.Filled.Add,
+                                    contentDescription = "子要素を追加",
+                                    modifier = Modifier.size(18.dp),
                                 )
                             }
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text("名前を変更") },
-                                onClick = { menuOpen = false; renameOpen = true },
-                                modifier = Modifier.testTag("tag_rename_open_${row.node.ref().type.name.lowercase()}_${row.node.id}"),
-                            )
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text("別グループへ移動") },
-                                onClick = { menuOpen = false; moveOpen = true },
-                                modifier = Modifier.testTag("tag_move_open_${row.node.ref().type.name.lowercase()}_${row.node.id}"),
-                            )
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text("削除") },
-                                onClick = { menuOpen = false; deleteOpen = true },
-                                modifier = Modifier.testTag("tag_delete_open_${row.node.ref().type.name.lowercase()}_${row.node.id}"),
+                            DropdownMenu(
+                                expanded = createMenuOpen,
+                                onDismissRequest = { createMenuOpen = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("グループを追加") },
+                                    onClick = {
+                                        createMenuOpen = false
+                                        onCreate(TagNodeType.GROUP, row.node.id)
+                                    },
+                                    modifier = Modifier.testTag("tag_add_create_group_${row.node.id}"),
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("タグを追加") },
+                                    onClick = {
+                                        createMenuOpen = false
+                                        onCreate(TagNodeType.TAG, row.node.id)
+                                    },
+                                    modifier = Modifier.testTag("tag_add_create_tag_${row.node.id}"),
+                                )
+                            }
+                        }
+                    } else {
+                        IconButton(
+                            onClick = { addAllOpen = true },
+                            modifier = Modifier.size(32.dp).testTag("tag_add_all_open_${row.node.id}"),
+                        ) {
+                            Icon(
+                                Icons.Outlined.Input,
+                                contentDescription = "別タグへ一括追加",
+                                modifier = Modifier.size(18.dp),
                             )
                         }
                     }
+                    IconButton(
+                        onClick = { renameOpen = true },
+                        modifier = Modifier.size(32.dp).testTag("tag_rename_open_${row.node.ref().type.name.lowercase()}_${row.node.id}"),
+                    ) {
+                        Icon(
+                            Icons.Filled.Edit,
+                            contentDescription = "編集",
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    IconButton(
+                        onClick = { deleteOpen = true },
+                        modifier = Modifier.size(32.dp).testTag("tag_delete_open_${row.node.ref().type.name.lowercase()}_${row.node.id}"),
+                    ) {
+                        Icon(
+                            Icons.Filled.Delete,
+                            contentDescription = "削除",
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
             }
         }
     }
     if (renameOpen) {
-        RenameNodeDialog(row.node.name, onDismiss = { renameOpen = false }) { name ->
+        RenameNodeDialog(
+            row.node.name,
+            initialColorId = if (row.node is TagGroupNode) row.node.group.colorId else (row.node as TagLeafNode).tag.colorId,
+            onDismiss = { renameOpen = false },
+        ) { name, colorId ->
             when (row.node) {
-                is TagGroupNode -> onRenameGroup(row.node.group, name)
-                is TagLeafNode -> onRenameTag(row.node.tag, name)
+                is TagGroupNode -> onRenameGroup(row.node.group, name, colorId)
+                is TagLeafNode -> onRenameTag(row.node.tag, name, colorId)
             }
             renameOpen = false
-        }
-    }
-    if (moveOpen) {
-        MoveNodeDialog(row.node, hierarchy.groups, onDismiss = { moveOpen = false }) { parent ->
-            onMove(row.node.ref(), parent)
-            moveOpen = false
         }
     }
     if (deleteOpen) {
@@ -2145,7 +2194,10 @@ fun EnhancedMediaGrid(assets: List<AssetEntity>) {
     val savedPhotos = shown.filter { it.asset.type == "photo" && it.asset.localPath != null }
     var initialViewerPage by remember { mutableStateOf<Int?>(null) }
 
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+    Column(
+        modifier = Modifier.padding(horizontal = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
         when (shown.size) {
             1 -> EnhancedMediaCell(
                 displayAsset = shown[0],

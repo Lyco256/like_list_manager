@@ -74,6 +74,7 @@ data class TagGroupEntity(
     val sortOrder: Int = 0,
     val createdAt: String,
     val updatedAt: String,
+    val colorId: String = TagColorId.STANDARD.id,
 )
 
 @Entity(
@@ -91,11 +92,11 @@ data class TagGroupEntity(
 data class TagEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
-    val color: Long = 0xFF3F8CFF,
     val parentGroupId: Long? = null,
     val sortOrder: Int = 0,
     val createdAt: String,
     val updatedAt: String,
+    val colorId: String = TagColorId.STANDARD.id,
 )
 
 @Entity(

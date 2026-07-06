@@ -111,6 +111,7 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/MainActivity.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/SettingsScreen.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/TagColorUi.kt.md`
 
 ### Data・API
 
@@ -123,6 +124,7 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/data/XOAuthManager.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/XApiClient.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/ClipRepository.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/TagColorPalette.kt.md`
 
 ### Tests
 
@@ -200,3 +202,4 @@ MainActivity / Compose UI
 - `docs/app/src/androidTest/java/com/lyco256/llm/MainActivityComposeTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/SearchFilterDatabaseIntegrationTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/SnapshotCompatibilityTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/data/TagColorPaletteTest.kt.md`

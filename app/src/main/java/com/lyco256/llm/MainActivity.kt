@@ -68,9 +68,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -86,6 +91,7 @@ import com.lyco256.llm.data.PostStorageLocation
 import com.lyco256.llm.data.PostStorageState
 import com.lyco256.llm.data.SettingsSnapshot
 import com.lyco256.llm.data.SyncStateEntity
+import com.lyco256.llm.data.TagColorId
 import com.lyco256.llm.data.TagEntity
 import com.lyco256.llm.data.TagFilterState
 import com.lyco256.llm.data.TagGroupEntity
@@ -96,6 +102,7 @@ import com.lyco256.llm.data.TagNodeRef
 import com.lyco256.llm.data.TagNodeType
 import com.lyco256.llm.data.TagTreeNode
 import com.lyco256.llm.data.TagWithCount
+import com.lyco256.llm.data.tagColor
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -323,10 +330,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun applyFilters(value: TweetFilterState) { filters.value = value }
 
-    fun createTag(name: String, parentGroupId: Long?, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.createTag(name, parentGroupId) }
-    fun createGroup(name: String, parentGroupId: Long?, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.createGroup(name, parentGroupId) }
-    fun renameTag(tag: TagEntity, name: String, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.renameTag(tag, name) }
-    fun renameGroup(group: TagGroupEntity, name: String, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.renameGroup(group, name) }
+    fun createTag(name: String, parentGroupId: Long?, colorId: String, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.createTag(name, parentGroupId, colorId) }
+    fun createGroup(name: String, parentGroupId: Long?, colorId: String, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.createGroup(name, parentGroupId, colorId) }
+    fun renameTag(tag: TagEntity, name: String, colorId: String, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.renameTag(tag.copy(colorId = colorId), name) }
+    fun renameGroup(group: TagGroupEntity, name: String, colorId: String, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.renameGroup(group.copy(colorId = colorId), name) }
     fun deleteTag(tag: TagEntity, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.deleteTag(tag.id) }
     fun deleteGroup(group: TagGroupEntity, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.deleteGroup(group.id) }
     fun moveTagNode(node: TagNodeRef, parentGroupId: Long?, onMessage: (String) -> Unit) = tagAction(onMessage) { repository.moveNode(node, parentGroupId) }
@@ -511,7 +518,27 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
         modifier = Modifier.testTag("main_screen"),
         topBar = {
             TopAppBar(
-                title = { Text(topBarTitle, fontWeight = FontWeight.SemiBold) },
+                title = {
+                    if (tab == AppTab.Unclassified) {
+                        Text(
+                            buildAnnotatedString {
+                                append("未分類  ")
+                                withStyle(
+                                    SpanStyle(
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontWeight = FontWeight.Normal,
+                                    ),
+                                ) {
+                                    append("${uiState.unclassified.size}件")
+                                }
+                            },
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    } else {
+                        Text(topBarTitle, fontWeight = FontWeight.SemiBold)
+                    }
+                },
                 actions = {
                     IconButton(
                         onClick = {
@@ -600,10 +627,10 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                 hierarchy = uiState.tagHierarchy,
                 listState = tagListState,
                 modifier = Modifier.padding(padding).testTag("tags_screen"),
-                onCreateTag = { name, parent -> viewModel.createTag(name, parent) { syncMessage = it } },
-                onCreateGroup = { name, parent -> viewModel.createGroup(name, parent) { syncMessage = it } },
-                onRenameTag = { tag, name -> viewModel.renameTag(tag, name) { syncMessage = it } },
-                onRenameGroup = { group, name -> viewModel.renameGroup(group, name) { syncMessage = it } },
+                onCreateTag = { name, parent, colorId -> viewModel.createTag(name, parent, colorId) { syncMessage = it } },
+                onCreateGroup = { name, parent, colorId -> viewModel.createGroup(name, parent, colorId) { syncMessage = it } },
+                onRenameTag = { tag, name, colorId -> viewModel.renameTag(tag, name, colorId) { syncMessage = it } },
+                onRenameGroup = { group, name, colorId -> viewModel.renameGroup(group, name, colorId) { syncMessage = it } },
                 onDeleteTag = { tag -> viewModel.deleteTag(tag) { syncMessage = it } },
                 onDeleteGroup = { group -> viewModel.deleteGroup(group) { syncMessage = it } },
                 onMove = { node, parent -> viewModel.moveTagNode(node, parent) { syncMessage = it } },
@@ -793,7 +820,7 @@ private fun screenTitle(
 ): String = when {
     uiState.storageState.isMigrating -> "投稿データ移動中"
     !uiState.storageState.isAvailable -> "投稿データ保存先"
-    tab == AppTab.Unclassified -> "未分類 (${uiState.unclassified.size})"
+    tab == AppTab.Unclassified -> "未分類  ${uiState.unclassified.size}件"
     tab == AppTab.Classified -> "分類済み"
     tab == AppTab.Tags -> "タグ管理"
     else -> tab.label
@@ -938,11 +965,19 @@ fun TweetCard(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                TextButton(
+                IconButton(
                     onClick = {
                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(clip.clip.postUrl)))
                     },
-                ) { Text("Xで開く") }
+                    modifier = Modifier.testTag("clip_open_x_${clip.clip.id}"),
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_x_logo),
+                        contentDescription = "Xで開く",
+                        tint = Color.Unspecified,
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
             }
             Spacer(Modifier.height(8.dp))
             Text(
@@ -1013,7 +1048,10 @@ fun TweetCard(
 @Composable
 fun MediaGrid(urls: List<String>) {
     val shown = urls.take(4)
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+    Column(
+        modifier = Modifier.padding(horizontal = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
         when (shown.size) {
             1 -> MediaCell(shown[0], Modifier.fillMaxWidth().aspectRatio(16f / 10f))
             2 -> Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -1141,10 +1179,10 @@ private fun TagFilterChildren(
 fun TagListScreen(
     hierarchy: TagHierarchy,
     modifier: Modifier = Modifier,
-    onCreateTag: (String, Long?) -> Unit,
-    onCreateGroup: (String, Long?) -> Unit,
-    onRenameTag: (TagEntity, String) -> Unit,
-    onRenameGroup: (TagGroupEntity, String) -> Unit,
+    onCreateTag: (String, Long?, String) -> Unit,
+    onCreateGroup: (String, Long?, String) -> Unit,
+    onRenameTag: (TagEntity, String, String) -> Unit,
+    onRenameGroup: (TagGroupEntity, String, String) -> Unit,
     onDeleteTag: (TagEntity) -> Unit,
     onDeleteGroup: (TagGroupEntity) -> Unit,
     onMove: (TagNodeRef, Long?) -> Unit,
@@ -1171,10 +1209,10 @@ fun TagListScreen(
         }
     }
     createType?.let { type ->
-        CreateNodeDialog(type, null, onDismiss = { createType = null }) { name ->
-            if (type == TagNodeType.TAG) onCreateTag(name, null) else onCreateGroup(name, null)
+        CreateNodeDialog(type, null, onDismiss = { createType = null }, onCreate = { name, colorId ->
+            if (type == TagNodeType.TAG) onCreateTag(name, null, colorId) else onCreateGroup(name, null, colorId)
             createType = null
-        }
+        })
     }
 }
 
@@ -1184,10 +1222,10 @@ private fun TagManagementChildren(
     parentId: Long?,
     depth: Int,
     expanded: MutableMap<Long, Boolean>,
-    onCreateTag: (String, Long?) -> Unit,
-    onCreateGroup: (String, Long?) -> Unit,
-    onRenameTag: (TagEntity, String) -> Unit,
-    onRenameGroup: (TagGroupEntity, String) -> Unit,
+    onCreateTag: (String, Long?, String) -> Unit,
+    onCreateGroup: (String, Long?, String) -> Unit,
+    onRenameTag: (TagEntity, String, String) -> Unit,
+    onRenameGroup: (TagGroupEntity, String, String) -> Unit,
     onDeleteTag: (TagEntity) -> Unit,
     onDeleteGroup: (TagGroupEntity) -> Unit,
     onMove: (TagNodeRef, Long?) -> Unit,
@@ -1238,7 +1276,7 @@ private fun TagManagementChildren(
                         }
                     } else {
                         val tag = (node as TagLeafNode).tag
-                        Box(Modifier.size(14.dp).clip(RoundedCornerShape(4.dp)).background(Color(tag.color)))
+                        Box(Modifier.size(14.dp).clip(RoundedCornerShape(4.dp)).background(tagColor(tag.colorId)))
                         Spacer(Modifier.width(10.dp))
                     }
                     Column(Modifier.weight(1f)) {
@@ -1269,16 +1307,16 @@ private fun TagManagementChildren(
                 )
             }
             createType?.let { type ->
-                CreateNodeDialog(type, (node as? TagGroupNode)?.id ?: parentId, onDismiss = { createType = null }) { name ->
+                CreateNodeDialog(type, (node as? TagGroupNode)?.id ?: parentId, onDismiss = { createType = null }, onCreate = { name, colorId ->
                     val parent = (node as? TagGroupNode)?.id ?: parentId
-                    if (type == TagNodeType.TAG) onCreateTag(name, parent) else onCreateGroup(name, parent)
+                    if (type == TagNodeType.TAG) onCreateTag(name, parent, colorId) else onCreateGroup(name, parent, colorId)
                     createType = null
-                }
+                })
             }
-            if (renameOpen) RenameNodeDialog(node.name, onDismiss = { renameOpen = false }) { name ->
+            if (renameOpen) RenameNodeDialog(node.name, initialColorId = if (node is TagGroupNode) node.group.colorId else (node as TagLeafNode).tag.colorId, onDismiss = { renameOpen = false }) { name, colorId ->
                 when (node) {
-                    is TagGroupNode -> onRenameGroup(node.group, name)
-                    is TagLeafNode -> onRenameTag(node.tag, name)
+                    is TagGroupNode -> onRenameGroup(node.group, name, colorId)
+                    is TagLeafNode -> onRenameTag(node.tag, name, colorId)
                 }
                 renameOpen = false
             }
@@ -1306,40 +1344,63 @@ private fun TagManagementChildren(
 }
 
 @Composable
-fun CreateNodeDialog(type: TagNodeType, parentId: Long?, onDismiss: () -> Unit, onCreate: (String) -> Unit) {
-    var name by remember(type, parentId) { mutableStateOf("") }
+fun CreateNodeDialog(
+    type: TagNodeType,
+    parentId: Long?,
+    onDismiss: () -> Unit,
+    onCreate: (String, String) -> Unit,
+    initialColorId: String = TagColorId.STANDARD.id,
+) {
+    var name by remember(type, parentId, initialColorId) { mutableStateOf("") }
+    var colorId by remember(type, parentId, initialColorId) { mutableStateOf(initialColorId) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (type == TagNodeType.TAG) "タグを追加" else "グループを追加") },
         text = {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                singleLine = true,
-                label = { Text("名前") },
-                modifier = Modifier.testTag("create_node_name"),
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    singleLine = true,
+                    label = { Text("名前") },
+                    modifier = Modifier.testTag("create_node_name"),
+                )
+                Spacer(Modifier.height(4.dp))
+                TagColorPalettePicker(selectedColorId = colorId, onColorSelected = { colorId = it })
+            }
         },
-        confirmButton = { TextButton(onClick = { onCreate(name) }, modifier = Modifier.testTag("create_node_confirm")) { Text("追加") } },
+        confirmButton = {
+            TextButton(onClick = { onCreate(name, colorId) }, modifier = Modifier.testTag("create_node_confirm")) { Text("追加") }
+        },
         dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("create_node_cancel")) { Text("閉じる") } },
     )
 }
 
 @Composable
-fun RenameNodeDialog(initialName: String, onDismiss: () -> Unit, onRename: (String) -> Unit) {
-    var name by remember(initialName) { mutableStateOf(initialName) }
+fun RenameNodeDialog(
+    initialName: String,
+    initialColorId: String = TagColorId.STANDARD.id,
+    onDismiss: () -> Unit,
+    onRename: (String, String) -> Unit,
+) {
+    var name by remember(initialName, initialColorId) { mutableStateOf(initialName) }
+    var colorId by remember(initialName, initialColorId) { mutableStateOf(initialColorId) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("名前を変更") },
         text = {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                singleLine = true,
-                modifier = Modifier.testTag("rename_node_name"),
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    singleLine = true,
+                    modifier = Modifier.testTag("rename_node_name"),
+                )
+                Spacer(Modifier.height(4.dp))
+                TagColorPalettePicker(selectedColorId = colorId, onColorSelected = { colorId = it })
+            }
         },
-        confirmButton = { TextButton(onClick = { onRename(name) }, modifier = Modifier.testTag("rename_node_save")) { Text("保存") } },
+        confirmButton = { TextButton(onClick = { onRename(name, colorId) }, modifier = Modifier.testTag("rename_node_save")) { Text("保存") } },
         dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("rename_node_cancel")) { Text("閉じる") } },
     )
 }

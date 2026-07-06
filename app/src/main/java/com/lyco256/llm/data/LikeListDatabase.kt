@@ -15,7 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SyncStateEntity::class,
         ApiUsageMonthEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 abstract class LikeListDatabase : RoomDatabase() {
@@ -23,6 +23,38 @@ abstract class LikeListDatabase : RoomDatabase() {
     abstract fun tagDao(): TagDao
 
     companion object {
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("PRAGMA foreign_keys=OFF")
+                database.execSQL("ALTER TABLE `tag_groups` ADD COLUMN `colorId` TEXT NOT NULL DEFAULT 'standard'")
+                database.execSQL(
+                    """
+                    CREATE TABLE `tags_new` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `parentGroupId` INTEGER,
+                        `sortOrder` INTEGER NOT NULL,
+                        `createdAt` TEXT NOT NULL,
+                        `updatedAt` TEXT NOT NULL,
+                        `colorId` TEXT NOT NULL DEFAULT 'standard',
+                        FOREIGN KEY(`parentGroupId`) REFERENCES `tag_groups`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT
+                    )
+                    """.trimIndent(),
+                )
+                database.execSQL(
+                    """
+                    INSERT INTO `tags_new` (`id`, `name`, `parentGroupId`, `sortOrder`, `createdAt`, `updatedAt`, `colorId`)
+                    SELECT `id`, `name`, `parentGroupId`, `sortOrder`, `createdAt`, `updatedAt`, 'standard'
+                    FROM `tags`
+                    """.trimIndent(),
+                )
+                database.execSQL("DROP TABLE `tags`")
+                database.execSQL("ALTER TABLE `tags_new` RENAME TO `tags`")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_tags_parentGroupId` ON `tags` (`parentGroupId`)")
+                database.execSQL("PRAGMA foreign_keys=ON")
+            }
+        }
+
         val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 val currentMonth = java.time.YearMonth.now().toString()

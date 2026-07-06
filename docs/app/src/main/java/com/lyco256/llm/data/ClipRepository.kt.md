@@ -61,3 +61,8 @@
 - 429ではheaderからrate limit状態をDBへ保存してから同期を停止します。
 - 空ページへ不正なnext tokenが付いていてもtokenを破棄して終了し、無限loopを防ぎます。
 - `includeSeedMedia=false` のテストvariantでは外部画像URLを持つsample assetを作らず、UI起動だけでネットワーク通信しません。
+## 2026-07 追加
+
+- `createTag` / `createGroup` に `colorId` を追加した。
+- `renameTag` / `renameGroup` は色も更新できるようになった。
+- 既存の呼び出しは `standard` をデフォルトにしている。

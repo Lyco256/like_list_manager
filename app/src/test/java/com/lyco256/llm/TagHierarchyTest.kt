@@ -13,10 +13,13 @@ import com.lyco256.llm.data.TagLeafNode
 import com.lyco256.llm.data.TagNodeRef
 import com.lyco256.llm.data.TagNodeType
 import com.lyco256.llm.data.TagWithCount
+import com.lyco256.llm.data.TagColorId
 import com.lyco256.llm.data.orderNodesAfterMove
 import com.lyco256.llm.data.orderNodesAfterMoveAtSlot
 import com.lyco256.llm.data.parentGroupIdForMove
 import com.lyco256.llm.data.postsBeforeFirstExisting
+import com.lyco256.llm.data.normalizedTagColorId
+import com.lyco256.llm.data.tagColorSpec
 import com.lyco256.llm.data.requireSiblingNameAvailable
 import com.lyco256.llm.data.requireValidGroupDestination
 import org.junit.Assert.assertEquals
@@ -54,6 +57,13 @@ class TagHierarchyTest {
         assertEquals("3,643", formatLikeCount(3_643))
         assertEquals("1.9万", formatLikeCount(19_999))
         assertEquals("10万", formatLikeCount(100_000))
+    }
+
+    @Test
+    fun tagColorPaletteFallsBackToStandardForUnknownIds() {
+        assertEquals(TagColorId.STANDARD.id, normalizedTagColorId(null))
+        assertEquals(TagColorId.STANDARD.id, normalizedTagColorId("unknown"))
+        assertEquals(TagColorId.STANDARD.id, tagColorSpec("unknown").id)
     }
 
     @Test

@@ -634,7 +634,7 @@ class ClipRepository(
             Bitmap.CompressFormat.WEBP
         }
 
-    suspend fun createTag(name: String, parentGroupId: Long? = null) = withContext(Dispatchers.IO) {
+    suspend fun createTag(name: String, parentGroupId: Long? = null, colorId: String = TagColorId.STANDARD.id) = withContext(Dispatchers.IO) {
         postStorageManager.withDatabase { database ->
             val clean = cleanNodeName(name)
             val tagDao = database.tagDao()
@@ -642,7 +642,7 @@ class ClipRepository(
             ensureUniqueSiblingName(tagDao, parentGroupId, clean)
             val now = Instant.now().toString()
             val order = siblingNodes(tagDao, parentGroupId).size
-            check(tagDao.insertTag(TagEntity(name = clean, parentGroupId = parentGroupId, sortOrder = order, createdAt = now, updatedAt = now)) > 0) {
+            check(tagDao.insertTag(TagEntity(name = clean, parentGroupId = parentGroupId, sortOrder = order, createdAt = now, updatedAt = now, colorId = colorId)) > 0) {
                 "タグを追加できませんでした"
             }
         }
@@ -657,7 +657,7 @@ class ClipRepository(
         }
     }
 
-    suspend fun createGroup(name: String, parentGroupId: Long? = null) = withContext(Dispatchers.IO) {
+    suspend fun createGroup(name: String, parentGroupId: Long? = null, colorId: String = TagColorId.STANDARD.id) = withContext(Dispatchers.IO) {
         postStorageManager.withDatabase { database ->
             val clean = cleanNodeName(name)
             val tagDao = database.tagDao()
@@ -672,6 +672,7 @@ class ClipRepository(
                     sortOrder = order,
                     createdAt = now,
                     updatedAt = now,
+                    colorId = colorId,
                 ),
             )
         }

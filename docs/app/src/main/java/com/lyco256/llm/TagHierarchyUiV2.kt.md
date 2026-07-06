@@ -68,3 +68,19 @@
 投稿カードのローカル削除導線には `clip_local_delete_open_<clipId>`、確認Dialogには `clip_local_delete_dialog_<clipId>`、実行/キャンセルには `clip_local_delete_confirm_<clipId>` / `clip_local_delete_cancel_<clipId>` を付け、E2Eで文言ではなく対象clip IDに紐づけて操作できます。
 
 一覧の先頭へ戻るFloatingActionButtonには `scroll_to_top` を付け、検索条件やタグ選択状態がスクロール後も維持されることをE2Eで確認できます。
+## 2026-07 追加
+
+- タグ/グループの chip を `colorId` ベースのグラデーション表示にした。
+- タグ一覧の行は、追加・編集・削除を常時見えるアイコンボタンに整理した。
+- 画像グリッドと単体画像ビューは左右の余白を少し広げた。
+- X で開くボタンは X ロゴのアイコンボタンにした。
+
+## 2026-07-04 Update
+
+- The group-add action now opens a `DropdownMenu` from the plus button.
+- Tag rows now use a bubble-style icon for the bulk-add action.
+- `EnhancedTagListScreen` keeps the `tag_list` test tag for scroll-targeted tests.
+
+## 2026-07-05 Update
+
+- The group-add menu continues to use a Google Material icon, and the bulk-add action uses an outlined chat-bubble style icon from the existing icon set.

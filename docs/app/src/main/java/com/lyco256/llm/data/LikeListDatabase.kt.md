@@ -41,3 +41,8 @@ Entity追加・列変更時はversionを更新し、既存実機データを保�
 
 - `api_usage_months` を追加し、当月の `usageMonth` と `monthlyFetchedCount` を1行として履歴へ移します。
 - 既存の `sync_state` は維持し、月間取得数の表示と内部履歴を両立します。
+## 2026-07 追加
+
+- DB version を 5 から 6 に上げた。
+- `tag_groups.colorId` と `tags.colorId` を migration 5->6 で追加した。
+- 既存データは両方とも `standard` で埋める。

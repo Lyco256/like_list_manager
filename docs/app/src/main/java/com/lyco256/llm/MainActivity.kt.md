@@ -56,3 +56,13 @@ UI項目を追加する場合は、対応するViewModel操作、Repository API�
 いいね数更新は `settings_like_refresh` から確認Dialogを開き、`settings_like_refresh_confirm` / `settings_like_refresh_cancel` で再取得の実行・キャンセル導線をE2Eで安定して確認できます。
 
 共通 `ConfirmDialog` は呼び出し側が `dialogTestTag`、`confirmTestTag`、`dismissTestTag` を任意指定でき、文言に依存せず確認/キャンセル操作をE2Eから固定できます。
+## 2026-07 追加
+
+- タイトルの未分類件数を `未分類 12件` の形で出すようにした。
+- タグ/グループの作成・名称変更ダイアログに色パレットを追加した。
+- `Xで開く` はテキストボタンではなく X ロゴのアイコンボタンに変えた。
+- 旧カード表示の画像まわりは左右に少し余白を入れた。
+
+## 2026-07-05 Update
+
+- The X logo buttons now preserve the black/white vector colors instead of being tinted by the theme, and the icon is rendered larger so it reads clearly in the button.

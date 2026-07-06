@@ -37,3 +37,8 @@ Entityの列変更はDB schema変更です。`LikeListDatabase` のversionとmig
 
 - `ClipEntity` はいいね数、取得日時、恒久失敗日時、失敗理由をnullableで保持します。
 - `TagHierarchy.groupCounts` は投稿数ではなく、各グループ直下のタグ数と子グループ数の合計です。子孫要素は含みません。
+## 2026-07 追加
+
+- `TagGroupEntity` と `TagEntity` に `colorId` を追加した。
+- どちらもデフォルトは `standard`。
+- 表示側は `TagColorPalette` から色を引き、未知の `colorId` は `standard` にフォールバックする。

@@ -48,3 +48,12 @@
 - Android戻るボタン相当で設定画面を閉じ、開く前のタブへ戻ることを確認する
 - X API設定に `Callback URI` / `Scope` が出ないことを確認する
 - データ管理に保存件数、画像枚数、保存先の使用状況、ストレージ凡例が表示され、旧ラベルが出ないことを確認する
+
+## 2026-07-04 Update
+
+- Added coverage for the tag-management dropdown menu flow that creates both child groups and child tags under the pressed group.
+- The color-picker persistence test still verifies create and rename flows, and the X logo open button test remains in place.
+
+## 2026-07-05 Update
+
+- The color-picker E2E coverage now asserts that the dialog renders two palette rows, so the fixed two-row layout is verified in tests.

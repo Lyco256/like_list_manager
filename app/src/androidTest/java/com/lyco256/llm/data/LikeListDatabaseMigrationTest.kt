@@ -195,4 +195,61 @@ class LikeListDatabaseMigrationTest {
         helper.close()
         context.deleteDatabase(name)
     }
+
+    @Test
+    fun migration5To6BackfillsStandardColorIdsForExistingTagsAndGroups() {
+        val name = "migration-5-6-test.db"
+        context.deleteDatabase(name)
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name(name)
+                .callback(object : SupportSQLiteOpenHelper.Callback(5) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL(
+                            """
+                            CREATE TABLE tag_groups (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                                name TEXT NOT NULL,
+                                parentGroupId INTEGER,
+                                sortOrder INTEGER NOT NULL,
+                                createdAt TEXT NOT NULL,
+                                updatedAt TEXT NOT NULL
+                            )
+                            """.trimIndent(),
+                        )
+                        db.execSQL(
+                            """
+                            CREATE TABLE tags (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                                name TEXT NOT NULL,
+                                color INTEGER NOT NULL,
+                                parentGroupId INTEGER,
+                                sortOrder INTEGER NOT NULL,
+                                createdAt TEXT NOT NULL,
+                                updatedAt TEXT NOT NULL
+                            )
+                            """.trimIndent(),
+                        )
+                    }
+
+                    override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+                })
+                .build(),
+        )
+        helper.writableDatabase.apply {
+            execSQL("INSERT INTO tag_groups (id, name, parentGroupId, sortOrder, createdAt, updatedAt) VALUES (1, 'Group', NULL, 0, 'now', 'now')")
+            execSQL("INSERT INTO tags (id, name, color, parentGroupId, sortOrder, createdAt, updatedAt) VALUES (2, 'Tag', 123, 1, 0, 'now', 'now')")
+            LikeListDatabase.MIGRATION_5_6.migrate(this)
+            query("SELECT colorId FROM tag_groups WHERE id = 1").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("standard", cursor.getString(0))
+            }
+            query("SELECT colorId FROM tags WHERE id = 2").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("standard", cursor.getString(0))
+            }
+        }
+        helper.close()
+        context.deleteDatabase(name)
+    }
 }
