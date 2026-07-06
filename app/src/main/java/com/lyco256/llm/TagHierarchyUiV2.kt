@@ -265,6 +265,7 @@ fun EnhancedClassifiedScreen(
     listState: LazyListState,
     modifier: Modifier = Modifier,
     onApplyFilters: (TweetFilterState) -> Unit,
+    onApplySort: (ClassifiedSortState) -> Unit,
     onClearAllFilters: () -> Unit,
     onTagsChange: (ClipEntity, Set<Long>) -> Unit,
     onSummaryChange: (ClipEntity, String) -> Unit,
@@ -272,6 +273,7 @@ fun EnhancedClassifiedScreen(
     onAuthorClick: (ClipEntity) -> Unit,
 ) {
     var filterDialogOpen by remember { mutableStateOf(false) }
+    var sortDialogOpen by remember { mutableStateOf(false) }
     var clearConfirmationOpen by remember { mutableStateOf(false) }
     val itemKeys = remember(uiState.classified) { uiState.classified.map { it.clip.id } }
     PreserveScrollAnchor(listState, "classified", itemKeys)
@@ -280,6 +282,7 @@ fun EnhancedClassifiedScreen(
             uiState = uiState,
             hierarchy = uiState.tagHierarchy,
             onOpen = { filterDialogOpen = true },
+            onOpenSort = { sortDialogOpen = true },
             onClear = { clearConfirmationOpen = true },
         )
         Spacer(Modifier.height(10.dp))
@@ -316,6 +319,13 @@ fun EnhancedClassifiedScreen(
             initialFilters = uiState.filters,
             onApply = onApplyFilters,
             onDismiss = { filterDialogOpen = false },
+        )
+    }
+    if (sortDialogOpen) {
+        SortConfigDialog(
+            initialSort = uiState.sort,
+            onApply = onApplySort,
+            onDismiss = { sortDialogOpen = false },
         )
     }
     if (clearConfirmationOpen) {
@@ -843,6 +853,7 @@ private fun TagFilterSummaryRow(
     uiState: MainUiState,
     hierarchy: TagHierarchy,
     onOpen: () -> Unit,
+    onOpenSort: () -> Unit,
     onClear: () -> Unit,
 ) {
     val filters = uiState.filters
@@ -864,11 +875,27 @@ private fun TagFilterSummaryRow(
             Text(
                 "一致件数:${uiState.classified.size}件",
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.labelSmall,
             )
             Text(
                 filterConditionSummary(filters, hierarchy, uiState.authorOptions),
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "｜",
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                sortConditionSummary(uiState.sort),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -881,6 +908,17 @@ private fun TagFilterSummaryRow(
             Icon(
                 Icons.Filled.FilterList,
                 contentDescription = "絞り込み",
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        FilledTonalButton(
+            onClick = onOpenSort,
+            modifier = Modifier.width(36.dp).height(32.dp).testTag("sort_open"),
+            contentPadding = PaddingValues(0.dp),
+        ) {
+            Icon(
+                Icons.Filled.Sort,
+                contentDescription = "並べ替え",
                 modifier = Modifier.size(18.dp),
             )
         }
@@ -1310,6 +1348,205 @@ private fun SearchFilterDialog(
                 ) { Text("キャンセル") }
             },
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SortConfigDialog(
+    initialSort: ClassifiedSortState,
+    onApply: (ClassifiedSortState) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var sort by remember(initialSort) { mutableStateOf(initialSort) }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
+    ) {
+        Surface(Modifier.fillMaxSize().testTag("sort_dialog"), shape = RoundedCornerShape(0.dp)) {
+            Column(Modifier.fillMaxSize().padding(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("並べ替え", style = MaterialTheme.typography.titleLarge)
+                        Text(sortConditionSummary(sort), style = MaterialTheme.typography.bodySmall)
+                    }
+                    TextButton(
+                        onClick = { sort = ClassifiedSortState() },
+                        modifier = Modifier.testTag("sort_clear_all_open"),
+                    ) { Text("初期化") }
+                }
+                LazyColumn(
+                    Modifier
+                        .weight(1f)
+                        .padding(top = 8.dp)
+                        .testTag("sort_options_list"),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    item {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Column(Modifier.weight(1f)) {
+                                Text("タグ順")
+                                Text("ONでタグ表示順を使います", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(
+                                checked = sort.tagEnabled,
+                                onCheckedChange = { sort = sort.copy(tagEnabled = it) },
+                                modifier = Modifier.testTag("sort_tag_toggle"),
+                            )
+                        }
+                    }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = !sort.tagDescending,
+                                onClick = { sort = sort.copy(tagDescending = false) },
+                                enabled = sort.tagEnabled,
+                                modifier = Modifier.testTag("sort_tag_direction_top"),
+                                label = { Text("上から") },
+                            )
+                            FilterChip(
+                                selected = sort.tagDescending,
+                                onClick = { sort = sort.copy(tagDescending = true) },
+                                enabled = sort.tagEnabled,
+                                modifier = Modifier.testTag("sort_tag_direction_bottom"),
+                                label = { Text("下から") },
+                            )
+                        }
+                    }
+                    item { Divider() }
+                    item {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Column(Modifier.weight(1f)) {
+                                Text("ユーザー順")
+                                Text("ONでユーザーごとの件数順を使います", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(
+                                checked = sort.userEnabled,
+                                onCheckedChange = { sort = sort.copy(userEnabled = it) },
+                                modifier = Modifier.testTag("sort_user_toggle"),
+                            )
+                        }
+                    }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = !sort.userDescending,
+                                onClick = { sort = sort.copy(userDescending = false) },
+                                enabled = sort.userEnabled,
+                                modifier = Modifier.testTag("sort_user_direction_few"),
+                                label = { Text("件数少ない順") },
+                            )
+                            FilterChip(
+                                selected = sort.userDescending,
+                                onClick = { sort = sort.copy(userDescending = true) },
+                                enabled = sort.userEnabled,
+                                modifier = Modifier.testTag("sort_user_direction_many"),
+                                label = { Text("件数多い順") },
+                            )
+                        }
+                    }
+                    item {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Column(Modifier.weight(1f)) {
+                                Text("優先順位")
+                                Text("タグ順とユーザー順を両方ONにした時の順番", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            val enabled = sort.tagEnabled && sort.userEnabled
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilterChip(
+                                    selected = sort.priority == ClassifiedSortPriority.TagFirst,
+                                    onClick = { sort = sort.copy(priority = ClassifiedSortPriority.TagFirst) },
+                                    enabled = enabled,
+                                    modifier = Modifier.testTag("sort_priority_tag"),
+                                    label = { Text("タグ優先") },
+                                )
+                                FilterChip(
+                                    selected = sort.priority == ClassifiedSortPriority.UserFirst,
+                                    onClick = { sort = sort.copy(priority = ClassifiedSortPriority.UserFirst) },
+                                    enabled = enabled,
+                                    modifier = Modifier.testTag("sort_priority_user"),
+                                    label = { Text("ユーザー優先") },
+                                )
+                            }
+                        }
+                    }
+                    item { Divider() }
+                    item {
+                        Text("基本順序", style = MaterialTheme.typography.titleSmall)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = sort.baseOrder == ClassifiedSortBase.Default,
+                                onClick = { sort = sort.copy(baseOrder = ClassifiedSortBase.Default) },
+                                modifier = Modifier.testTag("sort_base_saved"),
+                                label = { Text("保存順") },
+                            )
+                            FilterChip(
+                                selected = sort.baseOrder == ClassifiedSortBase.LikeCount,
+                                onClick = { sort = sort.copy(baseOrder = ClassifiedSortBase.LikeCount) },
+                                modifier = Modifier.testTag("sort_base_like"),
+                                label = { Text("いいね順") },
+                            )
+                            FilterChip(
+                                selected = sort.baseOrder == ClassifiedSortBase.PostTime,
+                                onClick = { sort = sort.copy(baseOrder = ClassifiedSortBase.PostTime) },
+                                modifier = Modifier.testTag("sort_base_date"),
+                                label = { Text("投稿時間順") },
+                            )
+                        }
+                    }
+                    if (sort.baseOrder == ClassifiedSortBase.LikeCount) {
+                        item {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilterChip(
+                                    selected = !sort.likeCountDescending,
+                                    onClick = { sort = sort.copy(likeCountDescending = false) },
+                                    modifier = Modifier.testTag("sort_like_direction_low"),
+                                    label = { Text("少ない順") },
+                                )
+                                FilterChip(
+                                    selected = sort.likeCountDescending,
+                                    onClick = { sort = sort.copy(likeCountDescending = true) },
+                                    modifier = Modifier.testTag("sort_like_direction_high"),
+                                    label = { Text("多い順") },
+                                )
+                            }
+                        }
+                    }
+                    if (sort.baseOrder == ClassifiedSortBase.PostTime) {
+                        item {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilterChip(
+                                    selected = !sort.postTimeDescending,
+                                    onClick = { sort = sort.copy(postTimeDescending = false) },
+                                    modifier = Modifier.testTag("sort_time_direction_old"),
+                                    label = { Text("古い順") },
+                                )
+                                FilterChip(
+                                    selected = sort.postTimeDescending,
+                                    onClick = { sort = sort.copy(postTimeDescending = true) },
+                                    modifier = Modifier.testTag("sort_time_direction_new"),
+                                    label = { Text("新しい順") },
+                                )
+                            }
+                        }
+                    }
+                }
+                Divider()
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    TextButton(onClick = onDismiss, modifier = Modifier.weight(1f).testTag("sort_cancel")) { Text("キャンセル") }
+                    Button(
+                        onClick = {
+                            onApply(sort)
+                            onDismiss()
+                        },
+                        modifier = Modifier.weight(1f).testTag("sort_apply"),
+                    ) { Text("適用") }
+                }
+            }
+        }
     }
 }
 

@@ -312,6 +312,204 @@ class TagHierarchyTest {
     }
 
     @Test
+    fun sortSummaryShowsDefaultAndCombinedOrderingLabels() {
+        assertEquals("並び:保存順", sortConditionSummary(ClassifiedSortState()))
+        assertEquals(
+            "並び:タグ上から → ユーザー件数多い順 → いいね多い順",
+            sortConditionSummary(
+                ClassifiedSortState(
+                    tagEnabled = true,
+                    userEnabled = true,
+                    priority = ClassifiedSortPriority.TagFirst,
+                    baseOrder = ClassifiedSortBase.LikeCount,
+                ),
+            ),
+        )
+        assertEquals(
+            "並び:ユーザー件数少ない順 → 投稿時間古い順",
+            sortConditionSummary(
+                ClassifiedSortState(
+                    userEnabled = true,
+                    userDescending = false,
+                    baseOrder = ClassifiedSortBase.PostTime,
+                    postTimeDescending = false,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun defaultSortUsesSaveOrderAndIdTiebreaker() {
+        val alpha = TagEntity(101, "Alpha", sortOrder = 0, createdAt = now, updatedAt = now)
+        val beta = TagEntity(102, "Beta", sortOrder = 1, createdAt = now, updatedAt = now)
+        val gamma = TagEntity(103, "Gamma", sortOrder = 2, createdAt = now, updatedAt = now)
+        val hierarchy = TagHierarchy(tags = listOf(alpha, beta, gamma).map { TagWithCount(it, 0) })
+        val first = clip(alpha, id = 2, savedAt = "2026-06-02T00:00:00Z")
+        val second = clip(beta, id = 1, savedAt = "2026-06-02T00:00:00Z")
+        val third = clip(gamma, id = 3, savedAt = "2026-06-03T00:00:00Z")
+
+        assertEquals(
+            listOf(third, second, first),
+            sortClipsForDisplay(
+                listOf(first, second, third),
+                hierarchy,
+                TweetFilterState(),
+                ClassifiedSortState(),
+            ),
+        )
+        assertEquals(listOf(second, first), sortClipsForDisplay(listOf(first, second), hierarchy, TweetFilterState(), ClassifiedSortState()))
+    }
+
+    @Test
+    fun likeAndPostTimeSortTreatMissingValuesAsLowest() {
+        val goodLike = clip(kotlin, id = 201, likeCount = 12, savedAt = "2026-06-02T00:00:00Z")
+        val missingLike = clip(compose, id = 202, savedAt = "2026-06-03T00:00:00Z")
+        val goodDate = clip(kotlin, id = 203, createdAt = "2026-06-02T00:00:00Z")
+        val missingDate = clip(compose, id = 204, createdAt = "not-a-date")
+
+        assertEquals(
+            listOf(goodLike, missingLike),
+            sortClipsForDisplay(
+                listOf(missingLike, goodLike),
+                hierarchy(),
+                TweetFilterState(),
+                ClassifiedSortState(baseOrder = ClassifiedSortBase.LikeCount),
+            ),
+        )
+        assertEquals(
+            listOf(missingLike, goodLike),
+            sortClipsForDisplay(
+                listOf(missingLike, goodLike),
+                hierarchy(),
+                TweetFilterState(),
+                ClassifiedSortState(baseOrder = ClassifiedSortBase.LikeCount, likeCountDescending = false),
+            ),
+        )
+        assertEquals(
+            listOf(goodDate, missingDate),
+            sortClipsForDisplay(
+                listOf(missingDate, goodDate),
+                hierarchy(),
+                TweetFilterState(),
+                ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime),
+            ),
+        )
+        assertEquals(
+            listOf(missingDate, goodDate),
+            sortClipsForDisplay(
+                listOf(missingDate, goodDate),
+                hierarchy(),
+                TweetFilterState(),
+                ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime, postTimeDescending = false),
+            ),
+        )
+    }
+
+    @Test
+    fun tagSortUsesIncludedCandidatesAndIgnoresExcludedTags() {
+        val first = TagEntity(301, "First", sortOrder = 0, createdAt = now, updatedAt = now)
+        val second = TagEntity(302, "Second", sortOrder = 1, createdAt = now, updatedAt = now)
+        val third = TagEntity(303, "Third", sortOrder = 2, createdAt = now, updatedAt = now)
+        val hierarchy = TagHierarchy(tags = listOf(first, second, third).map { TagWithCount(it, 0) })
+        val filters = TweetFilterState(
+            tagFilters = mapOf(
+                TagNodeRef(TagNodeType.TAG, second.id) to TagFilterState.INCLUDED,
+                TagNodeRef(TagNodeType.TAG, first.id) to TagFilterState.EXCLUDED,
+            ),
+        )
+        val excludedHeavy = clip(first, second, id = 401, savedAt = "2026-06-01T00:00:00Z")
+        val includedOnly = clip(second, third, id = 402, savedAt = "2026-06-02T00:00:00Z")
+
+        assertEquals(
+            listOf(includedOnly, excludedHeavy),
+            sortClipsForDisplay(
+                listOf(excludedHeavy, includedOnly),
+                hierarchy,
+                filters,
+                ClassifiedSortState(tagEnabled = true),
+            ),
+        )
+    }
+
+    @Test
+    fun tagAndUserPriorityChangesTheWinningCriterion() {
+        val first = TagEntity(401, "First", sortOrder = 0, createdAt = now, updatedAt = now)
+        val second = TagEntity(402, "Second", sortOrder = 1, createdAt = now, updatedAt = now)
+        val hierarchy = TagHierarchy(tags = listOf(first, second).map { TagWithCount(it, 0) })
+        val alphaNew = clip(second, id = 501, authorName = "Alpha", username = "alpha", savedAt = "2026-06-03T00:00:00Z")
+        val alphaOld = clip(second, id = 502, authorName = "Alpha", username = "alpha", savedAt = "2026-06-01T00:00:00Z")
+        val beta = clip(first, id = 503, authorName = "Beta", username = "beta", savedAt = "2026-06-02T00:00:00Z")
+        val source = listOf(alphaNew, alphaOld, beta)
+
+        assertEquals(
+            listOf(beta, alphaNew, alphaOld),
+            sortClipsForDisplay(
+                source,
+                hierarchy,
+                TweetFilterState(),
+                ClassifiedSortState(tagEnabled = true, userEnabled = true, priority = ClassifiedSortPriority.TagFirst),
+            ),
+        )
+        assertEquals(
+            listOf(alphaNew, alphaOld, beta),
+            sortClipsForDisplay(
+                source,
+                hierarchy,
+                TweetFilterState(),
+                ClassifiedSortState(tagEnabled = true, userEnabled = true, priority = ClassifiedSortPriority.UserFirst),
+            ),
+        )
+    }
+
+    @Test
+    fun taglessPostsSortToTailOrHeadDependingOnDirection() {
+        val first = TagEntity(601, "First", sortOrder = 0, createdAt = now, updatedAt = now)
+        val second = TagEntity(602, "Second", sortOrder = 1, createdAt = now, updatedAt = now)
+        val hierarchy = TagHierarchy(tags = listOf(first, second).map { TagWithCount(it, 0) })
+        val tagged = clip(first, id = 701, savedAt = "2026-06-01T00:00:00Z")
+        val untagged = clip(id = 702, savedAt = "2026-06-02T00:00:00Z")
+
+        assertEquals(
+            listOf(tagged, untagged),
+            sortClipsForDisplay(
+                listOf(untagged, tagged),
+                hierarchy,
+                TweetFilterState(),
+                ClassifiedSortState(tagEnabled = true),
+            ),
+        )
+        assertEquals(
+            listOf(untagged, tagged),
+            sortClipsForDisplay(
+                listOf(untagged, tagged),
+                hierarchy,
+                TweetFilterState(),
+                ClassifiedSortState(tagEnabled = true, tagDescending = true),
+            ),
+        )
+    }
+
+    @Test
+    fun userSortUsesFilteredCountsRatherThanHiddenClips() {
+        val alphaVisible = clip(id = 501, text = "needle", authorName = "Alpha", username = "zeta")
+        val alphaHidden = clip(id = 502, text = "hidden", authorName = "Alpha", username = "zeta")
+        val betaVisible = clip(id = 503, text = "needle", authorName = "Beta", username = "alpha")
+        val source = listOf(alphaVisible, alphaHidden, betaVisible)
+        val filters = TweetFilterState(query = "needle", taggedOnly = false)
+        val filtered = filterClipsForSearch(source, hierarchy(), filters)
+
+        assertEquals(
+            listOf(betaVisible, alphaVisible),
+            sortClipsForDisplay(
+                filtered,
+                hierarchy(),
+                filters,
+                ClassifiedSortState(userEnabled = true),
+            ),
+        )
+    }
+
+    @Test
     fun reversedDateRangeReturnsEmptyList() {
         val clip = clip(kotlin, createdAt = "2026-06-15T00:00:00Z")
         val filters = TweetFilterState(
@@ -580,6 +778,8 @@ class TagHierarchyTest {
         authorName: String = "author",
         username: String = "author",
         createdAt: String = now,
+        savedAt: String = now,
+        likeCount: Long? = null,
     ) = ClipWithDetails(
         clip = ClipEntity(
             id = id,
@@ -590,9 +790,10 @@ class TagHierarchyTest {
             text = text,
             postUrl = "https://x.com/$username/status/x-$id",
             xCreatedAt = createdAt,
-            savedAt = now,
+            savedAt = savedAt,
             syncedAt = now,
             summary = summary,
+            likeCount = likeCount,
         ),
         assets = emptyList(),
         tags = tags.toList(),

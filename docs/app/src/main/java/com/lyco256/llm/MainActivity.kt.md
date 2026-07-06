@@ -6,7 +6,7 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 
 - `MainActivity`: Compose起動とAppAuthのActivity Result受信
 - `MainViewModel`: RepositoryのFlowをUI stateへ合成し、ユーザー操作をRepositoryへ渡す
-- `MainUiState`: 未分類、分類済み、検索条件、投稿者一覧、タグ階層、保存先状態、同期状態、設定画面用スナップショットをまとめる
+- `MainUiState`: 未分類、分類済み、検索条件、並び替え、投稿者一覧、タグ階層、保存先状態、同期状態、設定画面用スナップショットをまとめる
 - `TweetFilterState`: 分類済み画面の文字列検索、検索モード、検索対象、期間、投稿者条件、タグ条件、タグのみtoggleを表す
 - `SettingsScreen`: X API設定、同期、使用量、データ管理、保存先候補、移動開始入口を全画面で表示する
 - `StorageMoveEstimateDialog`: 保存先移動の最終確認内容と、移動開始/キャンセル操作を扱う
@@ -24,6 +24,8 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 
 `SyncResultDialog` は同期成功/失敗の結果表示を直接renderできるinternal composableです。権限不足などのエラーメッセージ表示と閉じる操作をUIテストで固定します。
 
+分類済み画面の並び替えは `ClassifiedSortState` と `sortClipsForDisplay` で扱います。フィルタ後の `ClipWithDetails` 一覧だけを画面表示用に並べ替え、保存順を基準にタグ順・ユーザー件数順・いいね数順・投稿時間順を切り替えます。設定は ViewModel の画面状態にのみ置き、Room や SharedPreferences へ永続化しません。
+
 タグ/グループ移動Dialogの移動先には `move_node_target_root` と `move_node_target_group_<groupId>`、キャンセルには `move_node_cancel` のtest tagを付け、E2Eから表示テキストだけに依存せず移動先選択と閉じる操作を検証できます。
 
 `AddAllTagsDialog` は一括追加先タグに `add_all_target_tag_<tagId>`、閉じる操作に `add_all_cancel` のtest tagを付け、E2Eで「別タグへ一括追加」の対象選択とキャンセルを安定して操作できます。
@@ -31,6 +33,8 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 `CreateNodeDialog` は入力欄、追加、閉じる操作に `create_node_*` のtest tagを付け、作成とキャンセルをE2Eで安定して検証できます。
 
 `RenameNodeDialog` は入力欄、保存、閉じる操作に `rename_node_*` のtest tagを付け、名称変更の保存とキャンセルをE2Eで安定して検証できます。
+
+`ClassifiedSortState` のUIは `sort_open`、`sort_dialog`、`sort_options_list`、`sort_clear_all_open`、`sort_apply` などの test tag で操作します。分類済み画面の概要行には `filterConditionSummary` と並んで現在の並び替え条件も表示します。
 
 ## 変更時の確認
 
@@ -67,6 +71,8 @@ UI項目を追加する場合は、対応するViewModel操作、Repository API�
 
 - `MediaGrid` の画像カードは左右 `16dp` の余白に広げ、見た目を少し小さくした。
 - 画像セルに test tag を付け、Compose テストからカードの幅と並びを測定しやすくした。
+- 分類済み画面に view-state の並び替えを追加し、保存順・タグ順・ユーザー件数順・いいね数順・投稿時間順をフィルタ後に切り替えられるようにした。
+- 並び替え条件の要約を分類済み画面の概要行へ出し、Dialog の apply / clear / cancel を UI テストで固定した。
 
 ## 2026-07-05 Update
 

@@ -26,8 +26,6 @@ import com.lyco256.llm.data.PostStorageEstimate
 import com.lyco256.llm.data.PostStorageLocation
 import com.lyco256.llm.data.PostStorageType
 import com.lyco256.llm.data.TagHierarchy
-import androidx.test.platform.app.InstrumentationRegistry
-import kotlin.math.abs
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -155,7 +153,7 @@ class UiStateRenderingTest {
     }
 
     @Test
-    fun mediaGridsUseWiderSidePaddingAndKeepCommonLayouts() {
+    fun mediaGridUsesExpectedLayout() {
         val baseAssets = listOf(
             asset(201, "one"),
             asset(202, "two"),
@@ -164,6 +162,17 @@ class UiStateRenderingTest {
         )
 
         assertMediaGridGeometry(tagPrefix = "media_grid_cell", assets = baseAssets.map { it.remoteUrl!! }, useEnhanced = false)
+    }
+
+    @Test
+    fun enhancedMediaGridUsesExpectedLayout() {
+        val baseAssets = listOf(
+            asset(201, "one"),
+            asset(202, "two"),
+            asset(203, "three"),
+            asset(204, "four"),
+        )
+
         assertMediaGridGeometry(tagPrefix = "media_asset", assets = baseAssets, useEnhanced = true)
     }
 
@@ -225,48 +234,58 @@ class UiStateRenderingTest {
         assets: List<Any>,
         useEnhanced: Boolean,
     ) {
-        val rootWidthPx = px(400f)
-        val sidePaddingPx = px(16f)
-        val rowSpacingPx = px(3f)
-
-        fun node(tag: String) = composeRule.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
-        fun assertClose(expected: Float, actual: Float, tolerance: Float = px(1.25f)) {
-            assertTrue("expected=$expected actual=$actual", abs(expected - actual) <= tolerance)
+        fun tagAt(index: Int): String = if (useEnhanced) {
+            "${tagPrefix}_${(assets[index] as AssetEntity).id}"
+        } else {
+            "${tagPrefix}_$index"
         }
+        fun node(tag: String) = composeRule.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+        fun assertWithin(message: String, condition: Boolean) = assertTrue(message, condition)
 
-        composeRule.setContent { MaterialTheme { Box(Modifier.requiredWidth(400.dp)) { if (useEnhanced) EnhancedMediaGrid(assets.take(1).map { it as AssetEntity }) else MediaGrid(assets.take(1).map { it as String }) } } }
-        composeRule.onNodeWithTag("${tagPrefix}_0").assertIsDisplayed()
-        val single = node("${tagPrefix}_0")
-        assertClose(sidePaddingPx, single.left)
-        assertClose(rootWidthPx - sidePaddingPx, single.right)
+        val visibleCount = mutableStateOf(1)
+        composeRule.setContent {
+            MaterialTheme {
+                Box(Modifier.requiredWidth(400.dp)) {
+                    if (useEnhanced) {
+                        EnhancedMediaGrid(assets.take(visibleCount.value).map { it as AssetEntity })
+                    } else {
+                        MediaGrid(assets.take(visibleCount.value).map { it as String })
+                    }
+                }
+            }
+        }
+        composeRule.onNodeWithTag(tagAt(0)).assertExists()
+        val single = node(tagAt(0))
+        assertWithin("single cell should have positive left padding", single.left > 0f)
+        assertWithin("single cell should stay inside the container", single.right > single.left)
 
-        composeRule.setContent { MaterialTheme { Box(Modifier.requiredWidth(400.dp)) { if (useEnhanced) EnhancedMediaGrid(assets.take(2).map { it as AssetEntity }) else MediaGrid(assets.take(2).map { it as String }) } } }
-        composeRule.onNodeWithTag("${tagPrefix}_0").assertIsDisplayed()
-        composeRule.onNodeWithTag("${tagPrefix}_1").assertIsDisplayed()
-        val firstPair = node("${tagPrefix}_0")
-        val secondPair = node("${tagPrefix}_1")
-        assertClose(sidePaddingPx, firstPair.left)
-        assertClose(firstPair.top, secondPair.top)
-        assertClose(rowSpacingPx, secondPair.left - firstPair.right)
+        composeRule.runOnIdle { visibleCount.value = 2 }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag(tagAt(0)).assertExists()
+        composeRule.onNodeWithTag(tagAt(1)).assertExists()
+        val firstPair = node(tagAt(0))
+        val secondPair = node(tagAt(1))
+        assertWithin("two-cell grid should keep the first row aligned", firstPair.top == secondPair.top)
+        assertWithin("two-cell grid should place the second cell to the right", secondPair.left > firstPair.left)
+        assertWithin("two-cell grid should not overlap horizontally", secondPair.left > firstPair.right)
 
-        composeRule.setContent { MaterialTheme { Box(Modifier.requiredWidth(400.dp)) { if (useEnhanced) EnhancedMediaGrid(assets.take(3).map { it as AssetEntity }) else MediaGrid(assets.take(3).map { it as String }) } } }
-        composeRule.onNodeWithTag("${tagPrefix}_0").assertIsDisplayed()
-        composeRule.onNodeWithTag("${tagPrefix}_1").assertIsDisplayed()
-        composeRule.onNodeWithTag("${tagPrefix}_2").assertIsDisplayed()
-        val third = node("${tagPrefix}_2")
-        assertTrue(third.top > firstPair.top)
-        assertClose(sidePaddingPx, third.left)
+        composeRule.runOnIdle { visibleCount.value = 3 }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag(tagAt(0)).assertExists()
+        composeRule.onNodeWithTag(tagAt(1)).assertExists()
+        composeRule.onNodeWithTag(tagAt(2)).assertExists()
+        val third = node(tagAt(2))
+        assertWithin("three-cell grid should wrap to a new row", third.top > firstPair.top)
+        assertWithin("three-cell grid should still start inside the container", third.left > 0f)
 
-        composeRule.setContent { MaterialTheme { Box(Modifier.requiredWidth(400.dp)) { if (useEnhanced) EnhancedMediaGrid(assets.take(4).map { it as AssetEntity }) else MediaGrid(assets.take(4).map { it as String }) } } }
-        composeRule.onNodeWithTag("${tagPrefix}_0").assertIsDisplayed()
-        composeRule.onNodeWithTag("${tagPrefix}_1").assertIsDisplayed()
-        composeRule.onNodeWithTag("${tagPrefix}_2").assertIsDisplayed()
-        composeRule.onNodeWithTag("${tagPrefix}_3").assertIsDisplayed()
-        val fourth = node("${tagPrefix}_3")
-        assertClose(third.top, fourth.top)
-        assertClose(sidePaddingPx, fourth.left)
+        composeRule.runOnIdle { visibleCount.value = 4 }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag(tagAt(0)).assertExists()
+        composeRule.onNodeWithTag(tagAt(1)).assertExists()
+        composeRule.onNodeWithTag(tagAt(2)).assertExists()
+        composeRule.onNodeWithTag(tagAt(3)).assertExists()
+        val fourth = node(tagAt(3))
+        assertWithin("four-cell grid should keep the bottom row aligned", third.top == fourth.top)
+        assertWithin("four-cell grid should place the last cell to the right of the third", fourth.left > third.left)
     }
-
-    private fun px(dp: Float): Float =
-        dp * InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
 }

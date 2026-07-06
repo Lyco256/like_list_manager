@@ -15,7 +15,7 @@
 ## 主要な定義、設定、処理
 
 - `EnhancedClipListScreen`: 未分類投稿のカード一覧と、分類確定までの一時タグ選択、カード右下の分類ボタンを扱います。
-- `EnhancedClassifiedScreen`: 一致件数と条件文、右側固定の絞り込み/クリア操作、全画面Dialogの検索/絞り込みパネル、投稿の再割り当てを扱います。タグのみOFFでは未分類投稿も表示対象に含めます。
+- `EnhancedClassifiedScreen`: 一致件数と条件文、右側固定の絞り込み/クリア操作、全画面Dialogの検索/絞り込みパネル、並び替えDialog、投稿の再割り当てを扱います。タグのみOFFでは未分類投稿も表示対象に含めます。
 - `EnhancedTagListScreen`: タグ/グループの追加、名称変更、移動、削除、別タグへの一括追加、ドラッグ&ドロップ移動を扱います。
 - `EnhancedTweetCard`: 投稿本文、画像、概要、タグ選択をまとめます。
 - `SearchFilterDialog`: タグのみ、文字列検索、期間、ユーザー、タグ条件を区分し、確定条件と分離した下書きとリアルタイム一致件数を扱います。期間DatePickerは未指定時に今日を初期選択し、日付クリア操作は開始・終了指定の次行へ固定します。画面下部には適用/キャンセル、変更破棄・全条件クリアの確認Dialogを持ちます。
@@ -24,7 +24,8 @@
 - `PreserveScrollAnchor` / `LazyListScrollbar` / `ScrollToTopButton`: 未分類、分類済み、タグ管理のスクロール位置維持、常に薄い表示専用スクロールバー、白丸黒矢印の一番上へ移動ボタンを扱います。
 - 各画面内ではTopAppBarと重複する画面名見出しを表示しません。
 - `TagHierarchySelector` / `TagSelectionDialog`: 投稿カード内のタグ選択を、コンパクトな最上位チップと半画面Dialogの単一階層ナビゲーションで扱います。
-- `TagFilterSummaryRow` / `filterConditionSummary`: 分類済み画面の一致件数と現在条件を、小さい文字と灰色背景の省スペースな横スクロール領域に表示します。右側には余白を抑えたフィルターアイコンとクリアボタンを固定します。
+- `TagFilterSummaryRow` / `filterConditionSummary`: 分類済み画面の一致件数と現在条件を、小さい文字と灰色背景の省スペースな横スクロール領域に表示します。右側には余白を抑えたフィルターアイコン、並び替えアイコン、クリアボタンを固定します。
+- `SortConfigDialog`: 分類済み画面の表示順を切り替える全画面Dialogです。タグ順とユーザー件数順は個別にON/OFFでき、優先順も選べます。いいね数順と投稿時間順は昇順/降順を切り替えられます。クリアはダイアログ内の下書きを初期化し、適用で `ClassifiedSortState` を ViewModel に反映します。設定は画面状態のみで保持し、永続化しません。
 - `TagManagementRow`: タグリストの行表示、グループの展開、操作メニュー、ドラッグ開始を扱います。
 - `TagListItem` / `DragState`: ドラッグ中の表示リストを通常行とplaceholderへ分け、掴んだnodeと表示中子孫をLazyColumn本体から除外します。placeholderのindexは「drag中nodeを除外した移動先兄弟リスト上の挿入位置」です。
 - `TagManagementRow` のdrag placeholder表示 / `TagDragPreview`: 挿入候補位置に同じ高さのplaceholderを表示し、overlayは縦方向だけ指に追従します。overlayの横位置と横幅はドラッグ開始時の行位置に固定します。
@@ -63,6 +64,7 @@
 
 投稿カード、投稿者クリック領域、いいね数表示、分類確定、タグchip、タグ管理row、操作menu、名称変更menu、移動menu、削除menu、一括追加menu、group展開、root追加button、タグ/グループ削除DialogにはIDを含む安定した `testTag` を付けています。Compose E2Eは表示テキストだけに依存せず、操作後のRoom状態もassertします。タグ管理では、operation menuからのタグ名称変更、グループ名称変更、名称変更Dialogキャンセル、タグの別グループ移動、タグ/グループ移動Dialogキャンセル、別タグへの一括追加Dialogキャンセル、タグ/グループ削除DialogのキャンセルをRoom状態で確認します。
 検索/絞り込みDialogには、日付条件、投稿者条件、タグ条件、キャンセル、変更破棄、Dialog内全クリア確認を実機E2Eから安定して操作するため、`filter_options_list`、`filter_start_date`、`filter_end_date`、`filter_date_clear`、`filter_date_picker_apply`、`filter_date_picker_clear`、`filter_author_open`、`filter_author_option_<authorId>_<username>`、`filter_author_confirm`、`filter_author_clear`、`filter_tag_condition_<type>_<id>`、`filter_tag_clear`、`filter_cancel`、`filter_discard_*`、`filter_clear_all_*` を付けています。
+並び替えDialogには、`sort_open`、`sort_dialog`、`sort_options_list`、`sort_clear_all_open`、`sort_tag_toggle`、`sort_user_toggle`、`sort_base_like`、`sort_base_date`、`sort_apply`、`sort_cancel` などを付け、分類済み画面の表示順をUIテストから安定して切り替えられるようにしています。
 メディアグリッドと全画面画像viewerには、保存済みPhotoのタップと閉じる操作をスクリーンショットなしで検証するため、`media_asset_<assetId>`、`image_viewer`、`image_viewer_close`、`image_viewer_position`、`image_viewer_photo_<index>` を付けています。
 
 投稿カードのローカル削除導線には `clip_local_delete_open_<clipId>`、確認Dialogには `clip_local_delete_dialog_<clipId>`、実行/キャンセルには `clip_local_delete_confirm_<clipId>` / `clip_local_delete_cancel_<clipId>` を付け、E2Eで文言ではなく対象clip IDに紐づけて操作できます。
@@ -88,3 +90,5 @@
 ## 2026-07-06 Update
 
 - `EnhancedMediaGrid` now uses wider `16dp` side padding so the in-card image grid reads slightly smaller and matches the main feed image grid.
+- 分類済み画面に view-state の並び替えを追加し、保存順・タグ順・ユーザー件数順・いいね数順・投稿時間順をフィルタ後に切り替えられるようにした。
+- 並び替え条件の要約を分類済み画面の概要行へ出し、Dialog の apply / clear / cancel を UI テストで固定した。
