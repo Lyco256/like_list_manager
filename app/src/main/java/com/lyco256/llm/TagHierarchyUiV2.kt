@@ -636,7 +636,7 @@ private fun EnhancedTweetCard(
                                     if (clip.clip.hasProvisionalLikeCount()) {
                                         Icon(
                                             Icons.Filled.ErrorOutline,
-                                            contentDescription = "??????????",
+                                            contentDescription = "一時的ないいね数",
                                             modifier = Modifier.size(14.dp),
                                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
@@ -650,12 +650,12 @@ private fun EnhancedTweetCard(
                                     DropdownMenuItem(
                                         text = {
                                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                Text("???????: ${String.format(Locale.JAPAN, "%,d", likeCount)}")
-                                                Text("??????? ${formatLikeFetchedAt(clip.clip.likeCountFetchedAt)}", style = MaterialTheme.typography.bodySmall)
+                                                Text("いいね数: ${String.format(Locale.JAPAN, "%,d", likeCount)}")
+                                                Text("取得日時: ${formatLikeFetchedAt(clip.clip.likeCountFetchedAt)}", style = MaterialTheme.typography.bodySmall)
                                                 if (clip.clip.likeCountFetchError != null) {
-                                                    Text("???????? ${clip.clip.likeCountFetchError}", style = MaterialTheme.typography.bodySmall)
+                                                    Text("取得エラー: ${clip.clip.likeCountFetchError}", style = MaterialTheme.typography.bodySmall)
                                                 } else if (clip.clip.hasProvisionalLikeCount()) {
-                                                    Text("???????????????????????????????", style = MaterialTheme.typography.bodySmall)
+                                                    Text("一時的に取得した値の可能性があります", style = MaterialTheme.typography.bodySmall)
                                                 }
                                             }
                                         },
@@ -701,7 +701,7 @@ private fun EnhancedTweetCard(
                 ) {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_x_logo),
-                        contentDescription = "X???",
+                        contentDescription = "Xで開く",
                         tint = Color.Unspecified,
                         modifier = Modifier.size(28.dp),
                     )
@@ -725,7 +725,7 @@ private fun EnhancedTweetCard(
                     onSummaryChange(clip.clip, it)
                 },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("??") },
+                label = { Text("概要") },
                 minLines = 1,
                 maxLines = 3,
             )
@@ -756,7 +756,7 @@ private fun EnhancedTweetCard(
                         enabled = hierarchy.tags.isNotEmpty() && selectedTagIds.isNotEmpty(),
                         modifier = Modifier.testTag("classify_${clip.clip.id}"),
                     ) {
-                        Text("???????")
+                        Text("タグを付ける")
                     }
                 }
             }

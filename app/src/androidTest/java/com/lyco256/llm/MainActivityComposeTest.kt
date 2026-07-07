@@ -1,4 +1,4 @@
-package com.lyco256.llm
+﻿package com.lyco256.llm
 
 import android.graphics.Bitmap
 import android.os.SystemClock
@@ -70,7 +70,7 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("tags_screen").assertIsDisplayed()
         openSettingsScreen()
         composeRule.onNodeWithTag("settings_screen").assertIsDisplayed()
-        composeRule.onNodeWithText("設定").assertIsDisplayed()
+        composeRule.onNodeWithText("險ｭ螳・).assertIsDisplayed()
     }
 
     @Test
@@ -89,7 +89,7 @@ class MainActivityComposeTest {
         assertSettingsSectionVisible("settings_usage_section")
         assertSettingsSectionVisible("settings_data_management_section")
         composeRule.waitUntil(10_000) {
-            composeRule.onAllNodesWithText("保存件数: 3").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText("菫晏ｭ倅ｻｶ謨ｰ: 3").fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.activityRule.scenario.onActivity { activity ->
             activity.onBackPressedDispatcher.onBackPressed()
@@ -131,13 +131,13 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("filter_open").performClick()
         composeRule.onNodeWithTag("filter_query").performTextReplacement("RecreateFilterNeedle")
         composeRule.onNodeWithTag("filter_apply").performClick()
-        composeRule.onNodeWithText("文字列:\"RecreateFilterNeedle\"", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("譁・ｭ怜・:\"RecreateFilterNeedle\"", substring = true).assertIsDisplayed()
         composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
 
         composeRule.activityRule.scenario.recreate()
 
         composeRule.onNodeWithTag("classified_screen").assertIsDisplayed()
-        composeRule.onNodeWithText("文字列:\"RecreateFilterNeedle\"", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("譁・ｭ怜・:\"RecreateFilterNeedle\"", substring = true).assertIsDisplayed()
         composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
     }
 
@@ -161,17 +161,17 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("sort_base_like").performClick()
         composeRule.onNodeWithTag("sort_like_direction_high").performClick()
         composeRule.onNodeWithTag("sort_apply").performClick()
-        composeRule.onNodeWithText("並び:いいね多い順", substring = true).assertExists()
+        composeRule.onNodeWithText("荳ｦ縺ｳ:縺・＞縺ｭ螟壹＞鬆・, substring = true).assertExists()
     }
 
     @Test
     fun usageAndSettingsSafetyControlsReflectTheIsolatedEnvironment() {
         openSettingsScreen()
         assertSettingsSectionVisible("settings_usage_section")
-        assertSettingsTextVisible("今月のAPI使用量: 0 / 2000")
-        assertSettingsTextVisible("15分rate limit: 未取得")
-        assertTrue(composeRule.onAllNodesWithText("警告ライン").fetchSemanticsNodes().isEmpty())
-        assertTrue(composeRule.onAllNodesWithText("停止ライン").fetchSemanticsNodes().isEmpty())
+        assertSettingsTextVisible("莉頑怦縺ｮAPI菴ｿ逕ｨ驥・ 0 / 2000")
+        assertSettingsTextVisible("15蛻・ate limit: 譛ｪ蜿門ｾ・)
+        assertTrue(composeRule.onAllNodesWithText("隴ｦ蜻翫Λ繧､繝ｳ").fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithText("蛛懈ｭ｢繝ｩ繧､繝ｳ").fetchSemanticsNodes().isEmpty())
         assertSettingsSectionVisible("settings_x_api_section")
         composeRule.onNodeWithTag("settings_login_logout").assertIsNotEnabled()
         composeRule.onNodeWithTag("settings_client_id_input").performTextInput("test-client-id")
@@ -187,22 +187,22 @@ class MainActivityComposeTest {
 
         assertSettingsSectionVisible("settings_data_management_section")
         composeRule.waitUntil(10_000) {
-            composeRule.onAllNodesWithText("保存件数: 3").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText("菫晏ｭ倅ｻｶ謨ｰ: 3").fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.waitUntil(10_000) {
             composeRule.onAllNodesWithTag("settings_storage_usage_progress").fetchSemanticsNodes().isNotEmpty()
         }
 
-        assertSettingsTextVisible("保存件数: 3")
-        composeRule.onNodeWithText("画像枚数:", substring = true).assertIsDisplayed()
-        assertSettingsTextVisible("保存先の使用状況")
-        assertSettingsTextVisible("他のデータ")
-        assertSettingsTextVisible("アプリデータ")
-        assertSettingsTextVisible("空き容量")
-        assertTrue(composeRule.onAllNodesWithText("ツイートデータ容量", substring = true).fetchSemanticsNodes().isEmpty())
-        assertTrue(composeRule.onAllNodesWithText("現在の保存場所", substring = true).fetchSemanticsNodes().isEmpty())
-        assertTrue(composeRule.onAllNodesWithText("保存場所候補", substring = true).fetchSemanticsNodes().isEmpty())
-        assertTrue(composeRule.onAllNodesWithText("移動可能:", substring = true).fetchSemanticsNodes().isEmpty())
+        assertSettingsTextVisible("菫晏ｭ倅ｻｶ謨ｰ: 3")
+        composeRule.onNodeWithText("逕ｻ蜒乗椢謨ｰ:", substring = true).assertIsDisplayed()
+        assertSettingsTextVisible("菫晏ｭ伜・縺ｮ菴ｿ逕ｨ迥ｶ豕・)
+        assertSettingsTextVisible("莉悶・繝・・繧ｿ")
+        assertSettingsTextVisible("繧｢繝励Μ繝・・繧ｿ")
+        assertSettingsTextVisible("遨ｺ縺榊ｮｹ驥・)
+        assertTrue(composeRule.onAllNodesWithText("繝・う繝ｼ繝医ョ繝ｼ繧ｿ螳ｹ驥・, substring = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithText("迴ｾ蝨ｨ縺ｮ菫晏ｭ伜ｴ謇", substring = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithText("菫晏ｭ伜ｴ謇蛟呵｣・, substring = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithText("遘ｻ蜍募庄閭ｽ:", substring = true).fetchSemanticsNodes().isEmpty())
     }
 
     @Test
@@ -266,7 +266,7 @@ class MainActivityComposeTest {
         openSettingsScreen()
         composeRule.onNodeWithTag("settings_like_refresh").performClick()
         composeRule.waitUntil(10_000) {
-            composeRule.onAllNodesWithText("いいね数を更新しますか？").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText("縺・＞縺ｭ謨ｰ繧呈峩譁ｰ縺励∪縺吶°・・).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithTag("settings_like_refresh_cancel").performClick()
         composeRule.onNodeWithTag("settings_screen").assertIsDisplayed()
@@ -290,37 +290,37 @@ class MainActivityComposeTest {
         val before = databaseFingerprint()
 
         composeRule.onNodeWithTag("tab_classified").performClick()
-        waitForText("一致件数:1件")
+        waitForText("荳閾ｴ莉ｶ謨ｰ:1莉ｶ")
         composeRule.onNodeWithTag("filter_open").performClick()
         composeRule.onNodeWithTag("filter_query").performTextReplacement("FilterNeedle")
         composeRule.onNodeWithTag("filter_apply").performClick()
-        composeRule.onNodeWithText("文字列:\"FilterNeedle\"", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("譁・ｭ怜・:\"FilterNeedle\"", substring = true).assertIsDisplayed()
         composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
 
         composeRule.onNodeWithTag("filter_open").performClick()
         composeRule.onNodeWithTag("filter_query").performTextReplacement("discarded-query")
         composeRule.onNodeWithTag("filter_cancel").performClick()
-        composeRule.onNodeWithText("変更を破棄しますか？").assertIsDisplayed()
+        composeRule.onNodeWithText("螟画峩繧堤ｴ譽・＠縺ｾ縺吶°・・).assertIsDisplayed()
         composeRule.onNodeWithTag("filter_discard_confirm").performClick()
-        composeRule.onNodeWithText("文字列:\"FilterNeedle\"", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("譁・ｭ怜・:\"FilterNeedle\"", substring = true).assertIsDisplayed()
 
         composeRule.onNodeWithTag("filter_open").performClick()
         composeRule.onNodeWithTag("filter_query").performTextReplacement("back-discarded-query")
         requestDiscardConfirmationWithBack()
-        composeRule.onNodeWithText("変更を破棄しますか？").assertIsDisplayed()
+        composeRule.onNodeWithText("螟画峩繧堤ｴ譽・＠縺ｾ縺吶°・・).assertIsDisplayed()
         composeRule.onNodeWithTag("filter_discard_confirm").performClick()
-        composeRule.onNodeWithText("文字列:\"FilterNeedle\"", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("譁・ｭ怜・:\"FilterNeedle\"", substring = true).assertIsDisplayed()
 
         composeRule.onNodeWithTag("filter_open").performClick()
         composeRule.onNodeWithTag("filter_clear_all_open").performClick()
         composeRule.onNodeWithTag("filter_clear_all_cancel").performClick()
         composeRule.onNodeWithTag("filter_apply").performClick()
-        composeRule.onNodeWithText("文字列:\"FilterNeedle\"", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("譁・ｭ怜・:\"FilterNeedle\"", substring = true).assertIsDisplayed()
 
         composeRule.onNodeWithTag("filter_clear").performClick()
-        composeRule.onNodeWithText("すべての条件をクリアしますか？").assertIsDisplayed()
+        composeRule.onNodeWithText("縺吶∋縺ｦ縺ｮ譚｡莉ｶ繧偵け繝ｪ繧｢縺励∪縺吶°・・).assertIsDisplayed()
         composeRule.onNodeWithTag("filter_clear_confirm").performClick()
-        composeRule.onNodeWithText("対象:タグ付きのみ、条件なし").assertIsDisplayed()
+        composeRule.onNodeWithText("蟇ｾ雎｡:繧ｿ繧ｰ莉倥″縺ｮ縺ｿ縲∵擅莉ｶ縺ｪ縺・).assertIsDisplayed()
         assertEquals(before, databaseFingerprint())
     }
 
@@ -427,7 +427,7 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("filter_tag_condition_tag_${fixture.wantedTagId}").performClick()
         composeRule.onNodeWithTag("filter_apply").performClick()
 
-        composeRule.onNodeWithText("タグ:含む[TagClearWanted]", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("繧ｿ繧ｰ:蜷ｫ繧[TagClearWanted]", substring = true).assertIsDisplayed()
         composeRule.onNodeWithTag("clip_card_${fixture.matchingClipId}").assertIsDisplayed()
         composeRule.waitUntil(10_000) {
             composeRule.onAllNodesWithTag("clip_card_${fixture.wrongAuthorClipId}").fetchSemanticsNodes().isEmpty()
@@ -439,7 +439,7 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("filter_tag_clear").performClick()
         composeRule.onNodeWithTag("filter_apply").performClick()
 
-        composeRule.onNodeWithText("対象:タグ付きのみ、条件なし").assertIsDisplayed()
+        composeRule.onNodeWithText("蟇ｾ雎｡:繧ｿ繧ｰ莉倥″縺ｮ縺ｿ縲∵擅莉ｶ縺ｪ縺・).assertIsDisplayed()
         composeRule.onNodeWithTag("clip_card_${fixture.matchingClipId}").assertIsDisplayed()
         composeRule.onNodeWithTag("clip_card_${fixture.wrongAuthorClipId}").assertIsDisplayed()
         assertTrue(composeRule.onAllNodesWithTag("clip_card_${fixture.untaggedClipId}").fetchSemanticsNodes().isEmpty())
@@ -561,8 +561,8 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("clip_author_${fixture.clickedClipId}").performClick()
 
         composeRule.onNodeWithTag("classified_screen").assertIsDisplayed()
-        composeRule.onNodeWithText("対象:全ツイート", substring = true).assertIsDisplayed()
-        composeRule.onNodeWithText("ユーザー:@quickfilter", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("蟇ｾ雎｡:蜈ｨ繝・う繝ｼ繝・, substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("繝ｦ繝ｼ繧ｶ繝ｼ:@quickfilter", substring = true).assertIsDisplayed()
         composeRule.onNodeWithTag("clip_card_${fixture.clickedClipId}").assertIsDisplayed()
         composeRule.onNodeWithTag("clip_card_${fixture.sameAuthorClipId}").assertIsDisplayed()
         composeRule.waitUntil(10_000) {
@@ -598,7 +598,11 @@ class MainActivityComposeTest {
         val before = databaseFingerprint()
 
         composeRule.onNodeWithTag("clip_list").performScrollToNode(hasTestTag("clip_card_$clipId"))
+        composeRule.onNodeWithContentDescription("Xで開く", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("概要", substring = true).assertIsDisplayed()
         composeRule.onNodeWithTag("clip_like_count_$clipId", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithText("いいね数: 12,345", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("取得日時:", substring = true).assertIsDisplayed()
         composeRule.waitForIdle()
         assertEquals(before, databaseFingerprint())
     }
@@ -649,7 +653,7 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("filter_date_picker_apply").performClick()
         composeRule.onNodeWithTag("filter_apply").performClick()
 
-        composeRule.onNodeWithText("期間:${startDate.year}/${startDate.monthValue}/${startDate.dayOfMonth}~", substring = true)
+        composeRule.onNodeWithText("譛滄俣:${startDate.year}/${startDate.monthValue}/${startDate.dayOfMonth}~", substring = true)
             .assertIsDisplayed()
         composeRule.onNodeWithTag("clip_card_${fixture.matchingClipId}").assertIsDisplayed()
         composeRule.waitUntil(10_000) {
@@ -687,10 +691,12 @@ class MainActivityComposeTest {
     fun classifyingAndUnclassifyingUpdatesUiAndRoomTogether() {
         val clipId = waitForSeededClip()
         composeRule.onNodeWithTag("tab_tags").performClick()
-        val tagId = createRootTag("E2E分類タグ")
+        val tagId = createRootTag("E2E蛻・｡槭ち繧ｰ")
 
         composeRule.onNodeWithTag("tab_unclassified").performClick()
         composeRule.onNodeWithTag("clip_list").performScrollToNode(hasTestTag("clip_card_$clipId"))
+        composeRule.onNodeWithContentDescription("Xで開く", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("概要", substring = true).assertIsDisplayed()
         composeRule.onNode(
             hasTestTag("tag_chip_$tagId") and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
             useUnmergedTree = true,
@@ -698,8 +704,8 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("classify_$clipId").performClick()
         waitUntil { clipTagIds(clipId) == setOf(tagId) }
         composeRule.waitUntil(10_000) {
-            composeRule.onAllNodesWithText("未分類", substring = true).fetchSemanticsNodes().isNotEmpty() &&
-                composeRule.onAllNodesWithText("2件", substring = true).fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText("譛ｪ蛻・｡・, substring = true).fetchSemanticsNodes().isNotEmpty() &&
+                composeRule.onAllNodesWithText("2莉ｶ", substring = true).fetchSemanticsNodes().isNotEmpty()
         }
 
         composeRule.onNodeWithTag("tab_classified").performClick()
@@ -712,8 +718,8 @@ class MainActivityComposeTest {
 
         composeRule.onNodeWithTag("tab_unclassified").performClick()
         composeRule.waitUntil(10_000) {
-            composeRule.onAllNodesWithText("未分類", substring = true).fetchSemanticsNodes().isNotEmpty() &&
-                composeRule.onAllNodesWithText("3件", substring = true).fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText("譛ｪ蛻・｡・, substring = true).fetchSemanticsNodes().isNotEmpty() &&
+                composeRule.onAllNodesWithText("3莉ｶ", substring = true).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithTag("clip_list").performScrollToIndex(0)
         composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
@@ -737,14 +743,14 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("filter_query").performTextReplacement("ScrollFilterNeedle")
         composeRule.onNodeWithTag("filter_apply").performClick()
         composeRule.waitUntil(10_000) {
-            composeRule.onAllNodesWithText("一致件数:24件").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText("荳閾ｴ莉ｶ謨ｰ:24莉ｶ").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("文字列:\"ScrollFilterNeedle\"", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("譁・ｭ怜・:\"ScrollFilterNeedle\"", substring = true).assertIsDisplayed()
 
         composeRule.onNodeWithTag("clip_list").performScrollToIndex(10)
         composeRule.onNodeWithTag("scroll_to_top").performClick()
         composeRule.onNodeWithTag("clip_list").performScrollToNode(hasTestTag("clip_card_${clipIds.last()}"))
-        composeRule.onNodeWithText("文字列:\"ScrollFilterNeedle\"", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("譁・ｭ怜・:\"ScrollFilterNeedle\"", substring = true).assertIsDisplayed()
         composeRule.onNodeWithTag("clip_card_${clipIds.last()}").assertIsDisplayed()
 
         assertEquals(before, databaseFingerprint())
@@ -754,7 +760,7 @@ class MainActivityComposeTest {
     fun pendingTagSelectionSurvivesListScrollUntilClassification() {
         val clipId = waitForSeededClip()
         composeRule.onNodeWithTag("tab_tags").performClick()
-        val tagId = createRootTag("Scroll保持タグ")
+        val tagId = createRootTag("Scroll菫晄戟繧ｿ繧ｰ")
 
         composeRule.onNodeWithTag("tab_unclassified").performClick()
         composeRule.onNode(
@@ -767,6 +773,8 @@ class MainActivityComposeTest {
 
         composeRule.onNodeWithTag("clip_list").performScrollToIndex(10)
         composeRule.onNodeWithTag("clip_list").performScrollToNode(hasTestTag("clip_card_$clipId"))
+        composeRule.onNodeWithContentDescription("Xで開く", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("概要", substring = true).assertIsDisplayed()
         composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
         composeRule.onNodeWithTag("classify_$clipId").performClick()
 
@@ -780,10 +788,10 @@ class MainActivityComposeTest {
     fun classifyingWithTwoSameNamedChildTagsPersistsBothTagRelations() {
         val clipId = waitForSeededClip()
         composeRule.onNodeWithTag("tab_tags").performClick()
-        val firstGroup = createRootGroup("複合付与グループA")
-        val secondGroup = createRootGroup("複合付与グループB")
-        val firstTag = createChildTag(firstGroup, "同名の子タグ")
-        val secondTag = createChildTag(secondGroup, "同名の子タグ")
+        val firstGroup = createRootGroup("隍・粋莉倅ｸ弱げ繝ｫ繝ｼ繝輸")
+        val secondGroup = createRootGroup("隍・粋莉倅ｸ弱げ繝ｫ繝ｼ繝唯")
+        val firstTag = createChildTag(firstGroup, "蜷悟錐縺ｮ蟄舌ち繧ｰ")
+        val secondTag = createChildTag(secondGroup, "蜷悟錐縺ｮ蟄舌ち繧ｰ")
 
         composeRule.onNodeWithTag("tab_unclassified").performClick()
         composeRule.onNode(
@@ -839,18 +847,23 @@ class MainActivityComposeTest {
         }
 
         composeRule.onNodeWithTag("clip_list").performScrollToNode(hasTestTag("clip_card_$clipId"))
+        composeRule.onNodeWithContentDescription("Xで開く", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("概要", substring = true).assertIsDisplayed()
         composeRule.onNodeWithTag("tweet_options_button_$clipId", useUnmergedTree = true).performClick()
         composeRule.waitUntil(10_000) {
             composeRule.onAllNodesWithTag("tweet_options_local_delete").fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithTag("tweet_options_local_delete").performClick()
         composeRule.onNodeWithTag("clip_local_delete_dialog_$clipId").assertIsDisplayed()
-        composeRule.onNodeWithText("このツイートをアプリ内の一覧から削除します", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("投稿を削除", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("この投稿をアプリから削除します。X上の投稿は削除されません。", substring = true).assertIsDisplayed()
         composeRule.onNodeWithTag("clip_local_delete_cancel_$clipId").performClick()
         composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
         assertTrue(activeClipIds().contains(clipId))
 
         composeRule.onNodeWithTag("clip_list").performScrollToNode(hasTestTag("clip_card_$clipId"))
+        composeRule.onNodeWithContentDescription("Xで開く", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("概要", substring = true).assertIsDisplayed()
         composeRule.onNodeWithTag("tweet_options_button_$clipId", useUnmergedTree = true).performClick()
         composeRule.waitUntil(10_000) {
             composeRule.onAllNodesWithTag("tweet_options_local_delete").fetchSemanticsNodes().isNotEmpty()
@@ -870,7 +883,7 @@ class MainActivityComposeTest {
     @Test
     fun summaryEditPersistsToDatabaseAndSurvivesActivityRecreation() {
         val clipId = waitForSeededClip()
-        val summary = "E2E永続概要"
+        val summary = "E2E豌ｸ邯壽ｦりｦ・
 
         composeRule.onNode(
             hasSetTextAction() and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
@@ -1005,30 +1018,30 @@ class MainActivityComposeTest {
     @Test
     fun tagManagementCreatesSameNamedChildrenThenRenamesAndDeletes() {
         composeRule.onNodeWithTag("tab_tags").performClick()
-        val firstGroup = createRootGroup("E2EグループA")
-        val secondGroup = createRootGroup("E2EグループB")
+        val firstGroup = createRootGroup("E2E繧ｰ繝ｫ繝ｼ繝輸")
+        val secondGroup = createRootGroup("E2E繧ｰ繝ｫ繝ｼ繝唯")
         composeRule.onNodeWithTag("tag_rename_open_group_$secondGroup").performClick()
-        composeRule.onNodeWithTag("rename_node_name").performTextReplacement("E2E変更後グループ")
+        composeRule.onNodeWithTag("rename_node_name").performTextReplacement("E2E螟画峩蠕後げ繝ｫ繝ｼ繝・)
         composeRule.onNodeWithTag("rename_node_save").performClick()
-        waitUntil { groupsNamed("E2E変更後グループ") == 1 && groupsNamed("E2EグループB") == 0 }
+        waitUntil { groupsNamed("E2E螟画峩蠕後げ繝ｫ繝ｼ繝・) == 1 && groupsNamed("E2E繧ｰ繝ｫ繝ｼ繝唯") == 0 }
         assertTrue(groupExists(secondGroup))
 
-        val firstTag = createChildTag(firstGroup, "共有タグ")
-        createChildTag(secondGroup, "共有タグ")
-        assertEquals(2, tagsNamed("共有タグ"))
+        val firstTag = createChildTag(firstGroup, "蜈ｱ譛峨ち繧ｰ")
+        createChildTag(secondGroup, "蜈ｱ譛峨ち繧ｰ")
+        assertEquals(2, tagsNamed("蜈ｱ譛峨ち繧ｰ"))
 
         composeRule.onNodeWithTag("tag_expand_group_$firstGroup").performClick()
         composeRule.onNodeWithTag("tag_rename_open_tag_$firstTag").performClick()
-        composeRule.onNodeWithTag("rename_node_name").performTextReplacement("変更後タグ")
+        composeRule.onNodeWithTag("rename_node_name").performTextReplacement("螟画峩蠕後ち繧ｰ")
         composeRule.onNodeWithTag("rename_node_save").performClick()
-        waitUntil { tagsNamed("変更後タグ") == 1 }
+        waitUntil { tagsNamed("螟画峩蠕後ち繧ｰ") == 1 }
 
         composeRule.onNodeWithTag("tag_delete_open_tag_$firstTag").performClick()
-        composeRule.onNodeWithText("削除").performClick()
+        composeRule.onNodeWithText("蜑企勁").performClick()
         waitUntil { !tagExists(firstTag) }
 
         composeRule.onNodeWithTag("tag_delete_open_group_$firstGroup").performClick()
-        composeRule.onNodeWithText("削除").performClick()
+        composeRule.onNodeWithText("蜑企勁").performClick()
         waitUntil { !groupExists(firstGroup) }
         assertTrue(groupExists(secondGroup))
     }
@@ -1072,10 +1085,10 @@ class MainActivityComposeTest {
         assertPaletteRow("color_palette_row_0", listOf("color_palette_standard", "color_palette_red", "color_palette_orange", "color_palette_yellow", "color_palette_green", "color_palette_cyan"))
         assertPaletteRow("color_palette_row_1", listOf("color_palette_blue", "color_palette_purple", "color_palette_pink", "color_palette_white", "color_palette_brown", "color_palette_skin"))
         composeRule.onNodeWithTag("color_palette_red").performClick()
-        composeRule.onNodeWithTag("create_node_name").performTextInput("E2E色タグ")
+        composeRule.onNodeWithTag("create_node_name").performTextInput("E2E濶ｲ繧ｿ繧ｰ")
         composeRule.onNodeWithTag("create_node_confirm").performClick()
 
-        val tagId = tagIdByName("E2E色タグ")
+        val tagId = tagIdByName("E2E濶ｲ繧ｿ繧ｰ")
         waitUntil { tagColorId(tagId) == TagColorId.RED.id }
 
         composeRule.onNodeWithTag("tag_rename_open_tag_$tagId").performClick()
@@ -1101,11 +1114,11 @@ class MainActivityComposeTest {
         val before = databaseFingerprint()
 
         composeRule.onNodeWithTag("create_root_tag").performClick()
-        composeRule.onNodeWithTag("create_node_name").performTextInput("キャンセル作成タグ")
+        composeRule.onNodeWithTag("create_node_name").performTextInput("繧ｭ繝｣繝ｳ繧ｻ繝ｫ菴懈・繧ｿ繧ｰ")
         composeRule.onNodeWithTag("create_node_cancel").performClick()
 
-        waitUntil { tagsNamed("キャンセル作成タグ") == 0 }
-        assertEquals(0, tagsNamed("キャンセル作成タグ"))
+        waitUntil { tagsNamed("繧ｭ繝｣繝ｳ繧ｻ繝ｫ菴懈・繧ｿ繧ｰ") == 0 }
+        assertEquals(0, tagsNamed("繧ｭ繝｣繝ｳ繧ｻ繝ｫ菴懈・繧ｿ繧ｰ"))
         assertEquals(before, databaseFingerprint())
     }
 
@@ -1115,34 +1128,34 @@ class MainActivityComposeTest {
         val before = databaseFingerprint()
 
         composeRule.onNodeWithTag("create_root_group").performClick()
-        composeRule.onNodeWithTag("create_node_name").performTextInput("キャンセル作成グループ")
+        composeRule.onNodeWithTag("create_node_name").performTextInput("繧ｭ繝｣繝ｳ繧ｻ繝ｫ菴懈・繧ｰ繝ｫ繝ｼ繝・)
         composeRule.onNodeWithTag("create_node_cancel").performClick()
 
-        waitUntil { groupsNamed("キャンセル作成グループ") == 0 }
-        assertEquals(0, groupsNamed("キャンセル作成グループ"))
+        waitUntil { groupsNamed("繧ｭ繝｣繝ｳ繧ｻ繝ｫ菴懈・繧ｰ繝ｫ繝ｼ繝・) == 0 }
+        assertEquals(0, groupsNamed("繧ｭ繝｣繝ｳ繧ｻ繝ｫ菴懈・繧ｰ繝ｫ繝ｼ繝・))
         assertEquals(before, databaseFingerprint())
     }
 
     @Test
     fun renameDialogCancelKeepsTagAndGroupNames() {
         composeRule.onNodeWithTag("tab_tags").performClick()
-        val groupId = createRootGroup("名称キャンセルグループ")
-        val tagId = createChildTag(groupId, "名称キャンセルタグ")
+        val groupId = createRootGroup("蜷咲ｧｰ繧ｭ繝｣繝ｳ繧ｻ繝ｫ繧ｰ繝ｫ繝ｼ繝・)
+        val tagId = createChildTag(groupId, "蜷咲ｧｰ繧ｭ繝｣繝ｳ繧ｻ繝ｫ繧ｿ繧ｰ")
         val before = databaseFingerprint()
 
         composeRule.onNodeWithTag("tag_rename_open_group_$groupId").performClick()
-        composeRule.onNodeWithTag("rename_node_name").performTextReplacement("変更されないグループ")
+        composeRule.onNodeWithTag("rename_node_name").performTextReplacement("螟画峩縺輔ｌ縺ｪ縺・げ繝ｫ繝ｼ繝・)
         composeRule.onNodeWithTag("rename_node_cancel").performClick()
 
         composeRule.onNodeWithTag("tag_expand_group_$groupId").performClick()
         composeRule.onNodeWithTag("tag_rename_open_tag_$tagId").performClick()
-        composeRule.onNodeWithTag("rename_node_name").performTextReplacement("変更されないタグ")
+        composeRule.onNodeWithTag("rename_node_name").performTextReplacement("螟画峩縺輔ｌ縺ｪ縺・ち繧ｰ")
         composeRule.onNodeWithTag("rename_node_cancel").performClick()
 
-        assertEquals(1, groupsNamed("名称キャンセルグループ"))
-        assertEquals(0, groupsNamed("変更されないグループ"))
-        assertEquals(1, tagsNamed("名称キャンセルタグ"))
-        assertEquals(0, tagsNamed("変更されないタグ"))
+        assertEquals(1, groupsNamed("蜷咲ｧｰ繧ｭ繝｣繝ｳ繧ｻ繝ｫ繧ｰ繝ｫ繝ｼ繝・))
+        assertEquals(0, groupsNamed("螟画峩縺輔ｌ縺ｪ縺・げ繝ｫ繝ｼ繝・))
+        assertEquals(1, tagsNamed("蜷咲ｧｰ繧ｭ繝｣繝ｳ繧ｻ繝ｫ繧ｿ繧ｰ"))
+        assertEquals(0, tagsNamed("螟画峩縺輔ｌ縺ｪ縺・ち繧ｰ"))
         assertEquals(before, databaseFingerprint())
     }
 
@@ -1150,7 +1163,7 @@ class MainActivityComposeTest {
     fun tagDeleteDialogCancelKeepsTagAndRelations() {
         val clipId = waitForSeededClip()
         composeRule.onNodeWithTag("tab_tags").performClick()
-        val tagId = createRootTag("削除キャンセルタグ")
+        val tagId = createRootTag("蜑企勁繧ｭ繝｣繝ｳ繧ｻ繝ｫ繧ｿ繧ｰ")
 
         composeRule.onNodeWithTag("tab_unclassified").performClick()
         composeRule.onNode(
@@ -1163,7 +1176,7 @@ class MainActivityComposeTest {
 
         composeRule.onNodeWithTag("tab_tags").performClick()
         composeRule.onNodeWithTag("tag_delete_open_tag_$tagId").performClick()
-        composeRule.onNodeWithText("「削除キャンセルタグ」の割り当ても外れます。").assertIsDisplayed()
+        composeRule.onNodeWithText("縲悟炎髯､繧ｭ繝｣繝ｳ繧ｻ繝ｫ繧ｿ繧ｰ縲阪・蜑ｲ繧雁ｽ薙※繧ょ､悶ｌ縺ｾ縺吶・).assertIsDisplayed()
         composeRule.onNodeWithTag("tag_delete_cancel_tag_$tagId").performClick()
 
         composeRule.onNodeWithTag("tag_row_tag_$tagId").assertIsDisplayed()
@@ -1175,7 +1188,7 @@ class MainActivityComposeTest {
     @Test
     fun groupDeleteDialogCancelKeepsGroup() {
         composeRule.onNodeWithTag("tab_tags").performClick()
-        val groupId = createRootGroup("削除キャンセルグループ")
+        val groupId = createRootGroup("蜑企勁繧ｭ繝｣繝ｳ繧ｻ繝ｫ繧ｰ繝ｫ繝ｼ繝・)
         val before = databaseFingerprint()
 
         composeRule.onNodeWithTag("tag_delete_open_group_$groupId").performClick()
@@ -1183,7 +1196,7 @@ class MainActivityComposeTest {
 
         composeRule.onNodeWithTag("tag_row_group_$groupId").assertIsDisplayed()
         assertTrue(groupExists(groupId))
-        assertEquals(1, groupsNamed("削除キャンセルグループ"))
+        assertEquals(1, groupsNamed("蜑企勁繧ｭ繝｣繝ｳ繧ｻ繝ｫ繧ｰ繝ｫ繝ｼ繝・))
         assertEquals(before, databaseFingerprint())
     }
 
@@ -1191,9 +1204,9 @@ class MainActivityComposeTest {
     @Test
     fun tagManagementMovesTagToAnotherGroupThroughDialog() {
         composeRule.onNodeWithTag("tab_tags").performClick()
-        val sourceGroup = createRootGroup("E2E移動元グループ")
-        val targetGroup = createRootGroup("E2E移動先グループ")
-        val movedTag = createChildTag(sourceGroup, "E2E移動タグ")
+        val sourceGroup = createRootGroup("E2E遘ｻ蜍募・繧ｰ繝ｫ繝ｼ繝・)
+        val targetGroup = createRootGroup("E2E遘ｻ蜍募・繧ｰ繝ｫ繝ｼ繝・)
+        val movedTag = createChildTag(sourceGroup, "E2E遘ｻ蜍輔ち繧ｰ")
         waitUntil { tagParentGroupId(movedTag) == sourceGroup }
 
         composeRule.onNodeWithTag("tag_expand_group_$sourceGroup").performClick()
@@ -1209,16 +1222,16 @@ class MainActivityComposeTest {
     @Test
     fun tagMoveDialogCancelKeepsParentGroup() {
         composeRule.onNodeWithTag("tab_tags").performClick()
-        val sourceGroup = createRootGroup("移動キャンセル元")
-        createRootGroup("移動キャンセル先")
-        val tagId = createChildTag(sourceGroup, "移動キャンセルタグ")
+        val sourceGroup = createRootGroup("遘ｻ蜍輔く繝｣繝ｳ繧ｻ繝ｫ蜈・)
+        createRootGroup("遘ｻ蜍輔く繝｣繝ｳ繧ｻ繝ｫ蜈・)
+        val tagId = createChildTag(sourceGroup, "遘ｻ蜍輔く繝｣繝ｳ繧ｻ繝ｫ繧ｿ繧ｰ")
         waitUntil { tagParentGroupId(tagId) == sourceGroup }
         val before = databaseFingerprint()
 
         composeRule.onNodeWithTag("tag_expand_group_$sourceGroup").performClick()
         composeRule.onNodeWithTag("tag_operation_tag_$tagId").performClick()
         composeRule.onNodeWithTag("tag_move_open_tag_$tagId").performClick()
-        composeRule.onNodeWithText("「移動キャンセルタグ」を移動").assertIsDisplayed()
+        composeRule.onNodeWithText("縲檎ｧｻ蜍輔く繝｣繝ｳ繧ｻ繝ｫ繧ｿ繧ｰ縲阪ｒ遘ｻ蜍・).assertIsDisplayed()
         composeRule.onNodeWithTag("move_node_cancel").performClick()
 
         composeRule.onNodeWithTag("tag_row_tag_$tagId").assertIsDisplayed()
@@ -1230,8 +1243,8 @@ class MainActivityComposeTest {
     @Test
     fun groupMoveDialogCancelKeepsParentGroup() {
         composeRule.onNodeWithTag("tab_tags").performClick()
-        val sourceGroup = createRootGroup("グループ移動キャンセル元")
-        createRootGroup("グループ移動キャンセル先")
+        val sourceGroup = createRootGroup("繧ｰ繝ｫ繝ｼ繝礼ｧｻ蜍輔く繝｣繝ｳ繧ｻ繝ｫ蜈・)
+        createRootGroup("繧ｰ繝ｫ繝ｼ繝礼ｧｻ蜍輔く繝｣繝ｳ繧ｻ繝ｫ蜈・)
         waitUntil { groupParentGroupId(sourceGroup) == null }
         val before = databaseFingerprint()
 
@@ -1248,8 +1261,8 @@ class MainActivityComposeTest {
     fun addAllTagsDialogAddsTargetTagToSourceTaggedClips() {
         val clipId = waitForSeededClip()
         composeRule.onNodeWithTag("tab_tags").performClick()
-        val sourceTag = createRootTag("一括追加元タグ")
-        val targetTag = createRootTag("一括追加先タグ")
+        val sourceTag = createRootTag("荳諡ｬ霑ｽ蜉蜈・ち繧ｰ")
+        val targetTag = createRootTag("荳諡ｬ霑ｽ蜉蜈医ち繧ｰ")
 
         composeRule.onNodeWithTag("tab_unclassified").performClick()
         composeRule.onNode(
@@ -1261,7 +1274,7 @@ class MainActivityComposeTest {
 
         composeRule.onNodeWithTag("tab_tags").performClick()
         composeRule.onNodeWithTag("tag_add_all_open_$sourceTag").performClick()
-        composeRule.onNodeWithText("「一括追加元タグ」の全ツイートに追加するタグを選びます。元のタグは残ります。").assertIsDisplayed()
+        composeRule.onNodeWithText("縲御ｸ諡ｬ霑ｽ蜉蜈・ち繧ｰ縲阪・蜈ｨ繝・う繝ｼ繝医↓霑ｽ蜉縺吶ｋ繧ｿ繧ｰ繧帝∈縺ｳ縺ｾ縺吶ょ・縺ｮ繧ｿ繧ｰ縺ｯ谿九ｊ縺ｾ縺吶・).assertIsDisplayed()
         composeRule.onNodeWithTag("add_all_target_tag_$targetTag").performClick()
 
         waitUntil { clipTagIds(clipId) == setOf(sourceTag, targetTag) }
@@ -1272,8 +1285,8 @@ class MainActivityComposeTest {
     fun addAllTagsDialogCancelKeepsRelations() {
         val clipId = waitForSeededClip()
         composeRule.onNodeWithTag("tab_tags").performClick()
-        val sourceTag = createRootTag("一括追加キャンセル元")
-        createRootTag("一括追加キャンセル先")
+        val sourceTag = createRootTag("荳諡ｬ霑ｽ蜉繧ｭ繝｣繝ｳ繧ｻ繝ｫ蜈・)
+        createRootTag("荳諡ｬ霑ｽ蜉繧ｭ繝｣繝ｳ繧ｻ繝ｫ蜈・)
 
         composeRule.onNodeWithTag("tab_unclassified").performClick()
         composeRule.onNode(
@@ -1296,18 +1309,18 @@ class MainActivityComposeTest {
     fun dismissingTagPopupOutsideDoesNotModifyOrPropagateToTheClip() {
         val clipId = waitForSeededClip()
         composeRule.onNodeWithTag("tab_tags").performClick()
-        val groupId = createRootGroup("ポップアップ検証")
-        createChildTag(groupId, "触れないタグ")
+        val groupId = createRootGroup("繝昴ャ繝励い繝・・讀懆ｨｼ")
+        createChildTag(groupId, "隗ｦ繧後↑縺・ち繧ｰ")
 
         composeRule.onNodeWithTag("tab_unclassified").performClick()
         composeRule.onNode(
             hasTestTag("tag_group_chip_$groupId") and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
             useUnmergedTree = true,
         ).performClick()
-        composeRule.onNodeWithText("タグを選択").assertIsDisplayed()
+        composeRule.onNodeWithText("繧ｿ繧ｰ繧帝∈謚・).assertIsDisplayed()
         tapOutsidePopup()
         composeRule.waitUntil(10_000) {
-            composeRule.onAllNodesWithText("タグを選択").fetchSemanticsNodes().isEmpty()
+            composeRule.onAllNodesWithText("繧ｿ繧ｰ繧帝∈謚・).fetchSemanticsNodes().isEmpty()
         }
         assertTrue(clipTagIds(clipId).isEmpty())
         composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
@@ -1320,9 +1333,9 @@ class MainActivityComposeTest {
 
         openSettingsScreen()
         composeRule.onNodeWithTag("settings_sync_now").performClick()
-        waitForText("同期")
-        composeRule.onNodeWithText("X API設定からXにログインしてください").assertIsDisplayed()
-        composeRule.onNodeWithText("閉じる").performClick()
+        waitForText("蜷梧悄")
+        composeRule.onNodeWithText("X API險ｭ螳壹°繧厩縺ｫ繝ｭ繧ｰ繧､繝ｳ縺励※縺上□縺輔＞").assertIsDisplayed()
+        composeRule.onNodeWithText("髢峨§繧・).performClick()
         composeRule.onNodeWithTag("settings_screen").assertIsDisplayed()
         composeRule.onNodeWithTag("settings_back").performClick()
         composeRule.onNodeWithTag("main_screen").assertIsDisplayed()
@@ -1335,9 +1348,9 @@ class MainActivityComposeTest {
             }
         }
         composeRule.waitUntil(10_000) {
-            composeRule.onAllNodesWithText("タグなしのツイートはありません").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText("繧ｿ繧ｰ縺ｪ縺励・繝・う繝ｼ繝医・縺ゅｊ縺ｾ縺帙ｓ").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("タグなしのツイートはありません").assertIsDisplayed()
+        composeRule.onNodeWithText("繧ｿ繧ｰ縺ｪ縺励・繝・う繝ｼ繝医・縺ゅｊ縺ｾ縺帙ｓ").assertIsDisplayed()
     }
 
     private fun createRootTag(name: String): Long {
@@ -1464,6 +1477,7 @@ class MainActivityComposeTest {
             .performClick()
         composeRule.onNodeWithTag("tweet_options_ocr").performClick()
         composeRule.onNodeWithTag("ocr_dialog").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Xで開く", useUnmergedTree = true).assertIsDisplayed()
         composeRule.waitUntil(10_000) {
             composeRule.onAllNodesWithText("Landscape OCR", substring = true).fetchSemanticsNodes().isNotEmpty()
         }
@@ -1574,7 +1588,7 @@ class MainActivityComposeTest {
 
     private fun requestDiscardConfirmationWithBack() {
         dismissBackHandledDialog()
-        val confirmationText = "変更を破棄しますか？"
+        val confirmationText = "螟画峩繧堤ｴ譽・＠縺ｾ縺吶°・・
         val shown = try {
             composeRule.waitUntil(1_000) {
                 composeRule.onAllNodesWithText(confirmationText).fetchSemanticsNodes().isNotEmpty()

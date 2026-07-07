@@ -1,4 +1,5 @@
 # `TagHierarchyUiV2.kt`
+Updated visible labels: `Xで開く`, `概要`, `いいね数`, `取得日時`, `取得エラー`, `タグを付ける`.
 
 投稿一覧のLazyColumnには、未構築項目へ実機UIテストから安全にスクロールできる `clip_list` test tagがあります。
 

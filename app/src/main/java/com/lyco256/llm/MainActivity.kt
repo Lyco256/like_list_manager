@@ -1271,7 +1271,7 @@ fun TweetCard(
                 ) {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_x_logo),
-                        contentDescription = "X???",
+                        contentDescription = "Xで開く",
                         tint = Color.Unspecified,
                         modifier = Modifier.size(28.dp),
                     )
@@ -1295,7 +1295,7 @@ fun TweetCard(
                     onSummaryChange(clip.clip, it)
                 },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("??") },
+                label = { Text("概要") },
                 minLines = 1,
                 maxLines = 3,
             )
@@ -1321,7 +1321,7 @@ fun TweetCard(
                         onClick = onTagConfirmation,
                         enabled = hierarchy.tags.isNotEmpty() && selectedTagIds.isNotEmpty(),
                     ) {
-                        Text("???????")
+                        Text("タグを付ける")
                     }
                 }
             }
@@ -1329,8 +1329,8 @@ fun TweetCard(
     }
     if (deleteOpen) {
         ConfirmDialog(
-            title = "??????",
-            message = "????????????????X?????????????????????????",
+            title = "投稿を削除",
+            message = "この投稿をアプリから削除します。X上の投稿は削除されません。",
             onDismiss = { deleteOpen = false },
             onConfirm = {
                 onDelete(clip.clip)
