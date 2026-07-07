@@ -36,4 +36,4 @@
 
 ## テスト分離
 
-`PostStorageConfig` でDB名、画像ディレクトリ、外部保存用ディレクトリ、保存先Preferences名を指定できます。通常値は従来と同一で、統合テストvariantだけ別名を使います。
+`PostStorageConfig` でDB名、画像ディレクトリ、外部保存用ディレクトリ、保存先Preferences名を指定できます。通常値は従来と同一で、統合テストvariantだけ別名を使います。DB生成時は `LikeListDatabase.MIGRATION_6_7` まで登録して、OCR列追加後の既存DBを安全に開けるようにしています。

@@ -13,3 +13,7 @@
 - `TEST_HARNESS` とtest applicationIdを必須化します。
 - 本番DB名や端末ファイルは使用しません。
 - テスト終了時にin-memory DBを閉じます。
+
+## 2026-07 OCR update
+
+- Populates OCR text on a subset of the large dataset to keep search and storage coverage realistic.

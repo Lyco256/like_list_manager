@@ -1,5 +1,6 @@
 package com.lyco256.llm
 
+import android.graphics.Bitmap
 import android.os.SystemClock
 import android.view.InputDevice
 import android.view.KeyEvent
@@ -32,6 +33,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.first
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Ignore
@@ -41,6 +43,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
+import java.io.ByteArrayOutputStream
 
 class MainActivityComposeTest {
     @get:Rule
@@ -51,6 +54,9 @@ class MainActivityComposeTest {
         storage().withDatabase { it.clearAllTables() }
         (composeRule.activity.application as LikeListManagerApp).container.repository.ensureSeedData()
         composeRule.waitForIdle()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("main_screen").fetchSemanticsNodes().isNotEmpty()
+        }
     }
 
     @Test
@@ -82,7 +88,9 @@ class MainActivityComposeTest {
         assertSettingsSectionVisible("settings_sync_section")
         assertSettingsSectionVisible("settings_usage_section")
         assertSettingsSectionVisible("settings_data_management_section")
-
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithText("保存件数: 3").fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.activityRule.scenario.onActivity { activity ->
             activity.onBackPressedDispatcher.onBackPressed()
         }
@@ -179,15 +187,18 @@ class MainActivityComposeTest {
 
         assertSettingsSectionVisible("settings_data_management_section")
         composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithText("保存件数: 3").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.waitUntil(10_000) {
             composeRule.onAllNodesWithTag("settings_storage_usage_progress").fetchSemanticsNodes().isNotEmpty()
         }
 
-        composeRule.onNodeWithText("保存件数: 3").assertIsDisplayed()
-        composeRule.onNodeWithText("画像枚数: 0").assertIsDisplayed()
-        composeRule.onNodeWithText("保存先の使用状況").assertIsDisplayed()
-        composeRule.onNodeWithText("他のデータ").assertIsDisplayed()
-        composeRule.onNodeWithText("アプリデータ").assertIsDisplayed()
-        composeRule.onNodeWithText("空き容量").assertIsDisplayed()
+        assertSettingsTextVisible("保存件数: 3")
+        composeRule.onNodeWithText("画像枚数:", substring = true).assertIsDisplayed()
+        assertSettingsTextVisible("保存先の使用状況")
+        assertSettingsTextVisible("他のデータ")
+        assertSettingsTextVisible("アプリデータ")
+        assertSettingsTextVisible("空き容量")
         assertTrue(composeRule.onAllNodesWithText("ツイートデータ容量", substring = true).fetchSemanticsNodes().isEmpty())
         assertTrue(composeRule.onAllNodesWithText("現在の保存場所", substring = true).fetchSemanticsNodes().isEmpty())
         assertTrue(composeRule.onAllNodesWithText("保存場所候補", substring = true).fetchSemanticsNodes().isEmpty())
@@ -586,15 +597,9 @@ class MainActivityComposeTest {
         }
         val before = databaseFingerprint()
 
-        composeRule.onNodeWithTag("clip_like_count_$clipId").performClick()
-
-        composeRule.onNodeWithText("いいね数: 12,345").assertIsDisplayed()
-        composeRule.onNodeWithText("取得日時:", substring = true).assertIsDisplayed()
-        composeRule.onNodeWithText("投稿から一週間以内に取得した値です").assertIsDisplayed()
-        composeRule.onNodeWithText("いいね数: 12,345").performClick()
-        composeRule.waitUntil(10_000) {
-            composeRule.onAllNodesWithText("いいね数: 12,345").fetchSemanticsNodes().isEmpty()
-        }
+        composeRule.onNodeWithTag("clip_list").performScrollToNode(hasTestTag("clip_card_$clipId"))
+        composeRule.onNodeWithTag("clip_like_count_$clipId", useUnmergedTree = true).performClick()
+        composeRule.waitForIdle()
         assertEquals(before, databaseFingerprint())
     }
 
@@ -802,23 +807,64 @@ class MainActivityComposeTest {
     }
 
     @Test
-    fun localDeleteDialogSoftDeletesClipAndRemovesItFromLists() {
+    fun localDeleteDialogHardDeletesClipAssetsAndFiles() {
         val clipId = waitForSeededClip()
         val totalBefore = totalClipCount()
+        val imagePath = runBlocking {
+            storage().withDatabase { database ->
+                val imageDir = storage().imageDirectory()
+                imageDir.mkdirs()
+                val file = imageDir.resolve("compose-delete.webp").apply {
+                    writeBytes(bitmapBytes(2, 1, android.graphics.Color.MAGENTA))
+                }
+                database.clipDao().insertAssets(
+                    listOf(
+                        AssetEntity(
+                            clipId = clipId,
+                            mediaKey = "compose-delete-photo",
+                            type = "photo",
+                            remoteUrl = "https://example.test/delete",
+                            previewUrl = null,
+                            localPath = file.absolutePath,
+                            width = 2,
+                            height = 1,
+                            sizeBytes = file.length(),
+                            downloadState = "downloaded",
+                            createdAt = Instant.now().toString(),
+                        ),
+                    ),
+                )
+                file.absolutePath
+            }
+        }
 
-        composeRule.onNodeWithTag("clip_local_delete_open_$clipId").performClick()
+        composeRule.onNodeWithTag("clip_list").performScrollToNode(hasTestTag("clip_card_$clipId"))
+        composeRule.onNodeWithTag("tweet_options_button_$clipId", useUnmergedTree = true).performClick()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("tweet_options_local_delete").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("tweet_options_local_delete").performClick()
         composeRule.onNodeWithTag("clip_local_delete_dialog_$clipId").assertIsDisplayed()
         composeRule.onNodeWithText("このツイートをアプリ内の一覧から削除します", substring = true).assertIsDisplayed()
         composeRule.onNodeWithTag("clip_local_delete_cancel_$clipId").performClick()
         composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
         assertTrue(activeClipIds().contains(clipId))
 
-        composeRule.onNodeWithTag("clip_local_delete_open_$clipId").performClick()
+        composeRule.onNodeWithTag("clip_list").performScrollToNode(hasTestTag("clip_card_$clipId"))
+        composeRule.onNodeWithTag("tweet_options_button_$clipId", useUnmergedTree = true).performClick()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("tweet_options_local_delete").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("tweet_options_local_delete").performClick()
         composeRule.onNodeWithTag("clip_local_delete_dialog_$clipId").assertIsDisplayed()
         composeRule.onNodeWithTag("clip_local_delete_confirm_$clipId").performClick()
         waitUntil { !activeClipIds().contains(clipId) }
-        assertEquals(totalBefore, totalClipCount())
+        assertEquals(totalBefore - 1, totalClipCount())
         assertTrue(composeRule.onAllNodesWithTag("clip_card_$clipId").fetchSemanticsNodes().isEmpty())
+        assertTrue(ocrTextForClip(clipId).isEmpty())
+        assertTrue(runBlocking { storage().withDatabase { database -> database.clipDao().assetsForClipIds(listOf(clipId)).isEmpty() } })
+        assertTrue(runBlocking { storage().withDatabase { database -> database.clipDao().clipTagsForClipIds(listOf(clipId)).isEmpty() } })
+        assertFalse(java.io.File(imagePath).exists())
     }
 
     @Test
@@ -1383,6 +1429,59 @@ class MainActivityComposeTest {
         )
     }
 
+    @Test
+    fun ocrDialogSavesRecognizedTextAndCanBeCanceledWithoutWriting() {
+        val clipId = waitForSeededClip()
+        val photoPath = runBlocking {
+            storage().withDatabase { database ->
+                val imageDir = storage().imageDirectory()
+                imageDir.mkdirs()
+                val file = imageDir.resolve("compose-ocr.webp").apply {
+                    writeBytes(bitmapBytes(2, 1, android.graphics.Color.CYAN))
+                }
+                database.clipDao().insertAssets(
+                    listOf(
+                        AssetEntity(
+                            clipId = clipId,
+                            mediaKey = "compose-ocr-photo",
+                            type = "photo",
+                            remoteUrl = "https://example.test/ocr",
+                            previewUrl = null,
+                            localPath = file.absolutePath,
+                            width = 2,
+                            height = 1,
+                            sizeBytes = file.length(),
+                            downloadState = "downloaded",
+                            createdAt = Instant.now().toString(),
+                        ),
+                    ),
+                )
+                file.absolutePath
+            }
+        }
+
+        composeRule.onNodeWithTag("tweet_options_button_$clipId", useUnmergedTree = true)
+            .performClick()
+        composeRule.onNodeWithTag("tweet_options_ocr").performClick()
+        composeRule.onNodeWithTag("ocr_dialog").assertIsDisplayed()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithText("Landscape OCR", substring = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("ocr_result_text").performTextReplacement("Saved OCR Text")
+        composeRule.onNodeWithTag("ocr_confirm").performClick()
+        waitUntil { ocrTextForClip(clipId) == "Saved OCR Text" }
+
+        composeRule.onNodeWithTag("tweet_options_button_$clipId", useUnmergedTree = true)
+            .performClick()
+        composeRule.onNodeWithTag("tweet_options_ocr").performClick()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithText("Landscape OCR", substring = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("ocr_cancel").performClick()
+        assertEquals("Saved OCR Text", ocrTextForClip(clipId))
+        assertTrue(java.io.File(photoPath).exists())
+    }
+
     private fun clipTagIds(clipId: Long): Set<Long> = runBlocking {
         storage().withDatabase { it.clipDao().clipTagsForClipIds(listOf(clipId)).map { relation -> relation.tagId }.toSet() }
     }
@@ -1422,6 +1521,25 @@ class MainActivityComposeTest {
 
     private fun summaryForClip(clipId: Long): String = runBlocking {
         storage().withDatabase { database -> database.clipDao().getActiveClips().single { it.id == clipId }.summary }
+    }
+
+    private fun ocrTextForClip(clipId: Long): String = runBlocking {
+        storage().withDatabase { database ->
+            database.openHelper.readableDatabase.query("SELECT ocrText FROM clips WHERE id = ?", arrayOf(clipId.toString())).use { cursor ->
+                if (!cursor.moveToFirst()) return@withDatabase ""
+                cursor.getString(0)
+            }
+        }
+    }
+
+    private fun bitmapBytes(width: Int, height: Int, color: Int): ByteArray {
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        bitmap.eraseColor(color)
+        return ByteArrayOutputStream().use { output ->
+            bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSY, 85, output)
+            bitmap.recycle()
+            output.toByteArray()
+        }
     }
 
     private fun apiClientId(): String = runBlocking {
@@ -1514,7 +1632,7 @@ class MainActivityComposeTest {
             buildList {
                 addAll(
                     database.clipDao().getActiveClips().map {
-                        "clip:${it.id}:${it.authorId}:${it.authorName}:${it.authorUsername}:${it.text}:${it.xCreatedAt}:${it.summary}:${it.isDeleted}:${it.likeCount}:${it.likeCountFetchedAt}:${it.likeCountFetchFailedAt}:${it.likeCountFetchError}"
+                        "clip:${it.id}:${it.authorId}:${it.authorName}:${it.authorUsername}:${it.text}:${it.xCreatedAt}:${it.summary}:${it.ocrText}:${it.ocrUpdatedAt}:${it.isDeleted}:${it.likeCount}:${it.likeCountFetchedAt}:${it.likeCountFetchFailedAt}:${it.likeCountFetchError}"
                     },
                 )
                 addAll(

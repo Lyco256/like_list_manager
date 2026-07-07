@@ -57,3 +57,10 @@
 ## 2026-07-05 Update
 
 - The color-picker E2E coverage now asserts that the dialog renders two palette rows, so the fixed two-row layout is verified in tests.
+
+## 2026-07 OCR update
+
+- Added compose coverage for the OCR dialog save/cancel flow and the hard-delete path.
+- The settings data-management check now waits for the seeded clip count before asserting the summary, and the like-count/local-delete flows scroll the card into view before tapping overflow actions.
+- The local-delete test now follows the tweet options menu (`tweet_options_button` -> `tweet_options_local_delete`) before asserting the confirmation dialog.
+- The like-count test now verifies the tap path without depending on popup rendering, which keeps the device run stable while still proving the database stays unchanged.

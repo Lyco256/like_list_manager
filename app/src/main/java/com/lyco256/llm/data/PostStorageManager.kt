@@ -252,6 +252,7 @@ class PostStorageManager(
             LikeListDatabase.MIGRATION_3_4,
             LikeListDatabase.MIGRATION_4_5,
             LikeListDatabase.MIGRATION_5_6,
+            LikeListDatabase.MIGRATION_6_7,
         ).build()
 
     private fun selectedPaths(): StoragePaths {

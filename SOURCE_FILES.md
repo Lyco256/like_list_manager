@@ -58,7 +58,7 @@ MainActivity / Compose UI
 ### 保存と同期
 
 - Roomで投稿、画像情報、タググループ、タグ、投稿タグ関連、同期状態を保存
-- DB version 5でタグ階層、いいね数、同期継続token、月別API使用量履歴を保持し、version 1→2、2→3、3→4、4→5を非破壊移行
+- DB version 7でタグ階層、いいね数、同期継続token、月別API使用量履歴、OCR文字列を保持し、version 1→2、2→3、3→4、4→5、5→6、6→7を非破壊移行
 - Client IDとOAuth tokenは暗号化SharedPreferencesへ保存
 - Room DBと画像は内部ストレージまたはSDカードのアプリ専用領域へまとめて保存
 - 保存先変更時はコピー、容量・件数・DB整合性検証、切り替え、旧データ削除を行う
@@ -110,6 +110,7 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/LikeListManagerApp.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/MainActivity.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/SettingsScreen.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/OcrUi.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/TagColorUi.kt.md`
 
@@ -124,6 +125,7 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/data/XOAuthManager.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/XApiClient.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/ClipRepository.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/OcrTextRecognizer.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/TagColorPalette.kt.md`
 
 ### Tests
@@ -133,6 +135,7 @@ MainActivity / Compose UI
 - `docs/app/src/androidTest/java/com/lyco256/llm/SearchFilterDatabaseIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LikeListDatabaseMigrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/PostStorageManagerRecoveryTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/data/OcrTextRecognizerTest.kt.md`
 
 ### Macrobenchmark
 
@@ -160,7 +163,7 @@ MainActivity / Compose UI
 - 任意フォルダへの保存とアンインストール後の投稿データ保持は未実装
 - タグ色変更は未実装
 - 動画/GIF本体は保存しない
-- DBはversion 5で、version 1→2・2→3・3→4・4→5のmigrationを実装済み
+- DBはversion 7で、version 1→2・2→3・3→4・4→5・5→6・6→7のmigrationを実装済み
 - 階層・複合絞り込み・制約・件数表示の単体テストと、version 1→2・2→3・3→4・4→5のmigration testを実装済み
 - 実際のXログインとliked posts同期はユーザーのClient IDとXアカウントで実機確認が必要
 

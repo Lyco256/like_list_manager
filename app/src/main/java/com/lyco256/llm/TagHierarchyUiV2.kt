@@ -135,6 +135,7 @@ import com.lyco256.llm.data.tagGradient
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -208,6 +209,8 @@ fun EnhancedClipListScreen(
     requireTagConfirmation: Boolean = false,
     onTagsChange: (ClipEntity, Set<Long>) -> Unit,
     onSummaryChange: (ClipEntity, String) -> Unit,
+    onOcrSave: (ClipEntity, String) -> Unit,
+    onOcrDetect: (ClipWithDetails, (String) -> Unit, (String) -> Unit) -> Unit,
     onDelete: (ClipEntity) -> Unit,
     onAuthorClick: (ClipEntity) -> Unit = {},
 ) {
@@ -247,6 +250,8 @@ fun EnhancedClipListScreen(
                                 pendingTagIds.remove(clip.clip.id)
                             },
                             onSummaryChange = onSummaryChange,
+                            onOcrSave = onOcrSave,
+                            onOcrDetect = onOcrDetect,
                             onDelete = onDelete,
                             onAuthorClick = onAuthorClick,
                         )
@@ -269,6 +274,8 @@ fun EnhancedClassifiedScreen(
     onClearAllFilters: () -> Unit,
     onTagsChange: (ClipEntity, Set<Long>) -> Unit,
     onSummaryChange: (ClipEntity, String) -> Unit,
+    onOcrSave: (ClipEntity, String) -> Unit,
+    onOcrDetect: (ClipWithDetails, (String) -> Unit, (String) -> Unit) -> Unit,
     onDelete: (ClipEntity) -> Unit,
     onAuthorClick: (ClipEntity) -> Unit,
 ) {
@@ -302,6 +309,8 @@ fun EnhancedClassifiedScreen(
                             selectedTagIds = clip.tags.map { it.id }.toSet(),
                             onTagSelectionChange = { onTagsChange(clip.clip, it) },
                             onSummaryChange = onSummaryChange,
+                            onOcrSave = onOcrSave,
+                            onOcrDetect = onOcrDetect,
                             onDelete = onDelete,
                             onAuthorClick = onAuthorClick,
                         )
@@ -575,15 +584,25 @@ private fun EnhancedTweetCard(
     onTagSelectionChange: (Set<Long>) -> Unit,
     onTagConfirmation: () -> Unit = {},
     onSummaryChange: (ClipEntity, String) -> Unit,
+    onOcrSave: (ClipEntity, String) -> Unit,
+    onOcrDetect: (ClipWithDetails, (String) -> Unit, (String) -> Unit) -> Unit,
     onDelete: (ClipEntity) -> Unit,
     onAuthorClick: (ClipEntity) -> Unit,
 ) {
     val context = LocalContext.current
     var summary by remember(clip.clip.id, clip.clip.summary) { mutableStateOf(clip.clip.summary) }
+    var ocrDialogOpen by remember { mutableStateOf(false) }
+    var ocrText by remember(clip.clip.id, clip.clip.ocrText) { mutableStateOf(clip.clip.ocrText) }
+    var ocrError by remember { mutableStateOf<String?>(null) }
+    var ocrProcessing by remember { mutableStateOf(false) }
     var deleteOpen by remember { mutableStateOf(false) }
     val selectionPath = remember { mutableStateListOf<Long>() }
     var selectionOpen by remember { mutableStateOf(false) }
     var likePopupOpen by remember(clip.clip.id) { mutableStateOf(false) }
+    val ocrPreviewPaths = remember(clip.assets) {
+        clip.assets.mapNotNull { asset -> asset.localPath?.takeIf { File(it).exists() } }
+    }
+    val hasOcrAction = ocrPreviewPaths.isNotEmpty()
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -617,22 +636,26 @@ private fun EnhancedTweetCard(
                                     if (clip.clip.hasProvisionalLikeCount()) {
                                         Icon(
                                             Icons.Filled.ErrorOutline,
-                                            contentDescription = "暫定いいね数",
+                                            contentDescription = "??????????",
                                             modifier = Modifier.size(14.dp),
                                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
                                 }
-                                DropdownMenu(expanded = likePopupOpen, onDismissRequest = { likePopupOpen = false }) {
+                                DropdownMenu(
+                                    expanded = likePopupOpen,
+                                    onDismissRequest = { likePopupOpen = false },
+                                    modifier = Modifier.testTag("clip_like_popup_${clip.clip.id}"),
+                                ) {
                                     DropdownMenuItem(
                                         text = {
                                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                Text("いいね数: ${String.format(Locale.JAPAN, "%,d", likeCount)}")
-                                                Text("取得日時: ${formatLikeFetchedAt(clip.clip.likeCountFetchedAt)}", style = MaterialTheme.typography.bodySmall)
+                                                Text("???????: ${String.format(Locale.JAPAN, "%,d", likeCount)}")
+                                                Text("??????? ${formatLikeFetchedAt(clip.clip.likeCountFetchedAt)}", style = MaterialTheme.typography.bodySmall)
                                                 if (clip.clip.likeCountFetchError != null) {
-                                                    Text("取得失敗: ${clip.clip.likeCountFetchError}", style = MaterialTheme.typography.bodySmall)
+                                                    Text("???????? ${clip.clip.likeCountFetchError}", style = MaterialTheme.typography.bodySmall)
                                                 } else if (clip.clip.hasProvisionalLikeCount()) {
-                                                    Text("投稿から一週間以内に取得した値です", style = MaterialTheme.typography.bodySmall)
+                                                    Text("???????????????????????????????", style = MaterialTheme.typography.bodySmall)
                                                 }
                                             }
                                         },
@@ -648,6 +671,28 @@ private fun EnhancedTweetCard(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
+                TweetOptionsMenuButton(
+                    hasOcrAction = hasOcrAction,
+                    onOcrAction = {
+                        ocrDialogOpen = true
+                        ocrProcessing = true
+                        ocrText = clip.clip.ocrText
+                        ocrError = null
+                        onOcrDetect(
+                            clip,
+                            { result ->
+                                ocrText = result
+                                ocrProcessing = false
+                            },
+                            { message ->
+                                ocrError = message
+                                ocrProcessing = false
+                            },
+                        )
+                    },
+                    onDeleteAction = { deleteOpen = true },
+                    buttonTestTag = "tweet_options_button_${clip.clip.id}",
+                )
                 IconButton(
                     onClick = {
                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(clip.clip.postUrl)))
@@ -656,7 +701,7 @@ private fun EnhancedTweetCard(
                 ) {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_x_logo),
-                        contentDescription = "Xで開く",
+                        contentDescription = "X???",
                         tint = Color.Unspecified,
                         modifier = Modifier.size(28.dp),
                     )
@@ -680,7 +725,7 @@ private fun EnhancedTweetCard(
                     onSummaryChange(clip.clip, it)
                 },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("概要") },
+                label = { Text("??") },
                 minLines = 1,
                 maxLines = 3,
             )
@@ -702,22 +747,16 @@ private fun EnhancedTweetCard(
             Spacer(Modifier.height(6.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(
-                    onClick = { deleteOpen = true },
-                    modifier = Modifier.testTag("clip_local_delete_open_${clip.clip.id}"),
-                ) {
-                    Text("ローカル削除")
-                }
                 if (requireTagConfirmation) {
                     Button(
                         onClick = onTagConfirmation,
                         enabled = hierarchy.tags.isNotEmpty() && selectedTagIds.isNotEmpty(),
                         modifier = Modifier.testTag("classify_${clip.clip.id}"),
                     ) {
-                        Text("分類済みにする")
+                        Text("???????")
                     }
                 }
             }
@@ -736,21 +775,54 @@ private fun EnhancedTweetCard(
             initialPath = selectionPath.toList(),
         )
     }
-    if (deleteOpen) {
-        ConfirmDialog(
-            title = "ローカル削除",
-            message = "このツイートをアプリ内の一覧から削除します。X側のいいねは変更しません。",
-            onDismiss = { deleteOpen = false },
+    if (ocrDialogOpen) {
+        OcrTextDialog(
+            previewPaths = ocrPreviewPaths,
+            text = ocrText,
+            isProcessing = ocrProcessing,
+            errorMessage = ocrError,
+            onTextChange = { ocrText = it },
             onConfirm = {
-                onDelete(clip.clip)
-                deleteOpen = false
+                onOcrSave(clip.clip, ocrText)
+                ocrDialogOpen = false
             },
-            dialogTestTag = "clip_local_delete_dialog_${clip.clip.id}",
-            confirmTestTag = "clip_local_delete_confirm_${clip.clip.id}",
-            dismissTestTag = "clip_local_delete_cancel_${clip.clip.id}",
+            onDismiss = {
+                ocrDialogOpen = false
+                ocrProcessing = false
+            },
+        )
+    }
+    if (deleteOpen) {
+        AlertDialog(
+            onDismissRequest = { deleteOpen = false },
+            modifier = Modifier.testTag("clip_local_delete_dialog_${clip.clip.id}"),
+            title = { Text("ローカル削除") },
+            text = {
+                Text("このツイートをアプリ内の一覧から削除します")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDelete(clip.clip)
+                        deleteOpen = false
+                    },
+                    modifier = Modifier.testTag("clip_local_delete_confirm_${clip.clip.id}"),
+                ) {
+                    Text("削除")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { deleteOpen = false },
+                    modifier = Modifier.testTag("clip_local_delete_cancel_${clip.clip.id}"),
+                ) {
+                    Text("キャンセル")
+                }
+            },
         )
     }
 }
+
 
 @Composable
 private fun TagHierarchySelector(

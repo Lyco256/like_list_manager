@@ -77,3 +77,9 @@ UI項目を追加する場合は、対応するViewModel操作、Repository API�
 ## 2026-07-05 Update
 
 - The X logo buttons now preserve the black/white vector colors instead of being tinted by the theme, and the icon is rendered larger so it reads clearly in the button.
+
+## 2026-07 OCR update
+
+- Added OCR search support via `SearchTarget.OcrText`.
+- Tweet cards can open the OCR dialog, run OCR, and save `ocrText`/`ocrUpdatedAt` through the ViewModel.
+- Local delete now uses the repository hard-delete path, matching the updated repository behavior.

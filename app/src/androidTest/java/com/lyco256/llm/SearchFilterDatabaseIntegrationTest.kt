@@ -97,6 +97,33 @@ class SearchFilterDatabaseIntegrationTest {
         assertEquals(before, databaseFingerprint())
     }
 
+    @Test
+    fun ocrTextSearchTargetMatchesTheStoredOcrTextField() = runBlocking {
+        val clip = storage.withDatabase { database ->
+            database.clipDao().insertClip(
+                searchClip(
+                    "ocr-search-match",
+                    ocrText = "OCR Needle from local text",
+                ),
+            )
+            database.clipDao().getActiveClips().single { it.xPostId == "ocr-search-match" }
+        }
+
+        val clips = repository.clipsWithDetails.first { it.any { item -> item.clip.id == clip.id } }
+        val hierarchy = repository.tagHierarchy.first()
+        val filtered = filterClipsForSearch(
+            clips = clips,
+            hierarchy = hierarchy,
+            filters = TweetFilterState(
+                query = "ocr needle",
+                searchTargets = setOf(SearchTarget.OcrText),
+                taggedOnly = false,
+            ),
+        )
+
+        assertEquals(listOf("ocr-search-match"), filtered.map { it.clip.xPostId })
+    }
+
     private suspend fun insertSearchFixture(database: LikeListDatabase): SearchFixture {
         val clipDao = database.clipDao()
         val tagDao = database.tagDao()
@@ -132,6 +159,7 @@ class SearchFilterDatabaseIntegrationTest {
         authorId: String = "author-alpha",
         authorName: String = "Alpha",
         authorUsername: String = "alpha",
+        ocrText: String = "",
     ) = ClipEntity(
         xPostId = id,
         authorId = authorId,
@@ -143,6 +171,7 @@ class SearchFilterDatabaseIntegrationTest {
         savedAt = id,
         syncedAt = "2026-06-15T12:30:00Z",
         summary = "Manual Summary from local DB",
+        ocrText = ocrText,
     )
 
     private suspend fun databaseFingerprint(): SearchDbFingerprint = storage.withDatabase { database ->

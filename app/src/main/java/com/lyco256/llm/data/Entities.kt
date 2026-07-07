@@ -21,6 +21,8 @@ data class ClipEntity(
     val savedAt: String,
     val syncedAt: String,
     val summary: String = "",
+    val ocrText: String = "",
+    val ocrUpdatedAt: String? = null,
     val isDeleted: Boolean = false,
     val likeCount: Long? = null,
     val likeCountFetchedAt: String? = null,

@@ -42,3 +42,7 @@ Entityの列変更はDB schema変更です。`LikeListDatabase` のversionとmig
 - `TagGroupEntity` と `TagEntity` に `colorId` を追加した。
 - どちらもデフォルトは `standard`。
 - 表示側は `TagColorPalette` から色を引き、未知の `colorId` は `standard` にフォールバックする。
+
+## 2026-07 OCR update
+
+- `ClipEntity` now stores `ocrText` and `ocrUpdatedAt` for searchable OCR content.

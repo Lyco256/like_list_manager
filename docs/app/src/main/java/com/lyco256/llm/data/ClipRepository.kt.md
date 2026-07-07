@@ -66,3 +66,8 @@
 - `createTag` / `createGroup` に `colorId` を追加した。
 - `renameTag` / `renameGroup` は色も更新できるようになった。
 - 既存の呼び出しは `standard` をデフォルトにしている。
+
+## 2026-07 OCR update
+
+- Added OCR detection for locally stored `photo` and `video_thumbnail` assets using the new OCR gateway abstraction.
+- Added `updateOcrText` persistence with a timestamp and changed local delete to a hard delete that removes rows and files.

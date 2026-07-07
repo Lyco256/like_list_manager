@@ -183,4 +183,5 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.androidx.security.crypto)
     implementation(libs.appauth)
+    implementation(libs.mlkit.text.japanese)
 }

@@ -92,3 +92,10 @@
 - `EnhancedMediaGrid` now uses wider `16dp` side padding so the in-card image grid reads slightly smaller and matches the main feed image grid.
 - 分類済み画面に view-state の並び替えを追加し、保存順・タグ順・ユーザー件数順・いいね数順・投稿時間順をフィルタ後に切り替えられるようにした。
 - 並び替え条件の要約を分類済み画面の概要行へ出し、Dialog の apply / clear / cancel を UI テストで固定した。
+
+## 2026-07 OCR update
+
+- Enhanced tweet cards now share the same OCR menu, dialog, and save flow as the main list.
+- OCR recognition is triggered from the ViewModel callback and saved only on confirm.
+- The tweet options menu exposes the local-delete flow via `tweet_options_button` and `tweet_options_local_delete`, and the confirmation dialog uses `clip_local_delete_dialog_<id>`.
+- The like-count popup now carries `clip_like_popup_<id>` so instrumentation tests can wait for the popup itself instead of only waiting on its text.

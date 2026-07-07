@@ -205,6 +205,8 @@ class UiStateRenderingTest {
                     listState = rememberLazyListState(),
                     onTagsChange = { _, _ -> },
                     onSummaryChange = { _, _ -> },
+                    onOcrSave = { _, _ -> },
+                    onOcrDetect = { _, _, _ -> },
                     onDelete = {},
                 )
             }

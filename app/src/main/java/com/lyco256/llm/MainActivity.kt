@@ -109,6 +109,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -158,6 +159,7 @@ enum class SearchMode(val label: String) {
 enum class SearchTarget(val label: String) {
     Text("本文"),
     Summary("概要"),
+    OcrText("OCR"),
     AuthorName("表示名"),
     Username("@ユーザー名"),
 }
@@ -392,6 +394,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateSummary(clip: ClipEntity, summary: String) = viewModelScope.launch {
         repository.updateSummary(clip, summary)
     }
+
+    fun updateOcrText(clip: ClipEntity, ocrText: String) = viewModelScope.launch {
+        repository.updateOcrText(clip, ocrText)
+    }
+
+    fun detectOcrText(
+        clip: ClipWithDetails,
+        onSuccess: (String) -> Unit,
+        onFailure: (String) -> Unit,
+    ) = viewModelScope.launch {
+        runCatching { repository.detectOcrText(clip) }
+            .onSuccess(onSuccess)
+            .onFailure { onFailure(it.message ?: "画像認識に失敗しました") }
+    }
+
     fun moveClipToTrash(clip: ClipEntity) = viewModelScope.launch {
         repository.moveClipToTrash(clip)
     }
@@ -646,6 +663,8 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                 requireTagConfirmation = true,
                 onTagsChange = viewModel::setClipTags,
                 onSummaryChange = viewModel::updateSummary,
+                onOcrSave = viewModel::updateOcrText,
+                onOcrDetect = viewModel::detectOcrText,
                 onDelete = viewModel::moveClipToTrash,
                 onAuthorClick = { clip ->
                     viewModel.filterByAuthorFromClip(clip)
@@ -661,6 +680,8 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                 onClearAllFilters = viewModel::clearAllFilters,
                 onTagsChange = viewModel::setClipTags,
                 onSummaryChange = viewModel::updateSummary,
+                onOcrSave = viewModel::updateOcrText,
+                onOcrDetect = viewModel::detectOcrText,
                 onDelete = viewModel::moveClipToTrash,
                 onAuthorClick = viewModel::filterByAuthorFromClip,
             )
@@ -765,6 +786,7 @@ private fun matchesTextSearch(
     val values = buildList {
         if (SearchTarget.Text in targets) add(clip.text)
         if (SearchTarget.Summary in targets) add(clip.summary)
+        if (SearchTarget.OcrText in targets) add(clip.ocrText)
         if (SearchTarget.AuthorName in targets) add(clip.authorName)
         if (SearchTarget.Username in targets) add(clip.authorUsername)
     }
@@ -1087,6 +1109,8 @@ fun ClipListScreen(
     requireTagConfirmation: Boolean = false,
     onTagsChange: (ClipEntity, Set<Long>) -> Unit,
     onSummaryChange: (ClipEntity, String) -> Unit,
+    onOcrSave: (ClipEntity, String) -> Unit,
+    onOcrDetect: (ClipWithDetails, (String) -> Unit, (String) -> Unit) -> Unit,
     onDelete: (ClipEntity) -> Unit,
 ) {
     val pendingTagIds = remember { mutableStateMapOf<Long, Set<Long>>() }
@@ -1120,6 +1144,8 @@ fun ClipListScreen(
                             pendingTagIds.remove(clip.clip.id)
                         },
                         onSummaryChange = onSummaryChange,
+                        onOcrSave = onOcrSave,
+                        onOcrDetect = onOcrDetect,
                         onDelete = onDelete,
                     )
                 }
@@ -1137,6 +1163,8 @@ fun ClassifiedScreen(
     onClearTagFilters: () -> Unit,
     onTagsChange: (ClipEntity, Set<Long>) -> Unit,
     onSummaryChange: (ClipEntity, String) -> Unit,
+    onOcrSave: (ClipEntity, String) -> Unit,
+    onOcrDetect: (ClipWithDetails, (String) -> Unit, (String) -> Unit) -> Unit,
     onDelete: (ClipEntity) -> Unit,
 ) {
     val expandedGroups = remember { mutableStateMapOf<Long, Boolean>() }
@@ -1163,6 +1191,8 @@ fun ClassifiedScreen(
                         selectedTagIds = clip.tags.map { it.id }.toSet(),
                         onTagSelectionChange = { onTagsChange(clip.clip, it) },
                         onSummaryChange = onSummaryChange,
+                        onOcrSave = onOcrSave,
+                        onOcrDetect = onOcrDetect,
                         onDelete = onDelete,
                     )
                 }
@@ -1181,11 +1211,21 @@ fun TweetCard(
     onTagSelectionChange: (Set<Long>) -> Unit,
     onTagConfirmation: () -> Unit = {},
     onSummaryChange: (ClipEntity, String) -> Unit,
+    onOcrSave: (ClipEntity, String) -> Unit,
+    onOcrDetect: (ClipWithDetails, (String) -> Unit, (String) -> Unit) -> Unit,
     onDelete: (ClipEntity) -> Unit,
 ) {
     val context = LocalContext.current
     var summary by remember(clip.clip.id, clip.clip.summary) { mutableStateOf(clip.clip.summary) }
+    var ocrDialogOpen by remember { mutableStateOf(false) }
+    var ocrText by remember(clip.clip.id, clip.clip.ocrText) { mutableStateOf(clip.clip.ocrText) }
+    var ocrError by remember { mutableStateOf<String?>(null) }
+    var ocrProcessing by remember { mutableStateOf(false) }
     var deleteOpen by remember { mutableStateOf(false) }
+    val ocrPreviewPaths = remember(clip.assets) {
+        clip.assets.mapNotNull { asset -> asset.localPath?.takeIf { File(it).exists() } }
+    }
+    val hasOcrAction = ocrPreviewPaths.isNotEmpty()
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -1201,6 +1241,28 @@ fun TweetCard(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
+                TweetOptionsMenuButton(
+                    hasOcrAction = hasOcrAction,
+                    onOcrAction = {
+                        ocrDialogOpen = true
+                        ocrProcessing = true
+                        ocrText = clip.clip.ocrText
+                        ocrError = null
+                        onOcrDetect(
+                            clip,
+                            { result ->
+                                ocrText = result
+                                ocrProcessing = false
+                            },
+                            { message ->
+                                ocrError = message
+                                ocrProcessing = false
+                            },
+                        )
+                    },
+                    onDeleteAction = { deleteOpen = true },
+                    buttonTestTag = "tweet_options_button_${clip.clip.id}",
+                )
                 IconButton(
                     onClick = {
                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(clip.clip.postUrl)))
@@ -1209,7 +1271,7 @@ fun TweetCard(
                 ) {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_x_logo),
-                        contentDescription = "Xで開く",
+                        contentDescription = "X???",
                         tint = Color.Unspecified,
                         modifier = Modifier.size(28.dp),
                     )
@@ -1233,7 +1295,7 @@ fun TweetCard(
                     onSummaryChange(clip.clip, it)
                 },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("概要") },
+                label = { Text("??") },
                 minLines = 1,
                 maxLines = 3,
             )
@@ -1251,18 +1313,15 @@ fun TweetCard(
             Spacer(Modifier.height(6.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = { deleteOpen = true }) {
-                    Text("ローカル削除")
-                }
                 if (requireTagConfirmation) {
                     Button(
                         onClick = onTagConfirmation,
                         enabled = hierarchy.tags.isNotEmpty() && selectedTagIds.isNotEmpty(),
                     ) {
-                        Text("分類済みにする")
+                        Text("???????")
                     }
                 }
             }
@@ -1270,8 +1329,8 @@ fun TweetCard(
     }
     if (deleteOpen) {
         ConfirmDialog(
-            title = "ローカル削除",
-            message = "このツイートをアプリ内の一覧から削除します。X側のいいねは変更しません。",
+            title = "??????",
+            message = "????????????????X?????????????????????????",
             onDismiss = { deleteOpen = false },
             onConfirm = {
                 onDelete(clip.clip)
@@ -1279,7 +1338,26 @@ fun TweetCard(
             },
         )
     }
+
+    if (ocrDialogOpen) {
+        OcrTextDialog(
+            previewPaths = ocrPreviewPaths,
+            text = ocrText,
+            isProcessing = ocrProcessing,
+            errorMessage = ocrError,
+            onTextChange = { ocrText = it },
+            onConfirm = {
+                onOcrSave(clip.clip, ocrText)
+                ocrDialogOpen = false
+            },
+            onDismiss = {
+                ocrDialogOpen = false
+                ocrProcessing = false
+            },
+        )
+    }
 }
+
 
 @Composable
 fun MediaGrid(urls: List<String>) {

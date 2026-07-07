@@ -46,3 +46,7 @@ Entity追加・列変更時はversionを更新し、既存実機データを保�
 - DB version を 5 から 6 に上げた。
 - `tag_groups.colorId` と `tags.colorId` を migration 5->6 で追加した。
 - 既存データは両方とも `standard` で埋める。
+
+## 2026-07 OCR update
+
+- Bumped the database to version 7 and added migration `6 -> 7` for the OCR columns on `clips`.

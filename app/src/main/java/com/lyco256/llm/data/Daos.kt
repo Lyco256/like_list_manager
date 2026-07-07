@@ -58,6 +58,12 @@ interface ClipDao {
     @Update
     suspend fun updateClip(clip: ClipEntity)
 
+    @Query("UPDATE clips SET ocrText = :ocrText, ocrUpdatedAt = :ocrUpdatedAt WHERE id = :clipId")
+    suspend fun updateOcrText(clipId: Long, ocrText: String, ocrUpdatedAt: String?)
+
+    @Query("DELETE FROM clips WHERE id = :clipId")
+    suspend fun deleteClip(clipId: Long)
+
     @Query("UPDATE clips SET likeCount = :likeCount, likeCountFetchedAt = :fetchedAt, likeCountFetchFailedAt = NULL, likeCountFetchError = NULL WHERE id = :clipId")
     suspend fun updateLikeCount(clipId: Long, likeCount: Long, fetchedAt: String)
 

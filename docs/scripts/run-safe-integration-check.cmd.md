@@ -1,5 +1,5 @@
 # `run-safe-integration-check.cmd`
 
-PowerShell実行ポリシーの影響を避けて、同名 `.ps1` を起動するWindows用入口です。
+Windows 用の薄いラッパーです。PowerShell の実行ポリシーを回避して `run-safe-integration-check.ps1` を起動し、受け取った引数をそのまま渡します。
 
-引数と終了コードは `.ps1` へそのまま渡します。標準出力仕様、ログ保存、timeout、失敗時要約は `.ps1` 側が持ち、成功時はフェーズ名と `Success` だけが表示されます。
+たとえば `-DebugMethod wireless` を指定して、そのまま wireless 実機の統合テストを実行できます。

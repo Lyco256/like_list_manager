@@ -27,3 +27,7 @@ Compose、Room、Coil、AndroidX Security Crypto、AppAuth、material icons exte
 AndroidX Test Rules、Room testing、Compose UI Test、MockWebServer、sqlite-jdbcのversionとaliasを管理します。
 
 MacrobenchmarkとUI Automator、および `com.android.test` plugin aliasも管理します。
+
+## 2026-07 OCR update
+
+- Added the `mlkitTextJapanese` version entry and the `mlkit-text-japanese` library alias.

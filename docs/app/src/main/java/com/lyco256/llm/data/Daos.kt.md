@@ -38,3 +38,7 @@ SQL変更時はEntity列名、Foreign Key、削除時のcascade、Flowの更新�
 
 - `getActiveClips` でローカル削除されていない再取得候補を読みます。
 - 成功時はいいね数と取得日時を更新して失敗情報をクリアし、明確な恒久失敗だけ失敗日時・理由を記録します。
+
+## 2026-07 OCR update
+
+- Added DAO queries for `updateOcrText` and hard-deleting a clip by id.

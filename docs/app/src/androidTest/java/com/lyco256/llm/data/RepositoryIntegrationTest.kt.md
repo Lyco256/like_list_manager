@@ -21,3 +21,7 @@
 - 画像download失敗、保存先移動失敗、タグ/空グループ削除時にも投稿を保護すること
 
 変更時は `run-safe-integration-check.cmd` で実機統合テストを実行し、production metadataが前後不変であることを確認します。
+
+## 2026-07 OCR update
+
+- Added repository tests for OCR detection, OCR persistence, and hard delete of assets and local files.

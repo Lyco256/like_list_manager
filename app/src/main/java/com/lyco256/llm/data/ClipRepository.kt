@@ -38,6 +38,7 @@ class ClipRepository(
     private val apiSettingsStore: SettingsStore,
     private val xOAuthManager: OAuthGateway,
     private val xApiClient: XApiGateway,
+    private val ocrTextGateway: OcrTextGateway = FakeOcrTextGateway(),
     private val includeSeedMedia: Boolean = true,
 ) {
 
@@ -818,8 +819,50 @@ class ClipRepository(
         postStorageManager.withDatabase { it.clipDao().updateClip(clip.copy(summary = summary)) }
     }
 
+    suspend fun updateOcrText(clip: ClipEntity, ocrText: String) = withContext(Dispatchers.IO) {
+        postStorageManager.withDatabase { it.clipDao().updateOcrText(clip.id, ocrText, Instant.now().toString()) }
+    }
+
+    suspend fun detectOcrText(clip: ClipWithDetails): String = withContext(Dispatchers.IO) {
+        val eligibleAssets = clip.assets
+            .filter { asset -> asset.localPath != null && asset.type in setOf("photo", "video_thumbnail") }
+            .sortedBy { it.id }
+        if (eligibleAssets.isEmpty()) return@withContext ""
+        eligibleAssets.mapNotNull { asset ->
+            val path = asset.localPath?.let(::File)?.takeIf(File::isFile) ?: return@mapNotNull null
+            val bitmap = runCatching { BitmapFactory.decodeFile(path.absolutePath) }.getOrNull() ?: return@mapNotNull null
+            try {
+                ocrTextGateway.recognize(bitmap).trim().takeIf(String::isNotBlank)
+            } finally {
+                bitmap.recycle()
+            }
+        }.joinToString("\n\n")
+    }
+
     suspend fun moveClipToTrash(clip: ClipEntity) = withContext(Dispatchers.IO) {
-        postStorageManager.withDatabase { it.clipDao().updateClip(clip.copy(isDeleted = true)) }
+        postStorageManager.withDatabase { database ->
+            val clipDao = database.clipDao()
+            val assets = clipDao.assetsForClipIds(listOf(clip.id))
+            val imageDir = runCatching { postStorageManager.imageDirectory().canonicalFile }.getOrNull()
+                ?: error("保存先が利用できません")
+            val filesToDelete = assets.mapNotNull { asset ->
+                val localPath = asset.localPath ?: return@mapNotNull null
+                val file = File(localPath)
+                if (!file.exists()) return@mapNotNull null
+                val canonical = runCatching { file.canonicalFile }.getOrNull()
+                    ?: error("ファイルのパスを解決できません")
+                require(canonical.path.startsWith(imageDir.path + File.separator) || canonical == imageDir) {
+                    "管理画像ディレクトリ外のファイルは削除できません"
+                }
+                canonical
+            }
+            filesToDelete.forEach { file ->
+                require(file.delete() || !file.exists()) { "ローカル画像の削除に失敗しました" }
+            }
+            database.withTransaction {
+                clipDao.deleteClip(clip.id)
+            }
+        }
     }
 
     private fun cleanNodeName(name: String): String = name.trim().also {

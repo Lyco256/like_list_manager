@@ -20,12 +20,25 @@ class AppContainer(context: Context) {
     }
     val xOAuthManager: OAuthGateway = if (BuildConfig.TEST_HARNESS) DisabledOAuthGateway() else XOAuthManager(context)
     val xApiClient: XApiGateway = if (BuildConfig.TEST_HARNESS) DisabledXApiGateway() else XApiClient(BuildConfig.X_API_BASE_URL)
+    val ocrTextGateway: OcrTextGateway = if (BuildConfig.TEST_HARNESS) {
+        FakeOcrTextGateway { bitmap ->
+            when {
+                bitmap.width == 1 && bitmap.height == 1 -> ""
+                bitmap.width == 2 && bitmap.height == 2 -> throw IllegalStateException("Fake OCR failure")
+                bitmap.width > bitmap.height -> "Landscape OCR\nSecond line"
+                else -> "Portrait OCR"
+            }
+        }
+    } else {
+        MlKitOcrTextGateway()
+    }
     val repository = ClipRepository(
         context = context,
         postStorageManager = postStorageManager,
         apiSettingsStore = apiSettingsStore,
         xOAuthManager = xOAuthManager,
         xApiClient = xApiClient,
+        ocrTextGateway = ocrTextGateway,
         includeSeedMedia = !BuildConfig.TEST_HARNESS,
     )
 }

@@ -47,6 +47,7 @@ class LargeDatasetIntegrationTest {
                         savedAt = ordinal,
                         syncedAt = "2026-01-01T00:00:00Z",
                         summary = if (index % 2 == 0) "summary" else "",
+                        ocrText = if (index % 1_000 == 0) "ocr-$ordinal" else "",
                     ),
                 )
             }
@@ -58,6 +59,7 @@ class LargeDatasetIntegrationTest {
         assertEquals("large-09999", clips.first().xPostId)
         assertEquals("large-00000", clips.last().xPostId)
         assertEquals(10, clips.count { it.text.startsWith("needle-") })
+        assertEquals(10, clips.count { it.ocrText.startsWith("ocr-") })
     }
 
     @Test

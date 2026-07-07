@@ -252,4 +252,63 @@ class LikeListDatabaseMigrationTest {
         helper.close()
         context.deleteDatabase(name)
     }
+
+    @Test
+    fun migration6To7AddsOcrColumnsWithDefaults() {
+        val name = "migration-6-7-test.db"
+        context.deleteDatabase(name)
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name(name)
+                .callback(object : SupportSQLiteOpenHelper.Callback(6) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL(
+                            """
+                            CREATE TABLE clips (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                                xPostId TEXT NOT NULL,
+                                authorId TEXT,
+                                authorName TEXT NOT NULL,
+                                authorUsername TEXT NOT NULL,
+                                text TEXT NOT NULL,
+                                postUrl TEXT NOT NULL,
+                                xCreatedAt TEXT NOT NULL,
+                                savedAt TEXT NOT NULL,
+                                syncedAt TEXT NOT NULL,
+                                summary TEXT NOT NULL,
+                                isDeleted INTEGER NOT NULL,
+                                likeCount INTEGER,
+                                likeCountFetchedAt TEXT,
+                                likeCountFetchFailedAt TEXT,
+                                likeCountFetchError TEXT
+                            )
+                            """.trimIndent(),
+                        )
+                    }
+
+                    override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+                })
+                .build(),
+        )
+        helper.writableDatabase.apply {
+            execSQL(
+                "INSERT INTO clips (id, xPostId, authorId, authorName, authorUsername, text, postUrl, xCreatedAt, savedAt, syncedAt, summary, isDeleted) VALUES (9, 'ocr-post', NULL, 'name', 'user', 'text', 'url', '2026-07-01T00:00:00Z', 'now', 'now', 'summary', 0)",
+            )
+            LikeListDatabase.MIGRATION_6_7.migrate(this)
+            query("SELECT summary, ocrText, ocrUpdatedAt FROM clips WHERE id = 9").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("summary", cursor.getString(0))
+                assertEquals("", cursor.getString(1))
+                assertTrue(cursor.isNull(2))
+            }
+            execSQL("UPDATE clips SET ocrText = 'manual OCR', ocrUpdatedAt = '2026-07-01T01:23:45Z' WHERE id = 9")
+            query("SELECT ocrText, ocrUpdatedAt FROM clips WHERE id = 9").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("manual OCR", cursor.getString(0))
+                assertEquals("2026-07-01T01:23:45Z", cursor.getString(1))
+            }
+        }
+        helper.close()
+        context.deleteDatabase(name)
+    }
 }

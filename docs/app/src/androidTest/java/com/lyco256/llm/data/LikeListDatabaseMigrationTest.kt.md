@@ -18,3 +18,7 @@ version 3→4では既存使用量の保持、継続token列のNULL初期値、m
 ## 2026-07-03 追加確認
 
 - version 4->5では `api_usage_months` の作成、既存 `sync_state.usageMonth` と `monthlyFetchedCount` のバックフィル、既存 `sync_state` の保持を検証します。
+
+## 2026-07 OCR update
+
+- Added migration coverage for version `6 -> 7`, including the default OCR columns on `clips`.

@@ -59,7 +59,21 @@ class RepositoryIntegrationTest {
         )
         api = RecordingXApiGateway()
         oauth = RecordingOAuthGateway()
-        repository = ClipRepository(context, storage, settings, oauth, api)
+        repository = ClipRepository(
+            context = context,
+            postStorageManager = storage,
+            apiSettingsStore = settings,
+            xOAuthManager = oauth,
+            xApiClient = api,
+            ocrTextGateway = FakeOcrTextGateway { bitmap ->
+                when {
+                    bitmap.width == 1 && bitmap.height == 1 -> ""
+                    bitmap.width == 2 && bitmap.height == 2 -> throw IllegalStateException("Fake OCR failure")
+                    bitmap.width > bitmap.height -> "Landscape OCR\nSecond line"
+                    else -> "Portrait OCR"
+                }
+            },
+        )
     }
 
     @After
@@ -624,6 +638,112 @@ class RepositoryIntegrationTest {
     }
 
     @Test
+    fun detectOcrTextRecognizesEligibleAssetsAndSavingItPersistsTimestamp() = runBlocking {
+        val now = Instant.now().toString()
+        val clipId = storage.withDatabase { database ->
+            val clipId = database.clipDao().insertClip(clip("900", summary = "ocr"))
+            val imageDir = storage.imageDirectory()
+            imageDir.mkdirs()
+            val photoFile = File(imageDir, "ocr-photo.webp").apply { writeBytes(bitmapBytes(2, 1, android.graphics.Color.RED)) }
+            val thumbFile = File(imageDir, "ocr-thumb.webp").apply { writeBytes(bitmapBytes(1, 2, android.graphics.Color.BLUE)) }
+            database.clipDao().insertAssets(
+                listOf(
+                    AssetEntity(
+                        clipId = clipId,
+                        mediaKey = "photo",
+                        type = "photo",
+                        remoteUrl = "https://example.test/photo",
+                        previewUrl = null,
+                        localPath = photoFile.absolutePath,
+                        width = 2,
+                        height = 1,
+                        sizeBytes = photoFile.length(),
+                        downloadState = "downloaded",
+                        createdAt = now,
+                    ),
+                    AssetEntity(
+                        clipId = clipId,
+                        mediaKey = "thumb",
+                        type = "video_thumbnail",
+                        remoteUrl = "https://example.test/thumb",
+                        previewUrl = null,
+                        localPath = thumbFile.absolutePath,
+                        width = 1,
+                        height = 2,
+                        sizeBytes = thumbFile.length(),
+                        downloadState = "downloaded",
+                        createdAt = now,
+                    ),
+                ),
+            )
+            clipId
+        }
+
+        val clipWithDetails = storage.withDatabase { database ->
+            val clip = database.clipDao().getActiveClips().single { it.id == clipId }
+            val assets = database.clipDao().assetsForClipIds(listOf(clipId))
+            ClipWithDetails(clip = clip, assets = assets, tags = emptyList())
+        }
+
+        val recognized = repository.detectOcrText(clipWithDetails)
+
+        assertEquals("Landscape OCR\nSecond line\n\nPortrait OCR", recognized)
+
+        val clip = clipWithDetails.clip
+        repository.updateOcrText(clip, recognized)
+
+        storage.withDatabase { database ->
+            val updated = database.clipDao().getActiveClips().single { it.id == clipId }
+            assertEquals(recognized, updated.ocrText)
+            assertTrue(requireNotNull(updated.ocrUpdatedAt).isNotBlank())
+        }
+    }
+
+    @Test
+    fun moveClipToTrashDeletesRowsAndLocalImageFiles() = runBlocking {
+        val now = Instant.now().toString()
+        val imageFile = storage.imageDirectory().resolve("trash-me.webp").apply {
+            parentFile?.mkdirs()
+            writeBytes(bitmapBytes(2, 1, android.graphics.Color.GREEN))
+        }
+        val clipId = storage.withDatabase { database ->
+            val clipId = database.clipDao().insertClip(clip("901"))
+            val tagId = database.tagDao().insertTag(TagEntity(name = "tag", createdAt = now, updatedAt = now))
+            database.clipDao().insertClipTag(ClipTagEntity(clipId, tagId, now))
+            database.clipDao().insertAssets(
+                listOf(
+                    AssetEntity(
+                        clipId = clipId,
+                        mediaKey = "trash-photo",
+                        type = "photo",
+                        remoteUrl = "https://example.test/trash",
+                        previewUrl = null,
+                        localPath = imageFile.absolutePath,
+                        width = 2,
+                        height = 1,
+                        sizeBytes = imageFile.length(),
+                        downloadState = "downloaded",
+                        createdAt = now,
+                    ),
+                ),
+            )
+            clipId
+        }
+        val clip = storage.withDatabase { database -> database.clipDao().getActiveClips().single { it.id == clipId } }
+        val beforeCount = storage.withDatabase { database -> database.clipDao().countClips() }
+
+        repository.moveClipToTrash(clip)
+
+        storage.withDatabase { database ->
+            assertEquals(beforeCount - 1, database.clipDao().countClips())
+            assertTrue(database.clipDao().getActiveClips().none { it.id == clipId })
+            assertTrue(database.clipDao().assetsForClipIds(listOf(clipId)).isEmpty())
+            assertTrue(database.clipDao().clipTagsForClipIds(listOf(clipId)).isEmpty())
+        }
+        assertFalse(imageFile.exists())
+    }
+
+    @Test
     fun deletingTagOrEmptyGroupNeverDeletesTheClip() = runBlocking {
         val now = Instant.now().toString()
         val (clipId, tagId, groupId) = storage.withDatabase { database ->
@@ -678,6 +798,15 @@ class RepositoryIntegrationTest {
 
     private fun pngBytes(color: Int): ByteArray = ByteArrayOutputStream().use { output ->
         Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888).run {
+            eraseColor(color)
+            compress(Bitmap.CompressFormat.PNG, 100, output)
+            recycle()
+        }
+        output.toByteArray()
+    }
+
+    private fun bitmapBytes(width: Int, height: Int, color: Int): ByteArray = ByteArrayOutputStream().use { output ->
+        Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).run {
             eraseColor(color)
             compress(Bitmap.CompressFormat.PNG, 100, output)
             recycle()

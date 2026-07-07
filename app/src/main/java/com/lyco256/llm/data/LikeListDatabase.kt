@@ -15,7 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SyncStateEntity::class,
         ApiUsageMonthEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class LikeListDatabase : RoomDatabase() {
@@ -23,6 +23,13 @@ abstract class LikeListDatabase : RoomDatabase() {
     abstract fun tagDao(): TagDao
 
     companion object {
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `clips` ADD COLUMN `ocrText` TEXT NOT NULL DEFAULT ''")
+                database.execSQL("ALTER TABLE `clips` ADD COLUMN `ocrUpdatedAt` TEXT")
+            }
+        }
+
         val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("PRAGMA foreign_keys=OFF")

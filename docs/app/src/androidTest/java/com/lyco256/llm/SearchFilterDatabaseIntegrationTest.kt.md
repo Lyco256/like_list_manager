@@ -9,3 +9,7 @@
 - 検索処理が投稿、タグ、グループ、投稿タグ関係を変更しないこと
 
 本番package、実X API、実OAuth tokenは使いません。変更時は `scripts/run-safe-integration-check.cmd` で、同じ実機上の本番package metadataが前後不変であることも合わせて確認します。
+
+## 2026-07 OCR update
+
+- Added search coverage for the OCR text field so OCR content is included in text search targets.

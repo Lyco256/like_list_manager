@@ -1,4 +1,6 @@
 param(
+    [ValidateSet("usb", "wireless")]
+    [string]$DebugMethod = "usb",
     [string]$DeviceConfig = (Join-Path $PSScriptRoot "..\test-device.local.properties")
 )
 
@@ -85,8 +87,11 @@ $configPath = ""
 $serial = ""
 $productionPackage = ""
 $testPackage = ""
+$testRunnerComponent = ""
+$selectedDebugMethod = ""
 $adb = ""
 $targetApk = ""
+$androidTestApk = ""
 $productionBefore = ""
 $runError = $null
 
@@ -115,6 +120,8 @@ try {
         if ($script:productionPackage -ne "com.lyco256.llm") { throw "productionPackage must be com.lyco256.llm" }
         if ($script:testPackage -ne "com.lyco256.llm.test") { throw "testPackage must be com.lyco256.llm.test" }
         if ($script:productionPackage -eq $script:testPackage) { throw "Production and test package IDs must be different." }
+        $script:selectedDebugMethod = $DebugMethod.ToLowerInvariant()
+        $script:testRunnerComponent = "$($script:testPackage).test/androidx.test.runner.AndroidJUnitRunner"
 
         $script:adb = Join-Path $env:LOCALAPPDATA "Android\Sdk\platform-tools\adb.exe"
         if (-not (Test-Path -LiteralPath $script:adb)) { throw "adb was not found: $script:adb" }
@@ -145,8 +152,12 @@ try {
 
         Invoke-SafePhase -Name "Install" -Action {
             $script:targetApk = Join-Path $repoRoot "app\build\outputs\apk\integrationTest\app-integrationTest.apk"
+            $script:androidTestApk = Join-Path $repoRoot "app\build\outputs\apk\androidTest\integrationTest\app-integrationTest-androidTest.apk"
             if (-not (Test-Path -LiteralPath $script:targetApk -PathType Leaf)) {
                 throw "Integration test APK was not found: $script:targetApk"
+            }
+            if (-not (Test-Path -LiteralPath $script:androidTestApk -PathType Leaf)) {
+                throw "Integration test androidTest APK was not found: $script:androidTestApk"
             }
             $aapt = Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA "Android\Sdk\build-tools\*\aapt.exe") |
                 Sort-Object { [version]$_.Directory.Name } -Descending |
@@ -162,13 +173,31 @@ try {
             if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($badging) -or $badging -notmatch "package: name='$([regex]::Escape($script:testPackage))'") {
                 throw "Refusing installation because target APK is not $script:testPackage`: $badging"
             }
+            $asciiAndroidTestApk = Join-Path $env:TEMP "like-list-manager-integration-test-androidTest.apk"
+            Copy-Item -LiteralPath $script:androidTestApk -Destination $asciiAndroidTestApk -Force
+            $androidTestBadgingOutput = @(& $aapt.FullName dump badging $asciiAndroidTestApk 2>&1)
+            foreach ($line in $androidTestBadgingOutput) {
+                Write-SafeLog ($line | Out-String).TrimEnd()
+            }
+            $androidTestBadging = $androidTestBadgingOutput | Select-Object -First 1
+            $expectedAndroidTestPackage = [regex]::Escape("$($script:testPackage).test")
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($androidTestBadging) -or $androidTestBadging -notmatch "package: name='$expectedAndroidTestPackage'") {
+                throw "Refusing installation because androidTest APK is not $script:testPackage`.test`: $androidTestBadging"
+            }
             Wait-AllowedDevice -Adb $script:adb -Serial $script:serial
             Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "install", "-r", $script:targetApk) -TimeoutSeconds $timeouts.Install -WorkingDirectory $repoRoot
+            if ($script:selectedDebugMethod -eq "wireless") {
+                Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "install", "-r", $script:androidTestApk) -TimeoutSeconds $timeouts.Install -WorkingDirectory $repoRoot
+            }
         }
 
         Invoke-SafePhase -Name "IntegrationTest" -Action {
             Wait-AllowedDevice -Adb $script:adb -Serial $script:serial
-            Invoke-SafeNativeCommand -FilePath ".\gradlew.bat" -Arguments @(":app:connectedIntegrationTestAndroidTest", "--console=plain", "--no-daemon") -TimeoutSeconds $timeouts.IntegrationTest -WorkingDirectory $repoRoot
+            if ($script:selectedDebugMethod -eq "wireless") {
+                Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "shell", "am", "instrument", "-w", "-r", $script:testRunnerComponent) -TimeoutSeconds $timeouts.IntegrationTest -WorkingDirectory $repoRoot
+            } else {
+                Invoke-SafeNativeCommand -FilePath ".\gradlew.bat" -Arguments @(":app:connectedIntegrationTestAndroidTest", "--console=plain", "--no-daemon") -TimeoutSeconds $timeouts.IntegrationTest -WorkingDirectory $repoRoot
+            }
             $testPath = ((Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "pm", "path", $script:testPackage)) -join "`n").Trim()
             if (-not $testPath.StartsWith("package:")) {
                 Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "install", "-r", $script:targetApk) -TimeoutSeconds $timeouts.Install -WorkingDirectory $repoRoot
