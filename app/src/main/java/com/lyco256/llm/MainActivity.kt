@@ -151,6 +151,11 @@ enum class AppTab(val label: String) {
     Tags("タグ管理"),
 }
 
+enum class ClassifiedDisplayMode {
+    Card,
+    MediaGrid,
+}
+
 enum class SearchMode(val label: String) {
     Literal("リテラル"),
     Regex("正規表現"),
@@ -545,6 +550,7 @@ fun LikeListManagerUi(viewModel: MainViewModel, onLogin: (ApiSettings) -> Unit) 
 @Composable
 fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSettings) -> Unit) {
     var tab by rememberSaveable { mutableStateOf(AppTab.Unclassified) }
+    var classifiedDisplayMode by rememberSaveable { mutableStateOf(ClassifiedDisplayMode.Card) }
     var settingsOpen by remember { mutableStateOf(false) }
     var syncMessage by remember { mutableStateOf<String?>(null) }
     var likeRefreshEstimating by remember { mutableStateOf(false) }
@@ -674,6 +680,13 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
             AppTab.Classified -> EnhancedClassifiedScreen(
                 uiState = uiState,
                 listState = classifiedListState,
+                displayMode = classifiedDisplayMode,
+                onToggleDisplayMode = {
+                    classifiedDisplayMode = when (classifiedDisplayMode) {
+                        ClassifiedDisplayMode.Card -> ClassifiedDisplayMode.MediaGrid
+                        ClassifiedDisplayMode.MediaGrid -> ClassifiedDisplayMode.Card
+                    }
+                },
                 modifier = Modifier.padding(padding).testTag("classified_screen"),
                 onApplyFilters = viewModel::applyFilters,
                 onApplySort = viewModel::applySort,

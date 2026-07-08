@@ -100,3 +100,11 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - OCR recognition only runs when requested from the menu, and reopening OCR with existing text reuses the saved text until `再検出` is confirmed.
 - The tweet options menu exposes `tweet_options_ocr`, `tweet_options_summary`, and `tweet_options_local_delete`, and the OCR redetect confirmation uses `ocr_redetect_warning_dialog`.
 - The like-count popup now carries `clip_like_popup_<id>` so instrumentation tests can wait for the popup itself instead of only waiting on its text.
+## 2026-07 classified media grid
+
+- `EnhancedClassifiedScreen` now switches between the existing card list and a new media-grid mode with a single icon toggle.
+- `buildMediaGridEntries(clips)` flattens `uiState.classified` into `MediaGridEntry` rows so the grid can stay independent from direct `ClipWithDetails` nesting in the UI.
+- Only `photo` and `video_thumbnail` assets are included, and the grid keeps `displayUrl = localPath ?: previewUrl ?: remoteUrl`.
+- `classified_media_grid` uses `LazyVerticalGrid` with `GridCells.Fixed(4)` and zero item spacing.
+- Failed downloads, missing local files, and assets with no usable URL render as error cells via `media_grid_error_<assetId>`.
+- This update intentionally leaves out divider headings, like-count overlays, pinch-to-change columns, card popups, multi-select, and bulk tag editing for later work.

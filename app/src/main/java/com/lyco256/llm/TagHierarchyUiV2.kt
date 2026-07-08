@@ -35,6 +35,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -50,11 +51,14 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.LocalOffer
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.outlined.Input
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
@@ -268,6 +272,8 @@ fun EnhancedClipListScreen(
 fun EnhancedClassifiedScreen(
     uiState: MainUiState,
     listState: LazyListState,
+    displayMode: ClassifiedDisplayMode,
+    onToggleDisplayMode: () -> Unit,
     modifier: Modifier = Modifier,
     onApplyFilters: (TweetFilterState) -> Unit,
     onApplySort: (ClassifiedSortState) -> Unit,
@@ -283,16 +289,31 @@ fun EnhancedClassifiedScreen(
     var sortDialogOpen by remember { mutableStateOf(false) }
     var clearConfirmationOpen by remember { mutableStateOf(false) }
     val itemKeys = remember(uiState.classified) { uiState.classified.map { it.clip.id } }
+    val mediaGridState = rememberLazyGridState()
+    val mediaGridEntries = remember(uiState.classified) { buildMediaGridEntries(uiState.classified) }
     PreserveScrollAnchor(listState, "classified", itemKeys)
     Column(modifier.fillMaxSize().padding(12.dp)) {
         TagFilterSummaryRow(
             uiState = uiState,
             hierarchy = uiState.tagHierarchy,
+            displayMode = displayMode,
             onOpen = { filterDialogOpen = true },
             onOpenSort = { sortDialogOpen = true },
+            onToggleDisplayMode = onToggleDisplayMode,
             onClear = { clearConfirmationOpen = true },
         )
         Spacer(Modifier.height(10.dp))
+        if (displayMode == ClassifiedDisplayMode.MediaGrid) {
+            when {
+                uiState.classified.isEmpty() -> HierarchyEmptyState("譚｡莉ｶ縺ｫ蜷医≧繝・う繝ｼ繝医・縺ゅｊ縺ｾ縺帙ｓ")
+                mediaGridEntries.isEmpty() -> HierarchyEmptyState("この条件に一致する画像・動画サムネイルはありません")
+                else -> ClassifiedMediaGridContent(
+                    entries = mediaGridEntries,
+                    state = mediaGridState,
+                )
+            }
+            return
+        }
         if (uiState.classified.isEmpty()) {
             HierarchyEmptyState("条件に合うツイートはありません")
         } else {
@@ -969,8 +990,10 @@ private fun TagSelectionDialog(
 private fun TagFilterSummaryRow(
     uiState: MainUiState,
     hierarchy: TagHierarchy,
+    displayMode: ClassifiedDisplayMode,
     onOpen: () -> Unit,
     onOpenSort: () -> Unit,
+    onToggleDisplayMode: () -> Unit,
     onClear: () -> Unit,
 ) {
     val filters = uiState.filters
@@ -1036,6 +1059,17 @@ private fun TagFilterSummaryRow(
             Icon(
                 Icons.Filled.Sort,
                 contentDescription = "並べ替え",
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        FilledTonalButton(
+            onClick = onToggleDisplayMode,
+            modifier = Modifier.width(36.dp).height(32.dp).testTag("classified_display_toggle"),
+            contentPadding = PaddingValues(0.dp),
+        ) {
+            Icon(
+                imageVector = if (displayMode == ClassifiedDisplayMode.Card) Icons.Filled.GridView else Icons.Filled.ViewList,
+                contentDescription = "表示切替",
                 modifier = Modifier.size(18.dp),
             )
         }
@@ -2605,6 +2639,112 @@ fun EnhancedMediaGrid(assets: List<AssetEntity>) {
                 initialPage = initialPage.coerceIn(0, savedPhotos.lastIndex),
                 onDismiss = { initialViewerPage = null },
             )
+        }
+    }
+}
+
+internal data class MediaGridEntry(
+    val entryId: Long,
+    val clipId: Long,
+    val assetId: Long,
+    val mediaKey: String,
+    val mediaIndex: Int,
+    val type: String,
+    val displayUrl: String?,
+    val downloadState: String,
+    val hasLocalFile: Boolean,
+    val localPath: String?,
+    val clip: ClipWithDetails,
+)
+
+internal fun buildMediaGridEntries(clips: List<ClipWithDetails>): List<MediaGridEntry> =
+    clips.flatMap { clip ->
+        clip.assets
+            .filter { it.type == "photo" || it.type == "video_thumbnail" }
+            .sortedBy { it.id }
+            .mapIndexed { index, asset ->
+                val displayUrl = asset.localPath ?: asset.previewUrl ?: asset.remoteUrl
+                MediaGridEntry(
+                    entryId = asset.id,
+                    clipId = clip.clip.id,
+                    assetId = asset.id,
+                    mediaKey = asset.mediaKey,
+                    mediaIndex = index,
+                    type = asset.type,
+                    displayUrl = displayUrl,
+                    downloadState = asset.downloadState,
+                    hasLocalFile = asset.localPath != null && File(asset.localPath).isFile,
+                    localPath = asset.localPath,
+                    clip = clip,
+                )
+            }
+    }
+
+@Composable
+private fun ClassifiedMediaGridContent(
+    entries: List<MediaGridEntry>,
+    state: androidx.compose.foundation.lazy.grid.LazyGridState,
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(4),
+        state = state,
+        modifier = Modifier.fillMaxSize().testTag("classified_media_grid"),
+        horizontalArrangement = Arrangement.spacedBy(0.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
+    ) {
+        gridItems(entries, key = { it.entryId }) { entry ->
+            ClassifiedMediaGridCell(entry)
+        }
+    }
+}
+
+@Composable
+private fun ClassifiedMediaGridCell(entry: MediaGridEntry) {
+    val error = entry.downloadState == "failed" || entry.displayUrl == null || (entry.localPath != null && !entry.hasLocalFile)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(1f)
+            .testTag("media_grid_item_${entry.assetId}")
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        if (error) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("media_grid_error_${entry.assetId}"),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.ErrorOutline,
+                    contentDescription = "エラー",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+        } else {
+            AsyncImage(
+                model = entry.displayUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            if (entry.type == "video_thumbnail") {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(4.dp)
+                        .size(16.dp)
+                        .testTag("media_grid_video_badge_${entry.assetId}"),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.PlayArrow,
+                        contentDescription = "再生",
+                        tint = Color.White,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
         }
     }
 }

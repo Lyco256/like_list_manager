@@ -1,6 +1,7 @@
 package com.lyco256.llm
 
 import androidx.compose.ui.geometry.Rect
+import com.lyco256.llm.data.AssetEntity
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipTagEntity
 import com.lyco256.llm.data.ClipWithDetails
@@ -26,6 +27,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 import kotlin.random.Random
 
 class TagHierarchyTest {
@@ -731,6 +733,127 @@ class TagHierarchyTest {
         assertTrue(calculateAutoScrollDelta(110f, bounds, canScrollBackward = true, canScrollForward = true) < 0f)
         assertEquals(0f, calculateAutoScrollDelta(490f, bounds, canScrollBackward = true, canScrollForward = false), 0.001f)
         assertTrue(calculateAutoScrollDelta(490f, bounds, canScrollBackward = true, canScrollForward = true) > 0f)
+    }
+
+    @Test
+    fun buildMediaGridEntriesKeepsClipOrderFiltersUnsupportedAssetsAndUsesFallbackUrls() {
+        val existingPath = File.createTempFile("media-grid", ".webp").apply {
+            writeBytes(byteArrayOf(1))
+            deleteOnExit()
+        }.absolutePath
+        val missingPath = File(existingPath).parentFile!!.resolve("missing-media-grid.webp").absolutePath
+        val firstClip = ClipWithDetails(
+            clip = ClipEntity(
+                id = 1,
+                xPostId = "x-1",
+                authorName = "author1",
+                authorUsername = "author1",
+                text = "first clip",
+                postUrl = "https://x.com/author1/status/1",
+                xCreatedAt = now,
+                savedAt = now,
+                syncedAt = now,
+            ),
+            assets = listOf(
+                AssetEntity(
+                    id = 30,
+                    clipId = 1,
+                    mediaKey = "photo-existing",
+                    type = "photo",
+                    remoteUrl = "https://example.test/photo-existing.jpg",
+                    previewUrl = null,
+                    localPath = existingPath,
+                    createdAt = now,
+                    downloadState = "downloaded",
+                ),
+                AssetEntity(
+                    id = 10,
+                    clipId = 1,
+                    mediaKey = "video-preview",
+                    type = "video_thumbnail",
+                    remoteUrl = null,
+                    previewUrl = "https://example.test/video-preview.jpg",
+                    localPath = null,
+                    createdAt = now,
+                    downloadState = "downloaded",
+                ),
+                AssetEntity(
+                    id = 20,
+                    clipId = 1,
+                    mediaKey = "photo-remote",
+                    type = "photo",
+                    remoteUrl = "https://example.test/photo-remote.jpg",
+                    previewUrl = null,
+                    localPath = null,
+                    createdAt = now,
+                    downloadState = "downloaded",
+                ),
+                AssetEntity(
+                    id = 99,
+                    clipId = 1,
+                    mediaKey = "animated",
+                    type = "animated_gif",
+                    remoteUrl = "https://example.test/animated.gif",
+                    previewUrl = "https://example.test/animated.jpg",
+                    localPath = null,
+                    createdAt = now,
+                    downloadState = "downloaded",
+                ),
+            ),
+            tags = emptyList(),
+        )
+        val secondClip = ClipWithDetails(
+            clip = ClipEntity(
+                id = 2,
+                xPostId = "x-2",
+                authorName = "author2",
+                authorUsername = "author2",
+                text = "second clip",
+                postUrl = "https://x.com/author2/status/2",
+                xCreatedAt = now,
+                savedAt = now,
+                syncedAt = now,
+            ),
+            assets = listOf(
+                AssetEntity(
+                    id = 40,
+                    clipId = 2,
+                    mediaKey = "photo-missing",
+                    type = "photo",
+                    remoteUrl = "https://example.test/photo-missing.jpg",
+                    previewUrl = null,
+                    localPath = missingPath,
+                    createdAt = now,
+                    downloadState = "downloaded",
+                ),
+                AssetEntity(
+                    id = 41,
+                    clipId = 2,
+                    mediaKey = "photo-failed",
+                    type = "photo",
+                    remoteUrl = "https://example.test/photo-failed.jpg",
+                    previewUrl = null,
+                    localPath = null,
+                    createdAt = now,
+                    downloadState = "failed",
+                ),
+            ),
+            tags = emptyList(),
+        )
+
+        val entries = buildMediaGridEntries(listOf(firstClip, secondClip))
+
+        assertEquals(listOf(10L, 20L, 30L, 40L, 41L), entries.map { it.assetId })
+        assertEquals(listOf(1L, 1L, 1L, 2L, 2L), entries.map { it.clipId })
+        assertEquals(listOf(0, 1, 2, 0, 1), entries.map { it.mediaIndex })
+        assertEquals("https://example.test/video-preview.jpg", entries[0].displayUrl)
+        assertEquals("https://example.test/photo-remote.jpg", entries[1].displayUrl)
+        assertEquals(existingPath, entries[2].displayUrl)
+        assertTrue(entries[2].hasLocalFile)
+        assertFalse(entries[0].hasLocalFile)
+        assertEquals(missingPath, entries[3].localPath)
+        assertFalse(entries[3].hasLocalFile)
+        assertEquals("failed", entries[4].downloadState)
     }
 
     private fun hierarchy(clipTags: List<ClipTagEntity> = emptyList()) = TagHierarchy(

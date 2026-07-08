@@ -25,6 +25,7 @@ import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.PostStorageEstimate
 import com.lyco256.llm.data.PostStorageLocation
 import com.lyco256.llm.data.PostStorageType
+import com.lyco256.llm.data.TagEntity
 import com.lyco256.llm.data.TagHierarchy
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -174,6 +175,179 @@ class UiStateRenderingTest {
         )
 
         assertMediaGridGeometry(tagPrefix = "media_asset", assets = baseAssets, useEnhanced = true)
+    }
+
+    @Test
+    fun classifiedMediaGridShowsFourColumnsVideoBadgeAndErrorCells() {
+        val clips = listOf(
+            ClipWithDetails(
+                clip = ClipEntity(
+                    id = 1,
+                    xPostId = "grid-empty",
+                    authorName = "Empty",
+                    authorUsername = "empty",
+                    text = "No media clip",
+                    postUrl = "https://x.com/empty/status/1",
+                    xCreatedAt = "2026-01-01T00:00:00Z",
+                    savedAt = "2026-01-01T00:00:00Z",
+                    syncedAt = "2026-01-01T00:00:00Z",
+                ),
+                assets = emptyList(),
+                tags = emptyList(),
+            ),
+            ClipWithDetails(
+                clip = ClipEntity(
+                    id = 2,
+                    xPostId = "grid-media",
+                    authorName = "Media",
+                    authorUsername = "media",
+                    text = "Media clip",
+                    postUrl = "https://x.com/media/status/2",
+                    xCreatedAt = "2026-01-01T00:00:00Z",
+                    savedAt = "2026-01-01T00:00:00Z",
+                    syncedAt = "2026-01-01T00:00:00Z",
+                ),
+                assets = listOf(
+                    AssetEntity(
+                        id = 21,
+                        clipId = 2,
+                        mediaKey = "grid-photo",
+                        type = "photo",
+                        remoteUrl = "https://example.test/grid-photo.jpg",
+                        previewUrl = null,
+                        localPath = null,
+                        width = 1200,
+                        height = 1200,
+                        createdAt = "2026-01-01T00:00:00Z",
+                    ),
+                    AssetEntity(
+                        id = 22,
+                        clipId = 2,
+                        mediaKey = "grid-video",
+                        type = "video_thumbnail",
+                        remoteUrl = null,
+                        previewUrl = "https://example.test/grid-video.jpg",
+                        localPath = null,
+                        width = 1200,
+                        height = 1200,
+                        createdAt = "2026-01-01T00:00:00Z",
+                    ),
+                    AssetEntity(
+                        id = 23,
+                        clipId = 2,
+                        mediaKey = "grid-error",
+                        type = "photo",
+                        remoteUrl = null,
+                        previewUrl = null,
+                        localPath = null,
+                        width = 1200,
+                        height = 1200,
+                        downloadState = "failed",
+                        createdAt = "2026-01-01T00:00:00Z",
+                    ),
+                    AssetEntity(
+                        id = 24,
+                        clipId = 2,
+                        mediaKey = "grid-missing",
+                        type = "photo",
+                        remoteUrl = "https://example.test/grid-missing.jpg",
+                        previewUrl = null,
+                        localPath = "/tmp/missing-grid.webp",
+                        width = 1200,
+                        height = 1200,
+                        createdAt = "2026-01-01T00:00:00Z",
+                    ),
+                    AssetEntity(
+                        id = 25,
+                        clipId = 2,
+                        mediaKey = "grid-photo-2",
+                        type = "photo",
+                        remoteUrl = "https://example.test/grid-photo-2.jpg",
+                        previewUrl = null,
+                        localPath = null,
+                        width = 1200,
+                        height = 1200,
+                        createdAt = "2026-01-01T00:00:00Z",
+                    ),
+                ),
+                tags = listOf(
+                    TagEntity(
+                        id = 10,
+                        name = "GridTag",
+                        createdAt = "2026-01-01T00:00:00Z",
+                        updatedAt = "2026-01-01T00:00:00Z",
+                    ),
+                ),
+            ),
+        )
+        composeRule.setContent {
+            MaterialTheme {
+                Box(Modifier.requiredWidth(400.dp)) {
+                    EnhancedClassifiedScreen(
+                        uiState = com.lyco256.llm.MainUiState(clips = clips),
+                        listState = rememberLazyListState(),
+                        displayMode = ClassifiedDisplayMode.MediaGrid,
+                        onToggleDisplayMode = {},
+                        onApplyFilters = {},
+                        onApplySort = {},
+                        onClearAllFilters = {},
+                        onTagsChange = { _, _ -> },
+                        onSummaryChange = { _, _ -> },
+                        onOcrSave = { _, _ -> },
+                        onOcrDetect = { _, _, _ -> },
+                        onDelete = {},
+                        onAuthorClick = {},
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_item_21").fetchSemanticsNode()
+        composeRule.onNodeWithTag("media_grid_item_22").fetchSemanticsNode()
+        composeRule.onNodeWithTag("media_grid_item_23").fetchSemanticsNode()
+        composeRule.onNodeWithTag("media_grid_item_24").fetchSemanticsNode()
+        composeRule.onNodeWithTag("media_grid_item_25").fetchSemanticsNode()
+        composeRule.onNodeWithTag("media_grid_video_badge_22").fetchSemanticsNode()
+        composeRule.onNodeWithTag("media_grid_error_23").fetchSemanticsNode()
+        composeRule.onNodeWithTag("media_grid_error_24").fetchSemanticsNode()
+
+        fun bounds(tag: String) = composeRule.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+        val first = bounds("media_grid_item_21")
+        val second = bounds("media_grid_item_22")
+        val third = bounds("media_grid_item_23")
+        val fourth = bounds("media_grid_item_24")
+        val fifth = bounds("media_grid_item_25")
+
+        assertTrue("grid should keep first four cells aligned", first.top == second.top && second.top == third.top && third.top == fourth.top)
+        assertTrue("grid should wrap the fifth cell", fifth.top > first.top)
+        assertTrue("grid cells should stay square", kotlin.math.abs(first.width - first.height) < 1f)
+        assertTrue("grid cells should not have horizontal spacing", kotlin.math.abs(second.left - first.right) < 1f)
+    }
+
+    @Test
+    fun classifiedMediaGridShowsTheExistingEmptyStateWhenNothingMatches() {
+        composeRule.setContent {
+            MaterialTheme {
+                EnhancedClassifiedScreen(
+                    uiState = com.lyco256.llm.MainUiState(clips = emptyList()),
+                    listState = rememberLazyListState(),
+                    displayMode = ClassifiedDisplayMode.MediaGrid,
+                    onToggleDisplayMode = {},
+                    onApplyFilters = {},
+                    onApplySort = {},
+                    onClearAllFilters = {},
+                    onTagsChange = { _, _ -> },
+                    onSummaryChange = { _, _ -> },
+                    onOcrSave = { _, _ -> },
+                    onOcrDetect = { _, _, _ -> },
+                    onDelete = {},
+                    onAuthorClick = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("譚｡莉ｶ縺ｫ蜷医≧繝・う繝ｼ繝医・縺ゅｊ縺ｾ縺帙ｓ").assertIsDisplayed()
     }
 
     @Test

@@ -86,3 +86,10 @@ UI項目を追加する場合は、対応するViewModel操作、Repository API�
 - Added OCR search support via `SearchTarget.OcrText`.
 - Tweet cards can open the OCR dialog, run OCR, and save `ocrText`/`ocrUpdatedAt` through the ViewModel.
 - Local delete now uses the repository hard-delete path, matching the updated repository behavior.
+
+## 2026-07 classified media grid
+
+- `ClassifiedDisplayMode` is saved with `rememberSaveable` in `MainScreen`, so the classified tab keeps card/grid mode across tab switches and activity recreation.
+- The classified toolbar now has a single icon toggle next to filter/sort controls; it does not open a dropdown and does not show the text `MediaGrid`.
+- Grid mode still uses `uiState.classified` as its only source and stays separate from the existing card view.
+- This update intentionally does not add divider headings, like-count overlays, pinch-to-change columns, card popups, multi-select, or bulk tag editing.

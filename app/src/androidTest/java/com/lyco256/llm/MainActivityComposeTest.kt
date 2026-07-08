@@ -45,6 +45,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.io.ByteArrayOutputStream
+import java.io.File
 
 class MainActivityComposeTest {
     @get:Rule
@@ -139,6 +140,104 @@ class MainActivityComposeTest {
 
         composeRule.onNodeWithTag("classified_screen").assertIsDisplayed()
         composeRule.onNodeWithText("文字列:\"RecreateFilterNeedle\"", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
+    }
+
+    @Test
+    fun classifiedDisplayToggleSwitchesBetweenCardAndMediaGridAndSurvivesActivityRecreation() {
+        val now = Instant.now().toString()
+        val missingPath = File(storage().imageDirectory(), "classified-grid-missing.webp").absolutePath
+        val clipAndAssetIds = runBlocking {
+            storage().withDatabase { database ->
+                val clipId = database.clipDao().insertClip(
+                    ClipEntity(
+                        xPostId = "classified-grid-1",
+                        authorName = "Grid Author",
+                        authorUsername = "grid_author",
+                        text = "Classified grid clip",
+                        postUrl = "https://x.com/grid_author/status/classified-grid-1",
+                        xCreatedAt = now,
+                        savedAt = now,
+                        syncedAt = now,
+                    ),
+                )
+                val tagId = database.tagDao().insertTag(
+                    TagEntity(
+                        name = "GridTag",
+                        createdAt = now,
+                        updatedAt = now,
+                    ),
+                )
+                database.clipDao().insertClipTag(ClipTagEntity(clipId, tagId, now))
+                database.clipDao().insertAssets(
+                    listOf(
+                        AssetEntity(
+                            clipId = clipId,
+                            mediaKey = "grid-photo",
+                            type = "photo",
+                            remoteUrl = "https://example.test/grid-photo.jpg",
+                            previewUrl = null,
+                            localPath = null,
+                            width = 1200,
+                            height = 1200,
+                            sizeBytes = null,
+                            downloadState = "downloaded",
+                            createdAt = now,
+                        ),
+                        AssetEntity(
+                            clipId = clipId,
+                            mediaKey = "grid-video",
+                            type = "video_thumbnail",
+                            remoteUrl = null,
+                            previewUrl = "https://example.test/grid-video.jpg",
+                            localPath = null,
+                            width = 1200,
+                            height = 1200,
+                            sizeBytes = null,
+                            downloadState = "downloaded",
+                            createdAt = now,
+                        ),
+                        AssetEntity(
+                            clipId = clipId,
+                            mediaKey = "grid-error",
+                            type = "photo",
+                            remoteUrl = null,
+                            previewUrl = null,
+                            localPath = missingPath,
+                            width = 1200,
+                            height = 1200,
+                            sizeBytes = null,
+                            downloadState = "downloaded",
+                            createdAt = now,
+                        ),
+                    ),
+                )
+                clipId to database.clipDao().assetsForClipIds(listOf(clipId))
+                    .filter { it.mediaKey.startsWith("grid-") }
+                    .associate { it.mediaKey to it.id }
+            }
+        }
+        val clipId = clipAndAssetIds.first
+        val assetIds = clipAndAssetIds.second
+        waitUntil { clipTagIds(clipId).isNotEmpty() }
+
+        composeRule.onNodeWithTag("tab_classified").performClick()
+        composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
+        composeRule.onNodeWithTag("classified_display_toggle").assertIsDisplayed()
+        composeRule.onNodeWithTag("classified_display_toggle").performClick()
+
+        composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_item_${assetIds.getValue("grid-photo")}", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_video_badge_${assetIds.getValue("grid-video")}", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_error_${assetIds.getValue("grid-error")}", useUnmergedTree = true).assertIsDisplayed()
+
+        composeRule.activityRule.scenario.recreate()
+
+        composeRule.onNodeWithTag("classified_screen").assertIsDisplayed()
+        composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_item_${assetIds.getValue("grid-photo")}", useUnmergedTree = true).assertIsDisplayed()
+
+        composeRule.onNodeWithTag("classified_display_toggle").performClick()
         composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
     }
 
