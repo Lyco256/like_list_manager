@@ -6,6 +6,7 @@ import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.lyco256.llm.BuildConfig
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -130,6 +131,150 @@ class LargeDatasetIntegrationTest {
         assertEquals(4, tagDao.getGroups().size)
         assertEquals(3, tagDao.getTags().size)
     }
+
+    @Test
+    fun mediaGridDaoQueriesReturnOnlyActiveSupportedRowsAndDistinctTags() = runBlocking {
+        val clipDao = database.clipDao()
+        val tagDao = database.tagDao()
+        val deletedAt = "2026-06-15T08:00:00Z"
+        val newerAt = "2026-06-15T11:00:00Z"
+        val olderAt = "2026-06-15T09:00:00Z"
+        database.withTransaction {
+            val tagA = tagDao.insertTag(TagEntity(name = "tag-a", createdAt = deletedAt, updatedAt = deletedAt))
+            val tagB = tagDao.insertTag(TagEntity(name = "tag-b", createdAt = deletedAt, updatedAt = deletedAt))
+            val tagC = tagDao.insertTag(TagEntity(name = "tag-c", createdAt = deletedAt, updatedAt = deletedAt))
+
+            val mediaFirst = clipDao.insertClip(
+                ClipEntity(
+                    xPostId = "media-first",
+                    authorName = "First",
+                    authorUsername = "first",
+                    text = "first media clip",
+                    postUrl = "https://x.com/first/status/media-first",
+                    xCreatedAt = olderAt,
+                    savedAt = olderAt,
+                    syncedAt = olderAt,
+                ),
+            )
+            clipDao.insertClipTag(ClipTagEntity(mediaFirst, tagA, deletedAt))
+            clipDao.insertClipTag(ClipTagEntity(mediaFirst, tagB, deletedAt))
+            clipDao.insertAssets(
+                listOf(
+                    asset(mediaFirst, 11, "first-photo", "photo", olderAt),
+                    asset(mediaFirst, 12, "first-video", "video_thumbnail", olderAt),
+                    asset(mediaFirst, 13, "first-gif", "animated_gif", olderAt),
+                ),
+            )
+
+            val deletedClip = clipDao.insertClip(
+                ClipEntity(
+                    xPostId = "deleted-media",
+                    authorName = "Deleted",
+                    authorUsername = "deleted",
+                    text = "deleted media clip",
+                    postUrl = "https://x.com/deleted/status/deleted-media",
+                    xCreatedAt = deletedAt,
+                    savedAt = deletedAt,
+                    syncedAt = deletedAt,
+                    isDeleted = true,
+                ),
+            )
+            clipDao.insertClipTag(ClipTagEntity(deletedClip, tagC, deletedAt))
+            clipDao.insertAssets(listOf(asset(deletedClip, 21, "deleted-photo", "photo", deletedAt)))
+
+            val mediaSecond = clipDao.insertClip(
+                ClipEntity(
+                    xPostId = "media-second",
+                    authorName = "Second",
+                    authorUsername = "second",
+                    text = "second media clip",
+                    postUrl = "https://x.com/second/status/media-second",
+                    xCreatedAt = newerAt,
+                    savedAt = newerAt,
+                    syncedAt = newerAt,
+                ),
+            )
+            clipDao.insertClipTag(ClipTagEntity(mediaSecond, tagC, deletedAt))
+            clipDao.insertAssets(
+                listOf(
+                    asset(mediaSecond, 31, "second-photo", "photo", newerAt),
+                    asset(mediaSecond, 32, "second-thumb", "video_thumbnail", newerAt),
+                ),
+            )
+
+            val noMedia = clipDao.insertClip(
+                ClipEntity(
+                    xPostId = "no-media",
+                    authorName = "Plain",
+                    authorUsername = "plain",
+                    text = "plain clip",
+                    postUrl = "https://x.com/plain/status/no-media",
+                    xCreatedAt = newerAt,
+                    savedAt = newerAt,
+                    syncedAt = newerAt,
+                ),
+            )
+            clipDao.insertClipTag(ClipTagEntity(noMedia, tagA, deletedAt))
+        }
+
+        val rows = clipDao.observeActiveMediaGridAssetRows().first()
+        val tags = clipDao.observeActiveMediaGridClipTags().first()
+
+        assertEquals(listOf(31L, 32L, 11L, 12L), rows.map { it.assetId })
+        assertEquals(listOf("photo", "video_thumbnail", "photo", "video_thumbnail"), rows.map { it.assetType })
+        assertTrue(rows.none { it.assetType == "animated_gif" })
+        assertTrue(rows.none { it.xPostId == "deleted-media" })
+        assertEquals(setOf(31L, 32L, 11L, 12L), rows.map { it.assetId }.toSet())
+        assertEquals(3, tags.size)
+        assertEquals(3, tags.map { it.tagId }.toSet().size)
+    }
+
+    @Test
+    fun mediaGridQueryHandlesTenThousandClipsWithoutTimingOut() = runBlocking {
+        val clipDao = database.clipDao()
+        database.withTransaction {
+            repeat(10_000) { index ->
+                val ordinal = index.toString().padStart(5, '0')
+                val clipId = clipDao.insertClip(
+                    ClipEntity(
+                        xPostId = "grid-$ordinal",
+                        authorName = "Author ${index % 50}",
+                        authorUsername = "author${index % 50}",
+                        text = if (index % 1_000 == 0) "needle-$ordinal" else "body-$ordinal",
+                        postUrl = "https://x.com/author/status/grid-$ordinal",
+                        xCreatedAt = "2026-01-01T00:00:00Z",
+                        savedAt = ordinal,
+                        syncedAt = "2026-01-01T00:00:00Z",
+                    ),
+                )
+                if (index % 10 == 0) {
+                    clipDao.insertAssets(
+                        listOf(
+                            asset(clipId, "grid-photo-$ordinal", "photo", "2026-01-01T00:00:00Z"),
+                            asset(clipId, "grid-thumb-$ordinal", "video_thumbnail", "2026-01-01T00:00:00Z"),
+                            asset(clipId, "grid-ignored-$ordinal", "animated_gif", "2026-01-01T00:00:00Z"),
+                        ),
+                    )
+                }
+            }
+        }
+
+        val rows = clipDao.observeActiveMediaGridAssetRows().first()
+        assertEquals(2_000, rows.size)
+        assertEquals(2L, rows.take(2).map { it.assetId }.distinct().size.toLong())
+        assertEquals(listOf("photo", "video_thumbnail"), rows.take(2).map { it.assetType })
+        assertTrue(rows.none { it.assetType == "animated_gif" })
+    }
+
+    private fun asset(clipId: Long, id: Long, mediaKey: String, type: String, now: String) = AssetEntity(
+        id = id,
+        clipId = clipId,
+        mediaKey = mediaKey,
+        type = type,
+        remoteUrl = "https://example.test/$mediaKey",
+        previewUrl = null,
+        createdAt = now,
+    )
 
     private fun asset(clipId: Long, mediaKey: String, type: String, now: String) = AssetEntity(
         clipId = clipId,

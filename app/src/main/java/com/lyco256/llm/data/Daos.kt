@@ -22,6 +22,40 @@ interface ClipDao {
     @Query("SELECT * FROM clips WHERE isDeleted = 0 ORDER BY savedAt DESC")
     suspend fun getActiveClips(): List<ClipEntity>
 
+    @Query(
+        """
+        SELECT
+            clips.id AS clipId,
+            clips.xPostId AS xPostId,
+            clips.authorId AS authorId,
+            clips.authorName AS authorName,
+            clips.authorUsername AS authorUsername,
+            clips.text AS text,
+            clips.summary AS summary,
+            clips.ocrText AS ocrText,
+            clips.postUrl AS postUrl,
+            clips.xCreatedAt AS xCreatedAt,
+            clips.savedAt AS savedAt,
+            clips.syncedAt AS syncedAt,
+            clips.likeCount AS likeCount,
+            assets.id AS assetId,
+            assets.mediaKey AS mediaKey,
+            assets.type AS assetType,
+            assets.remoteUrl AS remoteUrl,
+            assets.previewUrl AS previewUrl,
+            assets.localPath AS localPath,
+            assets.width AS width,
+            assets.height AS height,
+            assets.downloadState AS downloadState
+        FROM clips
+        INNER JOIN assets ON assets.clipId = clips.id
+        WHERE clips.isDeleted = 0
+          AND assets.type IN ('photo', 'video_thumbnail')
+        ORDER BY clips.savedAt DESC, clips.id DESC, assets.id ASC
+        """,
+    )
+    fun observeActiveMediaGridAssetRows(): Flow<List<MediaGridAssetRow>>
+
     @Query("SELECT * FROM assets WHERE clipId IN (:clipIds) ORDER BY id")
     suspend fun assetsForClipIds(clipIds: List<Long>): List<AssetEntity>
 
@@ -42,6 +76,21 @@ interface ClipDao {
 
     @Query("SELECT clip_tags.* FROM clip_tags INNER JOIN clips ON clips.id = clip_tags.clipId WHERE clips.isDeleted = 0")
     fun observeActiveClipTags(): Flow<List<ClipTagEntity>>
+
+    @Query(
+        """
+        SELECT clip_tags.clipId, clip_tags.tagId, clip_tags.createdAt
+        FROM clip_tags
+        WHERE clip_tags.clipId IN (
+            SELECT DISTINCT clips.id
+            FROM clips
+            INNER JOIN assets ON assets.clipId = clips.id
+            WHERE clips.isDeleted = 0
+              AND assets.type IN ('photo', 'video_thumbnail')
+        )
+        """,
+    )
+    fun observeActiveMediaGridClipTags(): Flow<List<ClipTagEntity>>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertClip(clip: ClipEntity): Long
@@ -162,4 +211,29 @@ data class TagCountRow(
 data class AssetStorageStats(
     val count: Int,
     val totalBytes: Long,
+)
+
+data class MediaGridAssetRow(
+    val clipId: Long,
+    val xPostId: String,
+    val authorId: String?,
+    val authorName: String,
+    val authorUsername: String,
+    val text: String,
+    val summary: String,
+    val ocrText: String,
+    val postUrl: String,
+    val xCreatedAt: String,
+    val savedAt: String,
+    val syncedAt: String,
+    val likeCount: Long?,
+    val assetId: Long,
+    val mediaKey: String,
+    val assetType: String,
+    val remoteUrl: String?,
+    val previewUrl: String?,
+    val localPath: String?,
+    val width: Int?,
+    val height: Int?,
+    val downloadState: String,
 )

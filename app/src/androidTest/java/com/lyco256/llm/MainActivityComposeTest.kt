@@ -242,6 +242,141 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun classifiedMediaGridReflectsFilteringSortingAndEmptyStates() {
+        val now = Instant.now().toString()
+        data class GridFixture(
+            val lowAssetId: Long,
+            val highAssetId: Long,
+            val lowClipId: Long,
+            val highClipId: Long,
+            val noMediaClipId: Long,
+        )
+        val fixture = runBlocking {
+            storage().withDatabase { database ->
+                database.clearAllTables()
+                val tagId = database.tagDao().insertTag(
+                    TagEntity(
+                        name = "GridMatch",
+                        createdAt = now,
+                        updatedAt = now,
+                    ),
+                )
+                val lowClipId = database.clipDao().insertClip(
+                    ClipEntity(
+                        xPostId = "grid-low",
+                        authorName = "Low",
+                        authorUsername = "low",
+                        text = "Grid Alpha",
+                        postUrl = "https://x.com/low/status/grid-low",
+                        xCreatedAt = now,
+                        savedAt = "2026-06-15T09:00:00Z",
+                        syncedAt = now,
+                        likeCount = 5,
+                    ),
+                )
+                val highClipId = database.clipDao().insertClip(
+                    ClipEntity(
+                        xPostId = "grid-high",
+                        authorName = "High",
+                        authorUsername = "high",
+                        text = "Grid Beta",
+                        postUrl = "https://x.com/high/status/grid-high",
+                        xCreatedAt = now,
+                        savedAt = "2026-06-15T10:00:00Z",
+                        syncedAt = now,
+                        likeCount = 10,
+                    ),
+                )
+                val noMediaClipId = database.clipDao().insertClip(
+                    ClipEntity(
+                        xPostId = "grid-no-media",
+                        authorName = "Plain",
+                        authorUsername = "plain",
+                        text = "NoMedia Match",
+                        postUrl = "https://x.com/plain/status/grid-no-media",
+                        xCreatedAt = now,
+                        savedAt = "2026-06-15T11:00:00Z",
+                        syncedAt = now,
+                        likeCount = 1,
+                    ),
+                )
+                listOf(lowClipId, highClipId, noMediaClipId).forEach { clipId ->
+                    database.clipDao().insertClipTag(ClipTagEntity(clipId, tagId, now))
+                }
+                database.clipDao().insertAssets(
+                    listOf(
+                        AssetEntity(
+                            clipId = lowClipId,
+                            mediaKey = "grid-low-photo",
+                            type = "photo",
+                            remoteUrl = "https://example.test/grid-low-photo.jpg",
+                            previewUrl = null,
+                            localPath = null,
+                            width = 1200,
+                            height = 1200,
+                            sizeBytes = null,
+                            downloadState = "downloaded",
+                            createdAt = now,
+                        ),
+                        AssetEntity(
+                            clipId = highClipId,
+                            mediaKey = "grid-high-photo",
+                            type = "photo",
+                            remoteUrl = "https://example.test/grid-high-photo.jpg",
+                            previewUrl = null,
+                            localPath = null,
+                            width = 1200,
+                            height = 1200,
+                            sizeBytes = null,
+                            downloadState = "downloaded",
+                            createdAt = now,
+                        ),
+                    ),
+                )
+                val lowAssetId = database.clipDao().assetsForClipIds(listOf(lowClipId)).single().id
+                val highAssetId = database.clipDao().assetsForClipIds(listOf(highClipId)).single().id
+                GridFixture(lowAssetId, highAssetId, lowClipId, highClipId, noMediaClipId)
+            }
+        }
+        val lowAssetId = fixture.lowAssetId
+        val highAssetId = fixture.highAssetId
+        val noMediaClipId = fixture.noMediaClipId
+
+        composeRule.onNodeWithTag("tab_classified").performClick()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("clip_card_${fixture.highClipId}").fetchSemanticsNodes().isNotEmpty() ||
+                composeRule.onAllNodesWithTag("classified_media_grid").fetchSemanticsNodes().isNotEmpty()
+        }
+        if (composeRule.onAllNodesWithTag("clip_card_${fixture.highClipId}").fetchSemanticsNodes().isNotEmpty()) {
+            composeRule.onNodeWithTag("classified_display_toggle").performClick()
+        }
+        composeRule.onNodeWithTag("media_grid_item_$highAssetId", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("filter_dialog", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("filter_query").performTextReplacement("NoMedia")
+        composeRule.onNodeWithTag("filter_apply").performClick()
+        composeRule.onNodeWithText("この条件に一致する画像・動画サムネイルはありません").assertIsDisplayed()
+
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_clear_all_open").performClick()
+        composeRule.onNodeWithTag("filter_apply").performClick()
+        composeRule.onNodeWithTag("sort_open").performClick()
+        composeRule.onNodeWithTag("sort_base_like").performClick()
+        composeRule.onNodeWithTag("sort_like_direction_high").performClick()
+        composeRule.onNodeWithTag("sort_apply").performClick()
+        composeRule.onNodeWithTag("media_grid_item_$highAssetId", useUnmergedTree = true).assertIsDisplayed()
+
+        val highBounds = composeRule.onNodeWithTag("media_grid_item_$highAssetId", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val lowBounds = composeRule.onNodeWithTag("media_grid_item_$lowAssetId", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue(highBounds.left < lowBounds.left)
+
+        composeRule.onNodeWithTag("classified_display_toggle").performClick()
+        composeRule.onNodeWithTag("clip_card_${fixture.highClipId}").assertIsDisplayed()
+    }
+
+    @Test
     fun classifiedSortDialogOpensClearsAndAppliesSelection() {
         waitForSeededClip()
 

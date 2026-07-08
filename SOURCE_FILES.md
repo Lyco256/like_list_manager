@@ -135,7 +135,7 @@ MainActivity / Compose UI
 - `docs/app/src/androidTest/java/com/lyco256/llm/UiStateRenderingTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/SearchFilterDatabaseIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LikeListDatabaseMigrationTest.kt.md`
-- `MainActivityComposeTest.kt` and `UiStateRenderingTest.kt` now cover the classified display toggle and the 4-column media grid rendering.
+- `MainActivityComposeTest.kt`, `UiStateRenderingTest.kt`, `RepositoryIntegrationTest.kt`, and `LargeDatasetIntegrationTest.kt` now cover the classified display toggle, lightweight media-grid flow, and the 4-column media grid rendering.
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/PostStorageManagerRecoveryTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/OcrTextRecognizerTest.kt.md`
 

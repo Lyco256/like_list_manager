@@ -1,4 +1,4 @@
-package com.lyco256.llm
+﻿package com.lyco256.llm
 
 import android.content.Intent
 import android.net.Uri
@@ -124,6 +124,7 @@ import coil.compose.AsyncImage
 import com.lyco256.llm.data.AssetEntity
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipWithDetails
+import com.lyco256.llm.data.MediaGridClipSource
 import com.lyco256.llm.data.TagEntity
 import com.lyco256.llm.data.TagFilterState
 import com.lyco256.llm.data.TagGroupEntity
@@ -271,6 +272,7 @@ fun EnhancedClipListScreen(
 @Composable
 fun EnhancedClassifiedScreen(
     uiState: MainUiState,
+    mediaGridState: ClassifiedMediaGridState,
     listState: LazyListState,
     displayMode: ClassifiedDisplayMode,
     onToggleDisplayMode: () -> Unit,
@@ -289,8 +291,7 @@ fun EnhancedClassifiedScreen(
     var sortDialogOpen by remember { mutableStateOf(false) }
     var clearConfirmationOpen by remember { mutableStateOf(false) }
     val itemKeys = remember(uiState.classified) { uiState.classified.map { it.clip.id } }
-    val mediaGridState = rememberLazyGridState()
-    val mediaGridEntries = remember(uiState.classified) { buildMediaGridEntries(uiState.classified) }
+    val mediaGridLazyState = rememberLazyGridState()
     PreserveScrollAnchor(listState, "classified", itemKeys)
     Column(modifier.fillMaxSize().padding(12.dp)) {
         TagFilterSummaryRow(
@@ -305,11 +306,11 @@ fun EnhancedClassifiedScreen(
         Spacer(Modifier.height(10.dp))
         if (displayMode == ClassifiedDisplayMode.MediaGrid) {
             when {
-                uiState.classified.isEmpty() -> HierarchyEmptyState("譚｡莉ｶ縺ｫ蜷医≧繝・う繝ｼ繝医・縺ゅｊ縺ｾ縺帙ｓ")
-                mediaGridEntries.isEmpty() -> HierarchyEmptyState("この条件に一致する画像・動画サムネイルはありません")
+                mediaGridState.isEmptyByFilter -> HierarchyEmptyState("条件に合うツイートはありません")
+                mediaGridState.hasMatchingClipButNoMedia -> HierarchyEmptyState("この条件に一致する画像・動画サムネイルはありません")
                 else -> ClassifiedMediaGridContent(
-                    entries = mediaGridEntries,
-                    state = mediaGridState,
+                    entries = mediaGridState.entries,
+                    state = mediaGridLazyState,
                 )
             }
             return
@@ -2643,7 +2644,7 @@ fun EnhancedMediaGrid(assets: List<AssetEntity>) {
     }
 }
 
-internal data class MediaGridEntry(
+data class MediaGridEntry(
     val entryId: Long,
     val clipId: Long,
     val assetId: Long,
@@ -2654,28 +2655,25 @@ internal data class MediaGridEntry(
     val downloadState: String,
     val hasLocalFile: Boolean,
     val localPath: String?,
-    val clip: ClipWithDetails,
 )
 
-internal fun buildMediaGridEntries(clips: List<ClipWithDetails>): List<MediaGridEntry> =
+internal fun buildMediaGridEntries(clips: List<MediaGridClipSource>): List<MediaGridEntry> =
     clips.flatMap { clip ->
         clip.assets
-            .filter { it.type == "photo" || it.type == "video_thumbnail" }
-            .sortedBy { it.id }
+            .filter { it.assetType == "photo" || it.assetType == "video_thumbnail" }
             .mapIndexed { index, asset ->
                 val displayUrl = asset.localPath ?: asset.previewUrl ?: asset.remoteUrl
                 MediaGridEntry(
-                    entryId = asset.id,
+                    entryId = asset.assetId,
                     clipId = clip.clip.id,
-                    assetId = asset.id,
+                    assetId = asset.assetId,
                     mediaKey = asset.mediaKey,
                     mediaIndex = index,
-                    type = asset.type,
+                    type = asset.assetType,
                     displayUrl = displayUrl,
                     downloadState = asset.downloadState,
                     hasLocalFile = asset.localPath != null && File(asset.localPath).isFile,
                     localPath = asset.localPath,
-                    clip = clip,
                 )
             }
     }

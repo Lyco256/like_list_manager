@@ -1,10 +1,12 @@
-package com.lyco256.llm
+﻿package com.lyco256.llm
 
 import androidx.compose.ui.geometry.Rect
 import com.lyco256.llm.data.AssetEntity
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipTagEntity
 import com.lyco256.llm.data.ClipWithDetails
+import com.lyco256.llm.data.MediaGridAssetRow
+import com.lyco256.llm.data.MediaGridClipSource
 import com.lyco256.llm.data.TagEntity
 import com.lyco256.llm.data.TagFilterState
 import com.lyco256.llm.data.TagGroupNode
@@ -742,106 +744,90 @@ class TagHierarchyTest {
             deleteOnExit()
         }.absolutePath
         val missingPath = File(existingPath).parentFile!!.resolve("missing-media-grid.webp").absolutePath
-        val firstClip = ClipWithDetails(
-            clip = ClipEntity(
-                id = 1,
-                xPostId = "x-1",
-                authorName = "author1",
-                authorUsername = "author1",
-                text = "first clip",
-                postUrl = "https://x.com/author1/status/1",
-                xCreatedAt = now,
-                savedAt = now,
-                syncedAt = now,
-            ),
+        val firstClip = clip(
+            id = 1,
+            text = "first needle clip",
+            authorName = "author1",
+            username = "author1",
+        )
+        val secondClip = clip(
+            id = 2,
+            text = "second needle clip",
+            authorName = "author2",
+            username = "author2",
+        )
+        val firstSource = mediaClip(
+            clip = firstClip,
             assets = listOf(
-                AssetEntity(
-                    id = 30,
+                mediaGridAsset(
                     clipId = 1,
-                    mediaKey = "photo-existing",
-                    type = "photo",
-                    remoteUrl = "https://example.test/photo-existing.jpg",
-                    previewUrl = null,
-                    localPath = existingPath,
-                    createdAt = now,
-                    downloadState = "downloaded",
-                ),
-                AssetEntity(
-                    id = 10,
-                    clipId = 1,
+                    assetId = 10,
                     mediaKey = "video-preview",
-                    type = "video_thumbnail",
+                    assetType = "video_thumbnail",
                     remoteUrl = null,
                     previewUrl = "https://example.test/video-preview.jpg",
                     localPath = null,
-                    createdAt = now,
                     downloadState = "downloaded",
                 ),
-                AssetEntity(
-                    id = 20,
+                mediaGridAsset(
                     clipId = 1,
+                    assetId = 20,
                     mediaKey = "photo-remote",
-                    type = "photo",
+                    assetType = "photo",
                     remoteUrl = "https://example.test/photo-remote.jpg",
                     previewUrl = null,
                     localPath = null,
-                    createdAt = now,
                     downloadState = "downloaded",
                 ),
-                AssetEntity(
-                    id = 99,
+                mediaGridAsset(
                     clipId = 1,
+                    assetId = 30,
+                    mediaKey = "photo-existing",
+                    assetType = "photo",
+                    remoteUrl = "https://example.test/photo-existing.jpg",
+                    previewUrl = null,
+                    localPath = existingPath,
+                    downloadState = "downloaded",
+                ),
+                mediaGridAsset(
+                    clipId = 1,
+                    assetId = 99,
                     mediaKey = "animated",
-                    type = "animated_gif",
+                    assetType = "animated_gif",
                     remoteUrl = "https://example.test/animated.gif",
                     previewUrl = "https://example.test/animated.jpg",
                     localPath = null,
-                    createdAt = now,
                     downloadState = "downloaded",
                 ),
             ),
-            tags = emptyList(),
         )
-        val secondClip = ClipWithDetails(
-            clip = ClipEntity(
-                id = 2,
-                xPostId = "x-2",
-                authorName = "author2",
-                authorUsername = "author2",
-                text = "second clip",
-                postUrl = "https://x.com/author2/status/2",
-                xCreatedAt = now,
-                savedAt = now,
-                syncedAt = now,
-            ),
+        val secondSource = mediaClip(
+            clip = secondClip,
             assets = listOf(
-                AssetEntity(
-                    id = 40,
+                mediaGridAsset(
                     clipId = 2,
+                    assetId = 40,
                     mediaKey = "photo-missing",
-                    type = "photo",
+                    assetType = "photo",
                     remoteUrl = "https://example.test/photo-missing.jpg",
                     previewUrl = null,
                     localPath = missingPath,
-                    createdAt = now,
                     downloadState = "downloaded",
                 ),
-                AssetEntity(
-                    id = 41,
+                mediaGridAsset(
                     clipId = 2,
+                    assetId = 41,
                     mediaKey = "photo-failed",
-                    type = "photo",
+                    assetType = "photo",
                     remoteUrl = "https://example.test/photo-failed.jpg",
                     previewUrl = null,
                     localPath = null,
-                    createdAt = now,
                     downloadState = "failed",
                 ),
             ),
-            tags = emptyList(),
         )
 
-        val entries = buildMediaGridEntries(listOf(firstClip, secondClip))
+        val entries = buildMediaGridEntries(listOf(firstSource, secondSource))
 
         assertEquals(listOf(10L, 20L, 30L, 40L, 41L), entries.map { it.assetId })
         assertEquals(listOf(1L, 1L, 1L, 2L, 2L), entries.map { it.clipId })
@@ -854,6 +840,105 @@ class TagHierarchyTest {
         assertEquals(missingPath, entries[3].localPath)
         assertFalse(entries[3].hasLocalFile)
         assertEquals("failed", entries[4].downloadState)
+    }
+
+    @Test
+    fun lightweightMediaFilteringAndSortingMatchesClassifiedCards() {
+        val tag = TagEntity(id = 1, name = "NeedleTag", createdAt = now, updatedAt = now)
+        val alpha = ClipWithDetails(
+            clip = ClipEntity(
+                id = 1,
+                xPostId = "x-1",
+                authorName = "Alpha User",
+                authorUsername = "alpha_user",
+                text = "needle alpha",
+                postUrl = "https://x.com/alpha_user/status/x-1",
+                xCreatedAt = "2026-06-15T10:00:00Z",
+                savedAt = "2026-06-15T10:00:00Z",
+                syncedAt = now,
+                likeCount = 3,
+            ),
+            assets = emptyList(),
+            tags = listOf(tag),
+        )
+        val beta = ClipWithDetails(
+            clip = ClipEntity(
+                id = 2,
+                xPostId = "x-2",
+                authorName = "Beta User",
+                authorUsername = "beta_user",
+                text = "needle beta",
+                postUrl = "https://x.com/beta_user/status/x-2",
+                xCreatedAt = "2026-06-15T09:00:00Z",
+                savedAt = "2026-06-15T09:00:00Z",
+                syncedAt = now,
+                likeCount = 9,
+            ),
+            assets = emptyList(),
+            tags = listOf(tag),
+        )
+        val gamma = ClipWithDetails(
+            clip = ClipEntity(
+                id = 3,
+                xPostId = "x-3",
+                authorName = "Gamma User",
+                authorUsername = "gamma_user",
+                text = "needle gamma",
+                postUrl = "https://x.com/gamma_user/status/x-3",
+                xCreatedAt = "2026-06-15T08:00:00Z",
+                savedAt = "2026-06-15T08:00:00Z",
+                syncedAt = now,
+                likeCount = 6,
+            ),
+            assets = emptyList(),
+            tags = listOf(tag),
+        )
+        val cardClips = listOf(alpha, beta, gamma)
+        val mediaClips = listOf(
+            mediaClip(
+                clip = alpha,
+                assets = listOf(
+                    mediaGridAsset(clipId = 1, assetId = 10, mediaKey = "alpha-photo-1", assetType = "photo", remoteUrl = "https://example.test/alpha-1.jpg", previewUrl = null, localPath = null, downloadState = "downloaded"),
+                    mediaGridAsset(clipId = 1, assetId = 11, mediaKey = "alpha-photo-2", assetType = "photo", remoteUrl = "https://example.test/alpha-2.jpg", previewUrl = null, localPath = null, downloadState = "downloaded"),
+                ),
+            ),
+            mediaClip(
+                clip = beta,
+                assets = listOf(
+                    mediaGridAsset(clipId = 2, assetId = 20, mediaKey = "beta-thumb", assetType = "video_thumbnail", remoteUrl = null, previewUrl = "https://example.test/beta-thumb.jpg", localPath = null, downloadState = "downloaded"),
+                ),
+            ),
+            mediaClip(
+                clip = gamma,
+                assets = emptyList(),
+            ),
+        )
+        val hierarchy = TagHierarchy(
+            groups = emptyList(),
+            tags = listOf(TagWithCount(tag, 0)),
+            clipTags = listOf(
+                ClipTagEntity(1, tag.id, now),
+                ClipTagEntity(2, tag.id, now),
+                ClipTagEntity(3, tag.id, now),
+            ),
+        )
+        val filters = TweetFilterState(
+            query = "needle",
+            searchTargets = setOf(SearchTarget.Text),
+            tagFilters = mapOf(TagNodeRef(TagNodeType.TAG, tag.id) to TagFilterState.REQUIRED),
+        )
+        val sort = ClassifiedSortState(
+            baseOrder = ClassifiedSortBase.PostTime,
+            postTimeDescending = true,
+        )
+
+        val cardResult = sortClipsForDisplay(filterClipsForSearch(cardClips, hierarchy, filters), hierarchy, filters, sort)
+        val mediaResult = sortClipsForDisplay(filterClipsForSearch(mediaClips, hierarchy, filters), hierarchy, filters, sort)
+        val entries = buildMediaGridEntries(mediaResult)
+
+        assertEquals(cardResult.map { it.clip.id }, mediaResult.map { it.clip.id })
+        assertEquals(listOf(1L, 1L, 2L), entries.map { it.clipId })
+        assertEquals(listOf(10L, 11L, 20L), entries.map { it.assetId })
     }
 
     private fun hierarchy(clipTags: List<ClipTagEntity> = emptyList()) = TagHierarchy(
@@ -920,5 +1005,48 @@ class TagHierarchyTest {
         ),
         assets = emptyList(),
         tags = tags.toList(),
+    )
+
+    private fun mediaClip(
+        clip: ClipWithDetails,
+        assets: List<MediaGridAssetRow>,
+    ): MediaGridClipSource = MediaGridClipSource(
+        clip = clip.clip,
+        tags = clip.tags,
+        assets = assets,
+    )
+
+    private fun mediaGridAsset(
+        clipId: Long,
+        assetId: Long,
+        mediaKey: String,
+        assetType: String,
+        remoteUrl: String?,
+        previewUrl: String?,
+        localPath: String?,
+        downloadState: String,
+    ) = MediaGridAssetRow(
+        clipId = clipId,
+        xPostId = "x-$clipId",
+        authorId = null,
+        authorName = "author-$clipId",
+        authorUsername = "author_$clipId",
+        text = "text-$clipId",
+        summary = "",
+        ocrText = "",
+        postUrl = "https://x.com/author_$clipId/status/x-$clipId",
+        xCreatedAt = now,
+        savedAt = now,
+        syncedAt = now,
+        likeCount = null,
+        assetId = assetId,
+        mediaKey = mediaKey,
+        assetType = assetType,
+        remoteUrl = remoteUrl,
+        previewUrl = previewUrl,
+        localPath = localPath,
+        width = null,
+        height = null,
+        downloadState = downloadState,
     )
 }

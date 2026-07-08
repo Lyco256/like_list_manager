@@ -165,11 +165,16 @@ data class SettingsSnapshot(
     val tweetDataBytes: Long? = null,
 )
 
+interface ClassifiedClipItem {
+    val clip: ClipEntity
+    val tags: List<TagEntity>
+}
+
 data class ClipWithDetails(
-    val clip: ClipEntity,
+    override val clip: ClipEntity,
     val assets: List<AssetEntity>,
-    val tags: List<TagEntity>,
-)
+    override val tags: List<TagEntity>,
+) : ClassifiedClipItem
 
 data class TagWithCount(
     val tag: TagEntity,

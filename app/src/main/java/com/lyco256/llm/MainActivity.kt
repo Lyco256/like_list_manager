@@ -83,9 +83,11 @@ import androidx.lifecycle.viewModelScope
 import coil.compose.AsyncImage
 import com.lyco256.llm.data.ApiSettings
 import com.lyco256.llm.data.ClipEntity
+import com.lyco256.llm.data.ClassifiedClipItem
 import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.LikeCountRefreshEstimate
 import com.lyco256.llm.data.OAuthSession
+import com.lyco256.llm.data.MediaGridClipSource
 import com.lyco256.llm.data.PostStorageEstimate
 import com.lyco256.llm.data.PostStorageLocation
 import com.lyco256.llm.data.PostStorageState
@@ -252,6 +254,14 @@ data class MainUiState(
     val tagFilters: Map<TagNodeRef, TagFilterState> = filters.tagFilters
 }
 
+data class ClassifiedMediaGridState(
+    val entries: List<MediaGridEntry> = emptyList(),
+    val matchingClipCount: Int = 0,
+    val matchingMediaCount: Int = 0,
+    val isEmptyByFilter: Boolean = true,
+    val hasMatchingClipButNoMedia: Boolean = false,
+)
+
 private data class RepositoryUiState(
     val clips: List<ClipWithDetails>,
     val tags: List<TagWithCount>,
@@ -267,6 +277,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val apiSettings = MutableStateFlow(ApiSettings())
     private val oauthSession = MutableStateFlow<OAuthSession?>(null)
     private val settingsSnapshot = MutableStateFlow(SettingsSnapshot())
+    private val mediaGridSource = repository.mediaGridSource
 
     private val repositoryState = combine(
         repository.clipsWithDetails,
@@ -304,6 +315,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ) { baseState, snapshot ->
         baseState.copy(settingsSnapshot = snapshot)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
+
+    val classifiedMediaGridState: StateFlow<ClassifiedMediaGridState> = combine(
+        mediaGridSource,
+        repository.tagHierarchy,
+        filters,
+        sort,
+    ) { source, hierarchy, filterValue, sortValue ->
+        val filtered = filterClipsForSearch(source, hierarchy, filterValue)
+        val sorted = sortClipsForDisplay(filtered, hierarchy, filterValue, sortValue)
+        val entries = buildMediaGridEntries(sorted)
+        ClassifiedMediaGridState(
+            entries = entries,
+            matchingClipCount = filtered.size,
+            matchingMediaCount = entries.size,
+            isEmptyByFilter = filtered.isEmpty(),
+            hasMatchingClipButNoMedia = filtered.isNotEmpty() && entries.isEmpty(),
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ClassifiedMediaGridState())
 
     init {
         viewModelScope.launch {
@@ -559,6 +588,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
     val tagListState = rememberLazyListState()
     val classifiedListStates = remember { mutableMapOf<String, LazyListState>() }
     val classifiedScrollKey = uiState.classifiedScrollKey()
+    val mediaGridState by viewModel.classifiedMediaGridState.collectAsState()
     val classifiedListState = remember(classifiedScrollKey) {
         classifiedListStates.getOrPut(classifiedScrollKey) { LazyListState() }
     }
@@ -679,6 +709,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
             )
             AppTab.Classified -> EnhancedClassifiedScreen(
                 uiState = uiState,
+                mediaGridState = mediaGridState,
                 listState = classifiedListState,
                 displayMode = classifiedDisplayMode,
                 onToggleDisplayMode = {
@@ -737,7 +768,7 @@ internal fun SyncResultDialog(message: String, onDismiss: () -> Unit) {
 }
 
 internal fun matchesTagFilters(
-    clip: ClipWithDetails,
+    clip: ClassifiedClipItem,
     hierarchy: TagHierarchy,
     filters: Map<TagNodeRef, TagFilterState>,
 ): Boolean {
@@ -756,11 +787,11 @@ internal fun matchesTagFilters(
     return excluded.none(::matches) && required.all(::matches) && (included.isEmpty() || included.any(::matches))
 }
 
-internal fun filterClipsForSearch(
-    clips: List<ClipWithDetails>,
+internal fun <T : ClassifiedClipItem> filterClipsForSearch(
+    clips: List<T>,
     hierarchy: TagHierarchy,
     filters: TweetFilterState,
-): List<ClipWithDetails> {
+): List<T> {
     val regex = if (filters.searchMode == SearchMode.Regex && filters.query.isNotBlank()) {
         runCatching { Regex(filters.query, RegexOption.IGNORE_CASE) }.getOrNull() ?: return emptyList()
     } else {
@@ -810,7 +841,7 @@ private fun matchesTextSearch(
     }
 }
 
-private fun buildAuthorOptions(clips: List<ClipWithDetails>): List<TweetAuthorOption> =
+private fun buildAuthorOptions(clips: List<out ClassifiedClipItem>): List<TweetAuthorOption> =
     clips.groupBy { it.clip.authorKey() }
         .map { (key, authorClips) ->
             val latest = authorClips.first().clip
@@ -823,12 +854,12 @@ private fun buildAuthorOptions(clips: List<ClipWithDetails>): List<TweetAuthorOp
         }
         .sortedWith(compareBy<TweetAuthorOption> { it.displayName.lowercase() }.thenBy { it.username.lowercase() })
 
-internal fun sortClipsForDisplay(
-    clips: List<ClipWithDetails>,
+internal fun <T : ClassifiedClipItem> sortClipsForDisplay(
+    clips: List<T>,
     hierarchy: TagHierarchy,
     filters: TweetFilterState,
     sort: ClassifiedSortState,
-): List<ClipWithDetails> {
+): List<T> {
     if (clips.size <= 1) return clips
 
     val authorCounts = clips.groupingBy { it.clip.authorKey() }.eachCount()
@@ -847,9 +878,9 @@ internal fun sortClipsForDisplay(
     })
 }
 
-private fun compareClassifiedClips(
-    left: ClipWithDetails,
-    right: ClipWithDetails,
+private fun <T : ClassifiedClipItem> compareClassifiedClips(
+    left: T,
+    right: T,
     sort: ClassifiedSortState,
     authorCounts: Map<TweetAuthorKey, Int>,
     tagOrderIndexById: Map<Long, Int>,
@@ -923,7 +954,7 @@ private fun compareNullableInt(left: Int?, right: Int?, descending: Boolean): In
     else -> left.compareTo(right)
 }
 
-private fun ClipWithDetails.representativeTagOrder(
+private fun ClassifiedClipItem.representativeTagOrder(
     tagOrderIndexById: Map<Long, Int>,
     candidateTagIds: Set<Long>,
 ): Int? {

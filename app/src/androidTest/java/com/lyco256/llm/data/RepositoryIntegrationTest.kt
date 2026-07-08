@@ -6,7 +6,16 @@ import android.graphics.BitmapFactory
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.lyco256.llm.BuildConfig
+import com.lyco256.llm.ClassifiedSortBase
+import com.lyco256.llm.ClassifiedSortState
+import com.lyco256.llm.SearchMode
+import com.lyco256.llm.SearchTarget
+import com.lyco256.llm.buildMediaGridEntries
+import com.lyco256.llm.filterClipsForSearch
+import com.lyco256.llm.sortClipsForDisplay
+import com.lyco256.llm.TweetFilterState
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
@@ -241,6 +250,113 @@ class RepositoryIntegrationTest {
 
         assertEquals(ApiSettings(), settings.load())
         assertEquals(null, settings.loadSession())
+    }
+
+    @Test
+    fun mediaGridSourceMatchesCardFilteringAndSortingForTheSameClipSet() = runBlocking {
+        data class GridFixture(
+            val tagId: Long,
+            val lowClipId: Long,
+            val highClipId: Long,
+            val noMediaClipId: Long,
+            val lowAssetId: Long,
+            val highAssetId: Long,
+        )
+        val now = "2026-06-15T12:00:00Z"
+        val fixture = storage.withDatabase { database ->
+            val tagId = database.tagDao().insertTag(
+                TagEntity(name = "GridMatch", createdAt = now, updatedAt = now),
+            )
+            val lowClipId = database.clipDao().insertClip(
+                ClipEntity(
+                    xPostId = "grid-low",
+                    authorName = "Low",
+                    authorUsername = "low",
+                    text = "Needle alpha",
+                    postUrl = "https://x.com/low/status/grid-low",
+                    xCreatedAt = now,
+                    savedAt = "2026-06-15T09:00:00Z",
+                    syncedAt = now,
+                    likeCount = 5,
+                ),
+            )
+            val highClipId = database.clipDao().insertClip(
+                ClipEntity(
+                    xPostId = "grid-high",
+                    authorName = "High",
+                    authorUsername = "high",
+                    text = "Needle beta",
+                    postUrl = "https://x.com/high/status/grid-high",
+                    xCreatedAt = now,
+                    savedAt = "2026-06-15T10:00:00Z",
+                    syncedAt = now,
+                    likeCount = 10,
+                ),
+            )
+            val noMediaClipId = database.clipDao().insertClip(
+                ClipEntity(
+                    xPostId = "grid-no-media",
+                    authorName = "Plain",
+                    authorUsername = "plain",
+                    text = "Needle gamma",
+                    postUrl = "https://x.com/plain/status/grid-no-media",
+                    xCreatedAt = now,
+                    savedAt = "2026-06-15T11:00:00Z",
+                    syncedAt = now,
+                    likeCount = 1,
+                ),
+            )
+            listOf(lowClipId, highClipId, noMediaClipId).forEach { clipId ->
+                database.clipDao().insertClipTag(ClipTagEntity(clipId, tagId, now))
+            }
+            database.clipDao().insertAssets(
+                listOf(
+                    AssetEntity(
+                        clipId = lowClipId,
+                        mediaKey = "grid-low-photo",
+                        type = "photo",
+                        remoteUrl = "https://example.test/grid-low-photo.jpg",
+                        previewUrl = null,
+                        localPath = null,
+                        createdAt = now,
+                    ),
+                    AssetEntity(
+                        clipId = highClipId,
+                        mediaKey = "grid-high-photo",
+                        type = "photo",
+                        remoteUrl = "https://example.test/grid-high-photo.jpg",
+                        previewUrl = null,
+                        localPath = null,
+                        createdAt = now,
+                    ),
+                ),
+            )
+            val lowAssetId = database.clipDao().assetsForClipIds(listOf(lowClipId)).single().id
+            val highAssetId = database.clipDao().assetsForClipIds(listOf(highClipId)).single().id
+            GridFixture(tagId, lowClipId, highClipId, noMediaClipId, lowAssetId, highAssetId)
+        }
+
+        val hierarchy = repository.tagHierarchy.first { it.tags.any { tag -> tag.tag.id == fixture.tagId } }
+        val filters = TweetFilterState(
+            query = "Needle",
+            searchMode = SearchMode.Literal,
+            searchTargets = setOf(SearchTarget.Text),
+            taggedOnly = true,
+            tagFilters = mapOf(TagNodeRef(TagNodeType.TAG, fixture.tagId) to TagFilterState.REQUIRED),
+        )
+        val sort = ClassifiedSortState(
+            baseOrder = ClassifiedSortBase.LikeCount,
+            likeCountDescending = true,
+        )
+        val cardClips = repository.clipsWithDetails.first { it.size == 3 }
+        val mediaClips = repository.mediaGridSource.first { it.size == 3 }
+
+        val cardResult = sortClipsForDisplay(filterClipsForSearch(cardClips, hierarchy, filters), hierarchy, filters, sort)
+        val mediaResult = sortClipsForDisplay(filterClipsForSearch(mediaClips, hierarchy, filters), hierarchy, filters, sort)
+
+        assertEquals(cardResult.map { it.clip.id }, mediaResult.map { it.clip.id })
+        assertEquals(listOf(fixture.highClipId, fixture.lowClipId, fixture.noMediaClipId), mediaResult.map { it.clip.id })
+        assertEquals(listOf(fixture.highAssetId, fixture.lowAssetId), buildMediaGridEntries(mediaResult).map { it.assetId })
     }
 
     @Test

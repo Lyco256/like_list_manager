@@ -93,3 +93,9 @@ UI項目を追加する場合は、対応するViewModel操作、Repository API�
 - The classified toolbar now has a single icon toggle next to filter/sort controls; it does not open a dropdown and does not show the text `MediaGrid`.
 - Grid mode still uses `uiState.classified` as its only source and stays separate from the existing card view.
 - This update intentionally does not add divider headings, like-count overlays, pinch-to-change columns, card popups, multi-select, or bulk tag editing.
+## 2026-07 media grid lightweight state
+
+- `MainViewModel` now exposes `classifiedMediaGridState`, which combines the lightweight media source with filters, sort config, and tag hierarchy.
+- `filterClipsForSearch` and `sortClipsForDisplay` are shared by the card path and the media-grid path through the common `ClassifiedClipItem` contract.
+- `uiState.classified` remains the source for the existing card display.
+- The media-grid state tracks both the matching clip count and the rendered media count so the UI can distinguish the zero-clip and no-media empty states.

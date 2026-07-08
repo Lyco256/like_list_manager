@@ -108,3 +108,9 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - `classified_media_grid` uses `LazyVerticalGrid` with `GridCells.Fixed(4)` and zero item spacing.
 - Failed downloads, missing local files, and assets with no usable URL render as error cells via `media_grid_error_<assetId>`.
 - This update intentionally leaves out divider headings, like-count overlays, pinch-to-change columns, card popups, multi-select, and bulk tag editing for later work.
+## 2026-07 media grid lightweight UI
+
+- `EnhancedClassifiedScreen` now reads `ClassifiedMediaGridState.entries` instead of flattening `uiState.classified` directly.
+- The grid still keeps the existing toggle, empty states, video thumbnail badge behavior, error-cell behavior, and `testTag` usage.
+- `buildMediaGridEntries` now accepts the lightweight media-grid source and continues to emit one grid cell per asset.
+- The card view still renders the existing `uiState.classified` list without sharing the grid entry expansion step.

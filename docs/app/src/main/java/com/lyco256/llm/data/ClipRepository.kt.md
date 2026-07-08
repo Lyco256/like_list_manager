@@ -79,3 +79,9 @@
 - `photo` and `video_thumbnail` go through the same image download and WebP save flow regardless of network type.
 - Newly synced media never create `wifi_waiting`.
 - If image download, decode, or WebP conversion fails, the post still saves and the asset is recorded with `downloadState = "failed"`.
+## 2026-07 media grid lightweight flow
+
+- `mediaGridSource` is a repository Flow that does not depend on `clipsWithDetails`.
+- It combines active clips, lightweight asset rows, lightweight clip-tag rows, and the tag list so the grid can be filtered and sorted without expanding the card list.
+- Clips with matching filters but no media are still preserved in the source so the UI can show the existing media-free empty state.
+- The lightweight flow keeps the card path separate, and card rendering still uses `clipsWithDetails`.

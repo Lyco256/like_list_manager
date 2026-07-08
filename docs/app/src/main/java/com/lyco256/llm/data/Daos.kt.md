@@ -42,3 +42,9 @@ SQL変更時はEntity列名、Foreign Key、削除時のcascade、Flowの更新�
 ## 2026-07 OCR update
 
 - Added DAO queries for `updateOcrText` and hard-deleting a clip by id.
+## 2026-07 media grid lightweight query
+
+- `observeActiveMediaGridAssetRows` returns active clip media rows only for `photo` and `video_thumbnail` assets, joined through `clips` so deleted clips stay out.
+- `observeActiveMediaGridClipTags` returns clip tag rows for active clips that still have media-grid assets, so media filters can work without loading full card data.
+- `MediaGridAssetRow` carries the clip fields needed for filtering and sort order plus the asset fields needed to render the grid.
+- The lightweight media-grid path keeps one row per asset and excludes unsupported asset types entirely.

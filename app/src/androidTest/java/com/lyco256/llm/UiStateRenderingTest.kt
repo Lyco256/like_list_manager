@@ -285,6 +285,19 @@ class UiStateRenderingTest {
                 Box(Modifier.requiredWidth(400.dp)) {
                     EnhancedClassifiedScreen(
                         uiState = com.lyco256.llm.MainUiState(clips = clips),
+                        mediaGridState = ClassifiedMediaGridState(
+                            entries = listOf(
+                                MediaGridEntry(21, 2, 21, "grid-photo", 0, "photo", "https://example.test/grid-photo.jpg", "downloaded", false, null),
+                                MediaGridEntry(22, 2, 22, "grid-video", 1, "video_thumbnail", "https://example.test/grid-video.jpg", "downloaded", false, null),
+                                MediaGridEntry(23, 2, 23, "grid-error", 2, "photo", null, "failed", false, null),
+                                MediaGridEntry(24, 2, 24, "grid-missing", 3, "photo", "https://example.test/grid-missing.jpg", "downloaded", false, "/tmp/missing-grid.webp"),
+                                MediaGridEntry(25, 2, 25, "grid-photo-2", 4, "photo", "https://example.test/grid-photo-2.jpg", "downloaded", false, null),
+                            ),
+                            matchingClipCount = 1,
+                            matchingMediaCount = 5,
+                            isEmptyByFilter = false,
+                            hasMatchingClipButNoMedia = false,
+                        ),
                         listState = rememberLazyListState(),
                         displayMode = ClassifiedDisplayMode.MediaGrid,
                         onToggleDisplayMode = {},
@@ -331,6 +344,7 @@ class UiStateRenderingTest {
             MaterialTheme {
                 EnhancedClassifiedScreen(
                     uiState = com.lyco256.llm.MainUiState(clips = emptyList()),
+                    mediaGridState = ClassifiedMediaGridState(),
                     listState = rememberLazyListState(),
                     displayMode = ClassifiedDisplayMode.MediaGrid,
                     onToggleDisplayMode = {},
@@ -347,7 +361,7 @@ class UiStateRenderingTest {
             }
         }
 
-        composeRule.onNodeWithText("譚｡莉ｶ縺ｫ蜷医≧繝・う繝ｼ繝医・縺ゅｊ縺ｾ縺帙ｓ").assertIsDisplayed()
+        composeRule.onNodeWithText("条件に合うツイートはありません").assertIsDisplayed()
     }
 
     @Test

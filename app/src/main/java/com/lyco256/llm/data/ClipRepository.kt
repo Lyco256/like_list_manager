@@ -31,6 +31,12 @@ data class LikeCountRefreshEstimate(
     val estimatedCostUsd: Double,
 )
 
+data class MediaGridClipSource(
+    override val clip: ClipEntity,
+    override val tags: List<TagEntity>,
+    val assets: List<MediaGridAssetRow>,
+) : ClassifiedClipItem
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class ClipRepository(
     private val context: Context,
@@ -158,6 +164,44 @@ class ClipRepository(
                     clip = clip,
                     assets = assetsByClip[clip.id].orEmpty(),
                     tags = tagIdsByClip[clip.id].orEmpty().mapNotNull { tagsById[it.tagId] },
+                )
+            }
+        }
+    }
+
+    val mediaGridSource: Flow<List<MediaGridClipSource>> = postStorageManager.database.flatMapLatest { database ->
+        if (database == null) return@flatMapLatest flowOf(emptyList())
+        val clipDao = database.clipDao()
+        val tagDao = database.tagDao()
+        combine(
+            clipDao.observeActiveClips(),
+            clipDao.observeActiveMediaGridAssetRows(),
+            clipDao.observeActiveClipTags(),
+            clipDao.observeActiveMediaGridClipTags(),
+            tagDao.observeTags(),
+        ) { clips, assets, activeClipTags, mediaClipTags, tags ->
+            val tagsById = tags.associateBy { it.id }
+            val activeTagsByClip = activeClipTags
+                .groupBy { it.clipId }
+                .mapValues { (_, rows) -> rows.mapNotNull { tagsById[it.tagId] } }
+            val mediaTagsByClip = mediaClipTags
+                .groupBy { it.clipId }
+                .mapValues { (_, rows) -> rows.mapNotNull { tagsById[it.tagId] } }
+            val assetsByClip = assets
+                .groupBy { it.clipId }
+                .mapValues { (_, rows) -> rows.sortedBy { it.assetId } }
+
+            clips.map { clip ->
+                val clipAssets = assetsByClip[clip.id].orEmpty()
+                val clipTags = if (clipAssets.isEmpty()) {
+                    activeTagsByClip[clip.id].orEmpty()
+                } else {
+                    mediaTagsByClip[clip.id].orEmpty().ifEmpty { activeTagsByClip[clip.id].orEmpty() }
+                }
+                MediaGridClipSource(
+                    clip = clip,
+                    tags = clipTags,
+                    assets = clipAssets,
                 )
             }
         }
