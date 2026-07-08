@@ -11,12 +11,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.unit.dp
 import com.lyco256.llm.data.AssetEntity
@@ -178,7 +181,7 @@ class UiStateRenderingTest {
     }
 
     @Test
-    fun classifiedMediaGridShowsFourColumnsVideoBadgeAndErrorCells() {
+    fun classifiedMediaGridShowsDateHeadersVideoBadgeAndErrorCells() {
         val clips = listOf(
             ClipWithDetails(
                 clip = ClipEntity(
@@ -206,6 +209,7 @@ class UiStateRenderingTest {
                     xCreatedAt = "2026-01-01T00:00:00Z",
                     savedAt = "2026-01-01T00:00:00Z",
                     syncedAt = "2026-01-01T00:00:00Z",
+                    likeCount = 1_234,
                 ),
                 assets = listOf(
                     AssetEntity(
@@ -284,14 +288,17 @@ class UiStateRenderingTest {
             MaterialTheme {
                 Box(Modifier.requiredWidth(400.dp)) {
                     EnhancedClassifiedScreen(
-                        uiState = com.lyco256.llm.MainUiState(clips = clips),
+                        uiState = com.lyco256.llm.MainUiState(
+                            clips = clips,
+                            sort = ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime),
+                        ),
                         mediaGridState = ClassifiedMediaGridState(
                             entries = listOf(
-                                MediaGridEntry(21, 2, 21, "grid-photo", 0, "photo", "https://example.test/grid-photo.jpg", "downloaded", false, null),
-                                MediaGridEntry(22, 2, 22, "grid-video", 1, "video_thumbnail", "https://example.test/grid-video.jpg", "downloaded", false, null),
-                                MediaGridEntry(23, 2, 23, "grid-error", 2, "photo", null, "failed", false, null),
-                                MediaGridEntry(24, 2, 24, "grid-missing", 3, "photo", "https://example.test/grid-missing.jpg", "downloaded", false, "/tmp/missing-grid.webp"),
-                                MediaGridEntry(25, 2, 25, "grid-photo-2", 4, "photo", "https://example.test/grid-photo-2.jpg", "downloaded", false, null),
+                                MediaGridEntry(21, 2, 21, "grid-photo", 0, "photo", "https://example.test/grid-photo.jpg", "downloaded", false, null, "2026-01-01T00:00:00Z", 1_234),
+                                MediaGridEntry(22, 2, 22, "grid-video", 1, "video_thumbnail", "https://example.test/grid-video.jpg", "downloaded", false, null, "2026-01-01T00:00:00Z", 1_234),
+                                MediaGridEntry(23, 2, 23, "grid-error", 2, "photo", null, "failed", false, null, "2026-01-01T00:00:00Z", 1_234),
+                                MediaGridEntry(24, 2, 24, "grid-missing", 3, "photo", "https://example.test/grid-missing.jpg", "downloaded", false, "/tmp/missing-grid.webp", "2026-01-01T00:00:00Z", 1_234),
+                                MediaGridEntry(25, 2, 25, "grid-photo-2", 4, "photo", "https://example.test/grid-photo-2.jpg", "downloaded", false, null, "2026-01-01T00:00:00Z", 1_234),
                             ),
                             matchingClipCount = 1,
                             matchingMediaCount = 5,
@@ -316,6 +323,8 @@ class UiStateRenderingTest {
         }
 
         composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_header_post_time_day_2026-01-01").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_header_text_post_time_day_2026-01-01").assertIsDisplayed()
         composeRule.onNodeWithTag("media_grid_item_21").fetchSemanticsNode()
         composeRule.onNodeWithTag("media_grid_item_22").fetchSemanticsNode()
         composeRule.onNodeWithTag("media_grid_item_23").fetchSemanticsNode()
@@ -336,6 +345,245 @@ class UiStateRenderingTest {
         assertTrue("grid should wrap the fifth cell", fifth.top > first.top)
         assertTrue("grid cells should stay square", kotlin.math.abs(first.width - first.height) < 1f)
         assertTrue("grid cells should not have horizontal spacing", kotlin.math.abs(second.left - first.right) < 1f)
+    }
+
+    @Test
+    fun classifiedMediaGridShowsLikeHeadersAndLikeOverlaysWithoutBreakingBadgesOrErrors() {
+        val clips = listOf(
+            ClipWithDetails(
+                clip = ClipEntity(
+                    id = 1,
+                    xPostId = "grid-like",
+                    authorName = "Like",
+                    authorUsername = "like",
+                    text = "Like clip",
+                    postUrl = "https://x.com/like/status/1",
+                    xCreatedAt = "2026-01-01T00:00:00Z",
+                    savedAt = "2026-01-01T00:00:00Z",
+                    syncedAt = "2026-01-01T00:00:00Z",
+                    likeCount = 12_345,
+                ),
+                assets = listOf(
+                    AssetEntity(
+                        id = 31,
+                        clipId = 1,
+                        mediaKey = "like-photo",
+                        type = "photo",
+                        remoteUrl = "https://example.test/like-photo.jpg",
+                        previewUrl = null,
+                        localPath = null,
+                        width = 1200,
+                        height = 1200,
+                        createdAt = "2026-01-01T00:00:00Z",
+                    ),
+                    AssetEntity(
+                        id = 32,
+                        clipId = 1,
+                        mediaKey = "like-video",
+                        type = "video_thumbnail",
+                        remoteUrl = null,
+                        previewUrl = "https://example.test/like-video.jpg",
+                        localPath = null,
+                        width = 1200,
+                        height = 1200,
+                        createdAt = "2026-01-01T00:00:00Z",
+                    ),
+                    AssetEntity(
+                        id = 33,
+                        clipId = 1,
+                        mediaKey = "like-error",
+                        type = "photo",
+                        remoteUrl = null,
+                        previewUrl = null,
+                        localPath = null,
+                        width = 1200,
+                        height = 1200,
+                        downloadState = "failed",
+                        createdAt = "2026-01-01T00:00:00Z",
+                    ),
+                ),
+                tags = listOf(
+                    TagEntity(
+                        id = 11,
+                        name = "LikeTag",
+                        createdAt = "2026-01-01T00:00:00Z",
+                        updatedAt = "2026-01-01T00:00:00Z",
+                    ),
+                ),
+            ),
+            ClipWithDetails(
+                clip = ClipEntity(
+                    id = 2,
+                    xPostId = "grid-like-null",
+                    authorName = "Null",
+                    authorUsername = "null",
+                    text = "Null clip",
+                    postUrl = "https://x.com/null/status/2",
+                    xCreatedAt = "2026-01-01T00:00:00Z",
+                    savedAt = "2026-01-01T00:00:00Z",
+                    syncedAt = "2026-01-01T00:00:00Z",
+                ),
+                assets = listOf(
+                    AssetEntity(
+                        id = 41,
+                        clipId = 2,
+                        mediaKey = "null-photo",
+                        type = "photo",
+                        remoteUrl = "https://example.test/null-photo.jpg",
+                        previewUrl = null,
+                        localPath = null,
+                        width = 1200,
+                        height = 1200,
+                        createdAt = "2026-01-01T00:00:00Z",
+                    ),
+                ),
+                tags = listOf(
+                    TagEntity(
+                        id = 12,
+                        name = "NullTag",
+                        createdAt = "2026-01-01T00:00:00Z",
+                        updatedAt = "2026-01-01T00:00:00Z",
+                    ),
+                ),
+            ),
+        )
+        composeRule.setContent {
+            MaterialTheme {
+                Box(Modifier.requiredWidth(400.dp)) {
+                    EnhancedClassifiedScreen(
+                        uiState = com.lyco256.llm.MainUiState(
+                            clips = clips,
+                            sort = ClassifiedSortState(baseOrder = ClassifiedSortBase.LikeCount),
+                        ),
+                        mediaGridState = ClassifiedMediaGridState(
+                            entries = listOf(
+                                MediaGridEntry(31, 1, 31, "like-photo", 0, "photo", "https://example.test/like-photo.jpg", "downloaded", false, null, "2026-01-01T00:00:00Z", 12_345),
+                                MediaGridEntry(32, 1, 32, "like-video", 1, "video_thumbnail", "https://example.test/like-video.jpg", "downloaded", false, null, "2026-01-01T00:00:00Z", 12_345),
+                                MediaGridEntry(33, 1, 33, "like-error", 2, "photo", null, "failed", false, null, "2026-01-01T00:00:00Z", 12_345),
+                                MediaGridEntry(41, 2, 41, "null-photo", 0, "photo", "https://example.test/null-photo.jpg", "downloaded", false, null, "2026-01-01T00:00:00Z", null),
+                            ),
+                            matchingClipCount = 2,
+                            matchingMediaCount = 4,
+                            isEmptyByFilter = false,
+                            hasMatchingClipButNoMedia = false,
+                        ),
+                        listState = rememberLazyListState(),
+                        displayMode = ClassifiedDisplayMode.MediaGrid,
+                        onToggleDisplayMode = {},
+                        onApplyFilters = {},
+                        onApplySort = {},
+                        onClearAllFilters = {},
+                        onTagsChange = { _, _ -> },
+                        onSummaryChange = { _, _ -> },
+                        onOcrSave = { _, _ -> },
+                        onOcrDetect = { _, _, _ -> },
+                        onDelete = {},
+                        onAuthorClick = {},
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("media_grid_header_like_count_1000_12000").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_header_text_like_count_1000_12000").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_like_count_31").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_like_count_32").assertIsDisplayed()
+        composeRule.onAllNodesWithTag("media_grid_like_count_41").assertCountEquals(0)
+        composeRule.onNodeWithTag("media_grid_video_badge_32").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_error_33").assertIsDisplayed()
+    }
+
+    @Test
+    fun classifiedMediaGridHandlesLargeDatasetsWithoutCrashing() {
+        val clips = (1L..80L).map { clipId ->
+            ClipWithDetails(
+                clip = ClipEntity(
+                    id = clipId,
+                    xPostId = "large-grid-$clipId",
+                    authorName = "Author $clipId",
+                    authorUsername = "author$clipId",
+                    text = "Large grid clip $clipId",
+                    postUrl = "https://x.com/author$clipId/status/$clipId",
+                    xCreatedAt = "2026-01-${((clipId - 1) % 20 + 1).toString().padStart(2, '0')}T00:00:00Z",
+                    savedAt = "2026-01-01T00:00:00Z",
+                    syncedAt = "2026-01-01T00:00:00Z",
+                    likeCount = if (clipId % 3L == 0L) 120_000 else 1_000L * clipId,
+                ),
+                assets = (0L until 4L).map { index ->
+                    AssetEntity(
+                        id = clipId * 10 + index,
+                        clipId = clipId,
+                        mediaKey = "large-$clipId-$index",
+                        type = if (index == 1L) "video_thumbnail" else "photo",
+                        remoteUrl = if (index == 2L && clipId % 10L == 0L) null else "https://example.test/large-$clipId-$index.jpg",
+                        previewUrl = null,
+                        localPath = null,
+                        width = 1200,
+                        height = 1200,
+                        downloadState = if (index == 2L && clipId % 10L == 0L) "failed" else "downloaded",
+                        createdAt = "2026-01-01T00:00:00Z",
+                    )
+                },
+                tags = emptyList(),
+            )
+        }
+
+        val entries = clips.flatMap { clip ->
+            clip.assets.map { asset ->
+                MediaGridEntry(
+                    entryId = asset.id,
+                    clipId = clip.clip.id,
+                    assetId = asset.id,
+                    mediaKey = asset.mediaKey,
+                    mediaIndex = (asset.id % 4).toInt(),
+                    type = asset.type,
+                    displayUrl = asset.remoteUrl,
+                    downloadState = asset.downloadState,
+                    hasLocalFile = false,
+                    localPath = asset.localPath,
+                    xCreatedAt = clip.clip.xCreatedAt,
+                    likeCount = clip.clip.likeCount,
+                )
+            }
+        }
+
+        composeRule.setContent {
+            MaterialTheme {
+                Box(Modifier.requiredWidth(400.dp)) {
+                    EnhancedClassifiedScreen(
+                        uiState = com.lyco256.llm.MainUiState(
+                            clips = clips,
+                            sort = ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime),
+                        ),
+                        mediaGridState = ClassifiedMediaGridState(
+                            entries = entries,
+                            matchingClipCount = clips.size,
+                            matchingMediaCount = entries.size,
+                            isEmptyByFilter = false,
+                            hasMatchingClipButNoMedia = false,
+                        ),
+                        listState = rememberLazyListState(),
+                        displayMode = ClassifiedDisplayMode.MediaGrid,
+                        onToggleDisplayMode = {},
+                        onApplyFilters = {},
+                        onApplySort = {},
+                        onClearAllFilters = {},
+                        onTagsChange = { _, _ -> },
+                        onSummaryChange = { _, _ -> },
+                        onOcrSave = { _, _ -> },
+                        onOcrDetect = { _, _, _ -> },
+                        onDelete = {},
+                        onAuthorClick = {},
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_item_10").assertIsDisplayed()
+        composeRule.onNodeWithTag("classified_media_grid").performScrollToNode(hasTestTag("media_grid_item_800"))
+        composeRule.onNodeWithTag("media_grid_item_800").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_header_post_time_day_2026-01-20").assertIsDisplayed()
     }
 
     @Test

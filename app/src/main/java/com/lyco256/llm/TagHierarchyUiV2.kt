@@ -33,6 +33,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -143,9 +144,12 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
+import java.time.DayOfWeek
+import java.time.YearMonth
 import java.time.ZoneOffset
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -292,6 +296,7 @@ fun EnhancedClassifiedScreen(
     var clearConfirmationOpen by remember { mutableStateOf(false) }
     val itemKeys = remember(uiState.classified) { uiState.classified.map { it.clip.id } }
     val mediaGridLazyState = rememberLazyGridState()
+    val classifiedMediaGridColumnCount = 4
     PreserveScrollAnchor(listState, "classified", itemKeys)
     Column(modifier.fillMaxSize().padding(12.dp)) {
         TagFilterSummaryRow(
@@ -310,6 +315,8 @@ fun EnhancedClassifiedScreen(
                 mediaGridState.hasMatchingClipButNoMedia -> HierarchyEmptyState("この条件に一致する画像・動画サムネイルはありません")
                 else -> ClassifiedMediaGridContent(
                     entries = mediaGridState.entries,
+                    sort = uiState.sort,
+                    columnCount = classifiedMediaGridColumnCount,
                     state = mediaGridLazyState,
                 )
             }
@@ -2655,6 +2662,8 @@ data class MediaGridEntry(
     val downloadState: String,
     val hasLocalFile: Boolean,
     val localPath: String?,
+    val xCreatedAt: String,
+    val likeCount: Long?,
 )
 
 internal fun buildMediaGridEntries(clips: List<MediaGridClipSource>): List<MediaGridEntry> =
@@ -2674,30 +2683,203 @@ internal fun buildMediaGridEntries(clips: List<MediaGridClipSource>): List<Media
                     downloadState = asset.downloadState,
                     hasLocalFile = asset.localPath != null && File(asset.localPath).isFile,
                     localPath = asset.localPath,
+                    xCreatedAt = clip.clip.xCreatedAt,
+                    likeCount = clip.clip.likeCount,
                 )
             }
     }
 
+internal sealed interface ClassifiedMediaGridItem {
+    val key: String
+}
+
+internal data class MediaGridHeaderItem(
+    override val key: String,
+    val label: String,
+    val safeKey: String,
+) : ClassifiedMediaGridItem
+
+internal data class MediaGridCellItem(
+    override val key: String,
+    val entry: MediaGridEntry,
+) : ClassifiedMediaGridItem
+
+private data class MediaGridBucketSpec(
+    val key: String,
+    val label: String,
+    val safeKey: String,
+)
+
+internal fun buildClassifiedMediaGridItems(
+    entries: List<MediaGridEntry>,
+    sort: ClassifiedSortState,
+    columnCount: Int,
+): List<ClassifiedMediaGridItem> {
+    if (sort.baseOrder == ClassifiedSortBase.Default) {
+        return entries.map { entry -> MediaGridCellItem(key = mediaGridCellKey(entry), entry = entry) }
+    }
+
+    val items = ArrayList<ClassifiedMediaGridItem>(entries.size * 2)
+    var previousBucketKey: String? = null
+    entries.forEach { entry ->
+        val bucket = mediaGridBucketSpec(entry, sort.baseOrder, columnCount) ?: return@forEach
+        if (bucket.key != previousBucketKey) {
+            items += MediaGridHeaderItem(
+                key = "media_grid_header_${bucket.safeKey}",
+                label = bucket.label,
+                safeKey = bucket.safeKey,
+            )
+            previousBucketKey = bucket.key
+        }
+        items += MediaGridCellItem(key = mediaGridCellKey(entry), entry = entry)
+    }
+    return items
+}
+
+private fun mediaGridCellKey(entry: MediaGridEntry): String = "media_grid_item_${entry.assetId}"
+
+private fun mediaGridBucketSpec(
+    entry: MediaGridEntry,
+    baseOrder: ClassifiedSortBase,
+    columnCount: Int,
+): MediaGridBucketSpec? = when (baseOrder) {
+    ClassifiedSortBase.Default -> null
+    ClassifiedSortBase.PostTime -> mediaGridPostTimeBucket(entry.xCreatedAt, columnCount)
+    ClassifiedSortBase.LikeCount -> mediaGridLikeCountBucket(entry.likeCount, columnCount)
+}
+
+private enum class MediaGridDateGranularity { Day, Week, Month }
+
+private fun mediaGridPostTimeBucket(xCreatedAt: String, columnCount: Int): MediaGridBucketSpec {
+    val date = runCatching { Instant.parse(xCreatedAt).atZone(ZoneId.systemDefault()).toLocalDate() }.getOrNull()
+        ?: return MediaGridBucketSpec(
+            key = "post_time_unknown",
+            label = "日付不明",
+            safeKey = "post_time_unknown",
+        )
+    return when (mediaGridDateGranularity(columnCount)) {
+        MediaGridDateGranularity.Day -> MediaGridBucketSpec(
+            key = "post_time_day_$date",
+            label = formatDateBucketDate(date),
+            safeKey = "post_time_day_$date",
+        )
+        MediaGridDateGranularity.Week -> {
+            val weekStart = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+            MediaGridBucketSpec(
+                key = "post_time_week_$weekStart",
+                label = "${formatDateBucketDate(weekStart)}週",
+                safeKey = "post_time_week_$weekStart",
+            )
+        }
+        MediaGridDateGranularity.Month -> {
+            val month = YearMonth.from(date)
+            MediaGridBucketSpec(
+                key = "post_time_month_$month",
+                label = formatMonthBucketDate(month),
+                safeKey = "post_time_month_$month",
+            )
+        }
+    }
+}
+
+private fun mediaGridLikeCountBucket(likeCount: Long?, columnCount: Int): MediaGridBucketSpec = when {
+    likeCount == null -> MediaGridBucketSpec(
+        key = "like_count_unknown",
+        label = "いいね数不明",
+        safeKey = "like_count_unknown",
+    )
+    likeCount >= 100_000L -> MediaGridBucketSpec(
+        key = "like_count_100000_plus",
+        label = "10万以上",
+        safeKey = "like_count_100000_plus",
+    )
+    else -> {
+        val unit = mediaGridLikeBucketUnit(columnCount)
+        val start = (likeCount / unit) * unit
+        val end = start + unit - 1
+        MediaGridBucketSpec(
+            key = "like_count_${unit}_$start",
+            label = "${formatNumberBucketValue(start)}〜${formatNumberBucketValue(end)}",
+            safeKey = "like_count_${unit}_$start",
+        )
+    }
+}
+
+private fun mediaGridDateGranularity(columnCount: Int): MediaGridDateGranularity = when (columnCount.coerceIn(2, 12)) {
+    2, 3, 4 -> MediaGridDateGranularity.Day
+    5, 6, 7, 8 -> MediaGridDateGranularity.Week
+    else -> MediaGridDateGranularity.Month
+}
+
+private fun mediaGridLikeBucketUnit(columnCount: Int): Long = when (columnCount.coerceIn(2, 12)) {
+    2, 3, 4 -> 1_000L
+    5, 6, 7, 8 -> 5_000L
+    else -> 10_000L
+}
+
+private fun formatDateBucketDate(date: LocalDate): String = DateTimeFormatter.ofPattern("yyyy/M/d").format(date)
+
+private fun formatMonthBucketDate(month: YearMonth): String = DateTimeFormatter.ofPattern("yyyy/M").format(month)
+
+private fun formatNumberBucketValue(value: Long): String = String.format(Locale.JAPAN, "%,d", value)
+
 @Composable
 private fun ClassifiedMediaGridContent(
     entries: List<MediaGridEntry>,
+    sort: ClassifiedSortState,
+    columnCount: Int,
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
 ) {
+    val items = remember(entries, sort, columnCount) {
+        buildClassifiedMediaGridItems(entries, sort, columnCount)
+    }
     LazyVerticalGrid(
-        columns = GridCells.Fixed(4),
+        columns = GridCells.Fixed(columnCount),
         state = state,
         modifier = Modifier.fillMaxSize().testTag("classified_media_grid"),
         horizontalArrangement = Arrangement.spacedBy(0.dp),
         verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
-        gridItems(entries, key = { it.entryId }) { entry ->
-            ClassifiedMediaGridCell(entry)
+        gridItems(
+            items,
+            key = { it.key },
+            span = { item ->
+                when (item) {
+                    is MediaGridHeaderItem -> GridItemSpan(maxLineSpan)
+                    is MediaGridCellItem -> GridItemSpan(1)
+                }
+            },
+        ) { item ->
+            when (item) {
+                is MediaGridHeaderItem -> ClassifiedMediaGridHeader(item)
+                is MediaGridCellItem -> ClassifiedMediaGridCell(item.entry, sort)
+            }
         }
     }
 }
 
 @Composable
-private fun ClassifiedMediaGridCell(entry: MediaGridEntry) {
+private fun ClassifiedMediaGridHeader(item: MediaGridHeaderItem) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(item.key),
+        color = MaterialTheme.colorScheme.surface,
+    ) {
+        Text(
+            text = item.label,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .testTag("media_grid_header_text_${item.safeKey}"),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+private fun ClassifiedMediaGridCell(entry: MediaGridEntry, sort: ClassifiedSortState) {
     val error = entry.downloadState == "failed" || entry.displayUrl == null || (entry.localPath != null && !entry.hasLocalFile)
     Box(
         modifier = Modifier
@@ -2727,6 +2909,24 @@ private fun ClassifiedMediaGridCell(entry: MediaGridEntry) {
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
+            if (sort.baseOrder == ClassifiedSortBase.LikeCount && entry.likeCount != null) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(4.dp)
+                        .testTag("media_grid_like_count_${entry.assetId}"),
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color.Black.copy(alpha = 0.68f),
+                ) {
+                    Text(
+                        text = formatLikeCount(entry.likeCount),
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
             if (entry.type == "video_thumbnail") {
                 Box(
                     modifier = Modifier

@@ -114,3 +114,12 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - The grid still keeps the existing toggle, empty states, video thumbnail badge behavior, error-cell behavior, and `testTag` usage.
 - `buildMediaGridEntries` now accepts the lightweight media-grid source and continues to emit one grid cell per asset.
 - The card view still renders the existing `uiState.classified` list without sharing the grid entry expansion step.
+
+## 2026-07 media grid section headers / like overlay
+
+- `buildClassifiedMediaGridItems(entries, sort, columnCount)` inserts full-width header items only for `ClassifiedSortBase.PostTime` and `ClassifiedSortBase.LikeCount`.
+- `columnCount` now controls bucket granularity: `2..4` uses day / 1000, `5..8` uses week / 5000, and `9..12` uses month / 10000.
+- Unknown buckets are labeled `日付不明` and `いいね数不明`, and `likeCount >= 100000` collapses into `10万以上`.
+- `ClassifiedMediaGridHeader` uses `GridItemSpan(maxLineSpan)` and `media_grid_header_*` / `media_grid_header_text_*` test tags.
+- `ClassifiedMediaGridCell` shows `media_grid_like_count_<assetId>` only when `sort.baseOrder == ClassifiedSortBase.LikeCount` and the cell has a non-null like count.
+- The card view and the existing lightweight media source stay separate.

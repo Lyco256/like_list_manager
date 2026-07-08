@@ -1,3 +1,9 @@
+## 2026-07 media grid headers
+
+- `app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt` now owns `buildClassifiedMediaGridItems`, full-width header items, and the like-count overlay.
+- `app/src/test/java/com/lyco256/llm/TagHierarchyTest.kt` covers bucket generation for day/week/month and like-count units.
+- `app/src/androidTest/java/com/lyco256/llm/UiStateRenderingTest.kt` covers the PostTime header, LikeCount header, like overlay, and existing badge/error regressions.
+
 # Source Files Guide
 
 この文書は、like list managerの全体構成、現状の実装、変更時に最初に読む個別文書への索引です。

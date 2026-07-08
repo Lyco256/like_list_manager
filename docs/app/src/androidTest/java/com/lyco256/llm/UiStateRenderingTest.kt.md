@@ -11,3 +11,8 @@
 保存済みPhotoを含むメディアグリッドを直接renderし、Photoタップで全画面viewerが開くこと、位置表示が出ること、閉じる操作でviewerが消えることを検証します。
 
 画像グリッドのComposeテストでは、1〜4枚のケースで左右余白と行配置が崩れないことを測定します。`MediaGrid` と `EnhancedMediaGrid` の両方で、カードが左右 `16dp` 余白で配置されることを確認します。
+## 2026-07 media grid headers / overlay
+
+- `classifiedMediaGridShowsDateHeadersVideoBadgeAndErrorCells` now verifies the PostTime header row plus the existing video badge and error cells.
+- `classifiedMediaGridShowsLikeHeadersAndLikeOverlaysWithoutBreakingBadgesOrErrors` covers LikeCount headers, top-left like overlays, and the null-likeCount no-overlay case.
+- The existing 4-column layout regression still checks the grid geometry and the empty-state path remains unchanged.

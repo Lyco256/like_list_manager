@@ -843,6 +843,150 @@ class TagHierarchyTest {
     }
 
     @Test
+    fun buildClassifiedMediaGridItemsAddsHeadersForDateAndLikeBuckets() {
+        val clips = listOf(
+            mediaClip(
+                clip = clip(
+                    id = 1,
+                    createdAt = "2026-06-15T10:00:00Z",
+                    likeCount = 1_234,
+                    authorName = "first",
+                    username = "first",
+                ),
+                assets = listOf(
+                    mediaGridAsset(clipId = 1, assetId = 11, mediaKey = "first-1", assetType = "photo", remoteUrl = "https://example.test/first-1.jpg", previewUrl = null, localPath = null, downloadState = "downloaded"),
+                    mediaGridAsset(clipId = 1, assetId = 12, mediaKey = "first-2", assetType = "video_thumbnail", remoteUrl = null, previewUrl = "https://example.test/first-2.jpg", localPath = null, downloadState = "downloaded"),
+                ),
+            ),
+            mediaClip(
+                clip = clip(
+                    id = 2,
+                    createdAt = "2026-06-15T12:00:00Z",
+                    likeCount = 1_999,
+                    authorName = "second",
+                    username = "second",
+                ),
+                assets = listOf(
+                    mediaGridAsset(clipId = 2, assetId = 21, mediaKey = "second-1", assetType = "photo", remoteUrl = "https://example.test/second-1.jpg", previewUrl = null, localPath = null, downloadState = "downloaded"),
+                ),
+            ),
+            mediaClip(
+                clip = clip(
+                    id = 3,
+                    createdAt = "not-an-instant",
+                    likeCount = null,
+                    authorName = "third",
+                    username = "third",
+                ),
+                assets = listOf(
+                    mediaGridAsset(clipId = 3, assetId = 31, mediaKey = "third-1", assetType = "photo", remoteUrl = "https://example.test/third-1.jpg", previewUrl = null, localPath = null, downloadState = "downloaded"),
+                ),
+            ),
+        )
+        val entries = buildMediaGridEntries(clips)
+
+        val postItems = buildClassifiedMediaGridItems(entries, ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime), 4)
+        assertEquals(
+            listOf(
+                "media_grid_header_post_time_day_2026-06-15",
+                "media_grid_item_11",
+                "media_grid_item_12",
+                "media_grid_item_21",
+                "media_grid_header_post_time_unknown",
+                "media_grid_item_31",
+            ),
+            postItems.map { it.key },
+        )
+        assertEquals(
+            listOf("2026/6/15", "日付不明"),
+            postItems.filterIsInstance<MediaGridHeaderItem>().map { it.label },
+        )
+
+        val likeItems = buildClassifiedMediaGridItems(entries, ClassifiedSortState(baseOrder = ClassifiedSortBase.LikeCount), 4)
+        assertEquals(
+            listOf(
+                "media_grid_header_like_count_1000_1000",
+                "media_grid_item_11",
+                "media_grid_item_12",
+                "media_grid_item_21",
+                "media_grid_header_like_count_unknown",
+                "media_grid_item_31",
+            ),
+            likeItems.map { it.key },
+        )
+        assertEquals(
+            listOf("1,000〜1,999", "いいね数不明"),
+            likeItems.filterIsInstance<MediaGridHeaderItem>().map { it.label },
+        )
+    }
+
+    @Test
+    fun buildClassifiedMediaGridItemsUsesWeekAndMonthBucketsForWiderGrids() {
+        val clips = listOf(
+            mediaClip(
+                clip = clip(
+                    id = 1,
+                    createdAt = "2026-06-18T10:00:00Z",
+                    likeCount = 15_000,
+                    authorName = "wide",
+                    username = "wide",
+                ),
+                assets = listOf(
+                    mediaGridAsset(clipId = 1, assetId = 11, mediaKey = "wide-1", assetType = "photo", remoteUrl = "https://example.test/wide-1.jpg", previewUrl = null, localPath = null, downloadState = "downloaded"),
+                ),
+            ),
+            mediaClip(
+                clip = clip(
+                    id = 2,
+                    createdAt = "2026-06-19T10:00:00Z",
+                    likeCount = 4_999,
+                    authorName = "wide2",
+                    username = "wide2",
+                ),
+                assets = listOf(
+                    mediaGridAsset(clipId = 2, assetId = 21, mediaKey = "wide-2", assetType = "photo", remoteUrl = "https://example.test/wide-2.jpg", previewUrl = null, localPath = null, downloadState = "downloaded"),
+                ),
+            ),
+        )
+        val entries = buildMediaGridEntries(clips)
+
+        val weekItems = buildClassifiedMediaGridItems(entries, ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime), 5)
+        assertEquals(listOf("media_grid_header_post_time_week_2026-06-15", "media_grid_item_11", "media_grid_item_21"), weekItems.map { it.key })
+        assertEquals(listOf("2026/6/15週"), weekItems.filterIsInstance<MediaGridHeaderItem>().map { it.label })
+
+        val monthItems = buildClassifiedMediaGridItems(entries, ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime), 9)
+        assertEquals(listOf("media_grid_header_post_time_month_2026-06", "media_grid_item_11", "media_grid_item_21"), monthItems.map { it.key })
+        assertEquals(listOf("2026/6"), monthItems.filterIsInstance<MediaGridHeaderItem>().map { it.label })
+
+        val likeItems = buildClassifiedMediaGridItems(entries, ClassifiedSortState(baseOrder = ClassifiedSortBase.LikeCount), 9)
+        assertEquals(listOf("media_grid_header_like_count_10000_10000", "media_grid_item_11", "media_grid_header_like_count_10000_0", "media_grid_item_21"), likeItems.map { it.key })
+        assertEquals(listOf("10,000〜19,999", "0〜9,999"), likeItems.filterIsInstance<MediaGridHeaderItem>().map { it.label })
+    }
+
+    @Test
+    fun buildClassifiedMediaGridItemsLeavesDefaultSortWithoutHeaders() {
+        val clips = listOf(
+            mediaClip(
+                clip = clip(id = 1, createdAt = "2026-06-15T10:00:00Z", likeCount = 12, authorName = "default", username = "default"),
+                assets = listOf(
+                    mediaGridAsset(clipId = 1, assetId = 11, mediaKey = "default-1", assetType = "photo", remoteUrl = "https://example.test/default-1.jpg", previewUrl = null, localPath = null, downloadState = "downloaded"),
+                ),
+            ),
+            mediaClip(
+                clip = clip(id = 2, createdAt = "not-an-instant", likeCount = null, authorName = "default2", username = "default2"),
+                assets = listOf(
+                    mediaGridAsset(clipId = 2, assetId = 21, mediaKey = "default-2", assetType = "photo", remoteUrl = "https://example.test/default-2.jpg", previewUrl = null, localPath = null, downloadState = "downloaded"),
+                ),
+            ),
+        )
+        val entries = buildMediaGridEntries(clips)
+
+        val items = buildClassifiedMediaGridItems(entries, ClassifiedSortState(), 4)
+        assertEquals(listOf("media_grid_item_11", "media_grid_item_21"), items.map { it.key })
+        assertTrue(items.none { it is MediaGridHeaderItem })
+    }
+
+    @Test
     fun lightweightMediaFilteringAndSortingMatchesClassifiedCards() {
         val tag = TagEntity(id = 1, name = "NeedleTag", createdAt = now, updatedAt = now)
         val alpha = ClipWithDetails(

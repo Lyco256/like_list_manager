@@ -99,3 +99,8 @@ UI項目を追加する場合は、対応するViewModel操作、Repository API�
 - `filterClipsForSearch` and `sortClipsForDisplay` are shared by the card path and the media-grid path through the common `ClassifiedClipItem` contract.
 - `uiState.classified` remains the source for the existing card display.
 - The media-grid state tracks both the matching clip count and the rendered media count so the UI can distinguish the zero-clip and no-media empty states.
+
+## 2026-07 media grid headers / overlay follow-up
+
+- `MainActivity` still passes the lightweight media-grid state and the selected `ClassifiedSortState` into `EnhancedClassifiedScreen`; the header grouping and like overlay now live in `TagHierarchyUiV2.kt`.
+- The media-grid path continues to stay separate from the card path and does not change DB schema, entity tables, migrations, or DAO queries.
