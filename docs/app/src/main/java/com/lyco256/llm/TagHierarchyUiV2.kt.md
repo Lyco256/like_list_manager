@@ -1,5 +1,5 @@
 # `TagHierarchyUiV2.kt`
-Updated visible labels: `Xで開く`, `概要`, `いいね数`, `取得日時`, `取得エラー`, `タグを付ける`.
+Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いいね数`, `取得日時`, `取得エラー`, `タグを付ける`.
 
 投稿一覧のLazyColumnには、未構築項目へ実機UIテストから安全にスクロールできる `clip_list` test tagがあります。
 
@@ -18,7 +18,7 @@ Updated visible labels: `Xで開く`, `概要`, `いいね数`, `取得日時`, 
 - `EnhancedClipListScreen`: 未分類投稿のカード一覧と、分類確定までの一時タグ選択、カード右下の分類ボタンを扱います。
 - `EnhancedClassifiedScreen`: 一致件数と条件文、右側固定の絞り込み/クリア操作、全画面Dialogの検索/絞り込みパネル、並び替えDialog、投稿の再割り当てを扱います。タグのみOFFでは未分類投稿も表示対象に含めます。
 - `EnhancedTagListScreen`: タグ/グループの追加、名称変更、移動、削除、別タグへの一括追加、ドラッグ&ドロップ移動を扱います。
-- `EnhancedTweetCard`: 投稿本文、画像、概要、タグ選択をまとめます。
+- `EnhancedTweetCard`: 投稿本文、画像、概要の読み取り表示、タグ選択、投稿オプションメニューをまとめます。
 - `SearchFilterDialog`: タグのみ、文字列検索、期間、ユーザー、タグ条件を区分し、確定条件と分離した下書きとリアルタイム一致件数を扱います。期間DatePickerは未指定時に今日を初期選択し、日付クリア操作は開始・終了指定の次行へ固定します。画面下部には適用/キャンセル、変更破棄・全条件クリアの確認Dialogを持ちます。
 - `AuthorFilterDialog`: 保存済み投稿者から生成したユーザー一覧を検索し、複数ユーザーOR条件を選択して「決定」で閉じます。選択数は入口ボタンの外に表示し、入口の文言は常に「ユーザーを選択」です。
 - `withoutTrailingMediaUrl`: UI表示時だけ、メディア付き投稿の本文末尾に付く `https://t.co/...` を取り除きます。DB保存値、検索対象、本文途中のURLは変更しません。
@@ -96,7 +96,7 @@ Updated visible labels: `Xで開く`, `概要`, `いいね数`, `取得日時`, 
 
 ## 2026-07 OCR update
 
-- Enhanced tweet cards now share the same OCR menu, dialog, and save flow as the main list.
-- OCR recognition is triggered from the ViewModel callback and saved only on confirm.
-- The tweet options menu exposes the local-delete flow via `tweet_options_button` and `tweet_options_local_delete`, and the confirmation dialog uses `clip_local_delete_dialog_<id>`.
+- Enhanced tweet cards now share the same OCR menu, summary dialog, and save flow as the main list.
+- OCR recognition only runs when requested from the menu, and reopening OCR with existing text reuses the saved text until `再検出` is confirmed.
+- The tweet options menu exposes `tweet_options_ocr`, `tweet_options_summary`, and `tweet_options_local_delete`, and the OCR redetect confirmation uses `ocr_redetect_warning_dialog`.
 - The like-count popup now carries `clip_like_popup_<id>` so instrumentation tests can wait for the popup itself instead of only waiting on its text.

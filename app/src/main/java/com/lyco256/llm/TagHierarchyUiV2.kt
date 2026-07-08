@@ -590,8 +590,10 @@ private fun EnhancedTweetCard(
     onAuthorClick: (ClipEntity) -> Unit,
 ) {
     val context = LocalContext.current
-    var summary by remember(clip.clip.id, clip.clip.summary) { mutableStateOf(clip.clip.summary) }
+    var summaryDialogOpen by remember { mutableStateOf(false) }
+    var summaryDraft by remember(clip.clip.id, clip.clip.summary) { mutableStateOf(clip.clip.summary) }
     var ocrDialogOpen by remember { mutableStateOf(false) }
+    var ocrRedetectWarningOpen by remember { mutableStateOf(false) }
     var ocrText by remember(clip.clip.id, clip.clip.ocrText) { mutableStateOf(clip.clip.ocrText) }
     var ocrError by remember { mutableStateOf<String?>(null) }
     var ocrProcessing by remember { mutableStateOf(false) }
@@ -600,7 +602,9 @@ private fun EnhancedTweetCard(
     var selectionOpen by remember { mutableStateOf(false) }
     var likePopupOpen by remember(clip.clip.id) { mutableStateOf(false) }
     val ocrPreviewPaths = remember(clip.assets) {
-        clip.assets.mapNotNull { asset -> asset.localPath?.takeIf { File(it).exists() } }
+        clip.assets
+            .filter { it.type == "photo" || it.type == "video_thumbnail" }
+            .mapNotNull { asset -> asset.localPath?.takeIf { File(it).exists() } }
     }
     val hasOcrAction = ocrPreviewPaths.isNotEmpty()
     Card(
@@ -675,20 +679,29 @@ private fun EnhancedTweetCard(
                     hasOcrAction = hasOcrAction,
                     onOcrAction = {
                         ocrDialogOpen = true
-                        ocrProcessing = true
                         ocrText = clip.clip.ocrText
-                        ocrError = null
-                        onOcrDetect(
-                            clip,
-                            { result ->
-                                ocrText = result
-                                ocrProcessing = false
-                            },
-                            { message ->
-                                ocrError = message
-                                ocrProcessing = false
-                            },
-                        )
+                        if (clip.clip.ocrText.isBlank()) {
+                            ocrProcessing = true
+                            ocrError = null
+                            onOcrDetect(
+                                clip,
+                                { result ->
+                                    ocrText = result
+                                    ocrProcessing = false
+                                },
+                                { message ->
+                                    ocrError = message
+                                    ocrProcessing = false
+                                },
+                            )
+                        } else {
+                            ocrProcessing = false
+                            ocrError = null
+                        }
+                    },
+                    onSummaryAction = {
+                        summaryDraft = clip.clip.summary
+                        summaryDialogOpen = true
                     },
                     onDeleteAction = { deleteOpen = true },
                     buttonTestTag = "tweet_options_button_${clip.clip.id}",
@@ -717,18 +730,14 @@ private fun EnhancedTweetCard(
                 Spacer(Modifier.height(10.dp))
                 EnhancedMediaGrid(clip.assets)
             }
-            Spacer(Modifier.height(10.dp))
-            OutlinedTextField(
-                value = summary,
-                onValueChange = {
-                    summary = it
-                    onSummaryChange(clip.clip, it)
-                },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("概要") },
-                minLines = 1,
-                maxLines = 3,
-            )
+            if (clip.clip.summary.isNotBlank()) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    clip.clip.summary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             Spacer(Modifier.height(8.dp))
             TagHierarchySelector(
                 hierarchy = hierarchy,
@@ -762,6 +771,17 @@ private fun EnhancedTweetCard(
             }
         }
     }
+    if (summaryDialogOpen) {
+        SummarySettingsDialog(
+            summary = summaryDraft,
+            onSummaryChange = { summaryDraft = it },
+            onConfirm = {
+                onSummaryChange(clip.clip, summaryDraft)
+                summaryDialogOpen = false
+            },
+            onDismiss = { summaryDialogOpen = false },
+        )
+    }
     if (selectionOpen) {
         TagSelectionDialog(
             hierarchy = hierarchy,
@@ -782,6 +802,7 @@ private fun EnhancedTweetCard(
             isProcessing = ocrProcessing,
             errorMessage = ocrError,
             onTextChange = { ocrText = it },
+            onRedetect = { ocrRedetectWarningOpen = true },
             onConfirm = {
                 onOcrSave(clip.clip, ocrText)
                 ocrDialogOpen = false
@@ -789,6 +810,30 @@ private fun EnhancedTweetCard(
             onDismiss = {
                 ocrDialogOpen = false
                 ocrProcessing = false
+            },
+        )
+    }
+    if (ocrRedetectWarningOpen) {
+        OcrRedetectConfirmDialog(
+            onConfirm = {
+                ocrRedetectWarningOpen = false
+                ocrDialogOpen = true
+                ocrProcessing = true
+                ocrError = null
+                onOcrDetect(
+                    clip,
+                    { result ->
+                        ocrText = result
+                        ocrProcessing = false
+                    },
+                    { message ->
+                        ocrError = message
+                        ocrProcessing = false
+                    },
+                )
+            },
+            onDismiss = {
+                ocrRedetectWarningOpen = false
             },
         )
     }

@@ -476,7 +476,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun tagAction(onMessage: (String) -> Unit, block: suspend () -> Unit) = viewModelScope.launch {
-        runCatching { block() }.onFailure { onMessage(it.message ?: "タグ操作に失敗しました") }
+        runCatching { block() }.onFailure { onMessage(it.message ?: "画像認識に失敗しました") }
     }
 
     fun refreshStorageLocations(onComplete: (() -> Unit)? = null) = viewModelScope.launch {
@@ -579,7 +579,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                     if (tab == AppTab.Unclassified) {
                         Text(
                             buildAnnotatedString {
-                                append("未分類  ")
+                                append("未分類 ")
                                 withStyle(
                                     SpanStyle(
                                         fontSize = 12.sp,
@@ -704,8 +704,8 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
 
     if (likeRefreshEstimating || likeRefreshRunning) {
         StorageProgressDialog(
-            title = if (likeRefreshRunning) "いいね数を再取得しています" else "再取得対象を確認しています",
-            message = if (likeRefreshRunning) "完了するまでお待ちください" else "ローカル投稿を集計しています",
+            title = if (likeRefreshRunning) "いいね数を更新しています" else "いいね数の更新を確認しています",
+            message = if (likeRefreshRunning) "少しお待ちください" else "ローカル同期を取得しています",
         )
     }
     syncMessage?.let { message ->
@@ -993,7 +993,7 @@ internal fun classifiedConditionSummary(
 ): String = listOf(
     filterConditionSummary(filters, hierarchy, authors),
     sortConditionSummary(sort),
-).joinToString("｜")
+).joinToString(" / ")
 
 private fun ClipEntity.authorKey(): TweetAuthorKey =
     TweetAuthorKey(authorId = authorId?.takeIf { it.isNotBlank() }, username = authorUsername.lowercase())
@@ -1067,8 +1067,8 @@ private fun screenTitle(
     uiState: MainUiState,
 ): String = when {
     uiState.storageState.isMigrating -> "投稿データ移動中"
-    !uiState.storageState.isAvailable -> "投稿データ保存先"
-    tab == AppTab.Unclassified -> "未分類  ${uiState.unclassified.size}件"
+    !uiState.storageState.isAvailable -> "投稿データ利用不可"
+    tab == AppTab.Unclassified -> "未分類 ${uiState.unclassified.size}件"
     tab == AppTab.Classified -> "分類済み"
     tab == AppTab.Tags -> "タグ管理"
     else -> tab.label
@@ -1216,14 +1216,18 @@ fun TweetCard(
     onDelete: (ClipEntity) -> Unit,
 ) {
     val context = LocalContext.current
-    var summary by remember(clip.clip.id, clip.clip.summary) { mutableStateOf(clip.clip.summary) }
+    var summaryDialogOpen by remember { mutableStateOf(false) }
+    var summaryDraft by remember(clip.clip.id, clip.clip.summary) { mutableStateOf(clip.clip.summary) }
     var ocrDialogOpen by remember { mutableStateOf(false) }
+    var ocrRedetectWarningOpen by remember { mutableStateOf(false) }
     var ocrText by remember(clip.clip.id, clip.clip.ocrText) { mutableStateOf(clip.clip.ocrText) }
     var ocrError by remember { mutableStateOf<String?>(null) }
     var ocrProcessing by remember { mutableStateOf(false) }
     var deleteOpen by remember { mutableStateOf(false) }
     val ocrPreviewPaths = remember(clip.assets) {
-        clip.assets.mapNotNull { asset -> asset.localPath?.takeIf { File(it).exists() } }
+        clip.assets
+            .filter { it.type == "photo" || it.type == "video_thumbnail" }
+            .mapNotNull { asset -> asset.localPath?.takeIf { File(it).exists() } }
     }
     val hasOcrAction = ocrPreviewPaths.isNotEmpty()
     Card(
@@ -1245,20 +1249,29 @@ fun TweetCard(
                     hasOcrAction = hasOcrAction,
                     onOcrAction = {
                         ocrDialogOpen = true
-                        ocrProcessing = true
                         ocrText = clip.clip.ocrText
-                        ocrError = null
-                        onOcrDetect(
-                            clip,
-                            { result ->
-                                ocrText = result
-                                ocrProcessing = false
-                            },
-                            { message ->
-                                ocrError = message
-                                ocrProcessing = false
-                            },
-                        )
+                        if (clip.clip.ocrText.isBlank()) {
+                            ocrProcessing = true
+                            ocrError = null
+                            onOcrDetect(
+                                clip,
+                                { result ->
+                                    ocrText = result
+                                    ocrProcessing = false
+                                },
+                                { message ->
+                                    ocrError = message
+                                    ocrProcessing = false
+                                },
+                            )
+                        } else {
+                            ocrProcessing = false
+                            ocrError = null
+                        }
+                    },
+                    onSummaryAction = {
+                        summaryDraft = clip.clip.summary
+                        summaryDialogOpen = true
                     },
                     onDeleteAction = { deleteOpen = true },
                     buttonTestTag = "tweet_options_button_${clip.clip.id}",
@@ -1287,18 +1300,14 @@ fun TweetCard(
                 Spacer(Modifier.height(10.dp))
                 MediaGrid(clip.assets.mapNotNull { it.localPath ?: it.previewUrl ?: it.remoteUrl })
             }
-            Spacer(Modifier.height(10.dp))
-            OutlinedTextField(
-                value = summary,
-                onValueChange = {
-                    summary = it
-                    onSummaryChange(clip.clip, it)
-                },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("概要") },
-                minLines = 1,
-                maxLines = 3,
-            )
+            if (clip.clip.summary.isNotBlank()) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    clip.clip.summary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             Spacer(Modifier.height(8.dp))
             TagTreePicker(
                 hierarchy = hierarchy,
@@ -1327,6 +1336,18 @@ fun TweetCard(
             }
         }
     }
+    if (summaryDialogOpen) {
+        SummarySettingsDialog(
+            summary = summaryDraft,
+            onSummaryChange = { summaryDraft = it },
+            onConfirm = {
+                onSummaryChange(clip.clip, summaryDraft)
+                summaryDialogOpen = false
+            },
+            onDismiss = { summaryDialogOpen = false },
+        )
+    }
+
     if (deleteOpen) {
         ConfirmDialog(
             title = "投稿を削除",
@@ -1346,6 +1367,7 @@ fun TweetCard(
             isProcessing = ocrProcessing,
             errorMessage = ocrError,
             onTextChange = { ocrText = it },
+            onRedetect = { ocrRedetectWarningOpen = true },
             onConfirm = {
                 onOcrSave(clip.clip, ocrText)
                 ocrDialogOpen = false
@@ -1353,6 +1375,31 @@ fun TweetCard(
             onDismiss = {
                 ocrDialogOpen = false
                 ocrProcessing = false
+            },
+        )
+    }
+
+    if (ocrRedetectWarningOpen) {
+        OcrRedetectConfirmDialog(
+            onConfirm = {
+                ocrRedetectWarningOpen = false
+                ocrDialogOpen = true
+                ocrProcessing = true
+                ocrError = null
+                onOcrDetect(
+                    clip,
+                    { result ->
+                        ocrText = result
+                        ocrProcessing = false
+                    },
+                    { message ->
+                        ocrError = message
+                        ocrProcessing = false
+                    },
+                )
+            },
+            onDismiss = {
+                ocrRedetectWarningOpen = false
             },
         )
     }
@@ -1405,7 +1452,7 @@ fun TagTreePicker(
     onToggle: (Long) -> Unit,
 ) {
     if (hierarchy.tags.isEmpty()) {
-        Text("タグリストでタグを追加すると、ここから選べます", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("タグリストにタグを追加すると、ここから選べます", color = MaterialTheme.colorScheme.onSurfaceVariant)
         return
     }
     TagPickerChildren(hierarchy, null, 0, expandedGroups, selectedIds, onToggle)
@@ -1596,13 +1643,13 @@ private fun TagManagementChildren(
                     }
                     Column(Modifier.weight(1f)) {
                         Text(node.name, fontWeight = FontWeight.SemiBold)
-                        Text("${node.count} 件", style = MaterialTheme.typography.bodySmall)
+                        Text("${node.count}件", style = MaterialTheme.typography.bodySmall)
                     }
                     Box {
                         TextButton(onClick = { menuOpen = true }) { Text("操作") }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             if (node is TagGroupNode) {
-                                DropdownMenuItem(text = { Text("子グループを追加") }, onClick = { menuOpen = false; createType = TagNodeType.GROUP })
+                                DropdownMenuItem(text = { Text("グループを追加") }, onClick = { menuOpen = false; createType = TagNodeType.GROUP })
                                 DropdownMenuItem(text = { Text("子タグを追加") }, onClick = { menuOpen = false; createType = TagNodeType.TAG })
                             } else {
                                 DropdownMenuItem(text = { Text("別タグへ一括追加") }, onClick = { menuOpen = false; addAllOpen = true })

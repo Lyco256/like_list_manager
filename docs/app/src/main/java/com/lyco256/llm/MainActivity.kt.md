@@ -1,5 +1,5 @@
 # `app/src/main/java/com/lyco256/llm/MainActivity.kt`
-Updated visible labels: `Xで開く`, `概要`, `投稿を削除`, `タグを付ける`.
+Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `ローカル削除`, `タグを付ける`.
 
 Activity、ViewModel、UI state、Compose画面の接続入口です。未分類、分類済み、タグ管理、本体の設定アイコンから開く全画面の `SettingsScreen` へ状態とイベントを流します。画面本体のタグ階層UIは `TagHierarchyUiV2.kt` に分離されています。
 
@@ -22,6 +22,8 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 `SettingsScreen` は隔離テスト環境で本番OAuthを開始しないことに加え、Client IDの保存、trim、消去、ログイン可否の切り替え、同期、使用量、保存先移動をUI操作から検証できるよう、入力欄や各ボタンに `settings_*` のtest tagを付けています。
 
 `StorageMoveEstimateDialog` は保存先移動の最終確認UIを、`StorageProgressDialog` は待機表示を直接renderできるinternal composableです。
+
+投稿カードの三点メニューからは `文字起こし`、`概要設定`、`ローカル削除` を開きます。概要はカード内直書きではなくダイアログで編集し、OCRは既存結果がある場合は再実行せず編集画面を開きます。再検出は確認Dialogを挟んでから実行します。
 
 `SyncResultDialog` は同期成功/失敗の結果表示を直接renderできるinternal composableです。権限不足などのエラーメッセージ表示と閉じる操作をUIテストで固定します。
 

@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -44,6 +43,7 @@ import coil.compose.AsyncImage
 internal fun TweetOptionsMenuButton(
     hasOcrAction: Boolean,
     onOcrAction: () -> Unit,
+    onSummaryAction: () -> Unit,
     onDeleteAction: () -> Unit,
     buttonTestTag: String = "tweet_options_button",
     modifier: Modifier = Modifier,
@@ -56,13 +56,13 @@ internal fun TweetOptionsMenuButton(
         ) {
             Icon(
                 imageVector = Icons.Filled.MoreVert,
-                contentDescription = "投稿オプション",
+                contentDescription = "ツイートオプション",
             )
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             if (hasOcrAction) {
                 DropdownMenuItem(
-                    text = { Text("画像認識") },
+                    text = { Text("文字起こし") },
                     onClick = {
                         expanded = false
                         onOcrAction()
@@ -70,6 +70,14 @@ internal fun TweetOptionsMenuButton(
                     modifier = Modifier.testTag("tweet_options_ocr"),
                 )
             }
+            DropdownMenuItem(
+                text = { Text("概要設定") },
+                onClick = {
+                    expanded = false
+                    onSummaryAction()
+                },
+                modifier = Modifier.testTag("tweet_options_summary"),
+            )
             DropdownMenuItem(
                 text = { Text("ローカル削除") },
                 onClick = {
@@ -82,6 +90,63 @@ internal fun TweetOptionsMenuButton(
     }
 }
 
+@Composable
+internal fun SummarySettingsDialog(
+    summary: String,
+    onSummaryChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.testTag("summary_dialog"),
+        title = { Text("概要設定") },
+        text = {
+            OutlinedTextField(
+                value = summary,
+                onValueChange = onSummaryChange,
+                modifier = Modifier.fillMaxWidth().testTag("summary_text"),
+                label = { Text("概要") },
+                minLines = 3,
+                maxLines = 8,
+            )
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.testTag("summary_cancel")) {
+                Text("キャンセル")
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm, modifier = Modifier.testTag("summary_save")) {
+                Text("保存")
+            }
+        },
+    )
+}
+
+@Composable
+internal fun OcrRedetectConfirmDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.testTag("ocr_redetect_warning_dialog"),
+        title = { Text("再検出") },
+        text = { Text("文字起こし結果を上書きして再検出します。よろしいですか。") },
+        dismissButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.testTag("ocr_redetect_warning_cancel")) {
+                Text("キャンセル")
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm, modifier = Modifier.testTag("ocr_redetect_warning_confirm")) {
+                Text("再検出")
+            }
+        },
+    )
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun OcrTextDialog(
@@ -90,6 +155,7 @@ internal fun OcrTextDialog(
     isProcessing: Boolean,
     errorMessage: String?,
     onTextChange: (String) -> Unit,
+    onRedetect: () -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -97,7 +163,7 @@ internal fun OcrTextDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         modifier = Modifier.testTag("ocr_dialog"),
-        title = { Text("画像認識") },
+        title = { Text("文字起こし") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (previewPaths.isNotEmpty()) {
@@ -138,7 +204,7 @@ internal fun OcrTextDialog(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.size(12.dp))
-                        Text("画像認識中")
+                        Text("文字起こし中")
                     }
                 }
                 if (errorMessage != null) {
@@ -155,21 +221,30 @@ internal fun OcrTextDialog(
                 )
             }
         },
-        confirmButton = {
-            TextButton(
-                onClick = onConfirm,
-                enabled = !isProcessing,
-                modifier = Modifier.testTag("ocr_confirm"),
-            ) {
-                Text("使用")
-            }
-        },
         dismissButton = {
             TextButton(
                 onClick = onDismiss,
                 modifier = Modifier.testTag("ocr_cancel"),
             ) {
                 Text("キャンセル")
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    onClick = onRedetect,
+                    enabled = !isProcessing,
+                    modifier = Modifier.testTag("ocr_redetect"),
+                ) {
+                    Text("再検出")
+                }
+                TextButton(
+                    onClick = onConfirm,
+                    enabled = !isProcessing,
+                    modifier = Modifier.testTag("ocr_confirm"),
+                ) {
+                    Text("保存")
+                }
             }
         },
     )
