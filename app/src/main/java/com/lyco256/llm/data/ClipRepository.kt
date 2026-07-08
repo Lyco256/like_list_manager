@@ -1,4 +1,4 @@
-package com.lyco256.llm.data
+﻿package com.lyco256.llm.data
 
 import android.content.Context
 import android.content.Intent
@@ -280,7 +280,6 @@ class ClipRepository(
         var fetched = 0
         var inserted = 0
         var lastResult: XApiResult? = null
-        val isWifi = context.isWifiConnected()
         val existingPostIds = clipDao.getActiveClips().mapTo(mutableSetOf()) { it.xPostId }
         var newestReturnedPostId: String? = null
         var firstPageFromTop = !resumingContinuation
@@ -367,7 +366,6 @@ class ClipRepository(
                                 postId = post.id,
                                 media = media,
                                 now = now,
-                                canDownloadVideoThumb = isWifi,
                             )
                         },
                     )
@@ -539,7 +537,6 @@ class ClipRepository(
         postId: String,
         media: XMedia,
         now: String,
-        canDownloadVideoThumb: Boolean,
     ): AssetEntity? {
         val isPhoto = media.type == "photo"
         val isVideoLike = media.type == "video" || media.type == "animated_gif"
@@ -548,7 +545,7 @@ class ClipRepository(
             isVideoLike -> media.previewImageUrl
             else -> null
         } ?: return null
-        val shouldDownload = isPhoto || (isVideoLike && canDownloadVideoThumb)
+        val shouldDownload = isPhoto || isVideoLike
         val localPath = if (shouldDownload) {
             runCatching {
                 if (isPhoto) {
@@ -569,17 +566,19 @@ class ClipRepository(
             localPath = localPath,
             width = media.width,
             height = media.height,
-            downloadState = when {
-                localPath != null -> "downloaded"
-                shouldDownload -> "failed"
-                else -> "wifi_waiting"
-            },
+            downloadState = if (localPath != null) "downloaded" else "failed",
             sizeBytes = localPath?.let { File(it).length() },
             createdAt = now,
         )
     }
 
-    private fun downloadPhotoAsWebp(postId: String, mediaKey: String, url: String): String {
+    private fun downloadPhotoAsWebp(postId: String, mediaKey: String, url: String): String =
+        downloadImageAsWebp(postId, mediaKey, url)
+
+    private fun downloadMedia(postId: String, mediaKey: String, url: String): String =
+        downloadImageAsWebp(postId, mediaKey, url)
+
+    private fun downloadImageAsWebp(postId: String, mediaKey: String, url: String): String {
         val imageDir = postStorageManager.imageDirectory()
         val target = File(imageDir, "${postId}_${mediaKey}.webp")
         val sourceBytes = openConnection(url).inputStream.use { input -> input.readBytes() }
@@ -596,17 +595,6 @@ class ClipRepository(
         } finally {
             if (bitmap !== decoded) bitmap.recycle()
             decoded.recycle()
-        }
-        return target.absolutePath
-    }
-
-    private fun downloadMedia(postId: String, mediaKey: String, url: String): String {
-        val imageDir = postStorageManager.imageDirectory()
-        val extension = url.substringBefore("?").substringAfterLast('.', "jpg").takeIf { it.length <= 5 } ?: "jpg"
-        val target = File(imageDir, "${postId}_${mediaKey}.$extension")
-        val connection = openConnection(url)
-        connection.inputStream.use { input ->
-            target.outputStream().use { output -> input.copyTo(output) }
         }
         return target.absolutePath
     }

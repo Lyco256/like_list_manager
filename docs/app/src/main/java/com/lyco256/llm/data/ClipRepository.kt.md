@@ -71,3 +71,11 @@
 
 - Added OCR detection for locally stored `photo` and `video_thumbnail` assets using the new OCR gateway abstraction.
 - Added `updateOcrText` persistence with a timestamp and changed local delete to a hard delete that removes rows and files.
+
+## 2026-07 media thumbnail update
+
+- `photo` assets are downloaded from `media.url`, converted to WebP, and stored with quality 85.
+- `video` and `animated_gif` assets are saved only from `media.previewImageUrl`.
+- `photo` and `video_thumbnail` go through the same image download and WebP save flow regardless of network type.
+- Newly synced media never create `wifi_waiting`.
+- If image download, decode, or WebP conversion fails, the post still saves and the asset is recorded with `downloadState = "failed"`.

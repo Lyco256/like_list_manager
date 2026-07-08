@@ -25,3 +25,8 @@
 ## 2026-07 OCR update
 
 - Added repository tests for OCR detection, OCR persistence, and hard delete of assets and local files.
+
+## 2026-07 media thumbnail coverage
+
+- Added repository tests for `photo` WebP saves, `video` / `animated_gif` preview-image saves on non-Wi-Fi contexts, preview decode failure, and mixed legacy local paths.
+- The OCR and trash-deletion fixtures now use legacy `.jpg` / `.png` local paths to keep the non-WebP path covered.

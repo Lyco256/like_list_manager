@@ -46,3 +46,12 @@ Entityの列変更はDB schema変更です。`LikeListDatabase` のversionとmig
 ## 2026-07 OCR update
 
 - `ClipEntity` now stores `ocrText` and `ocrUpdatedAt` for searchable OCR content.
+
+## 2026-07 media asset semantics
+
+- `photo` assets are stored as WebP files when newly downloaded.
+- `video_thumbnail` assets represent preview images for `video` and `animated_gif` posts.
+- `downloadState` meanings:
+  - `downloaded`: the local file was saved successfully and `localPath` is set.
+  - `failed`: the asset download or conversion failed, so `localPath` stays `null`.
+- `wifi_waiting` is a legacy value that may still exist in older rows, but new syncs do not create it and this release does not migrate or rewrite it.

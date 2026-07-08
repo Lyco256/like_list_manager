@@ -59,22 +59,24 @@ class RepositoryIntegrationTest {
         )
         api = RecordingXApiGateway()
         oauth = RecordingOAuthGateway()
-        repository = ClipRepository(
-            context = context,
-            postStorageManager = storage,
-            apiSettingsStore = settings,
-            xOAuthManager = oauth,
-            xApiClient = api,
-            ocrTextGateway = FakeOcrTextGateway { bitmap ->
-                when {
-                    bitmap.width == 1 && bitmap.height == 1 -> ""
-                    bitmap.width == 2 && bitmap.height == 2 -> throw IllegalStateException("Fake OCR failure")
-                    bitmap.width > bitmap.height -> "Landscape OCR\nSecond line"
-                    else -> "Portrait OCR"
-                }
-            },
-        )
+        repository = newRepository()
     }
+
+    private fun newRepository() = ClipRepository(
+        context = context,
+        postStorageManager = storage,
+        apiSettingsStore = settings,
+        xOAuthManager = oauth,
+        xApiClient = api,
+        ocrTextGateway = FakeOcrTextGateway { bitmap ->
+            when {
+                bitmap.width == 1 && bitmap.height == 1 -> ""
+                bitmap.width == 2 && bitmap.height == 2 -> throw IllegalStateException("Fake OCR failure")
+                bitmap.width > bitmap.height -> "Landscape OCR\nSecond line"
+                else -> "Portrait OCR"
+            }
+        },
+    )
 
     @After
     fun tearDown() {
@@ -505,6 +507,158 @@ class RepositoryIntegrationTest {
     }
 
     @Test
+    fun videoAndAnimatedGifThumbnailsAreStoredAsWebpFromPreviewImagesOnly() = runBlocking {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(MockResponse().setResponseCode(200).setBody(okio.Buffer().write(pngBytes(android.graphics.Color.MAGENTA))))
+            server.enqueue(MockResponse().setResponseCode(200).setBody(okio.Buffer().write(pngBytes(android.graphics.Color.CYAN))))
+            val video = XMedia(
+                mediaKey = "video-media",
+                type = "video",
+                url = server.url("/video-body.mp4").toString(),
+                previewImageUrl = server.url("/video-thumb.png").toString(),
+                width = 1920,
+                height = 1080,
+            )
+            val gif = XMedia(
+                mediaKey = "gif-media",
+                type = "animated_gif",
+                url = server.url("/gif-body.mp4").toString(),
+                previewImageUrl = server.url("/gif-thumb.png").toString(),
+                width = 640,
+                height = 480,
+            )
+            api.likedResponses += XApiResult(listOf(post("304", media = listOf(video, gif))), null, null, null, null)
+
+            repository.syncNow()
+
+            storage.withDatabase { database ->
+                val assets = database.clipDao().getAllAssets().sortedBy { it.mediaKey }
+                assertEquals(2, assets.size)
+                assets.forEach { asset ->
+                    assertEquals("video_thumbnail", asset.type)
+                    assertEquals("downloaded", asset.downloadState)
+                    val local = File(requireNotNull(asset.localPath))
+                    assertTrue(local.exists())
+                    assertTrue(local.extension.equals("webp", ignoreCase = true))
+                    assertNotNull(BitmapFactory.decodeFile(local.absolutePath))
+                    assertTrue(requireNotNull(asset.sizeBytes) > 0)
+                }
+            }
+            assertEquals(2, server.requestCount)
+            assertEquals(
+                setOf("/gif-thumb.png", "/video-thumb.png"),
+                setOf(requireNotNull(server.takeRequest().path), requireNotNull(server.takeRequest().path)),
+            )
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun videoThumbnailIsStoredAsWebpOnNonWifi() = runBlocking {
+        val repo = newRepository()
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(MockResponse().setResponseCode(200).setBody(okio.Buffer().write(pngBytes(android.graphics.Color.YELLOW))))
+            val media = XMedia(
+                mediaKey = "nonwifi-video",
+                type = "video",
+                url = server.url("/video-body.mp4").toString(),
+                previewImageUrl = server.url("/video-thumb.png").toString(),
+                width = 1920,
+                height = 1080,
+            )
+            api.likedResponses += XApiResult(listOf(post("305", media = listOf(media))), null, null, null, null)
+
+            repo.syncNow()
+
+            storage.withDatabase { database ->
+                val asset = database.clipDao().getAllAssets().single()
+                assertEquals("video_thumbnail", asset.type)
+                val local = File(requireNotNull(asset.localPath))
+                assertTrue(local.exists())
+                assertTrue(local.extension.equals("webp", ignoreCase = true))
+                assertTrue(requireNotNull(asset.sizeBytes) > 0)
+                assertEquals("downloaded", asset.downloadState)
+            }
+            assertEquals(1, server.requestCount)
+            assertEquals("/video-thumb.png", requireNotNull(server.takeRequest().path))
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun animatedGifThumbnailIsStoredAsWebpOnNonWifi() = runBlocking {
+        val repo = newRepository()
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(MockResponse().setResponseCode(200).setBody(okio.Buffer().write(pngBytes(android.graphics.Color.CYAN))))
+            val media = XMedia(
+                mediaKey = "nonwifi-gif",
+                type = "animated_gif",
+                url = server.url("/gif-body.mp4").toString(),
+                previewImageUrl = server.url("/gif-thumb.png").toString(),
+                width = 480,
+                height = 270,
+            )
+            api.likedResponses += XApiResult(listOf(post("305-gif", media = listOf(media))), null, null, null, null)
+
+            repo.syncNow()
+
+            storage.withDatabase { database ->
+                val asset = database.clipDao().getAllAssets().single()
+                assertEquals("video_thumbnail", asset.type)
+                val local = File(requireNotNull(asset.localPath))
+                assertTrue(local.exists())
+                assertTrue(local.extension.equals("webp", ignoreCase = true))
+                assertTrue(requireNotNull(asset.sizeBytes) > 0)
+                assertEquals("downloaded", asset.downloadState)
+            }
+            assertEquals(1, server.requestCount)
+            assertEquals("/gif-thumb.png", requireNotNull(server.takeRequest().path))
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun previewImageFailureDoesNotFailThePostAndMarksTheVideoThumbnailAsFailed() = runBlocking {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("not an image"))
+            val media = XMedia(
+                mediaKey = "broken-video-thumb",
+                type = "video",
+                url = server.url("/video-body.mp4").toString(),
+                previewImageUrl = server.url("/broken-thumb.png").toString(),
+                width = 1920,
+                height = 1080,
+            )
+            api.likedResponses += XApiResult(listOf(post("306", media = listOf(media))), null, null, null, null)
+
+            repository.syncNow()
+
+            storage.withDatabase { database ->
+                assertEquals(1, database.clipDao().getActiveClips().count { it.xPostId == "306" })
+                val asset = database.clipDao().getAllAssets().single()
+                assertEquals("video_thumbnail", asset.type)
+                assertEquals("failed", asset.downloadState)
+                assertEquals(null, asset.localPath)
+            }
+            assertEquals(1, server.requestCount)
+            assertEquals("/broken-thumb.png", server.takeRequest().path)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
     fun multiplePhotosStoreSeparateWebpFilesWhileBrokenPhotoIsRecordedAsFailed() = runBlocking {
         val server = MockWebServer()
         server.start()
@@ -644,8 +798,8 @@ class RepositoryIntegrationTest {
             val clipId = database.clipDao().insertClip(clip("900", summary = "ocr"))
             val imageDir = storage.imageDirectory()
             imageDir.mkdirs()
-            val photoFile = File(imageDir, "ocr-photo.webp").apply { writeBytes(bitmapBytes(2, 1, android.graphics.Color.RED)) }
-            val thumbFile = File(imageDir, "ocr-thumb.webp").apply { writeBytes(bitmapBytes(1, 2, android.graphics.Color.BLUE)) }
+            val photoFile = File(imageDir, "ocr-photo.jpg").apply { writeBytes(bitmapBytes(2, 1, android.graphics.Color.RED)) }
+            val thumbFile = File(imageDir, "ocr-thumb.png").apply { writeBytes(bitmapBytes(1, 2, android.graphics.Color.BLUE)) }
             database.clipDao().insertAssets(
                 listOf(
                     AssetEntity(
@@ -702,7 +856,7 @@ class RepositoryIntegrationTest {
     @Test
     fun moveClipToTrashDeletesRowsAndLocalImageFiles() = runBlocking {
         val now = Instant.now().toString()
-        val imageFile = storage.imageDirectory().resolve("trash-me.webp").apply {
+        val imageFile = storage.imageDirectory().resolve("trash-me.jpg").apply {
             parentFile?.mkdirs()
             writeBytes(bitmapBytes(2, 1, android.graphics.Color.GREEN))
         }

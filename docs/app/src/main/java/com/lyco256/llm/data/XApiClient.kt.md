@@ -45,3 +45,8 @@ fields/expansions変更時はJSON parser、Entity、UIを確認します。X API
 - base URLにdefaultはなく、呼び出し側が本番またはlocalhostを明示しなければ生成できません。
 - `XApiException` は429時のlimit、remaining、resetを保持します。
 - `DisabledXApiGateway` はテスト用アプリからのネットワーク要求を即時拒否します。
+
+## 2026-07 media fields
+
+- `fetchLikedPosts` requests `media.fields=media_key,type,url,preview_image_url,width,height`.
+- `XMedia.previewImageUrl` is the only source used for `video` and `animated_gif` thumbnail downloads.
