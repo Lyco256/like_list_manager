@@ -1,3 +1,7 @@
+﻿Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る。変更対象が不明な場合は「変更目的別の入口」だけを見て、対象docsと実ソースへ進む。個別文書一覧は、対象ファイル名が分からない場合だけ使う。
+
+この文書は、全体構成、現状の実装、変更目的別入口、個別docs一覧だけを担当する。禁止事項、完了報告、検証手順は置かない。
+
 ## 2026-07 media grid headers
 
 - `app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt` now owns `buildClassifiedMediaGridItems`, full-width header items, and the like-count overlay.

@@ -964,6 +964,15 @@ class TagHierarchyTest {
     }
 
     @Test
+    fun classifiedMediaGridColumnCountFollowsPinchScaleAndClampsBounds() {
+        assertEquals(ClassifiedMediaGridDefaultColumnCount, classifiedMediaGridColumnCountForScale(4, 1f))
+        assertEquals(5, classifiedMediaGridColumnCountForScale(4, 1.13f))
+        assertEquals(3, classifiedMediaGridColumnCountForScale(4, 0.88f))
+        assertEquals(ClassifiedMediaGridMaxColumnCount, classifiedMediaGridColumnCountForScale(12, 2f))
+        assertEquals(ClassifiedMediaGridMinColumnCount, classifiedMediaGridColumnCountForScale(2, 0.2f))
+    }
+
+    @Test
     fun buildClassifiedMediaGridItemsLeavesDefaultSortWithoutHeaders() {
         val clips = listOf(
             mediaClip(

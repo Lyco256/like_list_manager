@@ -64,3 +64,6 @@
 - The settings data-management check now waits for the seeded clip count before asserting the summary, and the like-count/local-delete flows scroll the card into view before tapping overflow actions.
 - The local-delete test now follows the tweet options menu (`tweet_options_button` -> `tweet_options_local_delete`) before asserting the confirmation dialog.
 - The like-count test now verifies the tap path without depending on popup rendering, which keeps the device run stable while still proving the database stays unchanged.
+## 2026-07 media grid pinch coverage
+
+- The classified display toggle test now exercises pinch-in and pinch-out on the real app, then verifies the media-grid column count survives activity recreation and switching back and forth between card and grid mode.

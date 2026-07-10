@@ -7,6 +7,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
@@ -152,7 +153,13 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.roundToInt
+
+internal const val ClassifiedMediaGridMinColumnCount = 2
+internal const val ClassifiedMediaGridMaxColumnCount = 12
+internal const val ClassifiedMediaGridDefaultColumnCount = 4
+private const val ClassifiedMediaGridPinchScaleStep = 1.12f
 
 internal data class VisibleTagRow(
     val node: TagTreeNode,
@@ -279,6 +286,8 @@ fun EnhancedClassifiedScreen(
     mediaGridState: ClassifiedMediaGridState,
     listState: LazyListState,
     displayMode: ClassifiedDisplayMode,
+    mediaGridColumnCount: Int,
+    onMediaGridColumnCountChange: (Int) -> Unit,
     onToggleDisplayMode: () -> Unit,
     modifier: Modifier = Modifier,
     onApplyFilters: (TweetFilterState) -> Unit,
@@ -296,8 +305,19 @@ fun EnhancedClassifiedScreen(
     var clearConfirmationOpen by remember { mutableStateOf(false) }
     val itemKeys = remember(uiState.classified) { uiState.classified.map { it.clip.id } }
     val mediaGridLazyState = rememberLazyGridState()
-    val classifiedMediaGridColumnCount = 4
+    val mediaGridItems = remember(mediaGridState.entries, uiState.sort, mediaGridColumnCount) {
+        buildClassifiedMediaGridItems(mediaGridState.entries, uiState.sort, mediaGridColumnCount)
+    }
+    val mediaGridAnchor = rememberClassifiedMediaGridAnchor(mediaGridLazyState)
     PreserveScrollAnchor(listState, "classified", itemKeys)
+    LaunchedEffect(mediaGridColumnCount) {
+        val anchor = mediaGridAnchor ?: return@LaunchedEffect
+        if (mediaGridItems.isEmpty()) return@LaunchedEffect
+        val targetIndex = mediaGridItems.indexOfFirst { it.key == anchor.key }
+            .takeIf { it >= 0 }
+            ?: anchor.index.coerceIn(0, mediaGridItems.lastIndex)
+        mediaGridLazyState.scrollToItem(targetIndex)
+    }
     Column(modifier.fillMaxSize().padding(12.dp)) {
         TagFilterSummaryRow(
             uiState = uiState,
@@ -314,10 +334,11 @@ fun EnhancedClassifiedScreen(
                 mediaGridState.isEmptyByFilter -> HierarchyEmptyState("条件に合うツイートはありません")
                 mediaGridState.hasMatchingClipButNoMedia -> HierarchyEmptyState("この条件に一致する画像・動画サムネイルはありません")
                 else -> ClassifiedMediaGridContent(
-                    entries = mediaGridState.entries,
+                    items = mediaGridItems,
                     sort = uiState.sort,
-                    columnCount = classifiedMediaGridColumnCount,
+                    columnCount = mediaGridColumnCount,
                     state = mediaGridLazyState,
+                    onColumnCountChange = onMediaGridColumnCountChange,
                 )
             }
             return
@@ -2710,6 +2731,12 @@ private data class MediaGridBucketSpec(
     val safeKey: String,
 )
 
+private data class ClassifiedMediaGridScrollAnchor(
+    val key: String,
+    val index: Int,
+    val offset: Int,
+)
+
 internal fun buildClassifiedMediaGridItems(
     entries: List<MediaGridEntry>,
     sort: ClassifiedSortState,
@@ -2734,6 +2761,25 @@ internal fun buildClassifiedMediaGridItems(
         items += MediaGridCellItem(key = mediaGridCellKey(entry), entry = entry)
     }
     return items
+}
+
+internal fun classifiedMediaGridColumnCountForScale(
+    currentColumnCount: Int,
+    scale: Float,
+): Int {
+    var next = currentColumnCount.coerceIn(ClassifiedMediaGridMinColumnCount, ClassifiedMediaGridMaxColumnCount)
+    if (!scale.isFinite() || scale <= 0f) return next
+
+    var accumulatedScale = scale
+    while (accumulatedScale >= ClassifiedMediaGridPinchScaleStep && next < ClassifiedMediaGridMaxColumnCount) {
+        next += 1
+        accumulatedScale /= ClassifiedMediaGridPinchScaleStep
+    }
+    while (accumulatedScale <= 1f / ClassifiedMediaGridPinchScaleStep && next > ClassifiedMediaGridMinColumnCount) {
+        next -= 1
+        accumulatedScale *= ClassifiedMediaGridPinchScaleStep
+    }
+    return next.coerceIn(ClassifiedMediaGridMinColumnCount, ClassifiedMediaGridMaxColumnCount)
 }
 
 private fun mediaGridCellKey(entry: MediaGridEntry): String = "media_grid_item_${entry.assetId}"
@@ -2825,18 +2871,19 @@ private fun formatNumberBucketValue(value: Long): String = String.format(Locale.
 
 @Composable
 private fun ClassifiedMediaGridContent(
-    entries: List<MediaGridEntry>,
+    items: List<ClassifiedMediaGridItem>,
     sort: ClassifiedSortState,
     columnCount: Int,
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
+    onColumnCountChange: (Int) -> Unit,
 ) {
-    val items = remember(entries, sort, columnCount) {
-        buildClassifiedMediaGridItems(entries, sort, columnCount)
-    }
     LazyVerticalGrid(
         columns = GridCells.Fixed(columnCount),
         state = state,
-        modifier = Modifier.fillMaxSize().testTag("classified_media_grid"),
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("classified_media_grid")
+            .mediaGridPinchToResize(columnCount, onColumnCountChange),
         horizontalArrangement = Arrangement.spacedBy(0.dp),
         verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
@@ -2857,6 +2904,73 @@ private fun ClassifiedMediaGridContent(
         }
     }
 }
+
+@Composable
+private fun rememberClassifiedMediaGridAnchor(
+    state: androidx.compose.foundation.lazy.grid.LazyGridState,
+): ClassifiedMediaGridScrollAnchor? {
+    var anchor by remember { mutableStateOf<ClassifiedMediaGridScrollAnchor?>(null) }
+    LaunchedEffect(state) {
+        snapshotFlow { captureClassifiedMediaGridScrollAnchor(state) }
+            .collect { next ->
+                if (next != null) anchor = next
+            }
+    }
+    return anchor
+}
+
+private fun captureClassifiedMediaGridScrollAnchor(
+    state: androidx.compose.foundation.lazy.grid.LazyGridState,
+): ClassifiedMediaGridScrollAnchor? {
+    val layoutInfo = state.layoutInfo
+    if (layoutInfo.visibleItemsInfo.isEmpty()) return null
+    val viewportCenterY = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2f
+    return layoutInfo.visibleItemsInfo
+        .asSequence()
+        .filter { (it.key as? String)?.startsWith("media_grid_item_") == true }
+        .minByOrNull {
+            val itemCenterY = it.offset.y + it.size.height / 2f
+            abs(itemCenterY - viewportCenterY)
+        }
+        ?.let { info ->
+            ClassifiedMediaGridScrollAnchor(
+                key = info.key as String,
+                index = info.index,
+                offset = info.offset.y,
+            )
+        }
+}
+
+private fun Modifier.mediaGridPinchToResize(
+    currentColumnCount: Int,
+    onColumnCountChange: (Int) -> Unit,
+): Modifier = pointerInput(currentColumnCount) {
+    awaitEachGesture {
+        var accumulatedScale = 1f
+        while (true) {
+            val event = awaitPointerEvent()
+            val pressed = event.changes.filter { it.pressed }
+            if (pressed.size < 2) {
+                if (event.changes.none { it.pressed }) break
+                continue
+            }
+            val previousDistance = distanceBetween(pressed[0].previousPosition, pressed[1].previousPosition)
+            val currentDistance = distanceBetween(pressed[0].position, pressed[1].position)
+            if (previousDistance > 0f && currentDistance > 0f) {
+                accumulatedScale *= previousDistance / currentDistance
+                val nextColumnCount = classifiedMediaGridColumnCountForScale(currentColumnCount, accumulatedScale)
+                if (nextColumnCount != currentColumnCount) {
+                    onColumnCountChange(nextColumnCount)
+                    event.changes.forEach { it.consume() }
+                    break
+                }
+            }
+            if (event.changes.none { it.pressed }) break
+        }
+    }
+}
+
+private fun distanceBetween(first: Offset, second: Offset): Float = hypot(first.x - second.x, first.y - second.y)
 
 @Composable
 private fun ClassifiedMediaGridHeader(item: MediaGridHeaderItem) {

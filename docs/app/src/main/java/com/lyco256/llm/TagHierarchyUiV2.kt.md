@@ -123,3 +123,9 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - `ClassifiedMediaGridHeader` uses `GridItemSpan(maxLineSpan)` and `media_grid_header_*` / `media_grid_header_text_*` test tags.
 - `ClassifiedMediaGridCell` shows `media_grid_like_count_<assetId>` only when `sort.baseOrder == ClassifiedSortBase.LikeCount` and the cell has a non-null like count.
 - The card view and the existing lightweight media source stay separate.
+
+## 2026-07 media grid pinch / anchor follow-up
+
+- `EnhancedClassifiedScreen` now keeps a saved media-grid column count in `MainScreen` and updates it from pinch gestures.
+- Pinch-in increases the column count and pinch-out decreases it within the `2..12` range.
+- When the column count changes, the grid restores the nearest visible media-cell anchor instead of jumping back to the top.

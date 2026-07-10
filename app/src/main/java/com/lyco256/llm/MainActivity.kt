@@ -580,6 +580,7 @@ fun LikeListManagerUi(viewModel: MainViewModel, onLogin: (ApiSettings) -> Unit) 
 fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSettings) -> Unit) {
     var tab by rememberSaveable { mutableStateOf(AppTab.Unclassified) }
     var classifiedDisplayMode by rememberSaveable { mutableStateOf(ClassifiedDisplayMode.Card) }
+    var classifiedMediaGridColumnCount by rememberSaveable { mutableStateOf(ClassifiedMediaGridDefaultColumnCount) }
     var settingsOpen by remember { mutableStateOf(false) }
     var syncMessage by remember { mutableStateOf<String?>(null) }
     var likeRefreshEstimating by remember { mutableStateOf(false) }
@@ -712,6 +713,8 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                 mediaGridState = mediaGridState,
                 listState = classifiedListState,
                 displayMode = classifiedDisplayMode,
+                mediaGridColumnCount = classifiedMediaGridColumnCount,
+                onMediaGridColumnCountChange = { classifiedMediaGridColumnCount = it },
                 onToggleDisplayMode = {
                     classifiedDisplayMode = when (classifiedDisplayMode) {
                         ClassifiedDisplayMode.Card -> ClassifiedDisplayMode.MediaGrid

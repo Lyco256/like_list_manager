@@ -1,177 +1,168 @@
-# Safe Debug Routine
+﻿この文書は、Codexが検証、ビルド、テスト、lint、実機上書き、実機統合テストを安全に実行するための手順だけを扱う。
 
-## 文字化け対策メモ
+## Codex実行ルール
 
-- 今回の文字化けは、PowerShell 経由の文字列置換と端末の文字コード差で、日本語 UI 文言やテスト入力が cp932 系の見え方に崩れたままソースへ混入したのが原因だった。
-- 対策は、`apply_patch` か UTF-8 前提の編集だけを使い、置換後は `unicode_escape` 相当の確認で実文字列を検査すること。
-- 文字列をまとめて直したあとには、`rg` で `笆` / `蜷` / `�` などの不自然な断片が残っていないかを確認してから、`run-safe-debug-check.cmd` と `run-safe-integration-check.cmd` を回す。
-- テスト入力の日本語も UI と同じくソース管理対象なので、端末表示ではなくファイル内容を正として確認する。
+Codexは、検証・ビルド・テスト・lint・実機操作を自己判断で直接実行しない。必ずこの文書に書かれた `.cmd` 入口だけを使う。
 
-この文書は、ビルド、単体テスト、lint、実機への安全なdebug APK上書き再インストールを、毎回同じ手順で行うための運用メモです。
+禁止:
 
-## 使うスクリプト
+* `.\gradlew.bat ...` を直接実行する
+* `adb ...` を直接実行する
+* `aapt ...` を直接実行する
+* `.ps1` を直接実行する
+* `.cmd` や `.ps1` の中身を読んで、同等のGradle/adb/PowerShell処理を手動で再現する
+* Android StudioやGradleのconnected系タスクを自己判断で実行する
+* 成功時に詳細ログ、HTMLレポート、JUnit XML、lintレポートを読みに行く
 
-```powershell
-.\scripts\run-safe-debug-check.cmd
-```
+専用入口がない検証が必要な場合は、直接コマンドを実行せず、必要な入口を追加するか、未実行として報告する。
 
-実機へ上書き再インストールまで行う場合:
+## 許可する入口
 
-```powershell
-.\scripts\run-safe-debug-check.cmd -InstallToDevice
-```
-
-これらの安全スクリプトは低出力で動作します。成功時の標準出力はフェーズ名と最後の `Success` だけです。
-
-通常検証の成功例:
-
-```text
-Preflight
-Build
-UnitTest
-Lint
-Success
-```
-
-実機上書きありの成功例:
-
-```text
-Preflight
-Build
-UnitTest
-Lint
-Install
-Success
-```
-
-## 実行条件
-
-- Windows PowerShellから、リポジトリルートまたは任意のカレントディレクトリで実行できます。
-- Android Studio同梱JBRが `C:\Program Files\Android\Android Studio\jbr` にある前提です。違う場合は `-JavaHome` で指定します。
-- `-InstallToDevice` を使う場合は、ADBで認識される端末が1台だけ接続されている必要があります。
-- `-InstallToDevice` は、対象package `com.lyco256.llm` がすでに実機へ入っている場合だけ実行できます。未インストール端末への新規インストールは拒否します。
-- 実機の蓄積データがある端末では、事前に手動バックアップ方針を確認してください。このスクリプトはDBや画像バックアップを自動作成しません。
-
-## やってくれること
-
-- `git status --short --branch` で現在のブランチと作業ツリーをログへ記録します。
-- `git diff --check` で空白エラーを確認します。
-- `JAVA_HOME` と `PATH` をAndroid Studio同梱JBRへ合わせます。
-- `.\gradlew.bat :app:assembleDebug`、`:app:testDebugUnitTest`、`:app:lintDebug` をフェーズごとに実行します。
-- `-InstallToDevice` 指定時だけ、ADB端末が1台であること、既存packageがあること、debug APKが存在することを確認します。
-- `adb install -r` で上書き再インストールします。
-- 再インストール前後で `uid`、`appId`、`firstInstallTime` が変わっていないことを確認します。
-- Gradle、ADB、git、aaptの詳細出力は `build/safe-script-logs/` 配下のログファイルへ保存します。
-- フェーズごとに長めのtimeoutを持ち、timeout時は失敗フェーズとログパスを表示します。
-
-## やらないこと
-
-- `adb uninstall` は実行しません。
-- `adb shell pm clear` は実行しません。
-- `connectedDebugAndroidTest` や `connectedAndroidTest` は実行しません。
-- アプリデータ、DB、画像、SharedPreferencesを削除しません。
-- 実機データのバックアップやDB変換は行いません。
-- アプリ起動やlogcat確認は行いません。必要な場合は別途、実機確認手順として実行します。
-
-## 失敗したとき
-
-- 失敗時の標準出力は、失敗フェーズ、最初に確認すべきエラー情報、詳細ログファイルのパスを表示します。
-- Gradleが失敗した場合は、まず標準出力の `Error:` を確認し、それだけで原因が分からない場合に限り `Log:` のファイルを確認します。
-- `-InstallToDevice` でADB端末が0台または複数台の場合は、接続状態を整理してから再実行します。
-- 再インストール後に `uid`、`appId`、`firstInstallTime` が変わった場合は、以降の操作を止めて実機データ状態を確認します。
-
-失敗時の出力例:
-
-```text
-Preflight
-Build
-Failed: Build
-Error: <最初に確認すべきエラー情報>
-Log: <詳細ログファイルのパス>
-```
-
-timeout時の出力例:
-
-```text
-Preflight
-Build
-Failed: Build
-Error: Build timeout
-Log: <詳細ログファイルのパス>
-```
-
-Codexはスクリプト実行中に高頻度で進捗確認せず、十分長いtimeoutで起動します。成功時は詳細ログを読みません。失敗時だけ、標準出力の失敗フェーズ、エラー要約、ログパスを確認し、標準出力だけで原因が分からない場合に詳細ログを読みます。
-
-## よく使う例
-
-ローカル確認だけ:
+通常のローカル確認:
 
 ```powershell
 .\scripts\run-safe-debug-check.cmd
 ```
 
-ビルド、テスト、lint、SC-56Cなど接続中の1台へ安全な上書き再インストール:
+実機へ安全に上書きする場合:
 
 ```powershell
 .\scripts\run-safe-debug-check.cmd -InstallToDevice
 ```
 
-APKやpackageを明示する場合:
+隔離統合テスト:
 
 ```powershell
-.\scripts\run-safe-debug-check.cmd -InstallToDevice -PackageName com.lyco256.llm -ApkPath app\build\outputs\apk\debug\app-debug.apk
-```
-
-`.cmd` はPowerShellの署名ポリシーに左右されない入口です。内部で `-ExecutionPolicy Bypass` を今回のプロセスだけに指定し、既存の `.ps1` を実行します。
-
-## 隔離統合テスト
-
-Instrumentation/Compose/Room統合テストは、メインアプリと隔離テストアプリを同じ実機へ共存させて実行します。
-
-```powershell
-Copy-Item .\test-device.local.properties.example .\test-device.local.properties
-# ローカルファイルへ実機serialと共存package設定を記録
 .\scripts\run-safe-integration-check.cmd
 ```
 
-成功時の標準出力例:
+Macrobenchmark:
 
-```text
-Preflight
-Build
-UnitTest
-Lint
-Install
-IntegrationTest
-Success
+```powershell
+.\scripts\run-safe-macrobenchmark-check.cmd
 ```
 
-この入口は次を満たさない限りインストール前に停止します。
-
-- `test-device.local.properties` の `testDeviceSerial` と接続端末が完全一致する
-- `allowCoLocatedProductionApp=true` が明示されている
-- メイン `com.lyco256.llm` が既に端末へインストールされている
-- テストAPKが `com.lyco256.llm.test` であり、メインとは別package・別UIDである
-- 通常のbuild/unit test/lintゲートが成功する
-
-対象アプリは `com.lyco256.llm.test` です。AndroidJUnitRunnerはこの隔離packageだけを対象にし、メインpackageのpath、UID、version、初回導入日時、更新日時が前後不変であることを確認します。テスト後も隔離テストアプリを端末へ残し、両アプリを共存させます。SC-56CではOrchestratorが正常なテスト終了をクラッシュと誤判定するため使用しません。
-
-## DB・画像スナップショット互換テスト
-
-明示指定したバックアップを端末へ送らず、ホスト上の一時コピーで検証します。
+Snapshot互換テスト:
 
 ```powershell
 .\scripts\run-safe-snapshot-check.cmd -SnapshotRoot <DBを含むフォルダ> -ImageRoot <画像バックアップ>
 ```
 
-元DB・画像は読み取り元としてhashを取得するだけで、SQLiteで開くのは一時コピーです。OAuth設定やtokenは対象に含めません。
+## 待機とログ確認
 
-成功時の標準出力例:
+長時間コマンドは十分長いtimeoutで一度だけ実行する。短いtimeoutで何度も状態確認しない。
+
+禁止:
+
+* 実行中の逐次ログ監視
+* `tail -f`
+* 短い間隔のポーリング
+* timeout前のログ確認
+* 成功時の `build/safe-script-logs/` 確認
+
+見るもの:
+
+* 成功時: 標準出力のフェーズ名と `Success` だけ
+* 失敗時: 標準出力の `Failed:`、`Error:`、`Log:` だけ
+* 標準出力だけで原因が分からない失敗時: 該当ログの必要範囲だけ
+* timeout時: 該当ログの末尾だけ
+
+## 通常検証
+
+ローカル確認だけ行う場合:
+
+```powershell
+.\scripts\run-safe-debug-check.cmd
+```
+
+成功時の標準出力は、フェーズ名と `Success` だけを確認する。
 
 ```text
 Preflight
-SnapshotTest
+Build
+UnitTest
+Lint
 Success
 ```
 
-失敗時は通常の `Failed:`、`Error:`、`Log:` に加えて、元DB hash、画像件数、画像byte数の前後確認に基づく `Impact:` を表示します。詳細なhash、件数、Gradle出力はログファイルへ保存します。
+## 実機上書き
+
+実機へdebug APKを上書きする場合:
+
+```powershell
+.\scripts\run-safe-debug-check.cmd -InstallToDevice
+```
+
+この入口は、既存packageへの `adb install -r` だけを許可する。`adb uninstall`、`adb shell pm clear`、新規インストール、package変更、署名変更、applicationId変更は行わない。
+
+成功時の標準出力は、フェーズ名と `Success` だけを確認する。
+
+```text
+Preflight
+Build
+UnitTest
+Lint
+Install
+Success
+```
+
+## 隔離統合テスト
+
+Instrumentation、Compose、Room統合テストは、メインアプリと隔離テストアプリを同じ実機へ共存させて実行する。
+
+```powershell
+.\scripts\run-safe-integration-check.cmd
+```
+
+この入口だけを使う。`connectedDebugAndroidTest`、`connectedAndroidTest`、`connectedIntegrationTestAndroidTest` を直接実行しない。
+
+この入口は、次を満たさない限り停止する。
+
+* `test-device.local.properties` の `testDeviceSerial` と接続端末が完全一致する
+* `allowCoLocatedProductionApp=true` が明示されている
+* メイン `com.lyco256.llm` が既に端末へインストールされている
+* テストAPKが `com.lyco256.llm.test` であり、メインとは別package・別UIDである
+* 通常のbuild、unit test、lintゲートが成功する
+
+テスト後も隔離テストアプリを端末へ残し、両アプリを共存させる。
+
+## Macrobenchmark
+
+Macrobenchmarkは次の入口だけを使う。
+
+```powershell
+.\scripts\run-safe-macrobenchmark-check.cmd
+```
+
+Gradleのmacrobenchmarkタスクを直接実行しない。メインpackageのmetadata前後不変を安全スクリプト側で確認する。
+
+## Snapshot互換テスト
+
+DB・画像snapshotは、明示指定したバックアップをホスト上の一時コピーで検証する。
+
+```powershell
+.\scripts\run-safe-snapshot-check.cmd -SnapshotRoot <DBを含むフォルダ> -ImageRoot <画像バックアップ>
+```
+
+この入口だけを使う。元DB・画像を直接開いたり、端末へ送ったりしない。OAuth設定やtokenは対象に含めない。
+
+## 失敗時
+
+失敗時は、まず標準出力の `Failed:`、`Error:`、`Log:` だけを見る。
+
+```text
+Failed: <phase>
+Error: <最初に確認すべきエラー情報>
+Log: <詳細ログファイルのパス>
+```
+
+標準出力だけで原因が分からない場合に限り、該当ログの必要範囲だけ読む。関係ないフェーズのログ、成功したフェーズのログ、HTMLレポート、JUnit XML、lintレポートを広く読まない。
+
+## 冗長化防止
+
+* 同じコマンドを複数箇所に繰り返し書かない
+* 成功出力例は最小限にする
+* スクリプト内部のGradle/adbコマンド列を書きすぎない
+* AGENTS.mdと同じ禁止事項を長く重複させない
+* 詳細なテスト証跡は `TEST_REQUIREMENTS_COVERAGE.md` に置く
+* 実Xアカウントでの確認手順は `REAL_API_VERIFICATION.md` に置く

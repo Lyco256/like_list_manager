@@ -222,23 +222,50 @@ class MainActivityComposeTest {
         waitUntil { clipTagIds(clipId).isNotEmpty() }
 
         composeRule.onNodeWithTag("tab_classified").performClick()
-        composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("classified_display_toggle").fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithTag("classified_display_toggle").assertIsDisplayed()
+        if (composeRule.onAllNodesWithTag("clip_card_$clipId").fetchSemanticsNodes().isEmpty()) {
+            composeRule.onNodeWithTag("classified_display_toggle").performClick()
+            composeRule.waitUntil(10_000) {
+                composeRule.onAllNodesWithTag("clip_card_$clipId").fetchSemanticsNodes().isNotEmpty()
+            }
+        }
+        composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
         composeRule.onNodeWithTag("classified_display_toggle").performClick()
 
         composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
-        composeRule.onNodeWithTag("media_grid_item_${assetIds.getValue("grid-photo")}", useUnmergedTree = true).assertIsDisplayed()
+        val photoTag = "media_grid_item_${assetIds.getValue("grid-photo")}"
+        composeRule.onNodeWithTag(photoTag, useUnmergedTree = true).assertIsDisplayed()
         composeRule.onNodeWithTag("media_grid_video_badge_${assetIds.getValue("grid-video")}", useUnmergedTree = true).assertIsDisplayed()
         composeRule.onNodeWithTag("media_grid_error_${assetIds.getValue("grid-error")}", useUnmergedTree = true).assertIsDisplayed()
+
+        val beforePinch = gridItemBounds(photoTag)
+        pinchOnGrid("classified_media_grid", centerSpan = 260f, endSpan = 180f)
+        composeRule.waitForIdle()
+        val afterPinchIn = gridItemBounds(photoTag)
+        assertTrue(afterPinchIn.width < beforePinch.width)
+
+        pinchOnGrid("classified_media_grid", centerSpan = 180f, endSpan = 260f)
+        composeRule.waitForIdle()
+        val afterPinchOut = gridItemBounds(photoTag)
+        assertTrue(afterPinchOut.width > afterPinchIn.width)
 
         composeRule.activityRule.scenario.recreate()
 
         composeRule.onNodeWithTag("classified_screen").assertIsDisplayed()
         composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
-        composeRule.onNodeWithTag("media_grid_item_${assetIds.getValue("grid-photo")}", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithTag(photoTag, useUnmergedTree = true).assertIsDisplayed()
+        val afterRecreate = gridItemBounds(photoTag)
+        assertTrue(kotlin.math.abs(afterRecreate.width - afterPinchOut.width) < 1f)
 
         composeRule.onNodeWithTag("classified_display_toggle").performClick()
         composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
+        composeRule.onNodeWithTag("classified_display_toggle").performClick()
+        composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
+        val afterToggleBack = gridItemBounds(photoTag)
+        assertTrue(kotlin.math.abs(afterToggleBack.width - afterRecreate.width) < 1f)
     }
 
     @Test
@@ -1944,5 +1971,94 @@ class MainActivityComposeTest {
         }
         instrumentation.waitForIdleSync()
         composeRule.waitForIdle()
+    }
+
+    private fun gridItemBounds(tag: String): androidx.compose.ui.geometry.Rect =
+        composeRule.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+
+    private fun pinchOnGrid(gridTag: String, centerSpan: Float, endSpan: Float) {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val location = IntArray(2)
+        composeRule.activity.window.decorView.getLocationOnScreen(location)
+        val gridBounds = composeRule.onNodeWithTag(gridTag).fetchSemanticsNode().boundsInRoot
+        val centerX = location[0] + gridBounds.center.x
+        val centerY = location[1] + gridBounds.center.y
+        val downTime = SystemClock.uptimeMillis()
+        val stepCount = 8
+        val properties = arrayOf(
+            MotionEvent.PointerProperties().apply {
+                id = 0
+                toolType = MotionEvent.TOOL_TYPE_FINGER
+            },
+            MotionEvent.PointerProperties().apply {
+                id = 1
+                toolType = MotionEvent.TOOL_TYPE_FINGER
+            },
+        )
+
+        fun coords(x: Float, y: Float) = MotionEvent.PointerCoords().apply {
+            this.x = x
+            this.y = y
+            pressure = 1f
+            size = 1f
+        }
+
+        fun send(action: Int, eventTimeOffsetMs: Long, pointerCoords: Array<MotionEvent.PointerCoords>) {
+            val event = MotionEvent.obtain(
+                downTime,
+                downTime + eventTimeOffsetMs,
+                action,
+                pointerCoords.size,
+                properties,
+                pointerCoords,
+                0,
+                0,
+                1f,
+                1f,
+                0,
+                0,
+                InputDevice.SOURCE_TOUCHSCREEN,
+                0,
+            ).apply {
+                source = InputDevice.SOURCE_TOUCHSCREEN
+            }
+            check(instrumentation.uiAutomation.injectInputEvent(event, true))
+            event.recycle()
+        }
+
+        val startHalfSpan = centerSpan / 2f
+        val endHalfSpan = endSpan / 2f
+        send(MotionEvent.ACTION_DOWN, 0, arrayOf(coords(centerX - startHalfSpan, centerY)))
+        send(
+            MotionEvent.ACTION_POINTER_DOWN or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT),
+            16,
+            arrayOf(
+                coords(centerX - startHalfSpan, centerY),
+                coords(centerX + startHalfSpan, centerY),
+            ),
+        )
+        repeat(stepCount) { step ->
+            val fraction = (step + 1).toFloat() / stepCount.toFloat()
+            val span = centerSpan + (endSpan - centerSpan) * fraction
+            val halfSpan = span / 2f
+            send(
+                MotionEvent.ACTION_MOVE,
+                32L + step * 16L,
+                arrayOf(
+                    coords(centerX - halfSpan, centerY),
+                    coords(centerX + halfSpan, centerY),
+                ),
+            )
+        }
+        send(
+            MotionEvent.ACTION_POINTER_UP or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT),
+            160,
+            arrayOf(
+                coords(centerX - endHalfSpan, centerY),
+                coords(centerX + endHalfSpan, centerY),
+            ),
+        )
+        send(MotionEvent.ACTION_UP, 176, arrayOf(coords(centerX - endHalfSpan, centerY)))
+        instrumentation.waitForIdleSync()
     }
 }

@@ -286,6 +286,7 @@ class UiStateRenderingTest {
         )
         composeRule.setContent {
             MaterialTheme {
+                var columnCount by remember { mutableStateOf(ClassifiedMediaGridDefaultColumnCount) }
                 Box(Modifier.requiredWidth(400.dp)) {
                     EnhancedClassifiedScreen(
                         uiState = com.lyco256.llm.MainUiState(
@@ -307,6 +308,8 @@ class UiStateRenderingTest {
                         ),
                         listState = rememberLazyListState(),
                         displayMode = ClassifiedDisplayMode.MediaGrid,
+                        mediaGridColumnCount = ClassifiedMediaGridDefaultColumnCount,
+                        onMediaGridColumnCountChange = {},
                         onToggleDisplayMode = {},
                         onApplyFilters = {},
                         onApplySort = {},
@@ -469,6 +472,8 @@ class UiStateRenderingTest {
                         ),
                         listState = rememberLazyListState(),
                         displayMode = ClassifiedDisplayMode.MediaGrid,
+                        mediaGridColumnCount = ClassifiedMediaGridDefaultColumnCount,
+                        onMediaGridColumnCountChange = {},
                         onToggleDisplayMode = {},
                         onApplyFilters = {},
                         onApplySort = {},
@@ -547,6 +552,7 @@ class UiStateRenderingTest {
             }
         }
 
+        var columnCount by mutableStateOf(ClassifiedMediaGridDefaultColumnCount)
         composeRule.setContent {
             MaterialTheme {
                 Box(Modifier.requiredWidth(400.dp)) {
@@ -564,6 +570,8 @@ class UiStateRenderingTest {
                         ),
                         listState = rememberLazyListState(),
                         displayMode = ClassifiedDisplayMode.MediaGrid,
+                        mediaGridColumnCount = columnCount,
+                        onMediaGridColumnCountChange = { columnCount = it },
                         onToggleDisplayMode = {},
                         onApplyFilters = {},
                         onApplySort = {},
@@ -582,8 +590,40 @@ class UiStateRenderingTest {
         composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
         composeRule.onNodeWithTag("media_grid_item_10").assertIsDisplayed()
         composeRule.onNodeWithTag("classified_media_grid").performScrollToNode(hasTestTag("media_grid_item_800"))
-        composeRule.onNodeWithTag("media_grid_item_800").assertIsDisplayed()
+        composeRule.waitUntil(10_000) {
+            runCatching {
+                composeRule.onNodeWithTag("media_grid_item_800").assertIsDisplayed()
+            }.isSuccess
+        }
         composeRule.onNodeWithTag("media_grid_header_post_time_day_2026-01-20").assertIsDisplayed()
+
+        composeRule.runOnIdle {
+            columnCount = 2
+        }
+        composeRule.waitForIdle()
+        composeRule.waitUntil(10_000) {
+            runCatching {
+                composeRule.onNodeWithTag("media_grid_item_800").assertIsDisplayed()
+            }.isSuccess
+        }
+        val gridBounds = composeRule.onNodeWithTag("classified_media_grid").fetchSemanticsNode().boundsInRoot
+        val dayHeaderBounds = composeRule.onNodeWithTag("media_grid_header_post_time_day_2026-01-20").fetchSemanticsNode().boundsInRoot
+        assertTrue(dayHeaderBounds.left <= gridBounds.left + 1f)
+        assertTrue(dayHeaderBounds.right >= gridBounds.right - 1f)
+
+        composeRule.runOnIdle {
+            columnCount = 9
+        }
+        composeRule.waitForIdle()
+        composeRule.waitUntil(10_000) {
+            runCatching {
+                composeRule.onNodeWithTag("media_grid_item_800").assertIsDisplayed()
+            }.isSuccess
+        }
+        composeRule.onNodeWithTag("media_grid_header_post_time_month_2026-01").assertIsDisplayed()
+        val monthHeaderBounds = composeRule.onNodeWithTag("media_grid_header_post_time_month_2026-01").fetchSemanticsNode().boundsInRoot
+        assertTrue(monthHeaderBounds.left <= gridBounds.left + 1f)
+        assertTrue(monthHeaderBounds.right >= gridBounds.right - 1f)
     }
 
     @Test
@@ -595,6 +635,8 @@ class UiStateRenderingTest {
                     mediaGridState = ClassifiedMediaGridState(),
                     listState = rememberLazyListState(),
                     displayMode = ClassifiedDisplayMode.MediaGrid,
+                    mediaGridColumnCount = ClassifiedMediaGridDefaultColumnCount,
+                    onMediaGridColumnCountChange = {},
                     onToggleDisplayMode = {},
                     onApplyFilters = {},
                     onApplySort = {},

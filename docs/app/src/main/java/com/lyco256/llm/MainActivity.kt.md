@@ -104,3 +104,8 @@ UI項目を追加する場合は、対応するViewModel操作、Repository API�
 
 - `MainActivity` still passes the lightweight media-grid state and the selected `ClassifiedSortState` into `EnhancedClassifiedScreen`; the header grouping and like overlay now live in `TagHierarchyUiV2.kt`.
 - The media-grid path continues to stay separate from the card path and does not change DB schema, entity tables, migrations, or DAO queries.
+
+## 2026-07 media grid column count
+
+- `MainScreen` now saves the classified media-grid column count with `rememberSaveable`, so the value survives tab switches and activity recreation.
+- `EnhancedClassifiedScreen` receives the saved count, updates it from pinch gestures, and keeps the media-grid anchor cell in view after a column change.
