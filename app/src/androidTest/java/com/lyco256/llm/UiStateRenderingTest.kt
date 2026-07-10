@@ -19,6 +19,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.unit.dp
@@ -30,7 +31,10 @@ import com.lyco256.llm.data.PostStorageLocation
 import com.lyco256.llm.data.PostStorageType
 import com.lyco256.llm.data.TagEntity
 import com.lyco256.llm.data.TagHierarchy
+import com.lyco256.llm.data.TagWithCount
+import java.io.File
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 
@@ -687,6 +691,89 @@ class UiStateRenderingTest {
         composeRule.onNodeWithTag("media_grid_tweet_dialog_error").assertIsDisplayed()
         composeRule.onNodeWithTag("media_grid_tweet_dialog_close").performClick()
         composeRule.onAllNodesWithTag("media_grid_tweet_dialog").assertCountEquals(0)
+    }
+
+    @Test
+    fun mediaGridTweetDialogReusesCardActionsAndClosesBeforeLocalDelete() {
+        val clip = ClipEntity(
+            id = 42,
+            xPostId = "dialog-actions",
+            authorName = "Dialog Author",
+            authorUsername = "dialog_author",
+            text = "Dialog action test",
+            postUrl = "https://x.com/dialog_author/status/dialog-actions",
+            xCreatedAt = "2026-01-01T00:00:00Z",
+            savedAt = "2026-01-01T00:00:00Z",
+            syncedAt = "2026-01-01T00:00:00Z",
+        )
+        val localFile = File.createTempFile("media-grid-dialog", ".jpg")
+        val asset = AssetEntity(
+            id = 420,
+            clipId = clip.id,
+            mediaKey = "dialog-action-photo",
+            type = "photo",
+            remoteUrl = "https://example.test/dialog-action.jpg",
+            previewUrl = null,
+            localPath = localFile.absolutePath,
+            width = 1200,
+            height = 800,
+            createdAt = "2026-01-01T00:00:00Z",
+        )
+        val tag = TagEntity(
+            id = 7,
+            name = "Dialog Tag",
+            createdAt = "2026-01-01T00:00:00Z",
+            updatedAt = "2026-01-01T00:00:00Z",
+        )
+        val details = ClipWithDetails(clip = clip, assets = listOf(asset), tags = emptyList())
+        var selectedTagIds = emptySet<Long>()
+        var savedSummary: String? = null
+        var savedOcr: String? = null
+        var deletedClipId: Long? = null
+        var clickedAuthor = false
+        composeRule.setContent {
+            MaterialTheme {
+                MediaGridTweetDialog(
+                    state = MediaGridTweetDialogState.Loaded(details),
+                    hierarchy = TagHierarchy(tags = listOf(TagWithCount(tag, 0))),
+                    onDismiss = {},
+                    onTagsChange = { _, ids -> selectedTagIds = ids },
+                    onSummaryChange = { _, summary -> savedSummary = summary },
+                    onOcrSave = { _, text -> savedOcr = text },
+                    onOcrDetect = { _, _, _ -> },
+                    onDelete = { deletedClipId = it.id },
+                    onAuthorClick = { clickedAuthor = true },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("media_asset_${asset.id}").performClick()
+        composeRule.onNodeWithTag("image_viewer").assertIsDisplayed()
+        composeRule.onNodeWithTag("image_viewer_close").performClick()
+
+        composeRule.onNodeWithTag("tag_chip_${tag.id}").performClick()
+        composeRule.runOnIdle { assertEquals(setOf(tag.id), selectedTagIds) }
+
+        composeRule.onNodeWithTag("tweet_options_button_${clip.id}").performClick()
+        composeRule.onNodeWithTag("tweet_options_summary").performClick()
+        composeRule.onNodeWithTag("summary_text").performTextReplacement("updated summary")
+        composeRule.onNodeWithTag("summary_save").performClick()
+        composeRule.runOnIdle { assertEquals("updated summary", savedSummary) }
+
+        composeRule.onNodeWithTag("tweet_options_button_${clip.id}").performClick()
+        composeRule.onNodeWithTag("tweet_options_ocr").performClick()
+        composeRule.onNodeWithTag("ocr_result_text").performTextReplacement("updated OCR")
+        composeRule.onNodeWithTag("ocr_confirm").performClick()
+        composeRule.runOnIdle { assertEquals("updated OCR", savedOcr) }
+
+        composeRule.onNodeWithTag("clip_author_${clip.id}").performClick()
+        composeRule.runOnIdle { assertTrue(clickedAuthor) }
+
+        composeRule.onNodeWithTag("tweet_options_button_${clip.id}").performClick()
+        composeRule.onNodeWithTag("tweet_options_local_delete").performClick()
+        composeRule.onNodeWithTag("clip_local_delete_confirm_${clip.id}").performClick()
+        composeRule.runOnIdle { assertEquals(clip.id, deletedClipId) }
+        localFile.delete()
     }
 
     @Test
