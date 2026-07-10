@@ -68,3 +68,5 @@
 
 - The classified display toggle test now exercises pinch-in and pinch-out on the real app, then verifies the media-grid column count survives activity recreation and switching back and forth between card and grid mode.
 - The media-grid filtering fixture recreates the Activity after replacing its complete Room snapshot so the classified and media-grid flows are observed from the same state.
+- The classified grid flow taps a media cell, verifies the existing tweet card opens inside `media_grid_tweet_dialog`, closes it, and confirms the grid remains available with the same cell geometry.
+- The same test taps both a photo and a video thumbnail belonging to one clip and verifies that both open the same tweet card dialog.

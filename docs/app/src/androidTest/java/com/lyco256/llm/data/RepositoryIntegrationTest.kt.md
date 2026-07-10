@@ -30,3 +30,7 @@
 
 - Added repository tests for `photo` WebP saves, `video` / `animated_gif` preview-image saves on non-Wi-Fi contexts, preview decode failure, and mixed legacy local paths.
 - The OCR and trash-deletion fixtures now use legacy `.jpg` / `.png` local paths to keep the non-WebP path covered.
+
+## 2026-07 media-grid tweet dialog
+
+- `observeClipWithDetailsTracksOnlyTheSelectedClipAndUpdates` verifies clip-scoped detail construction, asset ID ordering, tag selection, update re-emission, and the missing-clip `null` result.

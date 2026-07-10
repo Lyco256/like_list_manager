@@ -22,6 +22,9 @@ interface ClipDao {
     @Query("SELECT * FROM clips WHERE isDeleted = 0 ORDER BY savedAt DESC")
     suspend fun getActiveClips(): List<ClipEntity>
 
+    @Query("SELECT * FROM clips WHERE id = :clipId AND isDeleted = 0 LIMIT 1")
+    fun observeActiveClip(clipId: Long): Flow<ClipEntity?>
+
     @Query(
         """
         SELECT
@@ -62,6 +65,9 @@ interface ClipDao {
     @Query("SELECT * FROM assets ORDER BY id")
     fun observeAssets(): Flow<List<AssetEntity>>
 
+    @Query("SELECT * FROM assets WHERE clipId = :clipId ORDER BY id ASC")
+    fun observeAssetsForClip(clipId: Long): Flow<List<AssetEntity>>
+
     @Query("SELECT * FROM assets ORDER BY id")
     suspend fun getAllAssets(): List<AssetEntity>
 
@@ -73,6 +79,9 @@ interface ClipDao {
 
     @Query("SELECT * FROM clip_tags")
     fun observeClipTags(): Flow<List<ClipTagEntity>>
+
+    @Query("SELECT * FROM clip_tags WHERE clipId = :clipId")
+    fun observeClipTagsForClip(clipId: Long): Flow<List<ClipTagEntity>>
 
     @Query("SELECT clip_tags.* FROM clip_tags INNER JOIN clips ON clips.id = clip_tags.clipId WHERE clips.isDeleted = 0")
     fun observeActiveClipTags(): Flow<List<ClipTagEntity>>
@@ -162,6 +171,11 @@ interface TagDao {
 
     @Query("SELECT * FROM tags ORDER BY parentGroupId, sortOrder, name")
     suspend fun getTags(): List<TagEntity>
+
+    @Query(
+        "SELECT tags.* FROM tags INNER JOIN clip_tags ON clip_tags.tagId = tags.id WHERE clip_tags.clipId = :clipId ORDER BY tags.parentGroupId, tags.sortOrder, tags.name",
+    )
+    fun observeTagsForClip(clipId: Long): Flow<List<TagEntity>>
 
     @Query("SELECT * FROM tag_groups ORDER BY parentGroupId, sortOrder, name")
     fun observeGroups(): Flow<List<TagGroupEntity>>

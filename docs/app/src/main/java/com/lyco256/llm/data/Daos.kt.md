@@ -42,6 +42,11 @@ SQL変更時はEntity列名、Foreign Key、削除時のcascade、Flowの更新�
 ## 2026-07 OCR update
 
 - Added DAO queries for `updateOcrText` and hard-deleting a clip by id.
+
+## 2026-07 media-grid tweet dialog
+
+- Added clip-scoped Flow queries for one active clip, its assets ordered by `id ASC`, and its joined tags.
+- These queries do not change the database schema or the lightweight media-grid queries.
 ## 2026-07 media grid lightweight query
 
 - `observeActiveMediaGridAssetRows` returns active clip media rows only for `photo` and `video_thumbnail` assets, joined through `clips` so deleted clips stay out.

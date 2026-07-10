@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -42,6 +43,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -288,6 +290,7 @@ fun EnhancedClassifiedScreen(
     displayMode: ClassifiedDisplayMode,
     mediaGridColumnCount: Int,
     onMediaGridColumnCountChange: (Int) -> Unit,
+    onMediaGridCellClick: (Long) -> Unit = {},
     onToggleDisplayMode: () -> Unit,
     modifier: Modifier = Modifier,
     onApplyFilters: (TweetFilterState) -> Unit,
@@ -339,6 +342,7 @@ fun EnhancedClassifiedScreen(
                     columnCount = mediaGridColumnCount,
                     state = mediaGridLazyState,
                     onColumnCountChange = onMediaGridColumnCountChange,
+                    onCellClick = onMediaGridCellClick,
                 )
             }
         } else if (uiState.classified.isEmpty()) {
@@ -402,6 +406,83 @@ fun EnhancedClassifiedScreen(
                 TextButton(onClick = { clearConfirmationOpen = false }) { Text("キャンセル") }
             },
         )
+    }
+}
+
+@Composable
+fun MediaGridTweetDialog(
+    state: MediaGridTweetDialogState,
+    hierarchy: TagHierarchy,
+    onDismiss: () -> Unit,
+    onTagsChange: (ClipEntity, Set<Long>) -> Unit,
+    onSummaryChange: (ClipEntity, String) -> Unit,
+    onOcrSave: (ClipEntity, String) -> Unit,
+    onOcrDetect: (ClipWithDetails, (String) -> Unit, (String) -> Unit) -> Unit,
+    onDelete: (ClipEntity) -> Unit,
+    onAuthorClick: (ClipEntity) -> Unit,
+) {
+    if (state == MediaGridTweetDialogState.Closed) return
+    BackHandler(onBack = onDismiss)
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.96f)
+                .fillMaxHeight(0.9f)
+                .testTag("media_grid_tweet_dialog"),
+            shape = RoundedCornerShape(12.dp),
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("ツイート", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.testTag("media_grid_tweet_dialog_close"),
+                    ) {
+                        Icon(Icons.Filled.Close, contentDescription = "閉じる")
+                    }
+                }
+                when (state) {
+                    MediaGridTweetDialogState.Closed -> Unit
+                    MediaGridTweetDialogState.Loading -> Box(
+                        Modifier.fillMaxSize().testTag("media_grid_tweet_dialog_loading"),
+                        contentAlignment = Alignment.Center,
+                    ) { Text("読み込み中…") }
+                    MediaGridTweetDialogState.NotFound -> Column(
+                        Modifier.fillMaxSize().testTag("media_grid_tweet_dialog_error").padding(24.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text("ツイートを読み込めませんでした")
+                        Spacer(Modifier.height(16.dp))
+                        Button(onClick = onDismiss) { Text("閉じる") }
+                    }
+                    is MediaGridTweetDialogState.Loaded -> Box(
+                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp),
+                    ) {
+                        EnhancedTweetCard(
+                            clip = state.clip,
+                            hierarchy = hierarchy,
+                            selectedTagIds = state.clip.tags.map { it.id }.toSet(),
+                            onTagSelectionChange = { onTagsChange(state.clip.clip, it) },
+                            onSummaryChange = onSummaryChange,
+                            onOcrSave = onOcrSave,
+                            onOcrDetect = onOcrDetect,
+                            onDelete = {
+                                onDismiss()
+                                onDelete(it)
+                            },
+                            onAuthorClick = onAuthorClick,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -636,6 +717,7 @@ private fun EnhancedTweetCard(
     onOcrDetect: (ClipWithDetails, (String) -> Unit, (String) -> Unit) -> Unit,
     onDelete: (ClipEntity) -> Unit,
     onAuthorClick: (ClipEntity) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     var summaryDialogOpen by remember { mutableStateOf(false) }
@@ -658,7 +740,7 @@ private fun EnhancedTweetCard(
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        modifier = Modifier.fillMaxWidth().testTag("clip_card_${clip.clip.id}"),
+        modifier = modifier.fillMaxWidth().testTag("clip_card_${clip.clip.id}"),
     ) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2874,6 +2956,7 @@ private fun ClassifiedMediaGridContent(
     columnCount: Int,
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
     onColumnCountChange: (Int) -> Unit,
+    onCellClick: (Long) -> Unit,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(columnCount),
@@ -2897,7 +2980,7 @@ private fun ClassifiedMediaGridContent(
         ) { item ->
             when (item) {
                 is MediaGridHeaderItem -> ClassifiedMediaGridHeader(item)
-                is MediaGridCellItem -> ClassifiedMediaGridCell(item.entry, sort)
+                is MediaGridCellItem -> ClassifiedMediaGridCell(item.entry, sort, onCellClick)
             }
         }
     }
@@ -2991,12 +3074,19 @@ private fun ClassifiedMediaGridHeader(item: MediaGridHeaderItem) {
 }
 
 @Composable
-private fun ClassifiedMediaGridCell(entry: MediaGridEntry, sort: ClassifiedSortState) {
+private fun ClassifiedMediaGridCell(
+    entry: MediaGridEntry,
+    sort: ClassifiedSortState,
+    onClick: (Long) -> Unit,
+) {
     val error = entry.downloadState == "failed" || entry.displayUrl == null || (entry.localPath != null && !entry.hasLocalFile)
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(1f)
+            .pointerInput(entry.clipId) {
+                detectTapGestures(onTap = { onClick(entry.clipId) })
+            }
             .testTag("media_grid_item_${entry.assetId}")
             .background(MaterialTheme.colorScheme.surfaceVariant),
     ) {

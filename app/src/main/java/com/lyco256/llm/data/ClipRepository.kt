@@ -169,6 +169,17 @@ class ClipRepository(
         }
     }
 
+    fun observeClipWithDetails(clipId: Long): Flow<ClipWithDetails?> = postStorageManager.database.flatMapLatest { database ->
+        if (database == null) return@flatMapLatest flowOf(null)
+        combine(
+            database.clipDao().observeActiveClip(clipId),
+            database.clipDao().observeAssetsForClip(clipId),
+            database.tagDao().observeTagsForClip(clipId),
+        ) { clip, assets, tags ->
+            clip?.let { ClipWithDetails(clip = it, assets = assets, tags = tags) }
+        }
+    }
+
     val mediaGridSource: Flow<List<MediaGridClipSource>> = postStorageManager.database.flatMapLatest { database ->
         if (database == null) return@flatMapLatest flowOf(emptyList())
         val clipDao = database.clipDao()

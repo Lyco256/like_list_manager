@@ -266,6 +266,19 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
         val afterToggleBack = gridItemBounds(photoTag)
         assertTrue(kotlin.math.abs(afterToggleBack.width - afterRecreate.width) < 1f)
+
+        composeRule.onNodeWithTag(photoTag, useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("media_grid_tweet_dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_tweet_dialog_close").performClick()
+        composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
+        assertTrue(kotlin.math.abs(gridItemBounds(photoTag).width - afterToggleBack.width) < 1f)
+
+        val videoTag = "media_grid_item_${assetIds.getValue("grid-video")}"
+        composeRule.onNodeWithTag(videoTag, useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("media_grid_tweet_dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_tweet_dialog_close").performClick()
     }
 
     @Test

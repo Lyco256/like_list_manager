@@ -264,6 +264,10 @@ class LargeDatasetIntegrationTest {
         assertEquals(2L, rows.take(2).map { it.assetId }.distinct().size.toLong())
         assertEquals(listOf("photo", "video_thumbnail"), rows.take(2).map { it.assetType })
         assertTrue(rows.none { it.assetType == "animated_gif" })
+
+        val selectedClipId = rows.first().clipId
+        assertEquals(selectedClipId, clipDao.observeActiveClip(selectedClipId).first()?.id)
+        assertEquals(2, clipDao.observeAssetsForClip(selectedClipId).first().size)
     }
 
     private fun asset(clipId: Long, id: Long, mediaKey: String, type: String, now: String) = AssetEntity(

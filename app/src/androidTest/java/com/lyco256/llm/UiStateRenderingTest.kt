@@ -664,6 +664,32 @@ class UiStateRenderingTest {
     }
 
     @Test
+    fun mediaGridTweetDialogShowsLoadingAndNotFoundStatesAndCanClose() {
+        var state by mutableStateOf<MediaGridTweetDialogState>(MediaGridTweetDialogState.Loading)
+        composeRule.setContent {
+            MaterialTheme {
+                MediaGridTweetDialog(
+                    state = state,
+                    hierarchy = TagHierarchy(),
+                    onDismiss = { state = MediaGridTweetDialogState.Closed },
+                    onTagsChange = { _, _ -> },
+                    onSummaryChange = { _, _ -> },
+                    onOcrSave = { _, _ -> },
+                    onOcrDetect = { _, _, _ -> },
+                    onDelete = {},
+                    onAuthorClick = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("media_grid_tweet_dialog_loading").assertIsDisplayed()
+        composeRule.runOnIdle { state = MediaGridTweetDialogState.NotFound }
+        composeRule.onNodeWithTag("media_grid_tweet_dialog_error").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_tweet_dialog_close").performClick()
+        composeRule.onAllNodesWithTag("media_grid_tweet_dialog").assertCountEquals(0)
+    }
+
+    @Test
     fun thousandItemListReachesTailAndReturnsToHeadWithoutMissingCards() {
         val clips = (1L..1_000L).map { id ->
             ClipWithDetails(

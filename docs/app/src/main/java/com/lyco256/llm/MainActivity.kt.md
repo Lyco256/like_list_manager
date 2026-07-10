@@ -109,3 +109,8 @@ UI項目を追加する場合は、対応するViewModel操作、Repository API�
 
 - `MainScreen` now saves the classified media-grid column count with `rememberSaveable`, so the value survives tab switches and activity recreation.
 - `EnhancedClassifiedScreen` receives the saved count, updates it from pinch gestures, and keeps the media-grid anchor cell in view after a column change.
+
+## 2026-07 media-grid tweet dialog
+
+- `MainViewModel` holds the selected media-grid `clipId` and exposes `Closed`, `Loading`, `Loaded`, and `NotFound` dialog states through a clip-scoped repository Flow.
+- Selecting a cell opens the existing tweet-card UI in a dialog; closing or destroying the Activity clears the selection so the dialog is not restored automatically.

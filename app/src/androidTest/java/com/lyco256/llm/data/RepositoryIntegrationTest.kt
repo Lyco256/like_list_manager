@@ -87,6 +87,37 @@ class RepositoryIntegrationTest {
         },
     )
 
+    @Test
+    fun observeClipWithDetailsTracksOnlyTheSelectedClipAndUpdates() = runBlocking {
+        val now = Instant.now().toString()
+        val selectedId = storage.withDatabase { database ->
+            val selectedId = database.clipDao().insertClip(clip("selected"))
+            val otherId = database.clipDao().insertClip(clip("other"))
+            val tagId = database.tagDao().insertTag(TagEntity(name = "Selected", createdAt = now, updatedAt = now))
+            database.clipDao().insertAssets(
+                listOf(
+                    AssetEntity(clipId = selectedId, mediaKey = "selected-2", type = "photo", remoteUrl = "https://example.test/2.jpg", previewUrl = null, createdAt = now),
+                    AssetEntity(clipId = selectedId, mediaKey = "selected-1", type = "photo", remoteUrl = "https://example.test/1.jpg", previewUrl = null, createdAt = now),
+                    AssetEntity(clipId = otherId, mediaKey = "other-1", type = "photo", remoteUrl = "https://example.test/other.jpg", previewUrl = null, createdAt = now),
+                ),
+            )
+            database.clipDao().insertClipTag(ClipTagEntity(selectedId, tagId, now))
+            selectedId
+        }
+
+        val initial = requireNotNull(repository.observeClipWithDetails(selectedId).first())
+        assertEquals(selectedId, initial.clip.id)
+        assertTrue(initial.assets.zipWithNext().all { (first, second) -> first.id < second.id })
+        assertEquals(listOf("Selected"), initial.tags.map { it.name })
+
+        storage.withDatabase { database ->
+            database.clipDao().updateClip(initial.clip.copy(summary = "updated summary"))
+        }
+        val updated = requireNotNull(repository.observeClipWithDetails(selectedId).first { it?.clip?.summary == "updated summary" })
+        assertEquals("updated summary", updated.clip.summary)
+        assertEquals(null, repository.observeClipWithDetails(Long.MAX_VALUE).first())
+    }
+
     @After
     fun tearDown() {
         runBlocking {

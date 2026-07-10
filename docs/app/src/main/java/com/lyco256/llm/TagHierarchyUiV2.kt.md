@@ -129,3 +129,10 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - `EnhancedClassifiedScreen` now keeps a saved media-grid column count in `MainScreen` and updates it from pinch gestures.
 - Pinch-in increases the column count and pinch-out decreases it within the `2..12` range.
 - When the column count changes, the grid restores the nearest visible media-cell anchor instead of jumping back to the top.
+
+## 2026-07 media-grid tweet dialog
+
+- Media cells use tap detection without merging child semantics, so existing video, like-count, error, and cell tags remain available.
+- A normal cell tap opens `MediaGridTweetDialog` for the cell's `clipId`; pinch gestures remain handled by the grid resize detector.
+- The dialog reuses `EnhancedTweetCard`, keeps its existing author/X/image-viewer/tag/OCR/summary/delete actions, and exposes `media_grid_tweet_dialog`, `media_grid_tweet_dialog_close`, `media_grid_tweet_dialog_loading`, and `media_grid_tweet_dialog_error`.
+- Author navigation and local deletion close the dialog before invoking their existing callbacks. Dialog close preserves the grid state because the grid LazyGridState remains owned by the classified screen.

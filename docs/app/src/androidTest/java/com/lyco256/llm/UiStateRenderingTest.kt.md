@@ -20,6 +20,10 @@
 ## 2026-07 media grid pinch / anchor follow-up
 
 - The large-dataset smoke test identifies the media cell nearest the visible grid center before each column-count change and verifies that same cell remains displayed after the grid is resized.
+
+## 2026-07 media-grid tweet dialog
+
+- `mediaGridTweetDialogShowsLoadingAndNotFoundStatesAndCanClose` covers the dialog state tags and close transition without requiring a database.
 ## 2026-07 media grid column coverage
 
 - The media-grid compose smoke now checks that changing the column count keeps the anchor media cell visible and that the day/month headers still span the full grid width.

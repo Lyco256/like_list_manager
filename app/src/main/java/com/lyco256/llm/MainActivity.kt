@@ -109,6 +109,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
@@ -144,6 +148,11 @@ class MainActivity : ComponentActivity() {
                 },
             )
         }
+    }
+
+    override fun onDestroy() {
+        if (::viewModel.isInitialized) viewModel.closeMediaGridTweetDialog()
+        super.onDestroy()
     }
 }
 
@@ -262,6 +271,13 @@ data class ClassifiedMediaGridState(
     val hasMatchingClipButNoMedia: Boolean = false,
 )
 
+sealed interface MediaGridTweetDialogState {
+    object Closed : MediaGridTweetDialogState
+    object Loading : MediaGridTweetDialogState
+    data class Loaded(val clip: ClipWithDetails) : MediaGridTweetDialogState
+    object NotFound : MediaGridTweetDialogState
+}
+
 private data class RepositoryUiState(
     val clips: List<ClipWithDetails>,
     val tags: List<TagWithCount>,
@@ -278,6 +294,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val oauthSession = MutableStateFlow<OAuthSession?>(null)
     private val settingsSnapshot = MutableStateFlow(SettingsSnapshot())
     private val mediaGridSource = repository.mediaGridSource
+    private val selectedMediaGridClipId = MutableStateFlow<Long?>(null)
 
     private val repositoryState = combine(
         repository.clipsWithDetails,
@@ -333,6 +350,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             hasMatchingClipButNoMedia = filtered.isNotEmpty() && entries.isEmpty(),
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ClassifiedMediaGridState())
+
+    val mediaGridTweetDialogState: StateFlow<MediaGridTweetDialogState> = selectedMediaGridClipId
+        .flatMapLatest { clipId ->
+            if (clipId == null) {
+                flowOf(MediaGridTweetDialogState.Closed)
+            } else {
+                repository.observeClipWithDetails(clipId)
+                    .map { clip ->
+                        clip?.let { MediaGridTweetDialogState.Loaded(it) }
+                            ?: MediaGridTweetDialogState.NotFound
+                    }
+                    .onStart { emit(MediaGridTweetDialogState.Loading) }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MediaGridTweetDialogState.Closed)
 
     init {
         viewModelScope.launch {
@@ -399,6 +431,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun clearTagFilters() { filters.value = filters.value.copy(tagFilters = emptyMap()) }
 
     fun clearAllFilters() { filters.value = TweetFilterState() }
+
+    fun openMediaGridTweetDialog(clipId: Long) {
+        selectedMediaGridClipId.value = clipId
+    }
+
+    fun closeMediaGridTweetDialog() {
+        selectedMediaGridClipId.value = null
+    }
 
     fun applyFilters(value: TweetFilterState) { filters.value = value }
 
@@ -560,6 +600,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 @Composable
 fun LikeListManagerUi(viewModel: MainViewModel, onLogin: (ApiSettings) -> Unit) {
     val uiState by viewModel.uiState.collectAsState()
+    val mediaGridTweetDialogState by viewModel.mediaGridTweetDialogState.collectAsState()
     MaterialTheme(
         colorScheme = darkColorScheme(
             primary = Color(0xFF7DB7FF),
@@ -571,6 +612,20 @@ fun LikeListManagerUi(viewModel: MainViewModel, onLogin: (ApiSettings) -> Unit) 
     ) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             MainScreen(uiState, viewModel, onLogin)
+            MediaGridTweetDialog(
+                state = mediaGridTweetDialogState,
+                hierarchy = uiState.tagHierarchy,
+                onDismiss = viewModel::closeMediaGridTweetDialog,
+                onTagsChange = viewModel::setClipTags,
+                onSummaryChange = viewModel::updateSummary,
+                onOcrSave = viewModel::updateOcrText,
+                onOcrDetect = viewModel::detectOcrText,
+                onDelete = viewModel::moveClipToTrash,
+                onAuthorClick = { clip ->
+                    viewModel.closeMediaGridTweetDialog()
+                    viewModel.filterByAuthorFromClip(clip)
+                },
+            )
         }
     }
 }
@@ -715,6 +770,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                 displayMode = classifiedDisplayMode,
                 mediaGridColumnCount = classifiedMediaGridColumnCount,
                 onMediaGridColumnCountChange = { classifiedMediaGridColumnCount = it },
+                onMediaGridCellClick = viewModel::openMediaGridTweetDialog,
                 onToggleDisplayMode = {
                     classifiedDisplayMode = when (classifiedDisplayMode) {
                         ClassifiedDisplayMode.Card -> ClassifiedDisplayMode.MediaGrid
