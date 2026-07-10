@@ -24,7 +24,7 @@
 ## 2026-07 media-grid tweet dialog
 
 - `mediaGridTweetDialogShowsLoadingAndNotFoundStatesAndCanClose` covers the dialog state tags and close transition without requiring a database.
-- `mediaGridTweetDialogReusesCardActionsAndClosesBeforeLocalDelete` exercises the reused card's image viewer, tag selection, summary save, author callback, and local-delete confirmation from inside the media-grid dialog.
+- `mediaGridTweetDialogReusesCardActionsAndClosesBeforeLocalDelete` exercises the reused card's image viewer, tag selection, summary/OCR save, X entry point, author callback, and local-delete confirmation from inside the media-grid dialog.
 ## 2026-07 media grid column coverage
 
 - The media-grid compose smoke now checks that changing the column count keeps the anchor media cell visible and that the day/month headers still span the full grid width.

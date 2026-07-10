@@ -768,6 +768,7 @@ class UiStateRenderingTest {
 
         composeRule.onNodeWithTag("clip_author_${clip.id}").performClick()
         composeRule.runOnIdle { assertTrue(clickedAuthor) }
+        composeRule.onNodeWithTag("clip_open_x_${clip.id}").assertIsDisplayed()
 
         composeRule.onNodeWithTag("tweet_options_button_${clip.id}").performClick()
         composeRule.onNodeWithTag("tweet_options_local_delete").performClick()
