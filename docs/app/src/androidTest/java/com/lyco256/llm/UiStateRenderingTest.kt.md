@@ -16,6 +16,10 @@
 - `classifiedMediaGridShowsDateHeadersVideoBadgeAndErrorCells` now verifies the PostTime header row plus the existing video badge and error cells.
 - `classifiedMediaGridShowsLikeHeadersAndLikeOverlaysWithoutBreakingBadgesOrErrors` covers LikeCount headers, top-left like overlays, and the null-likeCount no-overlay case.
 - The existing 4-column layout regression still checks the grid geometry and the empty-state path remains unchanged.
+
+## 2026-07 media grid pinch / anchor follow-up
+
+- The large-dataset smoke test identifies the media cell nearest the visible grid center before each column-count change and verifies that same cell remains displayed after the grid is resized.
 ## 2026-07 media grid column coverage
 
 - The media-grid compose smoke now checks that changing the column count keeps the anchor media cell visible and that the day/month headers still span the full grid width.

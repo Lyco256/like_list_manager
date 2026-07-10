@@ -341,9 +341,7 @@ fun EnhancedClassifiedScreen(
                     onColumnCountChange = onMediaGridColumnCountChange,
                 )
             }
-            return
-        }
-        if (uiState.classified.isEmpty()) {
+        } else if (uiState.classified.isEmpty()) {
             HierarchyEmptyState("条件に合うツイートはありません")
         } else {
             Box(Modifier.fillMaxSize()) {

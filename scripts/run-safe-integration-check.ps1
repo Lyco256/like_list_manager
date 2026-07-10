@@ -36,6 +36,20 @@ function Invoke-LoggedAdb {
     return $output
 }
 
+function Prepare-ComposeTestDevice {
+    param(
+        [Parameter(Mandatory = $true)][string]$Adb,
+        [Parameter(Mandatory = $true)][string]$Serial
+    )
+
+    Invoke-LoggedAdb -Adb $Adb -Arguments @("-s", $Serial, "shell", "input", "keyevent", "KEYCODE_WAKEUP") | Out-Null
+    Invoke-LoggedAdb -Adb $Adb -Arguments @("-s", $Serial, "shell", "wm", "dismiss-keyguard") | Out-Null
+    $powerState = Invoke-LoggedAdb -Adb $Adb -Arguments @("-s", $Serial, "shell", "dumpsys", "power")
+    if (-not ($powerState | Select-String "mWakefulness=Awake")) {
+        throw "The test device did not become awake before Compose tests."
+    }
+}
+
 function Wait-AllowedDevice {
     param(
         [Parameter(Mandatory = $true)][string]$Adb,
@@ -193,6 +207,7 @@ try {
 
         Invoke-SafePhase -Name "IntegrationTest" -Action {
             Wait-AllowedDevice -Adb $script:adb -Serial $script:serial
+            Prepare-ComposeTestDevice -Adb $script:adb -Serial $script:serial
             if ($script:selectedDebugMethod -eq "wireless") {
                 Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "shell", "am", "instrument", "-w", "-r", $script:testRunnerComponent) -TimeoutSeconds $timeouts.IntegrationTest -WorkingDirectory $repoRoot
             } else {

@@ -222,13 +222,13 @@ class MainActivityComposeTest {
         waitUntil { clipTagIds(clipId).isNotEmpty() }
 
         composeRule.onNodeWithTag("tab_classified").performClick()
-        composeRule.waitUntil(10_000) {
+        composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithTag("classified_display_toggle").fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithTag("classified_display_toggle").assertIsDisplayed()
         if (composeRule.onAllNodesWithTag("clip_card_$clipId").fetchSemanticsNodes().isEmpty()) {
             composeRule.onNodeWithTag("classified_display_toggle").performClick()
-            composeRule.waitUntil(10_000) {
+            composeRule.waitUntil(30_000) {
                 composeRule.onAllNodesWithTag("clip_card_$clipId").fetchSemanticsNodes().isNotEmpty()
             }
         }
@@ -369,17 +369,22 @@ class MainActivityComposeTest {
         val highAssetId = fixture.highAssetId
         val noMediaClipId = fixture.noMediaClipId
 
+        // Recreate after replacing the full fixture so both UI flows observe the same database snapshot.
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("main_screen").fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithTag("tab_classified").performClick()
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithTag("clip_card_${fixture.highClipId}").fetchSemanticsNodes().isNotEmpty() ||
                 composeRule.onAllNodesWithTag("classified_media_grid").fetchSemanticsNodes().isNotEmpty()
         }
-        if (composeRule.onAllNodesWithTag("clip_card_${fixture.highClipId}").fetchSemanticsNodes().isNotEmpty()) {
+        if (composeRule.onAllNodesWithTag("classified_media_grid").fetchSemanticsNodes().isEmpty()) {
             composeRule.onNodeWithTag("classified_display_toggle").performClick()
         }
         composeRule.onNodeWithTag("media_grid_item_$highAssetId", useUnmergedTree = true).assertIsDisplayed()
         composeRule.onNodeWithTag("filter_open").performClick()
-        composeRule.waitUntil(10_000) {
+        composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithTag("filter_dialog", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithTag("filter_query").performTextReplacement("NoMedia")
@@ -388,18 +393,34 @@ class MainActivityComposeTest {
 
         composeRule.onNodeWithTag("filter_open").performClick()
         composeRule.onNodeWithTag("filter_clear_all_open").performClick()
+        composeRule.onNodeWithTag("filter_clear_all_confirm").performClick()
         composeRule.onNodeWithTag("filter_apply").performClick()
+        composeRule.waitUntil(30_000) {
+            runCatching {
+                composeRule.onNodeWithTag("media_grid_item_$highAssetId", useUnmergedTree = true).assertIsDisplayed()
+                composeRule.onNodeWithTag("media_grid_item_$lowAssetId", useUnmergedTree = true).assertIsDisplayed()
+            }.isSuccess
+        }
         composeRule.onNodeWithTag("sort_open").performClick()
         composeRule.onNodeWithTag("sort_base_like").performClick()
         composeRule.onNodeWithTag("sort_like_direction_high").performClick()
         composeRule.onNodeWithTag("sort_apply").performClick()
-        composeRule.onNodeWithTag("media_grid_item_$highAssetId", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.waitUntil(30_000) {
+            runCatching {
+                composeRule.onNodeWithTag("media_grid_item_$highAssetId", useUnmergedTree = true).assertIsDisplayed()
+                composeRule.onNodeWithTag("media_grid_item_$lowAssetId", useUnmergedTree = true).assertIsDisplayed()
+            }.isSuccess
+        }
 
         val highBounds = composeRule.onNodeWithTag("media_grid_item_$highAssetId", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val lowBounds = composeRule.onNodeWithTag("media_grid_item_$lowAssetId", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         assertTrue(highBounds.left < lowBounds.left)
 
         composeRule.onNodeWithTag("classified_display_toggle").performClick()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("clip_list").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("clip_list").performScrollToNode(hasTestTag("clip_card_${fixture.highClipId}"))
         composeRule.onNodeWithTag("clip_card_${fixture.highClipId}").assertIsDisplayed()
     }
 

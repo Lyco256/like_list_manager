@@ -124,6 +124,8 @@ Instrumentation、Compose、Room統合テストは、メインアプリと隔離
 * テストAPKが `com.lyco256.llm.test` であり、メインとは別package・別UIDである
 * 通常のbuild、unit test、lintゲートが成功する
 
+長いbuild・unit test・lint中に端末が消灯してもCompose Activityを起動できるよう、隔離実機テストの直前に対象端末をwakeし、keyguard解除を要求してAwake状態を確認する。端末データやpackageは変更しない。
+
 テスト後も隔離テストアプリを端末へ残し、両アプリを共存させる。
 
 ## Macrobenchmark

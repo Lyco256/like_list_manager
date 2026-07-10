@@ -67,3 +67,4 @@
 ## 2026-07 media grid pinch coverage
 
 - The classified display toggle test now exercises pinch-in and pinch-out on the real app, then verifies the media-grid column count survives activity recreation and switching back and forth between card and grid mode.
+- The media-grid filtering fixture recreates the Activity after replacing its complete Room snapshot so the classified and media-grid flows are observed from the same state.

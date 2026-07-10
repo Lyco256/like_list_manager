@@ -107,7 +107,7 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - Only `photo` and `video_thumbnail` assets are included, and the grid keeps `displayUrl = localPath ?: previewUrl ?: remoteUrl`.
 - `classified_media_grid` uses `LazyVerticalGrid` with `GridCells.Fixed(4)` and zero item spacing.
 - Failed downloads, missing local files, and assets with no usable URL render as error cells via `media_grid_error_<assetId>`.
-- This update intentionally leaves out divider headings, like-count overlays, pinch-to-change columns, card popups, multi-select, and bulk tag editing for later work.
+- The later follow-up adds headings and pinch-to-change columns while preserving the existing grid-mode filter and sort dialogs.
 ## 2026-07 media grid lightweight UI
 
 - `EnhancedClassifiedScreen` now reads `ClassifiedMediaGridState.entries` instead of flattening `uiState.classified` directly.

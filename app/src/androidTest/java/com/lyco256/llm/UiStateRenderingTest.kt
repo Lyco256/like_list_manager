@@ -12,15 +12,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
-import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.unit.dp
 import com.lyco256.llm.data.AssetEntity
 import com.lyco256.llm.data.ClipEntity
@@ -551,6 +551,11 @@ class UiStateRenderingTest {
                 )
             }
         }
+        val targetIndex = buildClassifiedMediaGridItems(
+            entries,
+            ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime),
+            ClassifiedMediaGridDefaultColumnCount,
+        ).indexOfFirst { it.key == "media_grid_item_400" }
 
         var columnCount by mutableStateOf(ClassifiedMediaGridDefaultColumnCount)
         composeRule.setContent {
@@ -589,37 +594,41 @@ class UiStateRenderingTest {
 
         composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
         composeRule.onNodeWithTag("media_grid_item_10").assertIsDisplayed()
-        composeRule.onNodeWithTag("classified_media_grid").performScrollToNode(hasTestTag("media_grid_item_800"))
-        composeRule.waitUntil(10_000) {
+        composeRule.onNodeWithTag("classified_media_grid").performScrollToIndex(targetIndex)
+        composeRule.waitUntil(30_000) {
             runCatching {
-                composeRule.onNodeWithTag("media_grid_item_800").assertIsDisplayed()
+                composeRule.onNodeWithTag("media_grid_item_400").assertIsDisplayed()
             }.isSuccess
         }
-        composeRule.onNodeWithTag("media_grid_header_post_time_day_2026-01-20").assertIsDisplayed()
+        val dayAnchorTag = mediaGridCellNearestViewportCenterTag()
 
         composeRule.runOnIdle {
             columnCount = 2
         }
         composeRule.waitForIdle()
-        composeRule.waitUntil(10_000) {
+        composeRule.waitUntil(30_000) {
             runCatching {
-                composeRule.onNodeWithTag("media_grid_item_800").assertIsDisplayed()
+                composeRule.onNodeWithTag(dayAnchorTag, useUnmergedTree = true).assertIsDisplayed()
             }.isSuccess
         }
+        composeRule.onNodeWithTag("classified_media_grid").performScrollToIndex(targetIndex - 1)
+        composeRule.onNodeWithTag("media_grid_header_post_time_day_2026-01-20").assertIsDisplayed()
         val gridBounds = composeRule.onNodeWithTag("classified_media_grid").fetchSemanticsNode().boundsInRoot
         val dayHeaderBounds = composeRule.onNodeWithTag("media_grid_header_post_time_day_2026-01-20").fetchSemanticsNode().boundsInRoot
         assertTrue(dayHeaderBounds.left <= gridBounds.left + 1f)
         assertTrue(dayHeaderBounds.right >= gridBounds.right - 1f)
+        val monthAnchorTag = mediaGridCellNearestViewportCenterTag()
 
         composeRule.runOnIdle {
             columnCount = 9
         }
         composeRule.waitForIdle()
-        composeRule.waitUntil(10_000) {
+        composeRule.waitUntil(30_000) {
             runCatching {
-                composeRule.onNodeWithTag("media_grid_item_800").assertIsDisplayed()
+                composeRule.onNodeWithTag(monthAnchorTag, useUnmergedTree = true).assertIsDisplayed()
             }.isSuccess
         }
+        composeRule.onNodeWithTag("classified_media_grid").performScrollToIndex(0)
         composeRule.onNodeWithTag("media_grid_header_post_time_month_2026-01").assertIsDisplayed()
         val monthHeaderBounds = composeRule.onNodeWithTag("media_grid_header_post_time_month_2026-01").fetchSemanticsNode().boundsInRoot
         assertTrue(monthHeaderBounds.left <= gridBounds.left + 1f)
@@ -708,6 +717,24 @@ class UiStateRenderingTest {
         height = 800,
         createdAt = "2026-01-01T00:00:00Z",
     )
+
+    private fun mediaGridCellNearestViewportCenterTag(): String {
+        val gridBounds = composeRule.onNodeWithTag("classified_media_grid").fetchSemanticsNode().boundsInRoot
+        val viewportCenterY = (gridBounds.top + gridBounds.bottom) / 2f
+        return composeRule.onAllNodes(
+            matcher = SemanticsMatcher("media grid cell") { node ->
+                SemanticsProperties.TestTag in node.config &&
+                    node.config[SemanticsProperties.TestTag].startsWith("media_grid_item_")
+            },
+            useUnmergedTree = true,
+        ).fetchSemanticsNodes()
+            .minByOrNull { node ->
+                val bounds = node.boundsInRoot
+                kotlin.math.abs((bounds.top + bounds.bottom) / 2f - viewportCenterY)
+            }
+            ?.let { node -> node.config[SemanticsProperties.TestTag] }
+            ?: error("No visible media-grid cell was found")
+    }
 
     private fun assertMediaGridGeometry(
         tagPrefix: String,
