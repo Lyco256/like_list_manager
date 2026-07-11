@@ -60,14 +60,18 @@ Androidアプリに入力するのはOAuth 2.0 Client IDだけです。Client Se
 - callback後にアプリへ戻らない場合は、Developer ConsoleとManifestのURIが完全一致しているか確認します。
 - Android `logcat` に `FATAL EXCEPTION`、`AndroidRuntime`、アプリのANRがないことを確認します。
 
-## Local Verification Commands
+## Local Verification
+
+通常のbuild、unit test、lintは、`SAFE_DEBUG_ROUTINE.md`の安全入口を使用します。
 
 ```powershell
-$env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
-$env:PATH="$env:JAVA_HOME\bin;$env:PATH"
-.\gradlew.bat assembleDebug
-.\gradlew.bat lintDebug
-.\gradlew.bat testDebugUnitTest
+.\scripts\run-safe-debug-check.cmd
+```
+
+隔離実機確認はwireless endpointの自動解決を含む次の入口を使用します。
+
+```powershell
+.\scripts\run-safe-integration-check.cmd -DebugMethod wireless
 ```
 
 ## いいね数再取得の確認（2026-06-20）

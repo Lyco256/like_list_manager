@@ -148,7 +148,7 @@ MainActivity / Compose UI
 - `docs/app/src/androidTest/java/com/lyco256/llm/UiStateRenderingTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/SearchFilterDatabaseIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LikeListDatabaseMigrationTest.kt.md`
-- `MainActivityComposeTest.kt`, `UiStateRenderingTest.kt`, `RepositoryIntegrationTest.kt`, and `LargeDatasetIntegrationTest.kt` now cover the classified display toggle, lightweight media-grid flow, and the 4-column media grid rendering.
+- `MainActivityComposeTest.kt`, `UiStateRenderingTest.kt`, `RepositoryIntegrationTest.kt`, and `LargeDatasetIntegrationTest.kt` cover the classified display toggle, lightweight media-grid flow, 2〜12 column resizing, section headers, selection/Dialog boundaries, and large-data rendering.
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/PostStorageManagerRecoveryTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/OcrTextRecognizerTest.kt.md`
 
@@ -176,7 +176,7 @@ MainActivity / Compose UI
 - 自動バックグラウンド同期は未実装
 - backup/import/exportは未実装
 - 任意フォルダへの保存とアンインストール後の投稿データ保持は未実装
-- タグ色変更は未実装
+- タグ色変更は12色パレットで実装済み
 - 動画/GIF本体は保存しない
 - DBはversion 7で、version 1→2・2→3・3→4・4→5・5→6・6→7のmigrationを実装済み
 - 階層・複合絞り込み・制約・件数表示の単体テストと、version 1→2・2→3・3→4・4→5のmigration testを実装済み
@@ -197,7 +197,7 @@ MainActivity / Compose UI
 - 新規同期投稿へ `public_metrics.like_count` と取得日時を保存し、既存投稿は明示再取得だけで更新します。
 - 設定画面から未取得／期限到来した暫定値を月間残り枠内で一括再取得できます。
 - 投稿カードのいいね数・暫定警告、投稿者件数順、タグ投稿数、グループ直下要素数を表示します。
-- Room schema versionは5で、version 2→3、3→4、4→5 migrationを登録しています。
+- Room schema versionは7で、version 1→2、2→3、3→4、4→5、5→6、6→7 migrationを登録しています。
 
 ## 2026-06-22 高リスク統合テスト基盤
 
@@ -207,7 +207,7 @@ MainActivity / Compose UI
 - `SnapshotCompatibilityTest` は明示指定されたDB・画像をホスト側の一時コピーで検証し、コピー元hash不変を確認します。
 - `scripts/run-safe-integration-check.cmd` はGit管理外の許可serialだけを受け入れ、同じ実機上でメインと `.test` のpackage・UID分離、メインmetadata前後不変を検証します。
 - `scripts/run-safe-macrobenchmark-check.cmd` は同じ許可serial上で `.test.benchmark` 対象APKとMacrobenchmarkホストだけを扱い、メインmetadata前後不変を検証します。
-- 2026-06-23にSC-56Cで本番と隔離テストを共存させ、実機統合テスト26件の全件成功を確認しました。
+- 2026-06-23以降、SC-56Cで本番と隔離テストを共存させ、AndroidJUnitRunnerによる実機統合テストを継続実行しています。wireless時は`run-safe-integration-check.cmd -DebugMethod wireless`がhardware serialからmDNS endpointを解決します。
 
 追加したテスト文書:
 

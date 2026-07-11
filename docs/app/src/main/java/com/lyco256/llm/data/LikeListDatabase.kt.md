@@ -6,7 +6,7 @@
 
 ## 役割
 
-Room DatabaseにEntityを登録し、`ClipDao` と `TagDao` を公開します。現在のschema versionは5です。
+Room DatabaseにEntityを登録し、`ClipDao` と `TagDao` を公開します。現在のschema versionは7で、1→2から6→7までの非破壊migrationを登録しています。
 
 ## Migration
 

@@ -96,7 +96,7 @@ UI項目を追加する場合は、対応するViewModel操作、Repository API�
 - `ClassifiedDisplayMode` is saved with `rememberSaveable` in `MainScreen`, so the classified tab keeps card/grid mode across tab switches and activity recreation.
 - The classified toolbar now has a single icon toggle next to filter/sort controls; it does not open a dropdown and does not show the text `MediaGrid`.
 - Grid mode still uses `uiState.classified` as its only source and stays separate from the existing card view.
-- This update intentionally does not add divider headings, like-count overlays, pinch-to-change columns, card popups, multi-select, or bulk tag editing.
+- Classified media-grid support now includes divider headings, like-count overlays, pinch-to-change columns from 2 through 12, card popups, tweet-level multi-select, and bulk tag editing; the existing card-list path remains separate.
 ## 2026-07 media grid lightweight state
 
 - `MainViewModel` now exposes `classifiedMediaGridState`, which combines the lightweight media source with filters, sort config, and tag hierarchy.

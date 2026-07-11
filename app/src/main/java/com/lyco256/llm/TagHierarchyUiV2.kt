@@ -108,8 +108,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.ContentScale
@@ -309,6 +309,7 @@ fun EnhancedClassifiedScreen(
     var sortDialogOpen by remember { mutableStateOf(false) }
     var clearConfirmationOpen by remember { mutableStateOf(false) }
     var selectedMediaGridClipIds by remember { mutableStateOf(emptySet<Long>()) }
+    var mediaGridSelectionMode by remember { mutableStateOf(false) }
     var bulkTagDialogOpen by remember { mutableStateOf(false) }
     val itemKeys = remember(uiState.classified) { uiState.classified.map { it.clip.id } }
     val mediaGridLazyState = rememberLazyGridState()
@@ -318,6 +319,9 @@ fun EnhancedClassifiedScreen(
     val mediaGridAnchor = rememberClassifiedMediaGridAnchor(mediaGridLazyState)
     val selectableMediaGridClipIds = remember(mediaGridState.entries) {
         mediaGridState.entries.map { it.clipId }.toSet()
+    }
+    val multiAssetMediaGridClipIds = remember(mediaGridState.entries) {
+        mediaGridState.entries.groupingBy { it.clipId }.eachCount().filterValues { it >= 2 }.keys
     }
     val selectedVisibleMediaGridClipIds = selectedMediaGridClipIds.intersect(selectableMediaGridClipIds)
     LaunchedEffect(selectableMediaGridClipIds) {
@@ -332,8 +336,12 @@ fun EnhancedClassifiedScreen(
             ?: anchor.index.coerceIn(0, mediaGridItems.lastIndex)
         mediaGridLazyState.scrollToItem(targetIndex)
     }
+    BackHandler(enabled = displayMode == ClassifiedDisplayMode.MediaGrid && mediaGridSelectionMode && !bulkTagDialogOpen) {
+        mediaGridSelectionMode = false
+        selectedMediaGridClipIds = emptySet()
+    }
     Column(modifier.fillMaxSize().padding(12.dp)) {
-        if (displayMode == ClassifiedDisplayMode.MediaGrid && selectedVisibleMediaGridClipIds.isNotEmpty()) {
+        if (displayMode == ClassifiedDisplayMode.MediaGrid && mediaGridSelectionMode) {
             MediaGridSelectionToolbar(
                 selectedCount = selectedVisibleMediaGridClipIds.size,
                 allSelected = selectedVisibleMediaGridClipIds == selectableMediaGridClipIds,
@@ -344,8 +352,12 @@ fun EnhancedClassifiedScreen(
                         selectableMediaGridClipIds
                     }
                 },
-                onEditTags = { bulkTagDialogOpen = true },
-                onClose = { selectedMediaGridClipIds = emptySet() },
+                onEditTags = { if (selectedVisibleMediaGridClipIds.isNotEmpty()) bulkTagDialogOpen = true },
+                editTagsEnabled = selectedVisibleMediaGridClipIds.isNotEmpty(),
+                onClose = {
+                    mediaGridSelectionMode = false
+                    selectedMediaGridClipIds = emptySet()
+                },
             )
         } else {
             TagFilterSummaryRow(
@@ -371,7 +383,10 @@ fun EnhancedClassifiedScreen(
                     onColumnCountChange = onMediaGridColumnCountChange,
                     onCellClick = onMediaGridCellClick,
                     selectedClipIds = selectedVisibleMediaGridClipIds,
+                    selectionMode = mediaGridSelectionMode,
+                    multiAssetClipIds = multiAssetMediaGridClipIds,
                     onToggleSelection = { clipId ->
+                        mediaGridSelectionMode = true
                         selectedMediaGridClipIds = selectedMediaGridClipIds.toMutableSet().apply {
                             if (!add(clipId)) remove(clipId)
                         }
@@ -3011,6 +3026,7 @@ private fun MediaGridSelectionToolbar(
     allSelected: Boolean,
     onToggleAll: () -> Unit,
     onEditTags: () -> Unit,
+    editTagsEnabled: Boolean,
     onClose: () -> Unit,
 ) {
     Row(
@@ -3029,7 +3045,11 @@ private fun MediaGridSelectionToolbar(
         TextButton(onClick = onToggleAll, modifier = Modifier.testTag("media_grid_select_all")) {
             Text(if (allSelected) "全解除" else "全選択")
         }
-        Button(onClick = onEditTags, modifier = Modifier.testTag("media_grid_bulk_tag_open")) {
+        Button(
+            onClick = onEditTags,
+            enabled = editTagsEnabled,
+            modifier = Modifier.testTag("media_grid_bulk_tag_open"),
+        ) {
             Text("タグ編集")
         }
     }
@@ -3138,6 +3158,8 @@ private fun ClassifiedMediaGridContent(
     columnCount: Int,
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
     onColumnCountChange: (Int) -> Unit,
+    selectionMode: Boolean,
+    multiAssetClipIds: Set<Long>,
     onCellClick: (Long) -> Unit,
     selectedClipIds: Set<Long>,
     onToggleSelection: (Long) -> Unit,
@@ -3168,7 +3190,8 @@ private fun ClassifiedMediaGridContent(
                     entry = item.entry,
                     sort = sort,
                     columnCount = columnCount,
-                    selectionMode = selectedClipIds.isNotEmpty(),
+                    selectionMode = selectionMode,
+                    multiAsset = item.entry.clipId in multiAssetClipIds,
                     selected = item.entry.clipId in selectedClipIds,
                     onClick = onCellClick,
                     onToggleSelection = onToggleSelection,
@@ -3271,6 +3294,7 @@ private fun ClassifiedMediaGridCell(
     sort: ClassifiedSortState,
     columnCount: Int,
     selectionMode: Boolean,
+    multiAsset: Boolean,
     selected: Boolean,
     onClick: (Long) -> Unit,
     onToggleSelection: (Long) -> Unit,
@@ -3280,13 +3304,22 @@ private fun ClassifiedMediaGridCell(
     val videoIconSize = mediaGridVideoIconSize(columnCount)
     val cardDialogSize = mediaGridCardDialogSize(columnCount)
     val overlayPadding = if (columnCount <= 4) 4.dp else 2.dp
+    val hapticFeedback = LocalHapticFeedback.current
+    val selectionBackground = mediaGridSelectionBackground(MaterialTheme.colorScheme.primary, multiAsset)
+    val selectionCheckColor = if (multiAsset) Color.White else Color.Black
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(1f)
-            .pointerInput(entry.clipId) {
+            .pointerInput(entry.clipId, selectionMode) {
                 detectTapGestures(
-                    onLongPress = { onToggleSelection(entry.clipId) },
+                    onLongPress = {
+                        handleMediaGridLongPress(
+                            selectionMode = selectionMode,
+                            haptic = { hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress) },
+                            toggleSelection = { onToggleSelection(entry.clipId) },
+                        )
+                    },
                     onTap = {
                         if (selectionMode) onToggleSelection(entry.clipId) else onClick(entry.clipId)
                     },
@@ -3359,16 +3392,29 @@ private fun ClassifiedMediaGridCell(
                     .size(selectionIndicatorSize)
                     .testTag("media_grid_selection_${entry.assetId}"),
                 shape = CircleShape,
-                color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                border = if (selected) null else BorderStroke(1.5.dp, Color.White),
+                color = Color.Transparent,
+                border = BorderStroke(1.5.dp, Color.White),
             ) {
                 if (selected) {
-                    Icon(
-                        imageVector = Icons.Filled.Check,
-                        contentDescription = "選択済み",
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.padding(selectionIndicatorSize / 5),
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(selectionIndicatorSize * 0.68f)
+                                .background(selectionBackground, CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Check,
+                                contentDescription = "選択済み",
+                                tint = selectionCheckColor,
+                                modifier = Modifier.fillMaxSize().padding(selectionIndicatorSize / 7),
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -3379,15 +3425,21 @@ private fun ClassifiedMediaGridCell(
                     .align(Alignment.BottomEnd)
                     .padding(overlayPadding)
                     .size(cardDialogSize)
-                    .background(Color.Black.copy(alpha = 0.64f), CircleShape)
                     .testTag("media_grid_selection_open_${entry.assetId}"),
             ) {
-                Icon(
-                    imageVector = Icons.Filled.ViewList,
-                    contentDescription = "カードを表示",
-                    tint = Color.White,
-                    modifier = Modifier.fillMaxSize().padding(3.dp),
-                )
+                Box(
+                    modifier = Modifier
+                        .size(mediaGridCardDialogVisualSize(columnCount))
+                        .background(Color.Black.copy(alpha = 0.64f), RoundedCornerShape(5.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.ViewList,
+                        contentDescription = "カードを表示",
+                        tint = Color.White,
+                        modifier = Modifier.fillMaxSize().padding(3.dp),
+                    )
+                }
             }
         }
     }
@@ -3400,6 +3452,31 @@ private fun mediaGridSelectionIndicatorSize(columnCount: Int) = when (columnCoun
     else -> 14.dp
 }
 
+internal fun mediaGridSelectionBackground(primary: Color, multiAsset: Boolean): Color = if (!multiAsset) {
+    Color(
+        red = (primary.red * 0.72f + 0.24f).coerceAtMost(1f),
+        green = (primary.green * 0.72f + 0.24f).coerceAtMost(1f),
+        blue = 1f,
+        alpha = 0.96f,
+    )
+} else {
+    Color(
+        red = (primary.red * 0.55f).coerceAtLeast(0f),
+        green = (primary.green * 0.55f).coerceAtLeast(0f),
+        blue = (primary.blue * 0.82f).coerceAtMost(1f),
+        alpha = 0.96f,
+    )
+}
+
+internal fun handleMediaGridLongPress(
+    selectionMode: Boolean,
+    haptic: () -> Unit,
+    toggleSelection: () -> Unit,
+) {
+    if (!selectionMode) haptic()
+    toggleSelection()
+}
+
 private fun mediaGridVideoIconSize(columnCount: Int) = when (columnCount.coerceIn(2, 12)) {
     2, 3 -> 24.dp
     4, 5, 6 -> 20.dp
@@ -3410,6 +3487,11 @@ private fun mediaGridVideoIconSize(columnCount: Int) = when (columnCount.coerceI
 private fun mediaGridCardDialogSize(columnCount: Int) = when (columnCount.coerceIn(2, 12)) {
     2, 3 -> 28.dp
     else -> 24.dp
+}
+
+private fun mediaGridCardDialogVisualSize(columnCount: Int) = when (columnCount.coerceIn(2, 12)) {
+    2, 3 -> 20.dp
+    else -> 18.dp
 }
 
 private data class DisplayAsset(

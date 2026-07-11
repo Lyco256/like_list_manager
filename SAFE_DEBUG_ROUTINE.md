@@ -2,17 +2,27 @@
 
 ## Codex実行ルール
 
-Codexは、検証・ビルド・テスト・lint・実機操作を自己判断で直接実行しない。必ずこの文書に書かれた `.cmd` 入口だけを使う。
+Codexは、検証・ビルド・テスト・lint・実機操作を自己判断で直接実行しない。必ずこの文書に書かれた `.cmd` 入口だけを使う。ただし、ADB接続を確立・復旧・確認するための非破壊操作だけは、下記の条件付き例外として直接実行できる。
 
 禁止:
 
 * `.\gradlew.bat ...` を直接実行する
-* `adb ...` を直接実行する
+* 検証・インストール・テスト実行・アプリ状態変更を目的とした `adb ...` を直接実行する
 * `aapt ...` を直接実行する
 * `.ps1` を直接実行する
 * `.cmd` や `.ps1` の中身を読んで、同等のGradle/adb/PowerShell処理を手動で再現する
 * Android StudioやGradleのconnected系タスクを自己判断で実行する
 * 成功時に詳細ログ、HTMLレポート、JUnit XML、lintレポートを読みに行く
+
+### ADB接続復旧の例外
+
+次の操作だけは、wireless/USB ADBの接続確立・復旧・状態確認に限って直接実行してよい。
+
+* `adb devices -l`、`adb get-state`、`adb get-serialno`、接続確認用の`adb shell getprop ro.serialno`
+* `adb mdns services`
+* `adb connect <mDNS名またはhost:port>`、`adb disconnect <endpoint>`、`adb reconnect`
+
+この例外では、`adb install`、`adb uninstall`、`adb shell pm clear`、`adb shell am instrument`、アプリ起動・停止、ファイル転送、設定変更、権限変更、DB・画像・Preferencesへ触れる操作は禁止する。接続復旧後のbuild、install、test、lintは必ず対応する`.cmd`入口へ戻す。wireless統合テストは、許可serialからendpointを解決する`run-safe-integration-check.cmd -DebugMethod wireless`を優先する。
 
 専用入口がない検証が必要な場合は、直接コマンドを実行せず、必要な入口を追加するか、未実行として報告する。
 
@@ -34,6 +44,12 @@ Codexは、検証・ビルド・テスト・lint・実機操作を自己判断�
 
 ```powershell
 .\scripts\run-safe-integration-check.cmd
+```
+
+ワイヤレスデバッグ端末では、次のように指定する。`testDeviceSerial`に登録したhardware serialからmDNSのADB TLS endpointを安全スクリプトが解決し、端末serialを照合して接続する。
+
+```powershell
+.\scripts\run-safe-integration-check.cmd -DebugMethod wireless
 ```
 
 Macrobenchmark:

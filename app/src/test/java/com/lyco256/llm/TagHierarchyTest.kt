@@ -1,6 +1,7 @@
 ﻿package com.lyco256.llm
 
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
 import com.lyco256.llm.data.AssetEntity
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipTagEntity
@@ -970,6 +971,37 @@ class TagHierarchyTest {
         assertEquals(3, classifiedMediaGridColumnCountForScale(4, 0.88f))
         assertEquals(ClassifiedMediaGridMaxColumnCount, classifiedMediaGridColumnCountForScale(12, 2f))
         assertEquals(ClassifiedMediaGridMinColumnCount, classifiedMediaGridColumnCountForScale(2, 0.2f))
+    }
+
+    @Test
+    fun mediaGridSelectionBackgroundUsesLightBlueForSingleAndBlueForMultiAsset() {
+        val primary = Color(0.4f, 0.7f, 1f, 1f)
+
+        val singleBackground = mediaGridSelectionBackground(primary, multiAsset = false)
+        val multiBackground = mediaGridSelectionBackground(primary, multiAsset = true)
+        assertTrue(singleBackground.blue >= singleBackground.red)
+        assertTrue(singleBackground.blue >= singleBackground.green)
+        assertTrue(multiBackground.blue > multiBackground.red)
+        assertTrue(multiBackground.blue > multiBackground.green)
+        assertTrue(multiBackground.red < singleBackground.red)
+    }
+
+    @Test
+    fun mediaGridHapticOnlyOccursWhenLongPressStartsSelectionMode() {
+        var hapticCalls = 0
+        var toggleCalls = 0
+        handleMediaGridLongPress(
+            selectionMode = false,
+            haptic = { hapticCalls++ },
+            toggleSelection = { toggleCalls++ },
+        )
+        handleMediaGridLongPress(
+            selectionMode = true,
+            haptic = { hapticCalls++ },
+            toggleSelection = { toggleCalls++ },
+        )
+        assertEquals(1, hapticCalls)
+        assertEquals(2, toggleCalls)
     }
 
     @Test

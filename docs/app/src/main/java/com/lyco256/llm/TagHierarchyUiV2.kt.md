@@ -116,7 +116,7 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - `EnhancedClassifiedScreen` now switches between the existing card list and a new media-grid mode with a single icon toggle.
 - `buildMediaGridEntries(clips)` flattens `uiState.classified` into `MediaGridEntry` rows so the grid can stay independent from direct `ClipWithDetails` nesting in the UI.
 - Only `photo` and `video_thumbnail` assets are included, and the grid keeps `displayUrl = localPath ?: previewUrl ?: remoteUrl`.
-- `classified_media_grid` uses `LazyVerticalGrid` with `GridCells.Fixed(4)` and zero item spacing.
+- `classified_media_grid` uses `LazyVerticalGrid` with `GridCells.Fixed(columnCount)`, where `columnCount` is maintained from 2 through 12 by pinch gestures, with zero item spacing.
 - Failed downloads, missing local files, and assets with no usable URL render as error cells via `media_grid_error_<assetId>`.
 - The later follow-up adds headings and pinch-to-change columns while preserving the existing grid-mode filter and sort dialogs.
 ## 2026-07 media grid lightweight UI
@@ -147,3 +147,11 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - A normal cell tap opens `MediaGridTweetDialog` for the cell's `clipId`; pinch gestures remain handled by the grid resize detector.
 - The dialog reuses `EnhancedTweetCard`, keeps its existing author/X/image-viewer/tag/OCR/summary/delete actions, and exposes `media_grid_tweet_dialog`, `media_grid_tweet_dialog_close`, `media_grid_tweet_dialog_loading`, and `media_grid_tweet_dialog_error`.
 - Author navigation and local deletion close the dialog before invoking their existing callbacks. Dialog close preserves the grid state because the grid LazyGridState remains owned by the classified screen.
+
+## 2026-07 media-grid selection interaction fixes
+
+- Media-grid selection mode is tracked independently from the selected clip set, so the toolbar remains visible at `0件選択中` until the close button or Android Back is used.
+- The bulk tag button is disabled when no clip is selected. Cell taps in selection mode only toggle the clip; the card-dialog button is available only for 2–6 columns and does not propagate to the cell.
+- The image itself is never overlaid or dimmed by selection. Selection is represented only by the top-left indicator: a white outer ring, a light-blue checkbox with a black check for single-asset clips, or a blue checkbox with a white check shared by all cells of a multi-asset clip.
+- A single long-press that starts selection mode emits one `LongPress` haptic feedback; later selection changes, deselection, bulk selection, pinch, dialog, and mode close do not emit additional feedback.
+- The card-dialog action keeps an appropriately small rounded-square surface inside its touch target for 2–6 columns and remains absent for 7–12 columns.

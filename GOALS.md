@@ -34,10 +34,9 @@ MVPの上記機能は実装済みです。OAuth callback、token暗号化保存�
 1. 実機でOAuthログイン、callback、初回同期、token refreshを確認する
 2. OAuth/API/JSON変換/Repositoryの自動テストを追加する
 3. WorkManagerによる低頻度バックグラウンド同期を追加する
-4. タグ色変更と完全なタグ統合を追加する
-5. backup/export/importを追加する
-6. 保存先別の容量表示に加えて、画像の手動整理機能を追加する
-7. DB migration testを実機で継続実行できる検証手順へ組み込む
+4. backup/export/importを追加する
+5. 保存先別の容量表示に加えて、画像の手動整理機能を追加する
+6. DB migration testを実機で継続実行できる検証手順へ組み込む
 
 ## 非目標
 
@@ -74,7 +73,7 @@ MVPの上記機能は実装済みです。OAuth callback、token暗号化保存�
 
 - SC-56Cへ本番 `com.lyco256.llm` と隔離テスト `com.lyco256.llm.test` を同時に導入し、異なるUIDで共存することを確認
 - 本番packageのpath、UID、version、初回導入日時、更新日時が実機テスト前後で不変であることを安全スクリプトで確認
-- AndroidJUnitRunnerによる実機統合テスト26件を全件成功（Compose UI、環境分離、Room migration、Repository、MockWebServer）
+- AndroidJUnitRunnerによる実機統合テスト（Compose UI、環境分離、Room migration、Repository、MockWebServer）を安全スクリプト経由で継続実行できる状態にした
 - SC-56Cで正常終了をクラッシュ扱いするOrchestratorは使わず、各UIテスト前に隔離DBだけを初期化する構成へ変更
 
 ## 2026-07-01 達成済み
@@ -85,3 +84,11 @@ MVPの上記機能は実装済みです。OAuth callback、token暗号化保存�
 - SC-56CではOrchestratorが正常終了をクラッシュと誤判定するため採用しない方針を維持
 
 実画像backupの提供がないため、実画像backupによるsnapshot最終確認だけは未完了として残します。
+
+## 2026-07-11 達成済み
+
+- 分類済みメディアグリッドの2〜12列、投稿日／いいね数見出し、ピンチ列数変更、投稿単位の複数選択、一括タグ編集、選択中のカードDialog導線を実装
+- 複数選択を0件まで維持し、×／戻るで終了、0件時のタグ編集無効化、セルタップとDialogボタンのイベント分離を実装
+- 選択表示をチェックボックスだけに限定し、単一画像の水色＋黒チェック、複数画像の青色＋白チェック、選択開始時だけのハプティックを実装
+- タグ／グループの色パレットと色設定を実装
+- wireless ADBのmDNS endpoint自動解決を安全な統合テストスクリプトへ追加

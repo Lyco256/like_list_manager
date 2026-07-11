@@ -80,3 +80,8 @@
 ## 2026-07 media grid pinch bounds
 
 - `classifiedMediaGridColumnCountFollowsPinchScaleAndClampsBounds` now covers pinch-in growth, pinch-out shrinkage, and the `2..12` clamp range for the media-grid column helper.
+
+## 2026-07 media grid selection color
+
+- `mediaGridSelectionBackgroundUsesLightBlueForSingleAndBlueForMultiAsset` verifies the distinct single-asset light-blue and multi-asset blue checkbox backgrounds without changing the image itself.
+- `mediaGridHapticOnlyOccursWhenLongPressStartsSelectionMode` verifies one haptic call for the transition into selection mode, no additional call while already selecting, and a toggle for each long-press.
