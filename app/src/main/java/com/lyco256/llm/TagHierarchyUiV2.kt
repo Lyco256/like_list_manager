@@ -118,6 +118,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -456,22 +458,23 @@ fun EnhancedClassifiedScreen(
         )
     }
     if (bulkTagDialogOpen && selectedVisibleMediaGridClipIds.isNotEmpty()) {
-        val initialTagIds = selectedVisibleMediaGridClipIds
-            .flatMapTo(mutableSetOf()) { mediaGridState.tagIdsByClip[it].orEmpty() }
+        val initialTagStates = aggregateBulkTagStates(
+            selectedVisibleMediaGridClipIds.map { mediaGridState.tagIdsByClip[it].orEmpty() },
+            uiState.tagHierarchy.tags.map { it.tag.id },
+        )
         MediaGridBulkTagDialog(
             hierarchy = uiState.tagHierarchy,
             selectedClipCount = selectedVisibleMediaGridClipIds.size,
-            initialTagIds = initialTagIds,
-            onApply = { tagIds, complete ->
+            initialTagStates = initialTagStates,
+            onApply = { pending, complete ->
                 onMediaGridBulkTagsChange(
                     selectedVisibleMediaGridClipIds,
-                    tagIds - initialTagIds,
-                    initialTagIds - tagIds,
+                    pending.filterValues { it == BulkTagPending.ADD_ALL }.keys,
+                    pending.filterValues { it == BulkTagPending.REMOVE_ALL }.keys,
                 ) { error ->
                     complete(error)
                     if (error == null) {
                         bulkTagDialogOpen = false
-                        selectedMediaGridClipIds = emptySet()
                     }
                 }
             },
@@ -1074,6 +1077,7 @@ private fun EnhancedTweetCard(
 private fun TagHierarchySelector(
     hierarchy: TagHierarchy,
     selectedTagIds: Set<Long>,
+    mixedTagIds: Set<Long> = emptySet(),
     onToggleTag: (Long) -> Unit,
     onOpenGroup: (Long) -> Unit,
 ) {
@@ -1089,6 +1093,7 @@ private fun TagHierarchySelector(
                     node = node,
                     hierarchy = hierarchy,
                     selectedTagIds = selectedTagIds,
+                    mixedTagIds = mixedTagIds,
                     onToggleTag = onToggleTag,
                     onOpenGroup = onOpenGroup,
                 )
@@ -1101,6 +1106,7 @@ private fun TagHierarchySelector(
 private fun TagSelectionDialog(
     hierarchy: TagHierarchy,
     selectedTagIds: Set<Long>,
+    mixedTagIds: Set<Long> = emptySet(),
     onToggleTag: (Long) -> Unit,
     onDismiss: () -> Unit,
     initialPath: List<Long> = emptyList(),
@@ -1153,6 +1159,7 @@ private fun TagSelectionDialog(
                                     node = node,
                                     hierarchy = hierarchy,
                                     selectedTagIds = selectedTagIds,
+                                    mixedTagIds = mixedTagIds,
                                     onToggleTag = onToggleTag,
                                     onOpenGroup = { groupId -> path.add(groupId) },
                                     fillMaxWidth = true,
@@ -1973,6 +1980,7 @@ private fun TagHierarchyChip(
     node: TagTreeNode,
     hierarchy: TagHierarchy,
     selectedTagIds: Set<Long>,
+    mixedTagIds: Set<Long> = emptySet(),
     onToggleTag: (Long) -> Unit,
     onOpenGroup: (Long) -> Unit,
     fillMaxWidth: Boolean = false,
@@ -1980,7 +1988,7 @@ private fun TagHierarchyChip(
     val modifier = if (fillMaxWidth) Modifier.fillMaxWidth() else Modifier
     val shape = RoundedCornerShape(8.dp)
     if (node is TagGroupNode) {
-        val selectedCount = hierarchy.descendantTagIdsByGroup[node.id].orEmpty().count { it in selectedTagIds }
+        val selectedCount = hierarchy.descendantTagIdsByGroup[node.id].orEmpty().count { it in selectedTagIds || it in mixedTagIds }
         val spec = tagColorSpec(node.group.colorId)
         Surface(
             modifier = modifier
@@ -2017,12 +2025,16 @@ private fun TagHierarchyChip(
     } else {
         val tag = (node as TagLeafNode).tag
         val selected = tag.id in selectedTagIds
+        val mixed = tag.id in mixedTagIds
         val spec = tagColorSpec(tag.colorId)
         Surface(
             modifier = modifier
                 .testTag("tag_chip_${tag.id}")
+                .semantics { if (mixed) stateDescription = "一部付与" }
                 .heightIn(min = 32.dp)
-                .then(if (selected) Modifier.background(tagGradient(tag.colorId), shape) else Modifier)
+                .then(if (selected) Modifier.background(tagGradient(tag.colorId), shape) else if (mixed) Modifier.background(
+                    tagColor(tag.colorId).copy(alpha = 0.35f), shape,
+                ) else Modifier)
                 .clip(shape)
                 .clickable { onToggleTag(tag.id) },
             shape = shape,
@@ -2964,7 +2976,7 @@ private fun mediaGridPostTimeBucket(xCreatedAt: String, columnCount: Int): Media
             val weekStart = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
             MediaGridBucketSpec(
                 key = "post_time_week_$weekStart",
-                label = "${formatDateBucketDate(weekStart)}週",
+                label = "${formatDateBucketDate(weekStart)} ~ ${formatDateBucketDate(weekStart.plusDays(6))}",
                 safeKey = "post_time_week_$weekStart",
             )
         }
@@ -3009,12 +3021,12 @@ private fun mediaGridDateGranularity(columnCount: Int): MediaGridDateGranularity
 }
 
 private fun mediaGridLikeBucketUnit(columnCount: Int): Long = when (columnCount.coerceIn(2, 12)) {
-    2, 3, 4 -> 1_000L
-    5, 6, 7, 8 -> 5_000L
-    else -> 10_000L
+    2, 3, 4 -> 200L
+    5, 6, 7, 8 -> 500L
+    else -> 1_000L
 }
 
-private fun formatDateBucketDate(date: LocalDate): String = DateTimeFormatter.ofPattern("yyyy/M/d").format(date)
+private fun formatDateBucketDate(date: LocalDate): String = DateTimeFormatter.ofPattern("yyyy/MM/dd").format(date)
 
 private fun formatMonthBucketDate(month: YearMonth): String = DateTimeFormatter.ofPattern("yyyy/M").format(month)
 
@@ -3055,19 +3067,37 @@ private fun MediaGridSelectionToolbar(
     }
 }
 
+internal enum class BulkTagAggregate { NONE, ALL, MIXED }
+private enum class BulkTagPending { KEEP, ADD_ALL, REMOVE_ALL }
+
+internal fun aggregateBulkTagStates(
+    clipTagIds: List<Set<Long>>,
+    tagIds: List<Long>,
+): Map<Long, BulkTagAggregate> {
+    val total = clipTagIds.size
+    return tagIds.associateWith { tagId ->
+        val count = clipTagIds.count { tagId in it }
+        when { count == 0 -> BulkTagAggregate.NONE; count == total -> BulkTagAggregate.ALL; else -> BulkTagAggregate.MIXED }
+    }
+}
+
 @Composable
 private fun MediaGridBulkTagDialog(
     hierarchy: TagHierarchy,
     selectedClipCount: Int,
-    initialTagIds: Set<Long>,
-    onApply: (Set<Long>, (String?) -> Unit) -> Unit,
+    initialTagStates: Map<Long, BulkTagAggregate>,
+    onApply: (Map<Long, BulkTagPending>, (String?) -> Unit) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var draftTagIds by remember(initialTagIds) { mutableStateOf(initialTagIds) }
+    var pending by remember(initialTagStates) { mutableStateOf(initialTagStates.mapValues { BulkTagPending.KEEP }) }
     var openGroupId by remember { mutableStateOf<Long?>(null) }
     var discardConfirmationOpen by remember { mutableStateOf(false) }
     var bulkTagDialogError by remember { mutableStateOf<String?>(null) }
-    val hasPendingChanges = draftTagIds != initialTagIds
+    val hasPendingChanges = pending.values.any { it != BulkTagPending.KEEP }
+    val effectiveSelected = initialTagStates.filter { (id, state) ->
+        when (pending[id] ?: BulkTagPending.KEEP) { BulkTagPending.ADD_ALL -> true; BulkTagPending.REMOVE_ALL -> false; else -> state == BulkTagAggregate.ALL }
+    }.keys
+    val mixed = initialTagStates.filter { (id, state) -> state == BulkTagAggregate.MIXED && pending[id] == BulkTagPending.KEEP }.keys
     fun requestDismiss() {
         if (hasPendingChanges) discardConfirmationOpen = true else onDismiss()
     }
@@ -3093,9 +3123,16 @@ private fun MediaGridBulkTagDialog(
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     TagHierarchySelector(
                         hierarchy = hierarchy,
-                        selectedTagIds = draftTagIds,
+                        selectedTagIds = effectiveSelected,
+                        mixedTagIds = mixed,
                         onToggleTag = { tagId ->
-                            draftTagIds = draftTagIds.toMutableSet().apply { if (!add(tagId)) remove(tagId) }
+                            pending = pending.toMutableMap().apply {
+                                put(tagId, when (this[tagId]) {
+                                    BulkTagPending.REMOVE_ALL -> BulkTagPending.ADD_ALL
+                                    BulkTagPending.ADD_ALL -> BulkTagPending.REMOVE_ALL
+                                    else -> if (initialTagStates[tagId] == BulkTagAggregate.ALL) BulkTagPending.REMOVE_ALL else BulkTagPending.ADD_ALL
+                                })
+                            }
                         },
                         onOpenGroup = { openGroupId = it },
                     )
@@ -3110,7 +3147,7 @@ private fun MediaGridBulkTagDialog(
                         modifier = Modifier.weight(1f).testTag("media_grid_bulk_tag_cancel"),
                     ) { Text("キャンセル") }
                     Button(
-                        onClick = { onApply(draftTagIds) { error -> bulkTagDialogError = error } },
+                        onClick = { onApply(pending.filterValues { it != BulkTagPending.KEEP }) { error -> bulkTagDialogError = error } },
                         modifier = Modifier.weight(1f).testTag("media_grid_bulk_tag_apply"),
                     ) { Text("適用") }
                 }
@@ -3120,9 +3157,16 @@ private fun MediaGridBulkTagDialog(
     openGroupId?.let { groupId ->
         TagSelectionDialog(
             hierarchy = hierarchy,
-            selectedTagIds = draftTagIds,
+            selectedTagIds = effectiveSelected,
+            mixedTagIds = mixed,
             onToggleTag = { tagId ->
-                draftTagIds = draftTagIds.toMutableSet().apply { if (!add(tagId)) remove(tagId) }
+                pending = pending.toMutableMap().apply {
+                    put(tagId, when (this[tagId]) {
+                        BulkTagPending.REMOVE_ALL -> BulkTagPending.ADD_ALL
+                        BulkTagPending.ADD_ALL -> BulkTagPending.REMOVE_ALL
+                        else -> if (initialTagStates[tagId] == BulkTagAggregate.ALL) BulkTagPending.REMOVE_ALL else BulkTagPending.ADD_ALL
+                    })
+                }
             },
             onDismiss = { openGroupId = null },
             initialPath = listOf(groupId),

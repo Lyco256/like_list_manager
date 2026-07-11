@@ -899,16 +899,17 @@ class TagHierarchyTest {
             postItems.map { it.key },
         )
         assertEquals(
-            listOf("2026/6/15", "日付不明"),
+            listOf("2026/06/15", "日付不明"),
             postItems.filterIsInstance<MediaGridHeaderItem>().map { it.label },
         )
 
         val likeItems = buildClassifiedMediaGridItems(entries, ClassifiedSortState(baseOrder = ClassifiedSortBase.LikeCount), 4)
         assertEquals(
             listOf(
-                "media_grid_header_like_count_1000_1000",
+                "media_grid_header_like_count_200_1200",
                 "media_grid_item_11",
                 "media_grid_item_12",
+                "media_grid_header_like_count_200_1800",
                 "media_grid_item_21",
                 "media_grid_header_like_count_unknown",
                 "media_grid_item_31",
@@ -916,7 +917,7 @@ class TagHierarchyTest {
             likeItems.map { it.key },
         )
         assertEquals(
-            listOf("1,000〜1,999", "いいね数不明"),
+            listOf("1,200〜1,399", "1,800〜1,999", "いいね数不明"),
             likeItems.filterIsInstance<MediaGridHeaderItem>().map { it.label },
         )
     }
@@ -953,15 +954,15 @@ class TagHierarchyTest {
 
         val weekItems = buildClassifiedMediaGridItems(entries, ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime), 5)
         assertEquals(listOf("media_grid_header_post_time_week_2026-06-15", "media_grid_item_11", "media_grid_item_21"), weekItems.map { it.key })
-        assertEquals(listOf("2026/6/15週"), weekItems.filterIsInstance<MediaGridHeaderItem>().map { it.label })
+        assertEquals(listOf("2026/06/15 ~ 2026/06/21"), weekItems.filterIsInstance<MediaGridHeaderItem>().map { it.label })
 
         val monthItems = buildClassifiedMediaGridItems(entries, ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime), 9)
         assertEquals(listOf("media_grid_header_post_time_month_2026-06", "media_grid_item_11", "media_grid_item_21"), monthItems.map { it.key })
         assertEquals(listOf("2026/6"), monthItems.filterIsInstance<MediaGridHeaderItem>().map { it.label })
 
         val likeItems = buildClassifiedMediaGridItems(entries, ClassifiedSortState(baseOrder = ClassifiedSortBase.LikeCount), 9)
-        assertEquals(listOf("media_grid_header_like_count_10000_10000", "media_grid_item_11", "media_grid_header_like_count_10000_0", "media_grid_item_21"), likeItems.map { it.key })
-        assertEquals(listOf("10,000〜19,999", "0〜9,999"), likeItems.filterIsInstance<MediaGridHeaderItem>().map { it.label })
+        assertEquals(listOf("media_grid_header_like_count_1000_15000", "media_grid_item_11", "media_grid_header_like_count_1000_4000", "media_grid_item_21"), likeItems.map { it.key })
+        assertEquals(listOf("15,000〜15,999", "4,000〜4,999"), likeItems.filterIsInstance<MediaGridHeaderItem>().map { it.label })
     }
 
     @Test
