@@ -1,5 +1,9 @@
 # `ClipRepository.kt`
 
+## 2026-07-10 bulk tag transaction
+
+`setClipTagsForClips` applies one final tag set to all selected clip IDs through a single Room transaction. It is called only when the media-grid bulk editor is applied.
+
 ## 対応ソース
 
 `app/src/main/java/com/lyco256/llm/data/ClipRepository.kt`

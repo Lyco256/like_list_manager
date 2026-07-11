@@ -265,6 +265,7 @@ data class MainUiState(
 
 data class ClassifiedMediaGridState(
     val entries: List<MediaGridEntry> = emptyList(),
+    val tagIdsByClip: Map<Long, Set<Long>> = emptyMap(),
     val matchingClipCount: Int = 0,
     val matchingMediaCount: Int = 0,
     val isEmptyByFilter: Boolean = true,
@@ -344,6 +345,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val entries = buildMediaGridEntries(sorted)
         ClassifiedMediaGridState(
             entries = entries,
+            tagIdsByClip = filtered.associate { clip -> clip.clip.id to clip.tags.map { it.id }.toSet() },
             matchingClipCount = filtered.size,
             matchingMediaCount = entries.size,
             isEmptyByFilter = filtered.isEmpty(),
@@ -464,6 +466,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun setClipTags(clip: ClipEntity, tagIds: Set<Long>) = viewModelScope.launch {
         repository.setClipTags(clip.id, tagIds)
+    }
+    fun setClipTagsForClips(clipIds: Set<Long>, tagIds: Set<Long>) = viewModelScope.launch {
+        repository.setClipTagsForClips(clipIds, tagIds)
     }
     fun updateSummary(clip: ClipEntity, summary: String) = viewModelScope.launch {
         repository.updateSummary(clip, summary)
@@ -771,6 +776,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                 mediaGridColumnCount = classifiedMediaGridColumnCount,
                 onMediaGridColumnCountChange = { classifiedMediaGridColumnCount = it },
                 onMediaGridCellClick = viewModel::openMediaGridTweetDialog,
+                onMediaGridBulkTagsChange = viewModel::setClipTagsForClips,
                 onToggleDisplayMode = {
                     classifiedDisplayMode = when (classifiedDisplayMode) {
                         ClassifiedDisplayMode.Card -> ClassifiedDisplayMode.MediaGrid

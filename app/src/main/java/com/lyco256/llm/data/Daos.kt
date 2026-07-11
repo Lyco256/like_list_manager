@@ -162,6 +162,11 @@ interface ClipDao {
         current.minus(tagIds).forEach { deleteClipTag(clipId, it) }
         tagIds.minus(current).forEach { insertClipTag(ClipTagEntity(clipId, it, now)) }
     }
+
+    @Transaction
+    suspend fun replaceClipTagsForClips(clipIds: Set<Long>, tagIds: Set<Long>, now: String) {
+        clipIds.forEach { clipId -> replaceClipTags(clipId, tagIds, now) }
+    }
 }
 
 @Dao

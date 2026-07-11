@@ -267,7 +267,7 @@ class LargeDatasetIntegrationTest {
 
         val selectedClipId = rows.first().clipId
         assertEquals(selectedClipId, clipDao.observeActiveClip(selectedClipId).first()?.id)
-        assertEquals(2, clipDao.observeAssetsForClip(selectedClipId).first().size)
+        assertEquals(3, clipDao.observeAssetsForClip(selectedClipId).first().size)
     }
 
     private fun asset(clipId: Long, id: Long, mediaKey: String, type: String, now: String) = AssetEntity(

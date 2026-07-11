@@ -118,6 +118,34 @@ class RepositoryIntegrationTest {
         assertEquals(null, repository.observeClipWithDetails(Long.MAX_VALUE).first())
     }
 
+    @Test
+    fun bulkTagReplacementUpdatesEverySelectedClipTogether() = runBlocking {
+        val now = Instant.now().toString()
+        val fixture = storage.withDatabase { database ->
+            val firstClipId = database.clipDao().insertClip(clip("bulk-first"))
+            val secondClipId = database.clipDao().insertClip(clip("bulk-second"))
+            val untouchedClipId = database.clipDao().insertClip(clip("bulk-untouched"))
+            val oldTagId = database.tagDao().insertTag(TagEntity(name = "Old", createdAt = now, updatedAt = now))
+            val newTagId = database.tagDao().insertTag(TagEntity(name = "New", createdAt = now, updatedAt = now))
+            listOf(firstClipId, secondClipId, untouchedClipId).forEach { clipId ->
+                database.clipDao().insertClipTag(ClipTagEntity(clipId, oldTagId, now))
+            }
+            listOf(firstClipId, secondClipId, untouchedClipId, oldTagId, newTagId)
+        }
+        val (firstClipId, secondClipId, untouchedClipId, oldTagId, newTagId) = fixture
+
+        repository.setClipTagsForClips(setOf(firstClipId, secondClipId), setOf(newTagId))
+
+        storage.withDatabase { database ->
+            val rows = database.clipDao().clipTagsForClipIds(listOf(firstClipId, secondClipId, untouchedClipId))
+                .groupBy { it.clipId }
+                .mapValues { (_, values) -> values.map { it.tagId }.toSet() }
+            assertEquals(setOf(newTagId), rows[firstClipId])
+            assertEquals(setOf(newTagId), rows[secondClipId])
+            assertEquals(setOf(oldTagId), rows[untouchedClipId])
+        }
+    }
+
     @After
     fun tearDown() {
         runBlocking {

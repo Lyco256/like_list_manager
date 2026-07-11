@@ -17,3 +17,7 @@
 ## 2026-07 OCR update
 
 - Populates OCR text on a subset of the large dataset to keep search and storage coverage realistic.
+
+## 2026-07-10 media asset count expectation
+
+The large media-grid fixture stores two grid-supported assets plus one intentionally ignored animated GIF; the full asset assertion is therefore three while the grid query remains two thousand supported rows.

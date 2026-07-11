@@ -1,5 +1,10 @@
 # `UiStateRenderingTest.kt`
 
+## 2026-07-10 media-grid selection coverage
+
+- Covers long-press tweet-level selection, shared selection across multiple assets, selected count, selection indicators, like-count suppression, and the 2–6 column card-dialog action boundary.
+- Covers select-all over the filtered media result, union-based initial tag selection, pending tag changes, discard confirmation, and one apply callback for all selected clip IDs.
+
 1,000投稿のLazyColumnを末尾まで移動し、末尾カードを確認した後に先頭へ戻れることも検証します。
 
 読み込み中DialogのtitleとmessageをCompose semanticsで直接検証し、スクリーンショットなしでloading表示の回帰を検出します。

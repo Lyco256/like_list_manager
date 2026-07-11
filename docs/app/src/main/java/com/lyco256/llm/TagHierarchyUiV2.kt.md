@@ -1,4 +1,13 @@
 # `TagHierarchyUiV2.kt`
+
+## 2026-07-10 media-grid bulk tag editing
+
+- A long press starts tweet-level multi-selection. Every media cell with the same `clipId` shares the selected state.
+- The selection toolbar reports distinct tweet count and selects all media-bearing tweets in the current filtered result, including off-screen cells.
+- Selection indicators and video badges scale from 2 through 12 columns. Like-count overlays are hidden during selection.
+- A per-cell card button is available during selection only at 2 through 6 columns. Normal cell taps continue to open the tweet dialog at every column count.
+- Bulk tag editing starts from the union of tags on selected tweets. Draft changes remain local until Apply; cancelling a changed draft requires discard confirmation.
+- Grid column count, lazy-grid state, headers, and anchor restoration remain owned by `EnhancedClassifiedScreen` while dialogs open and close.
 Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いいね数`, `取得日時`, `取得エラー`, `タグを付ける`.
 
 投稿一覧のLazyColumnには、未構築項目へ実機UIテストから安全にスクロールできる `clip_list` test tagがあります。

@@ -1,5 +1,9 @@
 # `Daos.kt`
 
+## 2026-07-10 bulk tag transaction
+
+`ClipDao.replaceClipTagsForClips` is the `@Transaction` boundary covering removal and insertion for every selected clip. Existing single-clip replacement remains unchanged.
+
 ## 対応ソース
 
 `app/src/main/java/com/lyco256/llm/data/Daos.kt`

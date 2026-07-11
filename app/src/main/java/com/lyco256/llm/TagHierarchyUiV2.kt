@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -291,6 +292,7 @@ fun EnhancedClassifiedScreen(
     mediaGridColumnCount: Int,
     onMediaGridColumnCountChange: (Int) -> Unit,
     onMediaGridCellClick: (Long) -> Unit = {},
+    onMediaGridBulkTagsChange: (Set<Long>, Set<Long>) -> Unit = { _, _ -> },
     onToggleDisplayMode: () -> Unit,
     modifier: Modifier = Modifier,
     onApplyFilters: (TweetFilterState) -> Unit,
@@ -306,12 +308,21 @@ fun EnhancedClassifiedScreen(
     var filterDialogOpen by remember { mutableStateOf(false) }
     var sortDialogOpen by remember { mutableStateOf(false) }
     var clearConfirmationOpen by remember { mutableStateOf(false) }
+    var selectedMediaGridClipIds by remember { mutableStateOf(emptySet<Long>()) }
+    var bulkTagDialogOpen by remember { mutableStateOf(false) }
     val itemKeys = remember(uiState.classified) { uiState.classified.map { it.clip.id } }
     val mediaGridLazyState = rememberLazyGridState()
     val mediaGridItems = remember(mediaGridState.entries, uiState.sort, mediaGridColumnCount) {
         buildClassifiedMediaGridItems(mediaGridState.entries, uiState.sort, mediaGridColumnCount)
     }
     val mediaGridAnchor = rememberClassifiedMediaGridAnchor(mediaGridLazyState)
+    val selectableMediaGridClipIds = remember(mediaGridState.entries) {
+        mediaGridState.entries.map { it.clipId }.toSet()
+    }
+    val selectedVisibleMediaGridClipIds = selectedMediaGridClipIds.intersect(selectableMediaGridClipIds)
+    LaunchedEffect(selectableMediaGridClipIds) {
+        selectedMediaGridClipIds = selectedVisibleMediaGridClipIds
+    }
     PreserveScrollAnchor(listState, "classified", itemKeys)
     LaunchedEffect(mediaGridColumnCount) {
         val anchor = mediaGridAnchor ?: return@LaunchedEffect
@@ -322,15 +333,31 @@ fun EnhancedClassifiedScreen(
         mediaGridLazyState.scrollToItem(targetIndex)
     }
     Column(modifier.fillMaxSize().padding(12.dp)) {
-        TagFilterSummaryRow(
-            uiState = uiState,
-            hierarchy = uiState.tagHierarchy,
-            displayMode = displayMode,
-            onOpen = { filterDialogOpen = true },
-            onOpenSort = { sortDialogOpen = true },
-            onToggleDisplayMode = onToggleDisplayMode,
-            onClear = { clearConfirmationOpen = true },
-        )
+        if (displayMode == ClassifiedDisplayMode.MediaGrid && selectedVisibleMediaGridClipIds.isNotEmpty()) {
+            MediaGridSelectionToolbar(
+                selectedCount = selectedVisibleMediaGridClipIds.size,
+                allSelected = selectedVisibleMediaGridClipIds == selectableMediaGridClipIds,
+                onToggleAll = {
+                    selectedMediaGridClipIds = if (selectedVisibleMediaGridClipIds == selectableMediaGridClipIds) {
+                        emptySet()
+                    } else {
+                        selectableMediaGridClipIds
+                    }
+                },
+                onEditTags = { bulkTagDialogOpen = true },
+                onClose = { selectedMediaGridClipIds = emptySet() },
+            )
+        } else {
+            TagFilterSummaryRow(
+                uiState = uiState,
+                hierarchy = uiState.tagHierarchy,
+                displayMode = displayMode,
+                onOpen = { filterDialogOpen = true },
+                onOpenSort = { sortDialogOpen = true },
+                onToggleDisplayMode = onToggleDisplayMode,
+                onClear = { clearConfirmationOpen = true },
+            )
+        }
         Spacer(Modifier.height(10.dp))
         if (displayMode == ClassifiedDisplayMode.MediaGrid) {
             when {
@@ -343,6 +370,12 @@ fun EnhancedClassifiedScreen(
                     state = mediaGridLazyState,
                     onColumnCountChange = onMediaGridColumnCountChange,
                     onCellClick = onMediaGridCellClick,
+                    selectedClipIds = selectedVisibleMediaGridClipIds,
+                    onToggleSelection = { clipId ->
+                        selectedMediaGridClipIds = selectedMediaGridClipIds.toMutableSet().apply {
+                            if (!add(clipId)) remove(clipId)
+                        }
+                    },
                 )
             }
         } else if (uiState.classified.isEmpty()) {
@@ -405,6 +438,21 @@ fun EnhancedClassifiedScreen(
             dismissButton = {
                 TextButton(onClick = { clearConfirmationOpen = false }) { Text("キャンセル") }
             },
+        )
+    }
+    if (bulkTagDialogOpen && selectedVisibleMediaGridClipIds.isNotEmpty()) {
+        val initialTagIds = selectedVisibleMediaGridClipIds
+            .flatMapTo(mutableSetOf()) { mediaGridState.tagIdsByClip[it].orEmpty() }
+        MediaGridBulkTagDialog(
+            hierarchy = uiState.tagHierarchy,
+            selectedClipCount = selectedVisibleMediaGridClipIds.size,
+            initialTagIds = initialTagIds,
+            onApply = { tagIds ->
+                onMediaGridBulkTagsChange(selectedVisibleMediaGridClipIds, tagIds)
+                bulkTagDialogOpen = false
+                selectedMediaGridClipIds = emptySet()
+            },
+            onDismiss = { bulkTagDialogOpen = false },
         )
     }
 }
@@ -2950,6 +2998,128 @@ private fun formatMonthBucketDate(month: YearMonth): String = DateTimeFormatter.
 private fun formatNumberBucketValue(value: Long): String = String.format(Locale.JAPAN, "%,d", value)
 
 @Composable
+private fun MediaGridSelectionToolbar(
+    selectedCount: Int,
+    allSelected: Boolean,
+    onToggleAll: () -> Unit,
+    onEditTags: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().testTag("media_grid_selection_toolbar"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        IconButton(onClick = onClose, modifier = Modifier.testTag("media_grid_selection_close")) {
+            Icon(Icons.Filled.Close, contentDescription = "選択を終了")
+        }
+        Text(
+            text = "${selectedCount}件選択中",
+            modifier = Modifier.weight(1f).testTag("media_grid_selection_count"),
+            fontWeight = FontWeight.SemiBold,
+        )
+        TextButton(onClick = onToggleAll, modifier = Modifier.testTag("media_grid_select_all")) {
+            Text(if (allSelected) "全解除" else "全選択")
+        }
+        Button(onClick = onEditTags, modifier = Modifier.testTag("media_grid_bulk_tag_open")) {
+            Text("タグ編集")
+        }
+    }
+}
+
+@Composable
+private fun MediaGridBulkTagDialog(
+    hierarchy: TagHierarchy,
+    selectedClipCount: Int,
+    initialTagIds: Set<Long>,
+    onApply: (Set<Long>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var draftTagIds by remember(initialTagIds) { mutableStateOf(initialTagIds) }
+    var openGroupId by remember { mutableStateOf<Long?>(null) }
+    var discardConfirmationOpen by remember { mutableStateOf(false) }
+    val hasPendingChanges = draftTagIds != initialTagIds
+    fun requestDismiss() {
+        if (hasPendingChanges) discardConfirmationOpen = true else onDismiss()
+    }
+    BackHandler(onBack = ::requestDismiss)
+    Dialog(
+        onDismissRequest = ::requestDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.72f).testTag("media_grid_bulk_tag_dialog"),
+            shape = RoundedCornerShape(12.dp),
+        ) {
+            Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("一括タグ編集", style = MaterialTheme.typography.titleLarge)
+                        Text("${selectedClipCount}件のツイートへ同じタグを適用します", style = MaterialTheme.typography.bodySmall)
+                    }
+                    IconButton(onClick = ::requestDismiss, modifier = Modifier.testTag("media_grid_bulk_tag_close")) {
+                        Icon(Icons.Filled.Close, contentDescription = "閉じる")
+                    }
+                }
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    TagHierarchySelector(
+                        hierarchy = hierarchy,
+                        selectedTagIds = draftTagIds,
+                        onToggleTag = { tagId ->
+                            draftTagIds = draftTagIds.toMutableSet().apply { if (!add(tagId)) remove(tagId) }
+                        },
+                        onOpenGroup = { openGroupId = it },
+                    )
+                }
+                Divider()
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TextButton(
+                        onClick = ::requestDismiss,
+                        modifier = Modifier.weight(1f).testTag("media_grid_bulk_tag_cancel"),
+                    ) { Text("キャンセル") }
+                    Button(
+                        onClick = { onApply(draftTagIds) },
+                        modifier = Modifier.weight(1f).testTag("media_grid_bulk_tag_apply"),
+                    ) { Text("適用") }
+                }
+            }
+        }
+    }
+    openGroupId?.let { groupId ->
+        TagSelectionDialog(
+            hierarchy = hierarchy,
+            selectedTagIds = draftTagIds,
+            onToggleTag = { tagId ->
+                draftTagIds = draftTagIds.toMutableSet().apply { if (!add(tagId)) remove(tagId) }
+            },
+            onDismiss = { openGroupId = null },
+            initialPath = listOf(groupId),
+        )
+    }
+    if (discardConfirmationOpen) {
+        AlertDialog(
+            onDismissRequest = { discardConfirmationOpen = false },
+            title = { Text("変更を破棄しますか？") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        discardConfirmationOpen = false
+                        onDismiss()
+                    },
+                    modifier = Modifier.testTag("media_grid_bulk_tag_discard_confirm"),
+                ) { Text("破棄") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { discardConfirmationOpen = false },
+                    modifier = Modifier.testTag("media_grid_bulk_tag_discard_cancel"),
+                ) { Text("戻る") }
+            },
+        )
+    }
+}
+
+@Composable
 private fun ClassifiedMediaGridContent(
     items: List<ClassifiedMediaGridItem>,
     sort: ClassifiedSortState,
@@ -2957,6 +3127,8 @@ private fun ClassifiedMediaGridContent(
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
     onColumnCountChange: (Int) -> Unit,
     onCellClick: (Long) -> Unit,
+    selectedClipIds: Set<Long>,
+    onToggleSelection: (Long) -> Unit,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(columnCount),
@@ -2980,7 +3152,15 @@ private fun ClassifiedMediaGridContent(
         ) { item ->
             when (item) {
                 is MediaGridHeaderItem -> ClassifiedMediaGridHeader(item)
-                is MediaGridCellItem -> ClassifiedMediaGridCell(item.entry, sort, onCellClick)
+                is MediaGridCellItem -> ClassifiedMediaGridCell(
+                    entry = item.entry,
+                    sort = sort,
+                    columnCount = columnCount,
+                    selectionMode = selectedClipIds.isNotEmpty(),
+                    selected = item.entry.clipId in selectedClipIds,
+                    onClick = onCellClick,
+                    onToggleSelection = onToggleSelection,
+                )
             }
         }
     }
@@ -3077,15 +3257,26 @@ private fun ClassifiedMediaGridHeader(item: MediaGridHeaderItem) {
 private fun ClassifiedMediaGridCell(
     entry: MediaGridEntry,
     sort: ClassifiedSortState,
+    columnCount: Int,
+    selectionMode: Boolean,
+    selected: Boolean,
     onClick: (Long) -> Unit,
+    onToggleSelection: (Long) -> Unit,
 ) {
     val error = entry.downloadState == "failed" || entry.displayUrl == null || (entry.localPath != null && !entry.hasLocalFile)
+    val indicatorSize = mediaGridOverlayIconSize(columnCount)
+    val overlayPadding = if (columnCount <= 4) 4.dp else 2.dp
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(1f)
             .pointerInput(entry.clipId) {
-                detectTapGestures(onTap = { onClick(entry.clipId) })
+                detectTapGestures(
+                    onLongPress = { onToggleSelection(entry.clipId) },
+                    onTap = {
+                        if (selectionMode) onToggleSelection(entry.clipId) else onClick(entry.clipId)
+                    },
+                )
             }
             .testTag("media_grid_item_${entry.assetId}")
             .background(MaterialTheme.colorScheme.surfaceVariant),
@@ -3111,7 +3302,7 @@ private fun ClassifiedMediaGridCell(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
-            if (sort.baseOrder == ClassifiedSortBase.LikeCount && entry.likeCount != null) {
+            if (!selectionMode && sort.baseOrder == ClassifiedSortBase.LikeCount && entry.likeCount != null) {
                 Surface(
                     modifier = Modifier
                         .align(Alignment.TopStart)
@@ -3133,8 +3324,8 @@ private fun ClassifiedMediaGridCell(
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(4.dp)
-                        .size(16.dp)
+                        .padding(overlayPadding)
+                        .size(indicatorSize)
                         .testTag("media_grid_video_badge_${entry.assetId}"),
                 ) {
                     Icon(
@@ -3146,7 +3337,55 @@ private fun ClassifiedMediaGridCell(
                 }
             }
         }
+        if (selectionMode) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(overlayPadding)
+                    .size(indicatorSize)
+                    .testTag("media_grid_selection_${entry.assetId}"),
+                shape = CircleShape,
+                color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                border = if (selected) null else BorderStroke(1.5.dp, Color.White),
+            ) {
+                if (selected) {
+                    Icon(
+                        imageVector = Icons.Filled.Check,
+                        contentDescription = "選択済み",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.padding(indicatorSize / 5),
+                    )
+                }
+            }
+        }
+        if (selectionMode && columnCount <= 6) {
+            IconButton(
+                onClick = { onClick(entry.clipId) },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(overlayPadding)
+                    .size(indicatorSize.coerceAtLeast(20.dp))
+                    .background(Color.Black.copy(alpha = 0.64f), CircleShape)
+                    .testTag("media_grid_card_dialog_${entry.assetId}"),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.ViewList,
+                    contentDescription = "カードを表示",
+                    tint = Color.White,
+                    modifier = Modifier.fillMaxSize().padding(3.dp),
+                )
+            }
+        }
     }
+}
+
+private fun mediaGridOverlayIconSize(columnCount: Int) = when (columnCount.coerceIn(2, 12)) {
+    2 -> 28.dp
+    3, 4 -> 24.dp
+    5, 6 -> 20.dp
+    7, 8 -> 18.dp
+    9, 10 -> 16.dp
+    else -> 14.dp
 }
 
 private data class DisplayAsset(

@@ -21,6 +21,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.unit.dp
 import com.lyco256.llm.data.AssetEntity
@@ -679,7 +681,7 @@ class UiStateRenderingTest {
                     onTagsChange = { _, _ -> },
                     onSummaryChange = { _, _ -> },
                     onOcrSave = { _, _ -> },
-                    onOcrDetect = { _, _, _ -> },
+                    onOcrDetect = { _, onResult, _ -> onResult("") },
                     onDelete = {},
                     onAuthorClick = {},
                 )
@@ -691,6 +693,80 @@ class UiStateRenderingTest {
         composeRule.onNodeWithTag("media_grid_tweet_dialog_error").assertIsDisplayed()
         composeRule.onNodeWithTag("media_grid_tweet_dialog_close").performClick()
         composeRule.onAllNodesWithTag("media_grid_tweet_dialog").assertCountEquals(0)
+    }
+
+    @Test
+    fun classifiedMediaGridSelectsWholeTweetsAndStagesBulkTags() {
+        val now = "2026-01-01T00:00:00Z"
+        val firstTag = TagEntity(id = 10, name = "First", createdAt = now, updatedAt = now)
+        val secondTag = TagEntity(id = 11, name = "Second", createdAt = now, updatedAt = now)
+        val hierarchy = TagHierarchy(tags = listOf(TagWithCount(firstTag, 1), TagWithCount(secondTag, 1)))
+        var columnCount by mutableStateOf(4)
+        var openedClipId by mutableStateOf<Long?>(null)
+        var applied by mutableStateOf<Pair<Set<Long>, Set<Long>>?>(null)
+        val entries = listOf(
+            MediaGridEntry(101, 1, 101, "one-a", 0, "photo", "https://example.test/one-a.jpg", "downloaded", false, null, now, 99),
+            MediaGridEntry(102, 1, 102, "one-b", 1, "video_thumbnail", "https://example.test/one-b.jpg", "downloaded", false, null, now, 99),
+            MediaGridEntry(201, 2, 201, "two", 0, "photo", "https://example.test/two.jpg", "downloaded", false, null, now, 50),
+        )
+        composeRule.setContent {
+            MaterialTheme {
+                Box(Modifier.requiredWidth(400.dp)) {
+                    EnhancedClassifiedScreen(
+                        uiState = MainUiState(
+                            tagHierarchy = hierarchy,
+                            sort = ClassifiedSortState(baseOrder = ClassifiedSortBase.LikeCount),
+                        ),
+                        mediaGridState = ClassifiedMediaGridState(
+                            entries = entries,
+                            tagIdsByClip = mapOf(1L to setOf(10L), 2L to setOf(11L)),
+                            matchingClipCount = 2,
+                            matchingMediaCount = 3,
+                            isEmptyByFilter = false,
+                        ),
+                        listState = rememberLazyListState(),
+                        displayMode = ClassifiedDisplayMode.MediaGrid,
+                        mediaGridColumnCount = columnCount,
+                        onMediaGridColumnCountChange = { columnCount = it },
+                        onMediaGridCellClick = { openedClipId = it },
+                        onMediaGridBulkTagsChange = { clipIds, tagIds -> applied = clipIds to tagIds },
+                        onToggleDisplayMode = {},
+                        onApplyFilters = {},
+                        onApplySort = {},
+                        onClearAllFilters = {},
+                        onTagsChange = { _, _ -> },
+                        onSummaryChange = { _, _ -> },
+                        onOcrSave = { _, _ -> },
+                        onOcrDetect = { _, _, _ -> },
+                        onDelete = {},
+                        onAuthorClick = {},
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("media_grid_item_101").performTouchInput { longClick() }
+        composeRule.onNodeWithText("1件選択中").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_selection_101").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_selection_102").assertIsDisplayed()
+        composeRule.onAllNodesWithTag("media_grid_like_count_101").assertCountEquals(0)
+        composeRule.onNodeWithTag("media_grid_card_dialog_101").performClick()
+        composeRule.runOnIdle { assertEquals(1L, openedClipId) }
+
+        composeRule.onNodeWithTag("media_grid_select_all").performClick()
+        composeRule.onNodeWithText("2件選択中").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_bulk_tag_open").performClick()
+        composeRule.onNodeWithTag("tag_chip_10").performClick()
+        composeRule.runOnIdle { assertEquals(null, applied) }
+        composeRule.onNodeWithTag("media_grid_bulk_tag_cancel").performClick()
+        composeRule.onNodeWithTag("media_grid_bulk_tag_discard_confirm").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_bulk_tag_discard_cancel").performClick()
+        composeRule.onNodeWithTag("media_grid_bulk_tag_apply").performClick()
+        composeRule.runOnIdle { assertEquals(setOf(1L, 2L) to setOf(11L), applied) }
+
+        composeRule.runOnIdle { columnCount = 7 }
+        composeRule.onNodeWithTag("media_grid_item_101").performTouchInput { longClick() }
+        composeRule.onAllNodesWithTag("media_grid_card_dialog_101").assertCountEquals(0)
     }
 
     @Test
@@ -740,7 +816,7 @@ class UiStateRenderingTest {
                     onTagsChange = { _, ids -> selectedTagIds = ids },
                     onSummaryChange = { _, summary -> savedSummary = summary },
                     onOcrSave = { _, text -> savedOcr = text },
-                    onOcrDetect = { _, _, _ -> },
+                    onOcrDetect = { _, onResult, _ -> onResult("") },
                     onDelete = { deletedClipId = it.id },
                     onAuthorClick = { clickedAuthor = true },
                 )
