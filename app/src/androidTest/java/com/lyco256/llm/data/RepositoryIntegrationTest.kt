@@ -134,7 +134,11 @@ class RepositoryIntegrationTest {
         }
         val (firstClipId, secondClipId, untouchedClipId, oldTagId, newTagId) = fixture
 
-        repository.setClipTagsForClips(setOf(firstClipId, secondClipId), setOf(newTagId))
+        repository.applyClipTagChanges(
+            clipIds = setOf(firstClipId, secondClipId),
+            pendingAddTagIds = setOf(newTagId),
+            pendingRemoveTagIds = setOf(oldTagId),
+        )
 
         storage.withDatabase { database ->
             val rows = database.clipDao().clipTagsForClipIds(listOf(firstClipId, secondClipId, untouchedClipId))
@@ -143,6 +147,26 @@ class RepositoryIntegrationTest {
             assertEquals(setOf(newTagId), rows[firstClipId])
             assertEquals(setOf(newTagId), rows[secondClipId])
             assertEquals(setOf(oldTagId), rows[untouchedClipId])
+        }
+    }
+
+    @Test
+    fun bulkTagChangesRejectOverlappingPendingSetsWithoutChangingDatabase() = runBlocking {
+        val now = Instant.now().toString()
+        val clipId = storage.withDatabase { database ->
+            val id = database.clipDao().insertClip(clip("bulk-overlap"))
+            val tagId = database.tagDao().insertTag(TagEntity(name = "Overlap", createdAt = now, updatedAt = now))
+            database.clipDao().insertClipTag(ClipTagEntity(id, tagId, now))
+            id to tagId
+        }
+
+        val failure = runCatching {
+            repository.applyClipTagChanges(setOf(clipId.first), setOf(clipId.second), setOf(clipId.second))
+        }.exceptionOrNull()
+
+        assertNotNull(failure)
+        storage.withDatabase { database ->
+            assertEquals(setOf(clipId.second), database.clipDao().clipTagsForClipIds(listOf(clipId.first)).map { it.tagId }.toSet())
         }
     }
 

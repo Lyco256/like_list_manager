@@ -164,8 +164,19 @@ interface ClipDao {
     }
 
     @Transaction
-    suspend fun replaceClipTagsForClips(clipIds: Set<Long>, tagIds: Set<Long>, now: String) {
-        clipIds.forEach { clipId -> replaceClipTags(clipId, tagIds, now) }
+    suspend fun applyClipTagChanges(
+        clipIds: Set<Long>,
+        pendingAddTagIds: Set<Long>,
+        pendingRemoveTagIds: Set<Long>,
+        now: String,
+    ) {
+        require(pendingAddTagIds.intersect(pendingRemoveTagIds).isEmpty()) {
+            "追加と削除に同じタグを指定できません"
+        }
+        clipIds.forEach { clipId ->
+            pendingRemoveTagIds.forEach { tagId -> deleteClipTag(clipId, tagId) }
+            pendingAddTagIds.forEach { tagId -> insertClipTag(ClipTagEntity(clipId, tagId, now)) }
+        }
     }
 }
 

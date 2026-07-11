@@ -2,7 +2,7 @@
 
 ## 2026-07-10 media-grid selection state
 
-`ClassifiedMediaGridState` exposes tag IDs by clip for the filtered lightweight grid source. `MainViewModel.setClipTagsForClips` sends one bulk apply to the repository; drafts are not sent before Apply.
+`ClassifiedMediaGridState` exposes tag IDs by clip for the filtered lightweight grid source. `MainViewModel.applyClipTagChanges` sends add/remove pending sets only on Apply; drafts are not sent before Apply. The completion callback closes the editor only on success; failures leave selection and pending state visible.
 Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `ローカル削除`, `タグを付ける`.
 
 Activity、ViewModel、UI state、Compose画面の接続入口です。未分類、分類済み、タグ管理、本体の設定アイコンから開く全画面の `SettingsScreen` へ状態とイベントを流します。画面本体のタグ階層UIは `TagHierarchyUiV2.kt` に分離されています。

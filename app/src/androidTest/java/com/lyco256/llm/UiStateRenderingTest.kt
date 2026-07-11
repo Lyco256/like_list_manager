@@ -703,7 +703,7 @@ class UiStateRenderingTest {
         val hierarchy = TagHierarchy(tags = listOf(TagWithCount(firstTag, 1), TagWithCount(secondTag, 1)))
         var columnCount by mutableStateOf(4)
         var openedClipId by mutableStateOf<Long?>(null)
-        var applied by mutableStateOf<Pair<Set<Long>, Set<Long>>?>(null)
+        var applied by mutableStateOf<Pair<Set<Long>, Pair<Set<Long>, Set<Long>>>?>(null)
         val entries = listOf(
             MediaGridEntry(101, 1, 101, "one-a", 0, "photo", "https://example.test/one-a.jpg", "downloaded", false, null, now, 99),
             MediaGridEntry(102, 1, 102, "one-b", 1, "video_thumbnail", "https://example.test/one-b.jpg", "downloaded", false, null, now, 99),
@@ -729,7 +729,10 @@ class UiStateRenderingTest {
                         mediaGridColumnCount = columnCount,
                         onMediaGridColumnCountChange = { columnCount = it },
                         onMediaGridCellClick = { openedClipId = it },
-                        onMediaGridBulkTagsChange = { clipIds, tagIds -> applied = clipIds to tagIds },
+                        onMediaGridBulkTagsChange = { clipIds, addTagIds, removeTagIds, onResult ->
+                            applied = clipIds to (addTagIds to removeTagIds)
+                            onResult(null)
+                        },
                         onToggleDisplayMode = {},
                         onApplyFilters = {},
                         onApplySort = {},
@@ -750,7 +753,7 @@ class UiStateRenderingTest {
         composeRule.onNodeWithTag("media_grid_selection_101").assertIsDisplayed()
         composeRule.onNodeWithTag("media_grid_selection_102").assertIsDisplayed()
         composeRule.onAllNodesWithTag("media_grid_like_count_101").assertCountEquals(0)
-        composeRule.onNodeWithTag("media_grid_card_dialog_101").performClick()
+        composeRule.onNodeWithTag("media_grid_selection_open_101").performClick()
         composeRule.runOnIdle { assertEquals(1L, openedClipId) }
 
         composeRule.onNodeWithTag("media_grid_select_all").performClick()
@@ -762,11 +765,11 @@ class UiStateRenderingTest {
         composeRule.onNodeWithTag("media_grid_bulk_tag_discard_confirm").assertIsDisplayed()
         composeRule.onNodeWithTag("media_grid_bulk_tag_discard_cancel").performClick()
         composeRule.onNodeWithTag("media_grid_bulk_tag_apply").performClick()
-        composeRule.runOnIdle { assertEquals(setOf(1L, 2L) to setOf(11L), applied) }
+        composeRule.runOnIdle { assertEquals(setOf(1L, 2L) to (emptySet<Long>() to setOf(10L)), applied) }
 
         composeRule.runOnIdle { columnCount = 7 }
         composeRule.onNodeWithTag("media_grid_item_101").performTouchInput { longClick() }
-        composeRule.onAllNodesWithTag("media_grid_card_dialog_101").assertCountEquals(0)
+        composeRule.onAllNodesWithTag("media_grid_selection_open_101").assertCountEquals(0)
     }
 
     @Test

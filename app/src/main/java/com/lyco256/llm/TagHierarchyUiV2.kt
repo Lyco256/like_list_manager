@@ -292,7 +292,7 @@ fun EnhancedClassifiedScreen(
     mediaGridColumnCount: Int,
     onMediaGridColumnCountChange: (Int) -> Unit,
     onMediaGridCellClick: (Long) -> Unit = {},
-    onMediaGridBulkTagsChange: (Set<Long>, Set<Long>) -> Unit = { _, _ -> },
+    onMediaGridBulkTagsChange: (Set<Long>, Set<Long>, Set<Long>, (String?) -> Unit) -> Unit = { _, _, _, _ -> },
     onToggleDisplayMode: () -> Unit,
     modifier: Modifier = Modifier,
     onApplyFilters: (TweetFilterState) -> Unit,
@@ -447,10 +447,18 @@ fun EnhancedClassifiedScreen(
             hierarchy = uiState.tagHierarchy,
             selectedClipCount = selectedVisibleMediaGridClipIds.size,
             initialTagIds = initialTagIds,
-            onApply = { tagIds ->
-                onMediaGridBulkTagsChange(selectedVisibleMediaGridClipIds, tagIds)
-                bulkTagDialogOpen = false
-                selectedMediaGridClipIds = emptySet()
+            onApply = { tagIds, complete ->
+                onMediaGridBulkTagsChange(
+                    selectedVisibleMediaGridClipIds,
+                    tagIds - initialTagIds,
+                    initialTagIds - tagIds,
+                ) { error ->
+                    complete(error)
+                    if (error == null) {
+                        bulkTagDialogOpen = false
+                        selectedMediaGridClipIds = emptySet()
+                    }
+                }
             },
             onDismiss = { bulkTagDialogOpen = false },
         )
@@ -3032,12 +3040,13 @@ private fun MediaGridBulkTagDialog(
     hierarchy: TagHierarchy,
     selectedClipCount: Int,
     initialTagIds: Set<Long>,
-    onApply: (Set<Long>) -> Unit,
+    onApply: (Set<Long>, (String?) -> Unit) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var draftTagIds by remember(initialTagIds) { mutableStateOf(initialTagIds) }
     var openGroupId by remember { mutableStateOf<Long?>(null) }
     var discardConfirmationOpen by remember { mutableStateOf(false) }
+    var bulkTagDialogError by remember { mutableStateOf<String?>(null) }
     val hasPendingChanges = draftTagIds != initialTagIds
     fun requestDismiss() {
         if (hasPendingChanges) discardConfirmationOpen = true else onDismiss()
@@ -3071,6 +3080,9 @@ private fun MediaGridBulkTagDialog(
                         onOpenGroup = { openGroupId = it },
                     )
                 }
+                bulkTagDialogError?.let { error ->
+                    Text(error, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("media_grid_bulk_tag_error"))
+                }
                 Divider()
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     TextButton(
@@ -3078,7 +3090,7 @@ private fun MediaGridBulkTagDialog(
                         modifier = Modifier.weight(1f).testTag("media_grid_bulk_tag_cancel"),
                     ) { Text("キャンセル") }
                     Button(
-                        onClick = { onApply(draftTagIds) },
+                        onClick = { onApply(draftTagIds) { error -> bulkTagDialogError = error } },
                         modifier = Modifier.weight(1f).testTag("media_grid_bulk_tag_apply"),
                     ) { Text("適用") }
                 }
@@ -3264,7 +3276,9 @@ private fun ClassifiedMediaGridCell(
     onToggleSelection: (Long) -> Unit,
 ) {
     val error = entry.downloadState == "failed" || entry.displayUrl == null || (entry.localPath != null && !entry.hasLocalFile)
-    val indicatorSize = mediaGridOverlayIconSize(columnCount)
+    val selectionIndicatorSize = mediaGridSelectionIndicatorSize(columnCount)
+    val videoIconSize = mediaGridVideoIconSize(columnCount)
+    val cardDialogSize = mediaGridCardDialogSize(columnCount)
     val overlayPadding = if (columnCount <= 4) 4.dp else 2.dp
     Box(
         modifier = Modifier
@@ -3325,7 +3339,7 @@ private fun ClassifiedMediaGridCell(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(overlayPadding)
-                        .size(indicatorSize)
+                        .size(videoIconSize)
                         .testTag("media_grid_video_badge_${entry.assetId}"),
                 ) {
                     Icon(
@@ -3342,7 +3356,7 @@ private fun ClassifiedMediaGridCell(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(overlayPadding)
-                    .size(indicatorSize)
+                    .size(selectionIndicatorSize)
                     .testTag("media_grid_selection_${entry.assetId}"),
                 shape = CircleShape,
                 color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
@@ -3353,7 +3367,7 @@ private fun ClassifiedMediaGridCell(
                         imageVector = Icons.Filled.Check,
                         contentDescription = "選択済み",
                         tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.padding(indicatorSize / 5),
+                        modifier = Modifier.padding(selectionIndicatorSize / 5),
                     )
                 }
             }
@@ -3364,9 +3378,9 @@ private fun ClassifiedMediaGridCell(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(overlayPadding)
-                    .size(indicatorSize.coerceAtLeast(20.dp))
+                    .size(cardDialogSize)
                     .background(Color.Black.copy(alpha = 0.64f), CircleShape)
-                    .testTag("media_grid_card_dialog_${entry.assetId}"),
+                    .testTag("media_grid_selection_open_${entry.assetId}"),
             ) {
                 Icon(
                     imageVector = Icons.Filled.ViewList,
@@ -3379,13 +3393,23 @@ private fun ClassifiedMediaGridCell(
     }
 }
 
-private fun mediaGridOverlayIconSize(columnCount: Int) = when (columnCount.coerceIn(2, 12)) {
-    2 -> 28.dp
-    3, 4 -> 24.dp
-    5, 6 -> 20.dp
-    7, 8 -> 18.dp
-    9, 10 -> 16.dp
+private fun mediaGridSelectionIndicatorSize(columnCount: Int) = when (columnCount.coerceIn(2, 12)) {
+    2, 3 -> 28.dp
+    4, 5, 6 -> 24.dp
+    7, 8, 9 -> 18.dp
     else -> 14.dp
+}
+
+private fun mediaGridVideoIconSize(columnCount: Int) = when (columnCount.coerceIn(2, 12)) {
+    2, 3 -> 24.dp
+    4, 5, 6 -> 20.dp
+    7, 8, 9 -> 14.dp
+    else -> 10.dp
+}
+
+private fun mediaGridCardDialogSize(columnCount: Int) = when (columnCount.coerceIn(2, 12)) {
+    2, 3 -> 28.dp
+    else -> 24.dp
 }
 
 private data class DisplayAsset(

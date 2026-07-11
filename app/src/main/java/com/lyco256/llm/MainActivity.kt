@@ -467,8 +467,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setClipTags(clip: ClipEntity, tagIds: Set<Long>) = viewModelScope.launch {
         repository.setClipTags(clip.id, tagIds)
     }
-    fun setClipTagsForClips(clipIds: Set<Long>, tagIds: Set<Long>) = viewModelScope.launch {
-        repository.setClipTagsForClips(clipIds, tagIds)
+    fun applyClipTagChanges(
+        clipIds: Set<Long>,
+        addTagIds: Set<Long>,
+        removeTagIds: Set<Long>,
+        onResult: (String?) -> Unit,
+    ) = viewModelScope.launch {
+        runCatching { repository.applyClipTagChanges(clipIds, addTagIds, removeTagIds) }
+            .onSuccess { onResult(null) }
+            .onFailure { onResult(it.message ?: "タグの適用に失敗しました") }
     }
     fun updateSummary(clip: ClipEntity, summary: String) = viewModelScope.launch {
         repository.updateSummary(clip, summary)
@@ -776,7 +783,7 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
                 mediaGridColumnCount = classifiedMediaGridColumnCount,
                 onMediaGridColumnCountChange = { classifiedMediaGridColumnCount = it },
                 onMediaGridCellClick = viewModel::openMediaGridTweetDialog,
-                onMediaGridBulkTagsChange = viewModel::setClipTagsForClips,
+                onMediaGridBulkTagsChange = viewModel::applyClipTagChanges,
                 onToggleDisplayMode = {
                     classifiedDisplayMode = when (classifiedDisplayMode) {
                         ClassifiedDisplayMode.Card -> ClassifiedDisplayMode.MediaGrid

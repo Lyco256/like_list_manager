@@ -2,7 +2,7 @@
 
 ## 2026-07-10 bulk tag transaction
 
-`setClipTagsForClips` applies one final tag set to all selected clip IDs through a single Room transaction. It is called only when the media-grid bulk editor is applied.
+`applyClipTagChanges` applies `pendingAddTagIds` and `pendingRemoveTagIds` to all selected clip IDs through a single Room transaction. It is called only when the media-grid bulk editor is applied.
 
 ## 対応ソース
 

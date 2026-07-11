@@ -2,7 +2,7 @@
 
 ## 2026-07-10 bulk tag transaction
 
-`ClipDao.replaceClipTagsForClips` is the `@Transaction` boundary covering removal and insertion for every selected clip. Existing single-clip replacement remains unchanged.
+`ClipDao.applyClipTagChanges` is the `@Transaction` boundary covering `pendingRemoveTagIds` deletion and `pendingAddTagIds` insertion for every selected clip. It rejects overlap between add and remove sets.
 
 ## 対応ソース
 

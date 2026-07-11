@@ -8,6 +8,8 @@
 - A per-cell card button is available during selection only at 2 through 6 columns. Normal cell taps continue to open the tweet dialog at every column count.
 - Bulk tag editing starts from the union of tags on selected tweets. Draft changes remain local until Apply; cancelling a changed draft requires discard confirmation.
 - Grid column count, lazy-grid state, headers, and anchor restoration remain owned by `EnhancedClassifiedScreen` while dialogs open and close.
+- Selection indicators use 28/24/18/14dp at 2–3/4–6/7–9/10–12 columns; video icons use 24/20/14/10dp. The card-dialog button uses 28dp at 2–3 columns and 24dp at 4–6 columns, with testTag `media_grid_selection_open_<assetId>`.
+- A failed bulk apply keeps the editor, selected clips, and pending draft open and displays `media_grid_bulk_tag_error`; only a successful completion closes the editor.
 Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いいね数`, `取得日時`, `取得エラー`, `タグを付ける`.
 
 投稿一覧のLazyColumnには、未構築項目へ実機UIテストから安全にスクロールできる `clip_list` test tagがあります。

@@ -2,7 +2,7 @@
 
 ## 2026-07-10 bulk tag coverage
 
-The repository integration suite verifies that `setClipTagsForClips` updates every selected clip in one operation while leaving an unselected clip unchanged.
+The repository integration suite verifies that `applyClipTagChanges` applies pending additions/removals to every selected clip in one operation while leaving an unselected clip unchanged, and rejects overlapping add/remove sets without changing the database.
 
 隔離されたRoom DB、Fake OAuth、Fake X API、MockWebServerを使って `ClipRepository` の同期・保存・保護動作を検証するInstrumentationテストです。本番package、実X API、実OAuth tokenは使いません。
 

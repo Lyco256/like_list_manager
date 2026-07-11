@@ -5,7 +5,7 @@
 ## 2026-07 media grid headers
 
 - `app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt` now owns `buildClassifiedMediaGridItems`, full-width header items, and the like-count overlay.
-- The same file owns tweet-level long-press selection, shared selection across a tweet's assets, the 2–6 column card-dialog action, scaled selection/video overlays, and pending bulk tag editing.
+- The same file owns tweet-level long-press selection, shared selection across a tweet's assets, the 2–6 column card-dialog action, specified selection/video overlay sizes, and pending bulk tag editing.
 - `MainActivity.kt` carries filtered media-grid tag IDs; `ClipRepository.kt` and `Daos.kt` apply the final tag set in one transaction.
 - `app/src/test/java/com/lyco256/llm/TagHierarchyTest.kt` covers bucket generation for day/week/month and like-count units.
 - `app/src/androidTest/java/com/lyco256/llm/UiStateRenderingTest.kt` covers the PostTime header, LikeCount header, like overlay, and existing badge/error regressions.

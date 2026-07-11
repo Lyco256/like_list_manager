@@ -858,10 +858,19 @@ class ClipRepository(
         postStorageManager.withDatabase { it.clipDao().replaceClipTags(clipId, tagIds, Instant.now().toString()) }
     }
 
-    suspend fun setClipTagsForClips(clipIds: Set<Long>, tagIds: Set<Long>) = withContext(Dispatchers.IO) {
+    suspend fun applyClipTagChanges(
+        clipIds: Set<Long>,
+        pendingAddTagIds: Set<Long>,
+        pendingRemoveTagIds: Set<Long>,
+    ) = withContext(Dispatchers.IO) {
         if (clipIds.isEmpty()) return@withContext
         postStorageManager.withDatabase {
-            it.clipDao().replaceClipTagsForClips(clipIds, tagIds, Instant.now().toString())
+            it.clipDao().applyClipTagChanges(
+                clipIds = clipIds,
+                pendingAddTagIds = pendingAddTagIds,
+                pendingRemoveTagIds = pendingRemoveTagIds,
+                now = Instant.now().toString(),
+            )
         }
     }
 
