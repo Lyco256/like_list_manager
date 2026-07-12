@@ -765,6 +765,7 @@ class UiStateRenderingTest {
         composeRule.onNodeWithTag("media_grid_bulk_tag_discard_confirm").assertIsDisplayed()
         composeRule.onNodeWithTag("media_grid_bulk_tag_discard_cancel").performClick()
         composeRule.onNodeWithTag("media_grid_bulk_tag_apply").performClick()
+        composeRule.onNodeWithTag("media_grid_bulk_tag_apply_confirm").assertIsDisplayed().performClick()
         composeRule.runOnIdle { assertEquals(setOf(1L, 2L) to (emptySet<Long>() to setOf(10L)), applied) }
 
         composeRule.runOnIdle { columnCount = 7 }

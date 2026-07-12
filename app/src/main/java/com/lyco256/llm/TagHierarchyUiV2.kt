@@ -3068,7 +3068,7 @@ private fun MediaGridSelectionToolbar(
 }
 
 internal enum class BulkTagAggregate { NONE, ALL, MIXED }
-private enum class BulkTagPending { KEEP, ADD_ALL, REMOVE_ALL }
+internal enum class BulkTagPending { KEEP, ADD_ALL, REMOVE_ALL }
 
 internal fun aggregateBulkTagStates(
     clipTagIds: List<Set<Long>>,
@@ -3078,6 +3078,18 @@ internal fun aggregateBulkTagStates(
     return tagIds.associateWith { tagId ->
         val count = clipTagIds.count { tagId in it }
         when { count == 0 -> BulkTagAggregate.NONE; count == total -> BulkTagAggregate.ALL; else -> BulkTagAggregate.MIXED }
+    }
+}
+
+internal fun bulkTagPendingAfterToggle(
+    initial: BulkTagAggregate,
+    current: BulkTagPending,
+): BulkTagPending = when (current) {
+    BulkTagPending.REMOVE_ALL -> BulkTagPending.ADD_ALL
+    BulkTagPending.ADD_ALL -> BulkTagPending.REMOVE_ALL
+    BulkTagPending.KEEP -> when (initial) {
+        BulkTagAggregate.ALL, BulkTagAggregate.MIXED -> BulkTagPending.REMOVE_ALL
+        BulkTagAggregate.NONE -> BulkTagPending.ADD_ALL
     }
 }
 
@@ -3092,6 +3104,7 @@ private fun MediaGridBulkTagDialog(
     var pending by remember(initialTagStates) { mutableStateOf(initialTagStates.mapValues { BulkTagPending.KEEP }) }
     var openGroupId by remember { mutableStateOf<Long?>(null) }
     var discardConfirmationOpen by remember { mutableStateOf(false) }
+    var applyConfirmationOpen by remember { mutableStateOf(false) }
     var bulkTagDialogError by remember { mutableStateOf<String?>(null) }
     val hasPendingChanges = pending.values.any { it != BulkTagPending.KEEP }
     val effectiveSelected = initialTagStates.filter { (id, state) ->
@@ -3127,11 +3140,7 @@ private fun MediaGridBulkTagDialog(
                         mixedTagIds = mixed,
                         onToggleTag = { tagId ->
                             pending = pending.toMutableMap().apply {
-                                put(tagId, when (this[tagId]) {
-                                    BulkTagPending.REMOVE_ALL -> BulkTagPending.ADD_ALL
-                                    BulkTagPending.ADD_ALL -> BulkTagPending.REMOVE_ALL
-                                    else -> if (initialTagStates[tagId] == BulkTagAggregate.ALL) BulkTagPending.REMOVE_ALL else BulkTagPending.ADD_ALL
-                                })
+                                put(tagId, bulkTagPendingAfterToggle(initialTagStates[tagId] ?: BulkTagAggregate.NONE, this[tagId] ?: BulkTagPending.KEEP))
                             }
                         },
                         onOpenGroup = { openGroupId = it },
@@ -3147,7 +3156,8 @@ private fun MediaGridBulkTagDialog(
                         modifier = Modifier.weight(1f).testTag("media_grid_bulk_tag_cancel"),
                     ) { Text("キャンセル") }
                     Button(
-                        onClick = { onApply(pending.filterValues { it != BulkTagPending.KEEP }) { error -> bulkTagDialogError = error } },
+                        onClick = { if (hasPendingChanges) applyConfirmationOpen = true },
+                        enabled = hasPendingChanges,
                         modifier = Modifier.weight(1f).testTag("media_grid_bulk_tag_apply"),
                     ) { Text("適用") }
                 }
@@ -3161,11 +3171,7 @@ private fun MediaGridBulkTagDialog(
             mixedTagIds = mixed,
             onToggleTag = { tagId ->
                 pending = pending.toMutableMap().apply {
-                    put(tagId, when (this[tagId]) {
-                        BulkTagPending.REMOVE_ALL -> BulkTagPending.ADD_ALL
-                        BulkTagPending.ADD_ALL -> BulkTagPending.REMOVE_ALL
-                        else -> if (initialTagStates[tagId] == BulkTagAggregate.ALL) BulkTagPending.REMOVE_ALL else BulkTagPending.ADD_ALL
-                    })
+                    put(tagId, bulkTagPendingAfterToggle(initialTagStates[tagId] ?: BulkTagAggregate.NONE, this[tagId] ?: BulkTagPending.KEEP))
                 }
             },
             onDismiss = { openGroupId = null },
@@ -3190,6 +3196,36 @@ private fun MediaGridBulkTagDialog(
                     onClick = { discardConfirmationOpen = false },
                     modifier = Modifier.testTag("media_grid_bulk_tag_discard_cancel"),
                 ) { Text("戻る") }
+            },
+        )
+    }
+    if (applyConfirmationOpen) {
+        val namesById = hierarchy.tags.associate { it.tag.id to it.tag.name }
+        val addNames = pending.filterValues { it == BulkTagPending.ADD_ALL }.keys.mapNotNull(namesById::get)
+        val removeNames = pending.filterValues { it == BulkTagPending.REMOVE_ALL }.keys.mapNotNull(namesById::get)
+        AlertDialog(
+            onDismissRequest = { applyConfirmationOpen = false },
+            title = { Text("一括タグ変更を適用しますか？") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("${selectedClipCount}件のツイート")
+                    if (addNames.isNotEmpty()) Text("全件追加: ${addNames.joinToString("、")}")
+                    if (removeNames.isNotEmpty()) Text("全件削除: ${removeNames.joinToString("、")}")
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        applyConfirmationOpen = false
+                        onApply(pending.filterValues { it != BulkTagPending.KEEP }) { error -> bulkTagDialogError = error }
+                    },
+                    modifier = Modifier.testTag("media_grid_bulk_tag_apply_confirm"),
+                ) { Text("適用") }
+            },
+            dismissButton = {
+                TextButton(onClick = { applyConfirmationOpen = false }, modifier = Modifier.testTag("media_grid_bulk_tag_apply_cancel")) {
+                    Text("戻る")
+                }
             },
         )
     }

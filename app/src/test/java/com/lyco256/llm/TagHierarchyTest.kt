@@ -1127,6 +1127,19 @@ class TagHierarchyTest {
         assertEquals(listOf(10L, 11L, 20L), entries.map { it.assetId })
     }
 
+    @Test
+    fun bulkTagStatesAndPendingTransitionsRespectMixedTags() {
+        assertEquals(
+            mapOf(1L to BulkTagAggregate.NONE, 2L to BulkTagAggregate.ALL, 3L to BulkTagAggregate.MIXED),
+            aggregateBulkTagStates(listOf(setOf(2L), setOf(2L, 3L)), listOf(1L, 2L, 3L)),
+        )
+        assertEquals(BulkTagPending.REMOVE_ALL, bulkTagPendingAfterToggle(BulkTagAggregate.MIXED, BulkTagPending.KEEP))
+        assertEquals(BulkTagPending.ADD_ALL, bulkTagPendingAfterToggle(BulkTagAggregate.MIXED, BulkTagPending.REMOVE_ALL))
+        assertEquals(BulkTagPending.REMOVE_ALL, bulkTagPendingAfterToggle(BulkTagAggregate.MIXED, BulkTagPending.ADD_ALL))
+        assertEquals(BulkTagPending.ADD_ALL, bulkTagPendingAfterToggle(BulkTagAggregate.NONE, BulkTagPending.KEEP))
+        assertEquals(BulkTagPending.REMOVE_ALL, bulkTagPendingAfterToggle(BulkTagAggregate.ALL, BulkTagPending.KEEP))
+    }
+
     private fun hierarchy(clipTags: List<ClipTagEntity> = emptyList()) = TagHierarchy(
         groups = listOf(parent, child),
         tags = listOf(kotlin, compose, design).map { TagWithCount(it, 0) },

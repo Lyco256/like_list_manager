@@ -2,6 +2,14 @@
 
 ## 2026-07-10 media-grid bulk tag editing
 
+## 2026-07-12 mixed tags and header requirements
+
+- Bulk tag states are aggregated as `NONE`, `ALL`, or `MIXED` per selected clip.
+- `KEEP` tags are omitted from updates; `ADD_ALL` and `REMOVE_ALL` are sent together through the repository transaction.
+- MIXED cycles `KEEP -> REMOVE_ALL -> ADD_ALL -> REMOVE_ALL`; untouched MIXED tags preserve each clip's original state.
+- Apply confirms the selected tweet count and only all-add/all-remove tag names. Cancel and successful Apply preserve media-grid selection.
+- Like buckets use 200/500/1000 units for 2-4/5-8/9-12 columns. Week headers use Monday-Sunday `yyyy/MM/dd ~ yyyy/MM/dd`.
+
 - A long press starts tweet-level multi-selection. Every media cell with the same `clipId` shares the selected state.
 - The selection toolbar reports distinct tweet count and selects all media-bearing tweets in the current filtered result, including off-screen cells.
 - Selection indicators and video badges scale from 2 through 12 columns. Like-count overlays are hidden during selection.

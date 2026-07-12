@@ -74,8 +74,13 @@
 - `testDebugUnitTest` で JVM 単体テストが通ることを確認します。
 ## 2026-07 media grid buckets
 
+## 2026-07-12 mixed tags and header requirements
+
+- `bulkTagStatesAndPendingTransitionsRespectMixedTags` verifies NONE/ALL/MIXED aggregation and alternating pending transitions.
+- Header tests verify 200/500/1000 like-count units and Monday-Sunday `yyyy/MM/dd ~ yyyy/MM/dd` week labels.
+
 - `buildClassifiedMediaGridItemsAddsHeadersForDateAndLikeBuckets` / `buildClassifiedMediaGridItemsUsesWeekAndMonthBucketsForWiderGrids` / `buildClassifiedMediaGridItemsLeavesDefaultSortWithoutHeaders`
-  - `sort.baseOrder` と `columnCount` に応じて header item が増減し、日・週・月と 1000/5000/10000 単位の bucket が切り替わることを確認します。
+  - `sort.baseOrder` と `columnCount` に応じて header item が増減し、日・週・月と 200/500/1000 単位の bucket が切り替わることを確認します。
   - `Default` では header を出さず、`日付不明` / `いいね数不明` / `10万以上` もそれぞれ最後にまとまることを確認します。
 ## 2026-07 media grid pinch bounds
 
