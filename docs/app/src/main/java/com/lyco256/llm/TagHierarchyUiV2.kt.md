@@ -158,6 +158,13 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 
 ## 2026-07 media-grid selection interaction fixes
 
+## 2026-07 media-grid thumbnail cache / viewport priority
+
+- メディアグリッドは列数に依存しない256×256px中央クロップJPEG（quality 60）を`cacheDir/media_grid_thumbnails`へ保存する。
+- 元画像は`inJustDecodeBounds`と`inSampleSize`で縮小デコードし、キャッシュ生成は一時ファイル置換で壊れた完成ファイルを残さない。
+- グリッド専用ImageLoaderはcrossfadeなし、独自ディスクキャッシュなし、メモリ上限32MiBかつヒープ8%以下。
+- `LazyGridState`の最新viewportだけをマネージャーへ通知し、生成は1件直列、完了ごとに最新viewport中央距離で再評価する。セルは自身のStateFlowだけを購読する。
+
 - Media-grid selection mode is tracked independently from the selected clip set, so the toolbar remains visible at `0件選択中` until the close button or Android Back is used.
 - The bulk tag button is disabled when no clip is selected. Cell taps in selection mode only toggle the clip; the card-dialog button is available only for 2–6 columns and does not propagate to the cell.
 - The image itself is never overlaid or dimmed by selection. Selection is represented only by the top-left indicator: a white outer ring, a light-blue checkbox with a black check for single-asset clips, or a blue checkbox with a white check shared by all cells of a multi-asset clip.

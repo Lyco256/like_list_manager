@@ -129,6 +129,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import com.lyco256.llm.data.MediaGridThumbnailSource
+import com.lyco256.llm.data.MediaGridThumbnailState
+import com.lyco256.llm.data.MediaGridViewportRequest
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.DisposableEffect
 import com.lyco256.llm.data.AssetEntity
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipWithDetails
@@ -2858,6 +2863,8 @@ data class MediaGridEntry(
     val localPath: String?,
     val xCreatedAt: String,
     val likeCount: Long?,
+    val previewUrl: String? = null,
+    val remoteUrl: String? = null,
 )
 
 internal fun buildMediaGridEntries(clips: List<MediaGridClipSource>): List<MediaGridEntry> {
@@ -2876,6 +2883,8 @@ internal fun buildMediaGridEntries(clips: List<MediaGridClipSource>): List<Media
                     mediaIndex = index,
                     type = asset.assetType,
                     displayUrl = displayUrl,
+                    previewUrl = asset.previewUrl,
+                    remoteUrl = asset.remoteUrl,
                     downloadState = asset.downloadState,
                     localPath = asset.localPath,
                     xCreatedAt = clip.clip.xCreatedAt,
@@ -3259,6 +3268,20 @@ private fun ClassifiedMediaGridContent(
     selectedClipIds: Set<Long>,
     onToggleSelection: (Long) -> Unit,
 ) {
+    val appContainer = (LocalContext.current.applicationContext as LikeListManagerApp).container
+    DisposableEffect(Unit) {
+        onDispose { appContainer.mediaGridThumbnailManager.updateViewport(emptyList()) }
+    }
+    LaunchedEffect(state, items) {
+        snapshotFlow { state.layoutInfo }.collect { layout ->
+            val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2f
+            appContainer.mediaGridThumbnailManager.updateViewport(layout.visibleItemsInfo.mapNotNull { info ->
+                val item = items.firstOrNull { it.key == info.key } as? MediaGridCellItem ?: return@mapNotNull null
+                val e = item.entry
+                MediaGridViewportRequest(MediaGridThumbnailSource(e.assetId, e.mediaKey, e.localPath, e.previewUrl, e.remoteUrl), kotlin.math.abs((info.offset.y + info.size.height / 2f - center).toInt()))
+            })
+        }
+    }
     LazyVerticalGrid(
         columns = GridCells.Fixed(columnCount),
         state = state,
@@ -3290,6 +3313,8 @@ private fun ClassifiedMediaGridContent(
                     selected = item.entry.clipId in selectedClipIds,
                     onClick = onCellClick,
                     onToggleSelection = onToggleSelection,
+                    thumbnailManager = appContainer.mediaGridThumbnailManager,
+                    thumbnailImageLoader = appContainer.mediaGridImageLoader,
                 )
             }
         }
@@ -3393,10 +3418,11 @@ private fun ClassifiedMediaGridCell(
     selected: Boolean,
     onClick: (Long) -> Unit,
     onToggleSelection: (Long) -> Unit,
+    thumbnailManager: com.lyco256.llm.data.MediaGridThumbnailManager,
+    thumbnailImageLoader: coil.ImageLoader,
 ) {
-    var imageEnabled by remember(entry.entryId) { mutableStateOf(false) }
-    LaunchedEffect(entry.entryId) { withFrameNanos { imageEnabled = true } }
-    val error = entry.downloadState == "failed" || entry.displayUrl == null
+    val thumbnailState by thumbnailManager.state(entry.assetId).collectAsState()
+    val error = thumbnailState is MediaGridThumbnailState.Failed || entry.displayUrl == null
     val selectionIndicatorSize = mediaGridSelectionIndicatorSize(columnCount)
     val videoIconSize = mediaGridVideoIconSize(columnCount)
     val cardDialogSize = mediaGridCardDialogSize(columnCount)
@@ -3447,9 +3473,10 @@ private fun ClassifiedMediaGridCell(
                 )
             }
         } else {
-            if (imageEnabled) AsyncImage(
-                    model = entry.displayUrl,
+            if (thumbnailState is MediaGridThumbnailState.Ready) AsyncImage(
+                    model = (thumbnailState as MediaGridThumbnailState.Ready).file,
                     contentDescription = null,
+                    imageLoader = thumbnailImageLoader,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
                 )

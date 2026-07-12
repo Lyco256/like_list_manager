@@ -4,6 +4,13 @@ import android.content.Context
 import com.lyco256.llm.BuildConfig
 
 class AppContainer(context: Context) {
+    val mediaGridThumbnailStore = MediaGridThumbnailStore(context)
+    val mediaGridThumbnailManager = MediaGridThumbnailManager(mediaGridThumbnailStore, kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate))
+    val mediaGridImageLoader = coil.ImageLoader.Builder(context)
+        .crossfade(false)
+        .diskCachePolicy(coil.request.CachePolicy.DISABLED)
+        .memoryCache { coil.memory.MemoryCache.Builder(context).maxSizePercent(0.08).maxSizeBytes(32 * 1024 * 1024).build() }
+        .build()
     val postStorageManager = PostStorageManager(
         context,
         PostStorageConfig(
