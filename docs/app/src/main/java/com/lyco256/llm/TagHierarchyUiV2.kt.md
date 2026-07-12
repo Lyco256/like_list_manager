@@ -163,3 +163,6 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - The image itself is never overlaid or dimmed by selection. Selection is represented only by the top-left indicator: a white outer ring, a light-blue checkbox with a black check for single-asset clips, or a blue checkbox with a white check shared by all cells of a multi-asset clip.
 - A single long-press that starts selection mode emits one `LongPress` haptic feedback; later selection changes, deselection, bulk selection, pinch, dialog, and mode close do not emit additional feedback.
 - The card-dialog action keeps an appropriately small rounded-square surface inside its touch target for 2–6 columns and remains absent for 7–12 columns.
+# メディアグリッド高速化追補
+
+グリッドのメタデータ処理はカード表示と分離し、ファイル存在確認・画像デコードを枠生成前に行わない。複数選択はCalculating中に解除せず、Ready結果で選択可能Clipとの交差を更新する。

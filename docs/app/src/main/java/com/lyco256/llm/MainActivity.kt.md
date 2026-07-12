@@ -118,3 +118,6 @@ UI項目を追加する場合は、対応するViewModel操作、Repository API�
 
 - `MainViewModel` holds the selected media-grid `clipId` and exposes `Closed`, `Loading`, `Loaded`, and `NotFound` dialog states through a clip-scoped repository Flow.
 - Selecting a cell opens the existing tweet-card UI in a dialog; closing or destroying the Activity clears the selection so the dialog is not restored automatically.
+# メディアグリッド高速化追補
+
+メディアグリッドは`transformLatest`相当のlatest-wins処理で`Calculating`から`Ready`へ遷移する。Calculating中は旧セルを描画せずProgressを表示し、Ready後は静的グラデーション枠を描画して次フレーム以降に画像要求を開始する。

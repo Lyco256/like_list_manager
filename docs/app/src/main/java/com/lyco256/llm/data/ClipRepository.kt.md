@@ -95,3 +95,6 @@
 - `observeClipWithDetails(clipId)` combines only the selected active clip, its assets, and its tags.
 - The Flow emits `null` for a missing or deleted clip and stops when the ViewModel clears the selected clip ID.
 - Updates to the selected clip, its assets, or its tag relations re-emit the `ClipWithDetails` used by the open dialog.
+# メディアグリッド高速化追補
+
+Repositoryはactive Clip、対象Asset、active ClipTagから軽量スナップショットを構築する。ClipごとのタグIDは`LongArray`で保持し、タグEntityの複製とメディア専用タグ経路の二重購読を行わない。

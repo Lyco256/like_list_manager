@@ -218,12 +218,12 @@ class LargeDatasetIntegrationTest {
         }
 
         val rows = clipDao.observeActiveMediaGridAssetRows().first()
-        val tags = clipDao.observeActiveMediaGridClipTags().first()
+        val tags = clipDao.observeActiveClipTags().first()
 
         assertEquals(listOf(31L, 32L, 11L, 12L), rows.map { it.assetId })
         assertEquals(listOf("photo", "video_thumbnail", "photo", "video_thumbnail"), rows.map { it.assetType })
         assertTrue(rows.none { it.assetType == "animated_gif" })
-        assertTrue(rows.none { it.xPostId == "deleted-media" })
+        assertTrue(rows.none { it.assetId == 21L })
         assertEquals(setOf(31L, 32L, 11L, 12L), rows.map { it.assetId }.toSet())
         assertEquals(3, tags.size)
         assertEquals(3, tags.map { it.tagId }.toSet().size)

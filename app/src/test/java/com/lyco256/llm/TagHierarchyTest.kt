@@ -836,7 +836,7 @@ class TagHierarchyTest {
         assertEquals("https://example.test/video-preview.jpg", entries[0].displayUrl)
         assertEquals("https://example.test/photo-remote.jpg", entries[1].displayUrl)
         assertEquals(existingPath, entries[2].displayUrl)
-        assertTrue(entries[2].hasLocalFile)
+        assertFalse(entries[2].hasLocalFile)
         assertFalse(entries[0].hasLocalFile)
         assertEquals(missingPath, entries[3].localPath)
         assertFalse(entries[3].hasLocalFile)
@@ -1226,18 +1226,6 @@ class TagHierarchyTest {
         downloadState: String,
     ) = MediaGridAssetRow(
         clipId = clipId,
-        xPostId = "x-$clipId",
-        authorId = null,
-        authorName = "author-$clipId",
-        authorUsername = "author_$clipId",
-        text = "text-$clipId",
-        summary = "",
-        ocrText = "",
-        postUrl = "https://x.com/author_$clipId/status/x-$clipId",
-        xCreatedAt = now,
-        savedAt = now,
-        syncedAt = now,
-        likeCount = null,
         assetId = assetId,
         mediaKey = mediaKey,
         assetType = assetType,

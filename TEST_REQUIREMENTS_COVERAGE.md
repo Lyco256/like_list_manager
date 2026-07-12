@@ -61,3 +61,6 @@
 - `scroll_to_top` を使い、分類済み検索条件がスクロール後も維持されること、未分類の未確定タグ選択がスクロール後も分類確定まで維持されることを確認する。
 
 実画像backupの最終確認が残っている間は、要件定義全体を「完了」と判定しません。
+# メディアグリッド高速化の検証
+
+隔離実機チェックは`run-safe-integration-check.cmd -DebugMethod wireless`で実施し、Build・UnitTest・Lint・IntegrationTestのSuccessを確認する。本命上書きは隔離チェック成功後に`run-safe-debug-check.cmd -InstallToDevice`で実施する。Paging、低解像度サムネイル、画像処理キュー、列数アニメーションは対象外。

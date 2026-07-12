@@ -57,3 +57,6 @@ SQL変更時はEntity列名、Foreign Key、削除時のcascade、Flowの更新�
 - `observeActiveMediaGridClipTags` returns clip tag rows for active clips that still have media-grid assets, so media filters can work without loading full card data.
 - `MediaGridAssetRow` carries the clip fields needed for filtering and sort order plus the asset fields needed to render the grid.
 - The lightweight media-grid path keeps one row per asset and excludes unsupported asset types entirely.
+# メディアグリッド高速化追補
+
+メディアグリッドAsset projectionは`clipId`とAsset固有列だけを返し、Clip本文・概要・OCR・投稿者・日時・いいね数などの重複列を含めない。対象はactive Clipの`photo`/`video_thumbnail`のみ。タグ関連はactive ClipTag queryへ統一する。

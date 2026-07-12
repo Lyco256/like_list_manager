@@ -35,6 +35,7 @@ data class MediaGridClipSource(
     override val clip: ClipEntity,
     override val tags: List<TagEntity>,
     val assets: List<MediaGridAssetRow>,
+    val tagIds: LongArray = tags.map { it.id }.toLongArray(),
 ) : ClassifiedClipItem
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -188,31 +189,27 @@ class ClipRepository(
             clipDao.observeActiveClips(),
             clipDao.observeActiveMediaGridAssetRows(),
             clipDao.observeActiveClipTags(),
-            clipDao.observeActiveMediaGridClipTags(),
             tagDao.observeTags(),
-        ) { clips, assets, activeClipTags, mediaClipTags, tags ->
+        ) { clips, assets, activeClipTags, tags ->
             val tagsById = tags.associateBy { it.id }
-            val activeTagsByClip = activeClipTags
-                .groupBy { it.clipId }
-                .mapValues { (_, rows) -> rows.mapNotNull { tagsById[it.tagId] } }
-            val mediaTagsByClip = mediaClipTags
-                .groupBy { it.clipId }
-                .mapValues { (_, rows) -> rows.mapNotNull { tagsById[it.tagId] } }
-            val assetsByClip = assets
-                .groupBy { it.clipId }
-                .mapValues { (_, rows) -> rows.sortedBy { it.assetId } }
+            val activeTagsByClip = HashMap<Long, LongArray>()
+            activeClipTags.forEach { row ->
+                val current = activeTagsByClip[row.clipId]
+                activeTagsByClip[row.clipId] = if (current == null) longArrayOf(row.tagId) else current + row.tagId
+            }
+            val assetsByClip = HashMap<Long, ArrayList<MediaGridAssetRow>>()
+            assets.forEach { row -> assetsByClip.getOrPut(row.clipId) { ArrayList() }.add(row) }
 
             clips.map { clip ->
                 val clipAssets = assetsByClip[clip.id].orEmpty()
-                val clipTags = if (clipAssets.isEmpty()) {
-                    activeTagsByClip[clip.id].orEmpty()
-                } else {
-                    mediaTagsByClip[clip.id].orEmpty().ifEmpty { activeTagsByClip[clip.id].orEmpty() }
-                }
+                val clipTagIds = activeTagsByClip[clip.id] ?: LongArray(0)
+                val clipTags = ArrayList<TagEntity>(clipTagIds.size)
+                clipTagIds.forEach { tagId -> tagsById[tagId]?.let(clipTags::add) }
                 MediaGridClipSource(
                     clip = clip,
                     tags = clipTags,
                     assets = clipAssets,
+                    tagIds = clipTagIds,
                 )
             }
         }

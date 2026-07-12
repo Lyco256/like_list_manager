@@ -112,6 +112,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -264,6 +265,7 @@ data class MainUiState(
 }
 
 data class ClassifiedMediaGridState(
+    val status: MediaGridLoadStatus = MediaGridLoadStatus.Calculating,
     val entries: List<MediaGridEntry> = emptyList(),
     val tagIdsByClip: Map<Long, Set<Long>> = emptyMap(),
     val matchingClipCount: Int = 0,
@@ -271,6 +273,8 @@ data class ClassifiedMediaGridState(
     val isEmptyByFilter: Boolean = true,
     val hasMatchingClipButNoMedia: Boolean = false,
 )
+
+enum class MediaGridLoadStatus { Calculating, Ready }
 
 sealed interface MediaGridTweetDialogState {
     object Closed : MediaGridTweetDialogState
@@ -296,6 +300,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val settingsSnapshot = MutableStateFlow(SettingsSnapshot())
     private val mediaGridSource = repository.mediaGridSource
     private val selectedMediaGridClipId = MutableStateFlow<Long?>(null)
+    private val mediaGridCache = MediaGridMetadataCache()
 
     private val repositoryState = combine(
         repository.clipsWithDetails,
@@ -339,19 +344,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         repository.tagHierarchy,
         filters,
         sort,
-    ) { source, hierarchy, filterValue, sortValue ->
-        val filtered = filterClipsForSearch(source, hierarchy, filterValue)
-        val sorted = sortClipsForDisplay(filtered, hierarchy, filterValue, sortValue)
-        val entries = buildMediaGridEntries(sorted)
-        ClassifiedMediaGridState(
-            entries = entries,
-            tagIdsByClip = filtered.associate { clip -> clip.clip.id to clip.tags.map { it.id }.toSet() },
-            matchingClipCount = filtered.size,
-            matchingMediaCount = entries.size,
-            isEmptyByFilter = filtered.isEmpty(),
-            hasMatchingClipButNoMedia = filtered.isNotEmpty() && entries.isEmpty(),
-        )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ClassifiedMediaGridState())
+    ) { source, hierarchy, filterValue, sortValue -> Triple(source, hierarchy, filterValue to sortValue) }
+        .transformLatest { (source, hierarchy, conditions) ->
+            val (filterValue, sortValue) = conditions
+            emit(ClassifiedMediaGridState(status = MediaGridLoadStatus.Calculating))
+            val key = MediaGridCacheKey(source.hashCode(), hierarchy.hashCode(), filterValue, sortValue)
+            emit(prepareMediaGridMetadata(source, hierarchy, filterValue, sortValue, mediaGridCache, key))
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ClassifiedMediaGridState())
 
     val mediaGridTweetDialogState: StateFlow<MediaGridTweetDialogState> = selectedMediaGridClipId
         .flatMapLatest { clipId ->

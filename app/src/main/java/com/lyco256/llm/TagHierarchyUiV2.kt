@@ -108,6 +108,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -313,7 +314,9 @@ fun EnhancedClassifiedScreen(
     var selectedMediaGridClipIds by remember { mutableStateOf(emptySet<Long>()) }
     var mediaGridSelectionMode by remember { mutableStateOf(false) }
     var bulkTagDialogOpen by remember { mutableStateOf(false) }
-    val itemKeys = remember(uiState.classified) { uiState.classified.map { it.clip.id } }
+    val itemKeys = remember(displayMode, uiState.clips, uiState.filters, uiState.sort, uiState.tagHierarchy) {
+        if (displayMode == ClassifiedDisplayMode.Card) uiState.classified.map { it.clip.id } else emptyList()
+    }
     val mediaGridLazyState = rememberLazyGridState()
     val mediaGridItems = remember(mediaGridState.entries, uiState.sort, mediaGridColumnCount) {
         buildClassifiedMediaGridItems(mediaGridState.entries, uiState.sort, mediaGridColumnCount)
@@ -326,10 +329,12 @@ fun EnhancedClassifiedScreen(
         mediaGridState.entries.groupingBy { it.clipId }.eachCount().filterValues { it >= 2 }.keys
     }
     val selectedVisibleMediaGridClipIds = selectedMediaGridClipIds.intersect(selectableMediaGridClipIds)
-    LaunchedEffect(selectableMediaGridClipIds) {
-        selectedMediaGridClipIds = selectedVisibleMediaGridClipIds
+    LaunchedEffect(mediaGridState.status, selectableMediaGridClipIds) {
+        if (mediaGridState.status == MediaGridLoadStatus.Ready) {
+            selectedMediaGridClipIds = selectedVisibleMediaGridClipIds
+        }
     }
-    PreserveScrollAnchor(listState, "classified", itemKeys)
+    if (displayMode == ClassifiedDisplayMode.Card) PreserveScrollAnchor(listState, "classified", itemKeys)
     LaunchedEffect(mediaGridColumnCount) {
         val anchor = mediaGridAnchor ?: return@LaunchedEffect
         if (mediaGridItems.isEmpty()) return@LaunchedEffect
@@ -375,6 +380,10 @@ fun EnhancedClassifiedScreen(
         Spacer(Modifier.height(10.dp))
         if (displayMode == ClassifiedDisplayMode.MediaGrid) {
             when {
+                mediaGridState.status == MediaGridLoadStatus.Calculating -> Box(
+                    Modifier.fillMaxSize().testTag("classified_media_grid_progress"),
+                    contentAlignment = Alignment.Center,
+                ) { androidx.compose.material3.CircularProgressIndicator() }
                 mediaGridState.isEmptyByFilter -> HierarchyEmptyState("条件に合うツイートはありません")
                 mediaGridState.hasMatchingClipButNoMedia -> HierarchyEmptyState("この条件に一致する画像・動画サムネイルはありません")
                 else -> ClassifiedMediaGridContent(
@@ -2844,19 +2853,22 @@ data class MediaGridEntry(
     val type: String,
     val displayUrl: String?,
     val downloadState: String,
-    val hasLocalFile: Boolean,
+    @Deprecated("存在確認は画像読込失敗時に行う")
+    val hasLocalFile: Boolean = false,
     val localPath: String?,
     val xCreatedAt: String,
     val likeCount: Long?,
 )
 
-internal fun buildMediaGridEntries(clips: List<MediaGridClipSource>): List<MediaGridEntry> =
-    clips.flatMap { clip ->
-        clip.assets
-            .filter { it.assetType == "photo" || it.assetType == "video_thumbnail" }
-            .mapIndexed { index, asset ->
+internal fun buildMediaGridEntries(clips: List<MediaGridClipSource>): List<MediaGridEntry> {
+    val total = clips.sumOf { it.assets.size }
+    val result = ArrayList<MediaGridEntry>(total)
+    clips.forEach { clip ->
+        var index = 0
+        clip.assets.forEach { asset ->
+            if (asset.assetType == "photo" || asset.assetType == "video_thumbnail") {
                 val displayUrl = asset.localPath ?: asset.previewUrl ?: asset.remoteUrl
-                MediaGridEntry(
+                result += MediaGridEntry(
                     entryId = asset.assetId,
                     clipId = clip.clip.id,
                     assetId = asset.assetId,
@@ -2865,13 +2877,16 @@ internal fun buildMediaGridEntries(clips: List<MediaGridClipSource>): List<Media
                     type = asset.assetType,
                     displayUrl = displayUrl,
                     downloadState = asset.downloadState,
-                    hasLocalFile = asset.localPath != null && File(asset.localPath).isFile,
                     localPath = asset.localPath,
                     xCreatedAt = clip.clip.xCreatedAt,
                     likeCount = clip.clip.likeCount,
                 )
+                index++
             }
+        }
     }
+    return result
+}
 
 internal sealed interface ClassifiedMediaGridItem {
     val key: String
@@ -3379,7 +3394,9 @@ private fun ClassifiedMediaGridCell(
     onClick: (Long) -> Unit,
     onToggleSelection: (Long) -> Unit,
 ) {
-    val error = entry.downloadState == "failed" || entry.displayUrl == null || (entry.localPath != null && !entry.hasLocalFile)
+    var imageEnabled by remember(entry.entryId) { mutableStateOf(false) }
+    LaunchedEffect(entry.entryId) { withFrameNanos { imageEnabled = true } }
+    val error = entry.downloadState == "failed" || entry.displayUrl == null
     val selectionIndicatorSize = mediaGridSelectionIndicatorSize(columnCount)
     val videoIconSize = mediaGridVideoIconSize(columnCount)
     val cardDialogSize = mediaGridCardDialogSize(columnCount)
@@ -3406,7 +3423,14 @@ private fun ClassifiedMediaGridCell(
                 )
             }
             .testTag("media_grid_item_${entry.assetId}")
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        MaterialTheme.colorScheme.surfaceVariant,
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+                    ),
+                ),
+            ),
     ) {
         if (error) {
             Box(
@@ -3423,12 +3447,12 @@ private fun ClassifiedMediaGridCell(
                 )
             }
         } else {
-            AsyncImage(
-                model = entry.displayUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
+            if (imageEnabled) AsyncImage(
+                    model = entry.displayUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
             if (!selectionMode && sort.baseOrder == ClassifiedSortBase.LikeCount && entry.likeCount != null) {
                 Surface(
                     modifier = Modifier
