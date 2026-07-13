@@ -155,7 +155,6 @@ import com.lyco256.llm.data.tagGradient
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
-import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.DayOfWeek
@@ -343,9 +342,10 @@ fun EnhancedClassifiedScreen(
         }
     }
     if (displayMode == ClassifiedDisplayMode.Card) PreserveScrollAnchor(listState, "classified", itemKeys)
-    LaunchedEffect(mediaGridColumnCount) {
+    LaunchedEffect(mediaGridColumnCount, mediaGridItems) {
         val anchor = mediaGridAnchor ?: return@LaunchedEffect
         if (mediaGridItems.isEmpty()) return@LaunchedEffect
+        withFrameNanos { }
         val targetIndex = mediaGridItems.indexOfFirst { it.key == anchor.key }
             .takeIf { it >= 0 }
             ?: anchor.index.coerceIn(0, mediaGridItems.lastIndex)
@@ -836,9 +836,11 @@ private fun EnhancedTweetCard(
     val ocrPreviewPaths = remember(clip.assets) {
         clip.assets
             .filter { it.type == "photo" || it.type == "video_thumbnail" }
-            .mapNotNull { asset -> asset.localPath?.takeIf { File(it).exists() } }
+            .mapNotNull { it.localPath }
     }
-    val hasOcrAction = ocrPreviewPaths.isNotEmpty()
+    val hasOcrAction = remember(clip.assets) {
+        clip.assets.any { (it.type == "photo" || it.type == "video_thumbnail") && it.localPath != null }
+    }
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -3283,12 +3285,13 @@ private fun ClassifiedMediaGridContent(
     onToggleSelection: (Long) -> Unit,
 ) {
     val appContainer = (LocalContext.current.applicationContext as LikeListManagerApp).container
-    LaunchedEffect(sourceRevision) {
+    val itemByKey = remember(items) { items.associateBy { it.key } }
+    LaunchedEffect(sourceRevision, columnCount) {
         appContainer.mediaGridThumbnailManager.updateSourceSnapshot(
             revision = sourceRevision,
             ordered = items.asSequence().filterIsInstance<MediaGridCellItem>().map { e ->
                 val a = e.entry
-                MediaGridThumbnailSource(a.assetId, a.mediaKey, a.localPath, a.previewUrl, a.remoteUrl)
+                MediaGridThumbnailSource(a.assetId, a.mediaKey, a.localPath, a.previewUrl ?: a.remoteUrl ?: a.displayUrl?.takeUnless { it == a.localPath }, a.remoteUrl)
             }.toList(),
         )
     }
@@ -3299,9 +3302,9 @@ private fun ClassifiedMediaGridContent(
         snapshotFlow { state.layoutInfo }.collect { layout ->
             val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2f
             appContainer.mediaGridThumbnailManager.updateViewport(layout.visibleItemsInfo.mapNotNull { info ->
-                val item = items.firstOrNull { it.key == info.key } as? MediaGridCellItem ?: return@mapNotNull null
+                val item = itemByKey[info.key] as? MediaGridCellItem ?: return@mapNotNull null
                 val e = item.entry
-                MediaGridViewportRequest(MediaGridThumbnailSource(e.assetId, e.mediaKey, e.localPath, e.previewUrl, e.remoteUrl), kotlin.math.abs((info.offset.y + info.size.height / 2f - center).toInt()))
+                MediaGridViewportRequest(MediaGridThumbnailSource(e.assetId, e.mediaKey, e.localPath, e.previewUrl ?: e.remoteUrl ?: e.displayUrl?.takeUnless { it == e.localPath }, e.remoteUrl), kotlin.math.abs((info.offset.y + info.size.height / 2f - center).toInt()), info.index)
             }, columnCount)
         }
     }
@@ -3318,6 +3321,7 @@ private fun ClassifiedMediaGridContent(
         gridItems(
             items,
             key = { it.key },
+            contentType = { item -> if (item is MediaGridHeaderItem) "Header" else "MediaCell" },
             span = { item ->
                 when (item) {
                     is MediaGridHeaderItem -> GridItemSpan(maxLineSpan)
@@ -3462,8 +3466,8 @@ private fun ClassifiedMediaGridCell(
         resizeScale.animateTo(1f, tween(180))
     }
     val thumbnailState by thumbnailManager.state(entry.assetId).collectAsState()
-    val invalidLocalPath = entry.localPath?.let { !java.io.File(it).isFile } == true
-    val error = thumbnailState is MediaGridThumbnailState.Failed || entry.displayUrl == null || invalidLocalPath
+    val fallbackUrl = entry.previewUrl ?: entry.remoteUrl ?: entry.displayUrl?.takeUnless { it == entry.localPath }
+    val error = thumbnailState is MediaGridThumbnailState.Failed || (entry.localPath == null && fallbackUrl == null) || entry.downloadState == "failed"
     val selectionIndicatorSize = mediaGridSelectionIndicatorSize(columnCount)
     val videoIconSize = mediaGridVideoIconSize(columnCount)
     val cardDialogSize = mediaGridCardDialogSize(columnCount)
@@ -3524,6 +3528,8 @@ private fun ClassifiedMediaGridCell(
                     imageLoader = thumbnailImageLoader,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
+                    onSuccess = { thumbnailManager.onDisplaySuccess(MediaGridThumbnailSource(entry.assetId, entry.mediaKey, entry.localPath, entry.previewUrl ?: entry.remoteUrl ?: entry.displayUrl?.takeUnless { it == entry.localPath }, entry.remoteUrl)) },
+                    onError = { thumbnailManager.onDisplayError(MediaGridThumbnailSource(entry.assetId, entry.mediaKey, entry.localPath, entry.previewUrl ?: entry.remoteUrl ?: entry.displayUrl?.takeUnless { it == entry.localPath }, entry.remoteUrl), (thumbnailState as MediaGridThumbnailState.Ready).file) },
                 )
         }
         if (!selectionMode && sort.baseOrder == ClassifiedSortBase.LikeCount && entry.likeCount != null) {

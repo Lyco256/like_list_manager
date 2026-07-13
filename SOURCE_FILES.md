@@ -11,7 +11,7 @@
 - `app/src/test/java/com/lyco256/llm/TagHierarchyTest.kt` covers bucket generation for day/week/month and like-count units.
 - `app/src/androidTest/java/com/lyco256/llm/UiStateRenderingTest.kt` covers the PostTime header, LikeCount header, like overlay, and existing badge/error regressions.
 - `UiStateRenderingTest.kt` and `data/RepositoryIntegrationTest.kt` also cover tweet selection, bulk tag draft/apply/discard behavior, and transaction-level tag replacement.
-- `MediaGridThumbnailManager.kt` keeps one ordered source snapshot and selects from the latest viewport after every serial generation. Visible cells and their adjacent rows use bounded UI state; the surrounding 50 rows generate only local 256px JPEG files with yield/50ms pacing and no network fetch or UI state allocation. The worker follows application foreground/background state.
+- `MediaGridThumbnailManager.kt` keeps one ordered source snapshot and selects from the latest viewport after every serial generation, preferring the current scroll direction on ties. Wide preparation records cache identities so each source advances once, while visible cells and adjacent rows use bounded UI state. Generation validates the source snapshot before publishing Ready; display failures invalidate and retry once.
 
 # Source Files Guide
 

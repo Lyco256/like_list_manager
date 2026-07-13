@@ -36,7 +36,7 @@ class MediaGridThumbnailStore(context: Context) {
         if (output.isFile && output.length() > 0L) return@withContext output
         val temporary = File(directory, ".${key}.${Thread.currentThread().id}.tmp")
         try {
-            val bitmap = decode(input, source.previewUrl ?: source.remoteUrl)
+            val bitmap = decode(input, if (allowRemote) listOfNotNull(source.previewUrl, source.remoteUrl) else emptyList())
             val square = Bitmap.createBitmap(256, 256, Bitmap.Config.RGB_565)
             Canvas(square).drawColor(Color.BLACK)
             val scale = maxOf(256f / bitmap.width, 256f / bitmap.height)
@@ -57,8 +57,17 @@ class MediaGridThumbnailStore(context: Context) {
 
     fun invalidate(file: File) { file.delete() }
 
-    private fun decode(file: File?, url: String?): Bitmap {
-        val source = file?.inputStream() ?: (URL(url ?: error("No source")).openConnection() as HttpURLConnection).apply { connectTimeout = 10_000; readTimeout = 20_000 }.inputStream
+    private fun decode(file: File?, urls: List<String>): Bitmap {
+        if (file != null) return decodeStream(file.inputStream())
+        var last: Throwable? = null
+        for (url in urls) try {
+            val source = (URL(url).openConnection() as HttpURLConnection).apply { connectTimeout = 10_000; readTimeout = 20_000 }.inputStream
+            return decodeStream(source)
+        } catch (t: Throwable) { last = t }
+        throw last ?: error("No source")
+    }
+
+    private fun decodeStream(source: java.io.InputStream): Bitmap {
         BufferedInputStream(source).use { stream ->
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             stream.mark(1024 * 1024)

@@ -215,7 +215,7 @@ class MainActivityComposeTest {
                             width = 1200,
                             height = 1200,
                             sizeBytes = null,
-                            downloadState = "downloaded",
+                            downloadState = "failed",
                             createdAt = now,
                         ),
                     ),
@@ -250,7 +250,9 @@ class MainActivityComposeTest {
         val photoTag = "media_grid_item_${assetIds.getValue("grid-photo")}"
         waitDisplayed(photoTag)
         waitDisplayed("media_grid_video_badge_${assetIds.getValue("grid-video")}")
-        waitDisplayed("media_grid_error_${assetIds.getValue("grid-error")}")
+        val errorTag = "media_grid_error_${assetIds.getValue("grid-error")}"
+        composeRule.onNodeWithTag("classified_media_grid").performScrollToIndex(2)
+        waitDisplayed(errorTag)
 
         val beforePinch = gridItemBounds(photoTag)
         pinchOnGrid("classified_media_grid", centerSpan = 260f, endSpan = 180f)

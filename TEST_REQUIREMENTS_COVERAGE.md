@@ -76,6 +76,7 @@
 - Pinch direction recognition changes the column count by exactly one within 2–12 and locks further changes until all fingers are released, including reverse movement.
 - The animation starts at recognition time and applies only to currently composed media cells without fade or a second grid; the central Asset remains anchored across header changes.
 - Column changes do not regenerate or refetch completed thumbnails or rebuild the ordered source snapshot; the Thumbnail Manager receives the new column count with the latest viewport.
+- Wide preparation advances by cache identity, viewport updates carry direction/index/column count, stale source generations are discarded, and missing local paths fall back from preview URL to remote URL. A decoded JPEG display failure invalidates and retries once.
 
 ## 2026-07 media-grid thumbnail cache
 
