@@ -265,7 +265,8 @@ data class MainUiState(
 }
 
 data class ClassifiedMediaGridState(
-    val status: MediaGridLoadStatus = MediaGridLoadStatus.Calculating,
+    val status: MediaGridLoadStatus = MediaGridLoadStatus.Ready,
+    val sourceRevision: Int = 0,
     val entries: List<MediaGridEntry> = emptyList(),
     val tagIdsByClip: Map<Long, Set<Long>> = emptyMap(),
     val matchingClipCount: Int = 0,
@@ -351,7 +352,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val key = MediaGridCacheKey(source.hashCode(), hierarchy.hashCode(), filterValue, sortValue)
             emit(prepareMediaGridMetadata(source, hierarchy, filterValue, sortValue, mediaGridCache, key))
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ClassifiedMediaGridState())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ClassifiedMediaGridState(status = MediaGridLoadStatus.Calculating))
 
     val mediaGridTweetDialogState: StateFlow<MediaGridTweetDialogState> = selectedMediaGridClipId
         .flatMapLatest { clipId ->

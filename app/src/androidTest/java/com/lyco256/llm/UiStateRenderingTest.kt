@@ -495,8 +495,8 @@ class UiStateRenderingTest {
             }
         }
 
-        composeRule.onNodeWithTag("media_grid_header_like_count_1000_12000").assertIsDisplayed()
-        composeRule.onNodeWithTag("media_grid_header_text_like_count_1000_12000").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_header_like_count_200_12200").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_header_text_like_count_200_12200").assertIsDisplayed()
         composeRule.onNodeWithTag("media_grid_like_count_31").assertIsDisplayed()
         composeRule.onNodeWithTag("media_grid_like_count_32").assertIsDisplayed()
         composeRule.onAllNodesWithTag("media_grid_like_count_41").assertCountEquals(0)

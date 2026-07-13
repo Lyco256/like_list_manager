@@ -25,9 +25,9 @@ data class MediaGridThumbnailSource(
 class MediaGridThumbnailStore(context: Context) {
     private val directory = File(context.cacheDir, "media_grid_thumbnails").apply { mkdirs() }
 
-    suspend fun getOrCreate(source: MediaGridThumbnailSource): File = withContext(Dispatchers.IO) {
+    suspend fun getOrCreate(source: MediaGridThumbnailSource, allowRemote: Boolean = true): File = withContext(Dispatchers.IO) {
         val input = source.localPath?.let(::File)?.takeIf { it.isFile }
-        val inputName = input?.absolutePath ?: (source.previewUrl ?: source.remoteUrl)
+        val inputName = input?.absolutePath ?: if (allowRemote) (source.previewUrl ?: source.remoteUrl) else null
             ?: error("No media source")
         val actualSize = input?.length() ?: source.size
         val actualModified = input?.lastModified() ?: source.modified

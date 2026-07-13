@@ -393,6 +393,7 @@ fun EnhancedClassifiedScreen(
                 mediaGridState.hasMatchingClipButNoMedia -> HierarchyEmptyState("この条件に一致する画像・動画サムネイルはありません")
                 else -> ClassifiedMediaGridContent(
                     items = mediaGridItems,
+                    sourceRevision = mediaGridState.sourceRevision,
                     sort = uiState.sort,
                     columnCount = mediaGridColumnCount,
                     state = mediaGridLazyState,
@@ -3258,6 +3259,7 @@ private fun MediaGridBulkTagDialog(
 @Composable
 private fun ClassifiedMediaGridContent(
     items: List<ClassifiedMediaGridItem>,
+    sourceRevision: Int,
     sort: ClassifiedSortState,
     columnCount: Int,
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
@@ -3269,8 +3271,17 @@ private fun ClassifiedMediaGridContent(
     onToggleSelection: (Long) -> Unit,
 ) {
     val appContainer = (LocalContext.current.applicationContext as LikeListManagerApp).container
+    LaunchedEffect(sourceRevision, items) {
+        appContainer.mediaGridThumbnailManager.updateSourceSnapshot(
+            revision = sourceRevision,
+            ordered = items.asSequence().filterIsInstance<MediaGridCellItem>().map { e ->
+                val a = e.entry
+                MediaGridThumbnailSource(a.assetId, a.mediaKey, a.localPath, a.previewUrl, a.remoteUrl)
+            }.toList(),
+        )
+    }
     DisposableEffect(Unit) {
-        onDispose { appContainer.mediaGridThumbnailManager.updateViewport(emptyList()) }
+        onDispose { appContainer.mediaGridThumbnailManager.updateViewport(emptyList(), columnCount) }
     }
     LaunchedEffect(state, items) {
         snapshotFlow { state.layoutInfo }.collect { layout ->
@@ -3279,7 +3290,7 @@ private fun ClassifiedMediaGridContent(
                 val item = items.firstOrNull { it.key == info.key } as? MediaGridCellItem ?: return@mapNotNull null
                 val e = item.entry
                 MediaGridViewportRequest(MediaGridThumbnailSource(e.assetId, e.mediaKey, e.localPath, e.previewUrl, e.remoteUrl), kotlin.math.abs((info.offset.y + info.size.height / 2f - center).toInt()))
-            })
+            }, columnCount)
         }
     }
     LazyVerticalGrid(
@@ -3422,7 +3433,8 @@ private fun ClassifiedMediaGridCell(
     thumbnailImageLoader: coil.ImageLoader,
 ) {
     val thumbnailState by thumbnailManager.state(entry.assetId).collectAsState()
-    val error = thumbnailState is MediaGridThumbnailState.Failed || entry.displayUrl == null
+    val invalidLocalPath = entry.localPath?.let { !java.io.File(it).isFile } == true
+    val error = thumbnailState is MediaGridThumbnailState.Failed || entry.displayUrl == null || invalidLocalPath
     val selectionIndicatorSize = mediaGridSelectionIndicatorSize(columnCount)
     val videoIconSize = mediaGridVideoIconSize(columnCount)
     val cardDialogSize = mediaGridCardDialogSize(columnCount)
@@ -3480,40 +3492,17 @@ private fun ClassifiedMediaGridCell(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
                 )
-            if (!selectionMode && sort.baseOrder == ClassifiedSortBase.LikeCount && entry.likeCount != null) {
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(4.dp)
-                        .testTag("media_grid_like_count_${entry.assetId}"),
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color.Black.copy(alpha = 0.68f),
-                ) {
-                    Text(
-                        text = formatLikeCount(entry.likeCount),
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        color = Color.White,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-            }
-            if (entry.type == "video_thumbnail") {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(overlayPadding)
-                        .size(videoIconSize)
-                        .testTag("media_grid_video_badge_${entry.assetId}"),
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.PlayArrow,
-                        contentDescription = "再生",
-                        tint = Color.White,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-            }
+        }
+        if (!selectionMode && sort.baseOrder == ClassifiedSortBase.LikeCount && entry.likeCount != null) {
+            Surface(
+                modifier = Modifier.align(Alignment.TopStart).padding(4.dp).testTag("media_grid_like_count_${entry.assetId}"),
+                shape = RoundedCornerShape(8.dp), color = Color.Black.copy(alpha = 0.68f),
+            ) { Text(formatLikeCount(entry.likeCount), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold) }
+        }
+        if (entry.type == "video_thumbnail") {
+            Box(
+                modifier = Modifier.align(Alignment.TopEnd).padding(overlayPadding).size(videoIconSize).testTag("media_grid_video_badge_${entry.assetId}"),
+            ) { Icon(Icons.Filled.PlayArrow, contentDescription = "再生", tint = Color.White, modifier = Modifier.fillMaxSize()) }
         }
         if (selectionMode) {
             Surface(

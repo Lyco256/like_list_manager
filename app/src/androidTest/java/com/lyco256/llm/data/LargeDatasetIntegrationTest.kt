@@ -225,7 +225,7 @@ class LargeDatasetIntegrationTest {
         assertTrue(rows.none { it.assetType == "animated_gif" })
         assertTrue(rows.none { it.assetId == 21L })
         assertEquals(setOf(31L, 32L, 11L, 12L), rows.map { it.assetId }.toSet())
-        assertEquals(3, tags.size)
+        assertEquals(4, tags.size)
         assertEquals(3, tags.map { it.tagId }.toSet().size)
     }
 

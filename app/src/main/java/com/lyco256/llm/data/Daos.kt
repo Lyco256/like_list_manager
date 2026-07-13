@@ -42,7 +42,7 @@ interface ClipDao {
         INNER JOIN assets ON assets.clipId = clips.id
         WHERE clips.isDeleted = 0
           AND assets.type IN ('photo', 'video_thumbnail')
-        ORDER BY assets.clipId ASC, assets.id ASC
+        ORDER BY assets.clipId DESC, assets.id ASC
         """,
     )
     fun observeActiveMediaGridAssetRows(): Flow<List<MediaGridAssetRow>>

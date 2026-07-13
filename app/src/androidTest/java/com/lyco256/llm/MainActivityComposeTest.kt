@@ -145,6 +145,14 @@ class MainActivityComposeTest {
 
     @Test
     fun classifiedDisplayToggleSwitchesBetweenCardAndMediaGridAndSurvivesActivityRecreation() {
+        fun waitDisplayed(tag: String) {
+            composeRule.waitUntil(30_000) {
+                runCatching {
+                    composeRule.onNodeWithTag(tag, useUnmergedTree = true).assertIsDisplayed()
+                    true
+                }.getOrDefault(false)
+            }
+        }
         val now = Instant.now().toString()
         val missingPath = File(storage().imageDirectory(), "classified-grid-missing.webp").absolutePath
         val clipAndAssetIds = runBlocking {
@@ -235,11 +243,14 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
         composeRule.onNodeWithTag("classified_display_toggle").performClick()
 
-        composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("classified_media_grid").fetchSemanticsNodes().isNotEmpty()
+        }
+        waitDisplayed("classified_media_grid")
         val photoTag = "media_grid_item_${assetIds.getValue("grid-photo")}"
-        composeRule.onNodeWithTag(photoTag, useUnmergedTree = true).assertIsDisplayed()
-        composeRule.onNodeWithTag("media_grid_video_badge_${assetIds.getValue("grid-video")}", useUnmergedTree = true).assertIsDisplayed()
-        composeRule.onNodeWithTag("media_grid_error_${assetIds.getValue("grid-error")}", useUnmergedTree = true).assertIsDisplayed()
+        waitDisplayed(photoTag)
+        waitDisplayed("media_grid_video_badge_${assetIds.getValue("grid-video")}")
+        waitDisplayed("media_grid_error_${assetIds.getValue("grid-error")}")
 
         val beforePinch = gridItemBounds(photoTag)
         pinchOnGrid("classified_media_grid", centerSpan = 260f, endSpan = 180f)
@@ -254,30 +265,33 @@ class MainActivityComposeTest {
 
         composeRule.activityRule.scenario.recreate()
 
-        composeRule.onNodeWithTag("classified_screen").assertIsDisplayed()
-        composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
-        composeRule.onNodeWithTag(photoTag, useUnmergedTree = true).assertIsDisplayed()
+        waitDisplayed("classified_screen")
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("classified_media_grid").fetchSemanticsNodes().isNotEmpty()
+        }
+        waitDisplayed("classified_media_grid")
+        waitDisplayed(photoTag)
         val afterRecreate = gridItemBounds(photoTag)
         assertTrue(kotlin.math.abs(afterRecreate.width - afterPinchOut.width) < 1f)
 
         composeRule.onNodeWithTag("classified_display_toggle").performClick()
-        composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
+        waitDisplayed("clip_card_$clipId")
         composeRule.onNodeWithTag("classified_display_toggle").performClick()
-        composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
+        waitDisplayed("classified_media_grid")
         val afterToggleBack = gridItemBounds(photoTag)
         assertTrue(kotlin.math.abs(afterToggleBack.width - afterRecreate.width) < 1f)
 
         composeRule.onNodeWithTag(photoTag, useUnmergedTree = true).performClick()
-        composeRule.onNodeWithTag("media_grid_tweet_dialog").assertIsDisplayed()
-        composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
+        waitDisplayed("media_grid_tweet_dialog")
+        waitDisplayed("clip_card_$clipId")
         composeRule.onNodeWithTag("media_grid_tweet_dialog_close").performClick()
-        composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
+        waitDisplayed("classified_media_grid")
         assertTrue(kotlin.math.abs(gridItemBounds(photoTag).width - afterToggleBack.width) < 1f)
 
         val videoTag = "media_grid_item_${assetIds.getValue("grid-video")}"
         composeRule.onNodeWithTag(videoTag, useUnmergedTree = true).performClick()
-        composeRule.onNodeWithTag("media_grid_tweet_dialog").assertIsDisplayed()
-        composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
+        waitDisplayed("media_grid_tweet_dialog")
+        waitDisplayed("clip_card_$clipId")
         composeRule.onNodeWithTag("media_grid_tweet_dialog_close").performClick()
     }
 

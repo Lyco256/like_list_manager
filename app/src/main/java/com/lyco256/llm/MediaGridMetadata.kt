@@ -50,6 +50,7 @@ internal suspend fun prepareMediaGridMetadata(
         }
         Trace.beginSection("MediaGridEntryBuild")
         val result = ClassifiedMediaGridState(
+            sourceRevision = key.sourceRevision,
             entries = buildMediaGridEntries(ordered),
             tagIdsByClip = filtered.associate { it.clip.id to it.tagIds.toSet() },
             matchingClipCount = filtered.size,

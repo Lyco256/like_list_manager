@@ -63,6 +63,13 @@
 実画像backupの最終確認が残っている間は、要件定義全体を「完了」と判定しません。
 # メディアグリッド高速化の検証
 
+## 2026-07-13 wide thumbnail preparation
+
+- Manager receives the ordered source snapshot once per grid item revision; viewport updates do not rebuild the full source list.
+- Serial priority is visible cells, adjacent UI rows, then the current viewport's 50-row local-file range. Selection is recomputed after each completion, with yield and 50 ms pacing for wide preparation.
+- Wide preparation does not create Compose state, image requests, or per-asset Work objects, and never fetches preview/remote URLs. Application foreground/background callbacks allow the active item to finish, then pause.
+- `run-safe-debug-check.cmd` passed Build, UnitTest, and Lint after the change. Isolation-device verification remains required before production overwrite.
+
 隔離実機チェックは`run-safe-integration-check.cmd -DebugMethod wireless`で実施し、Build・UnitTest・Lint・IntegrationTestのSuccessを確認する。本命上書きは隔離チェック成功後に`run-safe-debug-check.cmd -InstallToDevice`で実施する。Paging、低解像度サムネイル、画像処理キュー、列数アニメーションは対象外。
 ## 2026-07 media-grid thumbnail cache
 
