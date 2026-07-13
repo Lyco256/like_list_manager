@@ -2,6 +2,8 @@
 
 メディアグリッド専用のメタデータ処理を担当する。Repositoryから受け取った軽量Asset行・active Clip・active ClipTagのスナップショットを、`Dispatchers.Default`でlatest-wins処理する。
 
-完成結果は最大3件のLRUキャッシュへ保持し、Bitmapやファイル内容は保持しない。メタデータ準備中は`Calculating`、完了後は`Ready`を発行する。枠は静的グラデーションを先に描画し、次フレーム以降に既存URLの画像要求を開始する。メタデータ処理中にFile I/Oや画像デコードは行わない。
+完成結果は最大3件のLRUキャッシュへ保持し、Bitmapやファイル内容は保持しない。キャッシュヒット時は`Calculating`を挟まずReady結果を即時発行し、ミス時だけ`Calculating`からReadyへ遷移する。枠は静的グラデーションを先に描画し、次フレーム以降に既存URLの画像要求を開始する。メタデータ処理中にFile I/Oや画像デコードは行わない。
+
+結果キーは空検索の検索モード・対象、無効なsort方向・優先順位を正規化する。保存順ではsortを省略し、投稿日・いいね数だけのsortでは投稿者件数とタグ順位を準備しない。Asset展開ではentries、matchingMediaCount、メディア有無、Clip内mediaIndexを一回の走査で確定する。
 
 Paging、低解像度サムネイル、画像処理キュー、列数アニメーションは後続実装の範囲とする。

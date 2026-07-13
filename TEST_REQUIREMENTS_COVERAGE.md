@@ -63,6 +63,16 @@
 実画像backupの最終確認が残っている間は、要件定義全体を「完了」と判定しません。
 # メディアグリッド高速化の検証
 
+## 2026-07-13 メタデータ最終整理
+
+| 対象 | 状態 | 証跡 |
+|---|---|---|
+| sourceのTagEntity除去、3 Flow、ClipTag一括LongArray、revision境界 | 完了 | `ClipRepository.kt`、`RepositoryIntegrationTest`、`TagHierarchyTest` |
+| 実効sort判定とsort準備の分離 | 完了 | `MediaGridMetadata.kt`、`TagHierarchyTest` |
+| 投稿者キー前計算、正規化cache key、cache hit即Ready | 完了 | `MediaGridMetadata.kt`、`MainActivity.kt` |
+| Asset展開とmatchingMediaCount/メディア有無の一括確定、hasLocalFile除去 | 完了 | `TagHierarchyUiV2.kt`、`UiStateRenderingTest` |
+| 通常安全検証 | 完了 | `run-safe-debug-check.cmd` Success |
+
 ## 2026-07-13 wide thumbnail preparation
 
 ## 2026-07-13 card/grid duplicate-work removal

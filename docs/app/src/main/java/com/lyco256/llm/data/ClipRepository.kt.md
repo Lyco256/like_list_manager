@@ -85,8 +85,8 @@
 - If image download, decode, or WebP conversion fails, the post still saves and the asset is recorded with `downloadState = "failed"`.
 ## 2026-07 media grid lightweight flow
 
-- `mediaGridSource` is a repository Flow that does not depend on `clipsWithDetails`.
-- It combines active clips, lightweight asset rows, lightweight clip-tag rows, and the tag list so the grid can be filtered and sorted without expanding the card list.
+- `mediaGridSource` is a repository Flow that does not depend on `clipsWithDetails` or `observeTags()`.
+- It combines only active clips, lightweight asset rows, and lightweight clip-tag rows. The source stores tag IDs and one precomputed `TweetAuthorKey`; it never stores or copies `TagEntity` lists.
 - Clips with matching filters but no media are still preserved in the source so the UI can show the existing media-free empty state.
 - The lightweight flow keeps the card path separate, and card rendering still uses `clipsWithDetails`.
 
@@ -98,3 +98,5 @@
 # メディアグリッド高速化追補
 
 Repositoryはactive Clip、対象Asset、active ClipTagから軽量スナップショットを構築する。ClipごとのタグIDは`LongArray`で保持し、タグEntityの複製とメディア専用タグ経路の二重購読を行わない。
+
+ClipTag行はClipごとの可変バッファへ集約してから一度だけ`LongArray`へ変換する。投稿者キー、投稿日、local day、メディア件数もsource生成時に前計算するため、タグ名・色だけの変更ではsource revisionを進めず、ClipTag変更では更新する。

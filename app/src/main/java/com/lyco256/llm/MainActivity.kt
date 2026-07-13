@@ -348,9 +348,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ) { source, hierarchy, filterValue, sortValue -> Triple(source, hierarchy, filterValue to sortValue) }
         .transformLatest { (snapshot, hierarchy, conditions) ->
             val (filterValue, sortValue) = conditions
-            emit(ClassifiedMediaGridState(status = MediaGridLoadStatus.Calculating))
-            val key = MediaGridCacheKey(snapshot.revision, hierarchy.structuralRevision, filterValue, sortValue)
-            emit(prepareMediaGridMetadata(snapshot, hierarchy, filterValue, sortValue, mediaGridCache, key))
+            val effectiveFilter = effectiveMediaGridFilter(filterValue)
+            val effectiveSort = effectiveMediaGridSort(sortValue)
+            val key = MediaGridCacheKey(snapshot.revision, hierarchy.structuralRevision, effectiveFilter, effectiveSort)
+            val cached = mediaGridCache.get(key)
+            if (cached != null) {
+                emit(cached)
+            } else {
+                emit(ClassifiedMediaGridState(status = MediaGridLoadStatus.Calculating))
+                emit(prepareMediaGridMetadata(snapshot, hierarchy, effectiveFilter, effectiveSort, mediaGridCache, key))
+            }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ClassifiedMediaGridState(status = MediaGridLoadStatus.Calculating))
 

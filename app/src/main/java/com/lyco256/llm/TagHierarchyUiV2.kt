@@ -2879,8 +2879,6 @@ data class MediaGridEntry(
     val type: String,
     val displayUrl: String?,
     val downloadState: String,
-    @Deprecated("存在確認は画像読込失敗時に行う")
-    val hasLocalFile: Boolean = false,
     val localPath: String?,
     val xCreatedAt: String,
     val likeCount: Long?,
@@ -2888,13 +2886,21 @@ data class MediaGridEntry(
     val remoteUrl: String? = null,
 )
 
-internal fun buildMediaGridEntries(clips: List<MediaGridClipSource>): List<MediaGridEntry> {
-    val total = clips.sumOf { it.assets.size }
+internal data class MediaGridBuildResult(
+    val entries: List<MediaGridEntry>,
+    val matchingMediaCount: Int,
+    val hasMedia: Boolean,
+)
+
+internal fun buildMediaGridResult(clips: List<MediaGridClipSource>): MediaGridBuildResult {
+    val total = clips.sumOf { it.mediaAssetCount }
     val result = ArrayList<MediaGridEntry>(total)
+    var matchingMediaCount = 0
     clips.forEach { clip ->
         var index = 0
         clip.assets.forEach { asset ->
             if (asset.assetType == "photo" || asset.assetType == "video_thumbnail") {
+                matchingMediaCount++
                 val displayUrl = asset.localPath ?: asset.previewUrl ?: asset.remoteUrl
                 result += MediaGridEntry(
                     entryId = asset.assetId,
@@ -2915,7 +2921,11 @@ internal fun buildMediaGridEntries(clips: List<MediaGridClipSource>): List<Media
             }
         }
     }
-    return result
+    return MediaGridBuildResult(result, matchingMediaCount, matchingMediaCount > 0)
+}
+
+internal fun buildMediaGridEntries(clips: List<MediaGridClipSource>): List<MediaGridEntry> {
+    return buildMediaGridResult(clips).entries
 }
 
 internal sealed interface ClassifiedMediaGridItem {

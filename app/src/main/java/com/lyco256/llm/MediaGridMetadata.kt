@@ -27,6 +27,22 @@ internal data class MediaGridCacheKey(
     val sort: ClassifiedSortState,
 )
 
+internal fun effectiveMediaGridSort(sort: ClassifiedSortState): ClassifiedSortState = sort.copy(
+    tagDescending = sort.tagDescending.takeIf { sort.tagEnabled } ?: false,
+    userDescending = sort.userDescending.takeIf { sort.userEnabled } ?: true,
+    priority = if (sort.tagEnabled && sort.userEnabled) sort.priority else ClassifiedSortPriority.TagFirst,
+    likeCountDescending = sort.likeCountDescending.takeIf { sort.baseOrder == ClassifiedSortBase.LikeCount } ?: true,
+    postTimeDescending = sort.postTimeDescending.takeIf { sort.baseOrder == ClassifiedSortBase.PostTime } ?: true,
+)
+
+internal fun effectiveMediaGridFilter(filters: TweetFilterState): TweetFilterState = filters.copy(
+    searchMode = filters.searchMode.takeIf { filters.query.isNotBlank() } ?: SearchMode.Literal,
+    searchTargets = filters.searchTargets.takeIf { filters.query.isNotBlank() } ?: SearchTarget.entries.toSet(),
+)
+
+internal fun mediaGridSortIsEffective(sort: ClassifiedSortState): Boolean =
+    sort.baseOrder != ClassifiedSortBase.Default || sort.tagEnabled || sort.userEnabled
+
 internal suspend fun prepareMediaGridMetadata(
     snapshot: com.lyco256.llm.data.MediaGridSourceSnapshot,
     hierarchy: com.lyco256.llm.data.TagHierarchy,
@@ -44,20 +60,21 @@ internal suspend fun prepareMediaGridMetadata(
         val preparedFilter = prepareMediaGridFilter(hierarchy, filters)
         source.forEach { clip -> if (matchesMediaGridFilter(clip, preparedFilter)) filtered += clip }
         Trace.endSection()
-        val ordered = if (sort == ClassifiedSortState()) filtered else {
+        val ordered = if (!mediaGridSortIsEffective(sort)) filtered else {
             Trace.beginSection("MediaGridSort")
             sortMediaGridClips(filtered, hierarchy, filters, sort)
                 .also { Trace.endSection() }
         }
         Trace.beginSection("MediaGridEntryBuild")
+        val built = buildMediaGridResult(ordered)
         val result = ClassifiedMediaGridState(
             sourceRevision = key.sourceRevision,
-            entries = buildMediaGridEntries(ordered),
+            entries = built.entries,
             tagIdsByClip = filtered.associate { it.clip.id to it.tagIds },
             matchingClipCount = filtered.size,
-            matchingMediaCount = ordered.sumOf { it.mediaAssetCount },
+            matchingMediaCount = built.matchingMediaCount,
             isEmptyByFilter = filtered.isEmpty(),
-            hasMatchingClipButNoMedia = filtered.isNotEmpty() && ordered.none { it.assets.any { a -> a.assetType == "photo" || a.assetType == "video_thumbnail" } },
+            hasMatchingClipButNoMedia = filtered.isNotEmpty() && !built.hasMedia,
         )
         Trace.endSection()
         cache.put(key, result)
@@ -72,6 +89,7 @@ private data class PreparedMediaGridFilter(
     val included: List<Set<Long>>,
     val required: List<Set<Long>>,
     val excluded: List<Set<Long>>,
+    val selectedAuthors: Set<TweetAuthorKey>,
 )
 
 private fun prepareMediaGridFilter(
@@ -88,6 +106,7 @@ private fun prepareMediaGridFilter(
         included = targetSets.filterKeys { filters.tagFilters[it] == TagFilterState.INCLUDED }.values.toList(),
         required = targetSets.filterKeys { filters.tagFilters[it] == TagFilterState.REQUIRED }.values.toList(),
         excluded = targetSets.filterKeys { filters.tagFilters[it] == TagFilterState.EXCLUDED }.values.toList(),
+        selectedAuthors = filters.selectedAuthors,
     )
 }
 
@@ -95,8 +114,7 @@ private fun matchesMediaGridFilter(clip: MediaGridClipSource, prepared: Prepared
     val filters = prepared
     val options = filters.filters
     if (options.taggedOnly && clip.tagIds.isEmpty()) return false
-    val authorKey = TweetAuthorKey(clip.clip.authorId?.takeIf { it.isNotBlank() }, clip.clip.authorUsername.lowercase())
-    if (options.selectedAuthors.isNotEmpty() && authorKey !in options.selectedAuthors) return false
+    if (filters.selectedAuthors.isNotEmpty() && clip.authorKey !in filters.selectedAuthors) return false
     if (options.startDate != null || options.endDate != null) {
         val day = clip.postLocalEpochDay ?: return false
         if (options.startDate != null && day < options.startDate.toEpochDay()) return false
@@ -130,7 +148,7 @@ private data class MediaGridSortKey(
     val clipId: Long,
     val postTime: Long,
     val likeCount: Long,
-    val authorKey: String,
+    val authorKey: TweetAuthorKey,
     val authorNameKey: String,
     val authorCount: Int,
     val tagOrder: Int,
@@ -144,10 +162,9 @@ private fun sortMediaGridClips(
     filters: TweetFilterState,
     sort: ClassifiedSortState,
 ): List<MediaGridClipSource> {
-    val counts = HashMap<String, Int>()
-    clips.forEach { clip -> counts[clip.authorKey] = (counts[clip.authorKey] ?: 0) + 1 }
-    val tagOrder = mediaGridTagDisplayOrderIndex(hierarchy)
-    val candidates = mediaGridTagCandidateIds(filters, hierarchy)
+    val counts = if (sort.userEnabled) HashMap<TweetAuthorKey, Int>().also { map -> clips.forEach { clip -> map[clip.authorKey] = (map[clip.authorKey] ?: 0) + 1 } } else emptyMap()
+    val tagOrder = if (sort.tagEnabled) mediaGridTagDisplayOrderIndex(hierarchy) else emptyMap()
+    val candidates = if (sort.tagEnabled) mediaGridTagCandidateIds(filters, hierarchy) else emptySet()
     val prepared = ArrayList<PreparedMediaGridClip>(clips.size)
     clips.forEachIndexed { index, clip ->
         var representative = Int.MAX_VALUE

@@ -301,11 +301,11 @@ class UiStateRenderingTest {
                         ),
                         mediaGridState = ClassifiedMediaGridState(
                             entries = listOf(
-                                MediaGridEntry(21, 2, 21, "grid-photo", 0, "photo", "https://example.test/grid-photo.jpg", "downloaded", false, null, "2026-01-01T00:00:00Z", 1_234),
-                                MediaGridEntry(22, 2, 22, "grid-video", 1, "video_thumbnail", "https://example.test/grid-video.jpg", "downloaded", false, null, "2026-01-01T00:00:00Z", 1_234),
-                                MediaGridEntry(23, 2, 23, "grid-error", 2, "photo", null, "failed", false, null, "2026-01-01T00:00:00Z", 1_234),
-                                MediaGridEntry(24, 2, 24, "grid-missing", 3, "photo", "https://example.test/grid-missing.jpg", "downloaded", false, "/tmp/missing-grid.webp", "2026-01-01T00:00:00Z", 1_234),
-                                MediaGridEntry(25, 2, 25, "grid-photo-2", 4, "photo", "https://example.test/grid-photo-2.jpg", "downloaded", false, null, "2026-01-01T00:00:00Z", 1_234),
+                                MediaGridEntry(21, 2, 21, "grid-photo", 0, "photo", "https://example.test/grid-photo.jpg", "downloaded", null, "2026-01-01T00:00:00Z", 1_234),
+                                MediaGridEntry(22, 2, 22, "grid-video", 1, "video_thumbnail", "https://example.test/grid-video.jpg", "downloaded", null, "2026-01-01T00:00:00Z", 1_234),
+                                MediaGridEntry(23, 2, 23, "grid-error", 2, "photo", null, "failed", null, "2026-01-01T00:00:00Z", 1_234),
+                                MediaGridEntry(24, 2, 24, "grid-missing", 3, "photo", "https://example.test/grid-missing.jpg", "downloaded", "/tmp/missing-grid.webp", "2026-01-01T00:00:00Z", 1_234),
+                                MediaGridEntry(25, 2, 25, "grid-photo-2", 4, "photo", "https://example.test/grid-photo-2.jpg", "downloaded", null, "2026-01-01T00:00:00Z", 1_234),
                             ),
                             matchingClipCount = 1,
                             matchingMediaCount = 5,
@@ -466,10 +466,10 @@ class UiStateRenderingTest {
                         ),
                         mediaGridState = ClassifiedMediaGridState(
                             entries = listOf(
-                                MediaGridEntry(31, 1, 31, "like-photo", 0, "photo", "https://example.test/like-photo.jpg", "downloaded", false, null, "2026-01-01T00:00:00Z", 12_345),
-                                MediaGridEntry(32, 1, 32, "like-video", 1, "video_thumbnail", "https://example.test/like-video.jpg", "downloaded", false, null, "2026-01-01T00:00:00Z", 12_345),
-                                MediaGridEntry(33, 1, 33, "like-error", 2, "photo", null, "failed", false, null, "2026-01-01T00:00:00Z", 12_345),
-                                MediaGridEntry(41, 2, 41, "null-photo", 0, "photo", "https://example.test/null-photo.jpg", "downloaded", false, null, "2026-01-01T00:00:00Z", null),
+                                MediaGridEntry(31, 1, 31, "like-photo", 0, "photo", "https://example.test/like-photo.jpg", "downloaded", null, "2026-01-01T00:00:00Z", 12_345),
+                                MediaGridEntry(32, 1, 32, "like-video", 1, "video_thumbnail", "https://example.test/like-video.jpg", "downloaded", null, "2026-01-01T00:00:00Z", 12_345),
+                                MediaGridEntry(33, 1, 33, "like-error", 2, "photo", null, "failed", null, "2026-01-01T00:00:00Z", 12_345),
+                                MediaGridEntry(41, 2, 41, "null-photo", 0, "photo", "https://example.test/null-photo.jpg", "downloaded", null, "2026-01-01T00:00:00Z", null),
                             ),
                             matchingClipCount = 2,
                             matchingMediaCount = 4,
@@ -550,7 +550,6 @@ class UiStateRenderingTest {
                     type = asset.type,
                     displayUrl = asset.remoteUrl,
                     downloadState = asset.downloadState,
-                    hasLocalFile = false,
                     localPath = asset.localPath,
                     xCreatedAt = clip.clip.xCreatedAt,
                     likeCount = clip.clip.likeCount,
@@ -693,9 +692,9 @@ class UiStateRenderingTest {
         var openedClipId by mutableStateOf<Long?>(null)
         var applied by mutableStateOf<Pair<Set<Long>, Pair<Set<Long>, Set<Long>>>?>(null)
         val entries = listOf(
-            MediaGridEntry(101, 1, 101, "one-a", 0, "photo", "https://example.test/one-a.jpg", "downloaded", false, null, now, 99),
-            MediaGridEntry(102, 1, 102, "one-b", 1, "video_thumbnail", "https://example.test/one-b.jpg", "downloaded", false, null, now, 99),
-            MediaGridEntry(201, 2, 201, "two", 0, "photo", "https://example.test/two.jpg", "downloaded", false, null, now, 50),
+            MediaGridEntry(101, 1, 101, "one-a", 0, "photo", "https://example.test/one-a.jpg", "downloaded", null, now, 99),
+            MediaGridEntry(102, 1, 102, "one-b", 1, "video_thumbnail", "https://example.test/one-b.jpg", "downloaded", null, now, 99),
+            MediaGridEntry(201, 2, 201, "two", 0, "photo", "https://example.test/two.jpg", "downloaded", null, now, 50),
         )
         composeRule.setContent {
             MaterialTheme {

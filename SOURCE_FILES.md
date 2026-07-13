@@ -249,4 +249,4 @@ MainActivity / Compose UI
 - `docs/app/src/test/java/com/lyco256/llm/data/TagColorPaletteTest.kt.md`
 # メディアグリッド高速化の入口
 
-`MediaGridMetadata.kt`が軽量スナップショットの絞り込み・前計算キー生成・標準安定ソート・Asset展開・最大3件LRUキャッシュを担当する。DAO/RepositoryはAsset重複列を除外し、UIはCalculating/Readyと静的スケルトンを扱う。
+`MediaGridMetadata.kt`が軽量スナップショットの絞り込み・正規化済みcache key・実効sortだけの準備・標準安定ソート・Asset展開・最大3件LRUキャッシュを担当する。Repositoryのsourceはactive Clip/Asset/ClipTagの3 Flowだけで、タグIDの`LongArray`と前計算済み投稿者キーを保持する。保存順ではsortを省略し、cache hitでは`Calculating`を表示しない。

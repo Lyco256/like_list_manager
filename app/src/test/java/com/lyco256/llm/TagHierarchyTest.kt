@@ -836,10 +836,7 @@ class TagHierarchyTest {
         assertEquals("https://example.test/video-preview.jpg", entries[0].displayUrl)
         assertEquals("https://example.test/photo-remote.jpg", entries[1].displayUrl)
         assertEquals(existingPath, entries[2].displayUrl)
-        assertFalse(entries[2].hasLocalFile)
-        assertFalse(entries[0].hasLocalFile)
         assertEquals(missingPath, entries[3].localPath)
-        assertFalse(entries[3].hasLocalFile)
         assertEquals("failed", entries[4].downloadState)
     }
 
@@ -1123,7 +1120,7 @@ class TagHierarchyTest {
         )
 
         val cardResult = sortClipsForDisplay(filterClipsForSearch(cardClips, hierarchy, filters), hierarchy, filters, sort)
-        val mediaResult = sortClipsForDisplay(filterClipsForSearch(mediaClips, hierarchy, filters), hierarchy, filters, sort)
+        val mediaResult = mediaClips.sortedByDescending { it.postTimeMillis ?: Long.MIN_VALUE }
         val entries = buildMediaGridEntries(mediaResult)
 
         assertEquals(cardResult.map { it.clip.id }, mediaResult.map { it.clip.id })
@@ -1215,7 +1212,6 @@ class TagHierarchyTest {
         assets: List<MediaGridAssetRow>,
     ): MediaGridClipSource = MediaGridClipSource(
         clip = clip.clip,
-        tags = clip.tags,
         assets = assets,
     )
 

@@ -1,5 +1,6 @@
 ﻿package com.lyco256.llm.data
 
+import com.lyco256.llm.TweetAuthorKey
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -33,17 +34,16 @@ data class LikeCountRefreshEstimate(
 )
 
 data class MediaGridClipSource(
-    override val clip: ClipEntity,
-    override val tags: List<TagEntity>,
+    val clip: ClipEntity,
     val assets: List<MediaGridAssetRow>,
-    val tagIds: LongArray = tags.map { it.id }.toLongArray(),
+    val tagIds: LongArray = LongArray(0),
     val sourceIndex: Int = 0,
     val postTimeMillis: Long? = null,
     val postLocalEpochDay: Long? = null,
-    val authorKey: String = "",
+    val authorKey: TweetAuthorKey = TweetAuthorKey(clip.authorId?.takeIf { it.isNotBlank() }, clip.authorUsername.lowercase()),
     val authorNameKey: String = clip.authorUsername.lowercase(),
     val mediaAssetCount: Int = assets.count { it.assetType == "photo" || it.assetType == "video_thumbnail" },
-) : ClassifiedClipItem
+)
 
 data class MediaGridSourceSnapshot(val revision: Long, val clips: List<MediaGridClipSource>)
 
@@ -194,37 +194,30 @@ class ClipRepository(
     val mediaGridSource: Flow<MediaGridSourceSnapshot> = postStorageManager.database.flatMapLatest { database ->
         if (database == null) return@flatMapLatest flowOf(MediaGridSourceSnapshot(++mediaGridRevision, emptyList()))
         val clipDao = database.clipDao()
-        val tagDao = database.tagDao()
         combine(
             clipDao.observeActiveClips(),
             clipDao.observeActiveMediaGridAssetRows(),
             clipDao.observeActiveClipTags(),
-            tagDao.observeTags(),
-        ) { clips, assets, activeClipTags, tags ->
-            val tagsById = tags.associateBy { it.id }
-            val activeTagsByClip = HashMap<Long, LongArray>()
+        ) { clips, assets, activeClipTags ->
+            val activeTagsByClip = HashMap<Long, ArrayList<Long>>()
             activeClipTags.forEach { row ->
-                val current = activeTagsByClip[row.clipId]
-                activeTagsByClip[row.clipId] = if (current == null) longArrayOf(row.tagId) else current + row.tagId
+                activeTagsByClip.getOrPut(row.clipId) { ArrayList() }.add(row.tagId)
             }
             val assetsByClip = HashMap<Long, ArrayList<MediaGridAssetRow>>()
             assets.forEach { row -> assetsByClip.getOrPut(row.clipId) { ArrayList() }.add(row) }
 
             val snapshot = clips.mapIndexed { index, clip ->
                 val clipAssets = assetsByClip[clip.id].orEmpty()
-                val clipTagIds = activeTagsByClip[clip.id] ?: LongArray(0)
-                val clipTags = ArrayList<TagEntity>(clipTagIds.size)
-                clipTagIds.forEach { tagId -> tagsById[tagId]?.let(clipTags::add) }
+                val clipTagIds = activeTagsByClip[clip.id]?.toLongArray() ?: LongArray(0)
                 val postTime = runCatching { Instant.parse(clip.xCreatedAt).toEpochMilli() }.getOrNull()
                 MediaGridClipSource(
                     clip = clip,
-                    tags = clipTags,
                     assets = clipAssets,
                     tagIds = clipTagIds,
                     sourceIndex = index,
                     postTimeMillis = postTime,
                     postLocalEpochDay = postTime?.let { java.time.Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().toEpochDay() },
-                    authorKey = "${clip.authorId.orEmpty()}\u0000${clip.authorUsername.lowercase()}",
+                    authorKey = TweetAuthorKey(clip.authorId?.takeIf { it.isNotBlank() }, clip.authorUsername.lowercase()),
                     authorNameKey = clip.authorUsername.lowercase(),
                     mediaAssetCount = clipAssets.count { it.assetType == "photo" || it.assetType == "video_thumbnail" },
                 )
