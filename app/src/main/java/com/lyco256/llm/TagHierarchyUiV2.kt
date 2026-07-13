@@ -406,7 +406,7 @@ fun EnhancedClassifiedScreen(
                 mediaGridState.hasMatchingClipButNoMedia -> HierarchyEmptyState("この条件に一致する画像・動画サムネイルはありません")
                 else -> ClassifiedMediaGridContent(
                     items = mediaGridItems,
-                    sourceRevision = mediaGridState.sourceRevision.toInt(),
+                    sourceRevision = mediaGridState.sourceRevision,
                     sort = uiState.sort,
                     columnCount = mediaGridColumnCount,
                     state = mediaGridLazyState,
@@ -3277,7 +3277,7 @@ private fun MediaGridBulkTagDialog(
 @Composable
 private fun ClassifiedMediaGridContent(
     items: List<ClassifiedMediaGridItem>,
-    sourceRevision: Int,
+    sourceRevision: Long,
     sort: ClassifiedSortState,
     columnCount: Int,
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
@@ -3291,7 +3291,16 @@ private fun ClassifiedMediaGridContent(
 ) {
     val appContainer = (LocalContext.current.applicationContext as LikeListManagerApp).container
     val itemByKey = remember(items) { items.associateBy { it.key } }
-    LaunchedEffect(sourceRevision, columnCount) {
+    val thumbnailSurfaceVariant = MaterialTheme.colorScheme.surfaceVariant
+    val thumbnailBrush = remember(thumbnailSurfaceVariant) {
+        Brush.linearGradient(
+            listOf(
+                thumbnailSurfaceVariant,
+                thumbnailSurfaceVariant.copy(alpha = 0.72f),
+            ),
+        )
+    }
+    LaunchedEffect(sourceRevision) {
         appContainer.mediaGridThumbnailManager.updateSourceSnapshot(
             revision = sourceRevision,
             ordered = items.asSequence().filterIsInstance<MediaGridCellItem>().map { e ->
@@ -3349,6 +3358,7 @@ private fun ClassifiedMediaGridContent(
                     onToggleSelection = onToggleSelection,
                     thumbnailManager = appContainer.mediaGridThumbnailManager,
                     thumbnailImageLoader = appContainer.mediaGridImageLoader,
+                    thumbnailBrush = thumbnailBrush,
                 )
             }
         }
@@ -3393,10 +3403,14 @@ private fun captureClassifiedMediaGridScrollAnchor(
         }
 }
 
+@Composable
 private fun Modifier.mediaGridPinchToResize(
     currentColumnCount: Int,
     onColumnCountChange: (Int) -> Unit,
-): Modifier = pointerInput(currentColumnCount) {
+): Modifier {
+    val latestColumnCount by rememberUpdatedState(currentColumnCount)
+    val latestOnColumnCountChange by rememberUpdatedState(onColumnCountChange)
+    return pointerInput(Unit) {
     awaitEachGesture {
         var accumulatedScale = 1f
         var locked = false
@@ -3415,9 +3429,10 @@ private fun Modifier.mediaGridPinchToResize(
             val currentDistance = distanceBetween(pressed[0].position, pressed[1].position)
             if (previousDistance > 0f && currentDistance > 0f) {
                 accumulatedScale *= previousDistance / currentDistance
-                val nextColumnCount = classifiedMediaGridColumnCountForScale(currentColumnCount, accumulatedScale)
-                if (nextColumnCount != currentColumnCount) {
-                    onColumnCountChange(nextColumnCount)
+                val nextColumnCount = classifiedMediaGridColumnCountForScale(latestColumnCount, accumulatedScale)
+                val thresholdReached = accumulatedScale >= ClassifiedMediaGridPinchScaleStep || accumulatedScale <= 1f / ClassifiedMediaGridPinchScaleStep
+                if (thresholdReached) {
+                    if (nextColumnCount != latestColumnCount) latestOnColumnCountChange(nextColumnCount)
                     locked = true
                     event.changes.forEach { it.consume() }
                 }
@@ -3425,6 +3440,7 @@ private fun Modifier.mediaGridPinchToResize(
             if (event.changes.none { it.pressed }) break
         }
     }
+}
 }
 
 private fun distanceBetween(first: Offset, second: Offset): Float = hypot(first.x - second.x, first.y - second.y)
@@ -3463,6 +3479,7 @@ private fun ClassifiedMediaGridCell(
     onToggleSelection: (Long) -> Unit,
     thumbnailManager: com.lyco256.llm.data.MediaGridThumbnailManager,
     thumbnailImageLoader: coil.ImageLoader,
+    thumbnailBrush: Brush,
 ) {
     val resizeScale = remember { Animatable(1f) }
     LaunchedEffect(resizeAnimation.second) {
@@ -3470,7 +3487,8 @@ private fun ClassifiedMediaGridCell(
         resizeScale.snapTo(if (resizeAnimation.first > 0) 1.06f else 0.94f)
         resizeScale.animateTo(1f, tween(180))
     }
-    val thumbnailState by thumbnailManager.state(entry.assetId).collectAsState()
+    val thumbnailSource = MediaGridThumbnailSource(entry.assetId, entry.mediaKey, entry.localPath, entry.previewUrl ?: entry.remoteUrl ?: entry.displayUrl?.takeUnless { it == entry.localPath }, entry.remoteUrl, downloadState = entry.downloadState)
+    val thumbnailState by thumbnailManager.state(entry.assetId, thumbnailSource).collectAsState()
     val fallbackUrl = entry.previewUrl ?: entry.remoteUrl ?: entry.displayUrl?.takeUnless { it == entry.localPath }
     val error = thumbnailState is MediaGridThumbnailState.Failed || (entry.localPath == null && fallbackUrl == null) || entry.downloadState == "failed"
     val selectionIndicatorSize = mediaGridSelectionIndicatorSize(columnCount)
@@ -3503,14 +3521,7 @@ private fun ClassifiedMediaGridCell(
                 )
             }
             .testTag("media_grid_item_${entry.assetId}")
-            .background(
-                Brush.linearGradient(
-                    listOf(
-                        MaterialTheme.colorScheme.surfaceVariant,
-                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
-                    ),
-                ),
-            ),
+            .background(thumbnailBrush),
     ) {
         if (error) {
             Box(

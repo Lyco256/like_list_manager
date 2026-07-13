@@ -16,10 +16,13 @@ data class MediaGridViewportRequest(val source: MediaGridThumbnailSource, val di
 
 /** One serial worker. The queue is intentionally not materialized: every completion re-selects from the latest viewport. */
 class MediaGridThumbnailManager(private val store: MediaGridThumbnailStore, private val scope: CoroutineScope) {
-    private data class Work(val source: MediaGridThumbnailSource, val state: MutableStateFlow<MediaGridThumbnailState>)
+    private class Work(var source: MediaGridThumbnailSource, val state: MutableStateFlow<MediaGridThumbnailState>) {
+        var generation: Long = 0L
+    }
     private val works = LinkedHashMap<Long, Work>()
     private var sources = emptyList<MediaGridThumbnailSource>()
-    private var sourceRevision: Int? = null
+    private var sourceRevision: Long? = null
+    private var sourceByAssetId = emptyMap<Long, MediaGridThumbnailSource>()
     private var sourceIndex = emptyMap<Long, Int>()
     private var visible = emptyMap<Long, Int>()
     private var first = 0
@@ -32,16 +35,20 @@ class MediaGridThumbnailManager(private val store: MediaGridThumbnailStore, priv
     private var foreground = true
     private var job: Job? = null
 
-    @Synchronized fun updateSourceSnapshot(revision: Int, ordered: List<MediaGridThumbnailSource>) {
-        if (sourceRevision == revision && sources == ordered.distinctBy { it.assetId }) return
+    @Synchronized fun updateSourceSnapshot(revision: Long, ordered: List<MediaGridThumbnailSource>) {
+        val nextSources = ordered.distinctBy { it.assetId }
+        if (sourceRevision == revision && sources == nextSources) return
         sourceRevision = revision
-        sources = ordered.distinctBy { it.assetId }
+        sources = nextSources
+        sourceByAssetId = sources.associateBy { it.assetId }
         sourceIndex = sources.mapIndexed { i, source -> source.assetId to i }.toMap()
         works.entries.removeIf { it.key !in sourceIndex }
         sources.forEach { source ->
             val current = works[source.assetId]
-            if (current != null && current.source != source && current.state.value !is MediaGridThumbnailState.Generating) {
-                works[source.assetId] = Work(source, MutableStateFlow(initialState(source)))
+            if (current != null && current.source != source) {
+                current.source = source
+                current.generation++
+                current.state.value = initialState(source)
             }
         }
         startIfNeeded()
@@ -70,18 +77,20 @@ class MediaGridThumbnailManager(private val store: MediaGridThumbnailStore, priv
 
     @Synchronized fun setForeground(active: Boolean) { foreground = active; if (active) startIfNeeded() }
 
-    @Synchronized fun state(assetId: Long): StateFlow<MediaGridThumbnailState> = ensureWork(assetId).state
+    @Synchronized fun state(assetId: Long, source: MediaGridThumbnailSource): StateFlow<MediaGridThumbnailState> =
+        requireNotNull(ensureWork(assetId, source)).state
 
     @Synchronized fun onDisplayError(source: MediaGridThumbnailSource, file: File) {
+        if (sourceByAssetId[source.assetId] != source) return
         val key = cacheIdentity(source)
         store.invalidate(file)
         if ((displayRetries[key] ?: 0) >= 1) {
-            ensureWork(source.assetId).state.value = MediaGridThumbnailState.Failed
+            ensureWork(source.assetId, source)?.state?.value = MediaGridThumbnailState.Failed
             return
         }
         displayRetries[key] = 1
         completedKeys.remove(key)
-        ensureWork(source.assetId).state.value = MediaGridThumbnailState.Waiting
+        ensureWork(source.assetId, source)?.state?.value = MediaGridThumbnailState.Waiting
         startIfNeeded()
     }
 
@@ -89,9 +98,15 @@ class MediaGridThumbnailManager(private val store: MediaGridThumbnailStore, priv
         displayRetries.remove(cacheIdentity(source))
     }
 
-    private fun ensureWork(id: Long): Work = works.getOrPut(id) {
-        val source = sources.firstOrNull { it.assetId == id } ?: MediaGridThumbnailSource(id, "", null, null, null)
-        Work(source, MutableStateFlow(initialState(source)))
+    private fun ensureWork(id: Long, source: MediaGridThumbnailSource? = sourceByAssetId[id]): Work? {
+        if (source == null || source.assetId != id) return null
+        return works.getOrPut(id) { Work(source, MutableStateFlow(initialState(source))) }.also { work ->
+            if (work.source != source) {
+                work.source = source
+                work.generation++
+                work.state.value = initialState(source)
+            }
+        }
     }
 
     private fun pruneUiState() {
@@ -126,7 +141,7 @@ class MediaGridThumbnailManager(private val store: MediaGridThumbnailStore, priv
                 .filter { it in (first - columns * 50..last + columns * 50) }
                 .sortedWith(compareBy<Int> { kotlin.math.abs(it - center) }.thenBy { if (direction > 0) -it else it })
                 .mapNotNull { sources.getOrNull(it) }
-                .firstOrNull { cacheIdentity(it) !in completedKeys && !isKnownFailure(it) }
+                .firstOrNull { it.localPath != null && cacheIdentity(it) !in completedKeys && !isKnownFailure(it) }
             if (source == null) return
             generate(source, wide = true); return
         }
@@ -134,16 +149,21 @@ class MediaGridThumbnailManager(private val store: MediaGridThumbnailStore, priv
     }
 
     private fun generate(source: MediaGridThumbnailSource, wide: Boolean) {
-        val work = if (wide) null else ensureWork(source.assetId)
+        val work = if (wide) null else ensureWork(source.assetId, source)
+        val generation = work?.generation
         work?.let { it.state.value = MediaGridThumbnailState.Generating }
         job = scope.launch(Dispatchers.IO) {
             val startedSource = source
-            val result = runCatching { store.getOrCreate(startedSource, allowRemote = true) }
+            val result = runCatching { store.getOrCreate(startedSource, allowRemote = !wide) }
             if (wide) { yield(); delay(50) }
             synchronized(this@MediaGridThumbnailManager) {
-                val current = sources.firstOrNull { it.assetId == startedSource.assetId }
-                if (wide && result.isSuccess) completedKeys += cacheIdentity(startedSource)
-                if (work != null && current == startedSource) {
+                val current = sourceByAssetId[startedSource.assetId]
+                if (wide) {
+                    // A wide preparation is cache-only. Record failures too so a missing
+                    // local file is not retried on every 50ms scheduling pass.
+                    completedKeys += cacheIdentity(startedSource)
+                }
+                if (work != null && generation == work.generation && current == startedSource) {
                     work.state.value = result.fold({ completedKeys += cacheIdentity(startedSource); MediaGridThumbnailState.Ready(it) }, { MediaGridThumbnailState.Failed })
                 }
                 job = null; startIfNeeded()

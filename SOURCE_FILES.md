@@ -220,6 +220,13 @@ MainActivity / Compose UI
 - `MIXED` は全件削除予定と全件追加予定を交互に切り替え、適用確認後も複数選択状態を維持する。
 - いいね数見出しは2〜4列/5〜8列/9〜12列で200/500/1000単位、週見出しは月曜〜日曜の期間表示。
 
+## 2026-07-13 サムネイル状態遷移・ピンチロック残存修正
+
+- `MediaGridSourceSnapshot`、`ClassifiedMediaGridState`、UI、Thumbnail Managerのrevisionは全経路で`Long`を使い、変換・切り詰めを行わない。
+- Thumbnail ManagerはAsset IDからsourceをMapで参照し、AssetごとのStateFlowをsource変更後も維持する。source変更時はgeneration tokenで旧生成結果を破棄し、最新sourceをWaitingまたは既知のFailedへ戻す。
+- 初回セルは現在sourceをManagerへ渡すため空sourceのWorkを作らない。広範囲準備はlocalPathのみ・`allowRemote=false`で、欠落localPathのcache identityも完了扱いにして再試行ループを防ぐ。
+- ピンチ検出は安定したpointerInput keyと`rememberUpdatedState`を使い、閾値確定後は全指が離れるまでロックする。静的グラデーションBrushはグリッドで共有する。
+
 - `integrationTest` build typeは `com.lyco256.llm.test` と本番とは異なるDB、画像、Preferencesを使います。
 - テスト用Application containerは本番OAuth/X APIを無効化し、Repositoryテストだけが記録可能なFakeを注入します。
 - AndroidJUnitRunner、Compose UI Test、Room統合、MockWebServerで環境分離、同期、データ保持、画像、HTTP異常系、主要画面を検証します。

@@ -86,6 +86,14 @@
 
 ## 2026-07 media-grid thumbnail cache
 
+## 2026-07-13 thumbnail state transitions and pinch lock
+
+- Revision is `Long` from repository snapshot through UI and Thumbnail Manager; no `Int` conversion remains.
+- One Asset keeps the same StateFlow across source changes. A generation token prevents stale Ready/Failed publication, and the latest source is rescheduled from Waiting or known Failed.
+- Wide preparation only selects sources with `localPath` and calls the store with `allowRemote=false`; missing local files are recorded as completed for that cache identity and remain eligible for URL fallback when visible.
+- Pinch detection uses a stable pointer-input key, reads the latest column count/callback, commits at most one column, and remains locked through recomposition and reverse motion until all pointers are released. Boundary gestures at 2 and 12 columns also lock.
+- The grid creates the static skeleton gradient once and passes the shared Brush to cells.
+
 - `run-safe-debug-check.cmd`: Build、UnitTest、Lint 成功。
 - 実装: 256×256 JPEG quality 60、cacheDir再生成、inSampleSize縮小デコード、直列最新viewport優先、セル単位StateFlow、専用ImageLoader設定。
 - `run-safe-integration-check.cmd -DebugMethod wireless`: Success。隔離packageでIntegrationTestまで完了。
