@@ -970,8 +970,12 @@ class TagHierarchyTest {
         assertEquals(ClassifiedMediaGridDefaultColumnCount, classifiedMediaGridColumnCountForScale(4, 1f))
         assertEquals(5, classifiedMediaGridColumnCountForScale(4, 1.13f))
         assertEquals(3, classifiedMediaGridColumnCountForScale(4, 0.88f))
-        assertEquals(ClassifiedMediaGridMaxColumnCount, classifiedMediaGridColumnCountForScale(12, 2f))
+        assertEquals(5, classifiedMediaGridColumnCountForScale(4, 2f))
         assertEquals(ClassifiedMediaGridMinColumnCount, classifiedMediaGridColumnCountForScale(2, 0.2f))
+        assertEquals(2, classifiedMediaGridColumnCountForScale(2, 0.01f))
+        assertEquals(12, classifiedMediaGridColumnCountForScale(12, 2f))
+        assertEquals(4, classifiedMediaGridColumnCountForScale(4, Float.NaN))
+        assertEquals(4, classifiedMediaGridColumnCountForScale(4, Float.POSITIVE_INFINITY))
     }
 
     @Test

@@ -70,7 +70,13 @@
 - Wide preparation does not create Compose state, image requests, or per-asset Work objects, and never fetches preview/remote URLs. Application foreground/background callbacks allow the active item to finish, then pause.
 - `run-safe-debug-check.cmd` passed Build, UnitTest, and Lint after the change. Isolation-device verification remains required before production overwrite.
 
-隔離実機チェックは`run-safe-integration-check.cmd -DebugMethod wireless`で実施し、Build・UnitTest・Lint・IntegrationTestのSuccessを確認する。本命上書きは隔離チェック成功後に`run-safe-debug-check.cmd -InstallToDevice`で実施する。Paging、低解像度サムネイル、画像処理キュー、列数アニメーションは対象外。
+隔離実機チェックは`run-safe-integration-check.cmd -DebugMethod wireless`で実施し、Build・UnitTest・Lint・IntegrationTestのSuccessを確認する。本命上書きは隔離チェック成功後に`run-safe-debug-check.cmd -InstallToDevice`で実施する。Paging、低解像度サムネイル、画像処理キューは対象外。
+## 2026-07 single-step media-grid resize
+
+- Pinch direction recognition changes the column count by exactly one within 2–12 and locks further changes until all fingers are released, including reverse movement.
+- The animation starts at recognition time and applies only to currently composed media cells without fade or a second grid; the central Asset remains anchored across header changes.
+- Column changes do not regenerate or refetch completed thumbnails or rebuild the ordered source snapshot; the Thumbnail Manager receives the new column count with the latest viewport.
+
 ## 2026-07 media-grid thumbnail cache
 
 - `run-safe-debug-check.cmd`: Build、UnitTest、Lint 成功。

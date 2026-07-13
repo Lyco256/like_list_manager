@@ -4,6 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -319,6 +321,7 @@ fun EnhancedClassifiedScreen(
     var selectedMediaGridClipIds by remember { mutableStateOf(emptySet<Long>()) }
     var mediaGridSelectionMode by remember { mutableStateOf(false) }
     var bulkTagDialogOpen by remember { mutableStateOf(false) }
+    var mediaGridResizeAnimation by remember { mutableStateOf(0 to 0) }
     val itemKeys = remember(displayMode, uiState.clips, uiState.filters, uiState.sort, uiState.tagHierarchy) {
         if (displayMode == ClassifiedDisplayMode.Card) uiState.classified.map { it.clip.id } else emptyList()
     }
@@ -346,7 +349,13 @@ fun EnhancedClassifiedScreen(
         val targetIndex = mediaGridItems.indexOfFirst { it.key == anchor.key }
             .takeIf { it >= 0 }
             ?: anchor.index.coerceIn(0, mediaGridItems.lastIndex)
-        mediaGridLazyState.scrollToItem(targetIndex)
+        mediaGridLazyState.scrollToItem(targetIndex, anchor.offset)
+        withFrameNanos { }
+        val target = mediaGridLazyState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == anchor.key }
+        if (target != null) {
+            val viewportCenter = (mediaGridLazyState.layoutInfo.viewportStartOffset + mediaGridLazyState.layoutInfo.viewportEndOffset) / 2f
+            mediaGridLazyState.scrollBy(target.offset.y + target.size.height / 2f - viewportCenter - anchor.centerOffset)
+        }
     }
     BackHandler(enabled = displayMode == ClassifiedDisplayMode.MediaGrid && mediaGridSelectionMode && !bulkTagDialogOpen) {
         mediaGridSelectionMode = false
@@ -397,7 +406,11 @@ fun EnhancedClassifiedScreen(
                     sort = uiState.sort,
                     columnCount = mediaGridColumnCount,
                     state = mediaGridLazyState,
-                    onColumnCountChange = onMediaGridColumnCountChange,
+                    onColumnCountChange = { next ->
+                        mediaGridResizeAnimation = (if (next > mediaGridColumnCount) 1 else -1) to (mediaGridResizeAnimation.second + 1)
+                        onMediaGridColumnCountChange(next)
+                    },
+                    resizeAnimation = mediaGridResizeAnimation,
                     onCellClick = onMediaGridCellClick,
                     selectedClipIds = selectedVisibleMediaGridClipIds,
                     selectionMode = mediaGridSelectionMode,
@@ -2923,6 +2936,7 @@ private data class ClassifiedMediaGridScrollAnchor(
     val key: String,
     val index: Int,
     val offset: Int,
+    val centerOffset: Float,
 )
 
 internal fun buildClassifiedMediaGridItems(
@@ -2958,16 +2972,13 @@ internal fun classifiedMediaGridColumnCountForScale(
     var next = currentColumnCount.coerceIn(ClassifiedMediaGridMinColumnCount, ClassifiedMediaGridMaxColumnCount)
     if (!scale.isFinite() || scale <= 0f) return next
 
-    var accumulatedScale = scale
-    while (accumulatedScale >= ClassifiedMediaGridPinchScaleStep && next < ClassifiedMediaGridMaxColumnCount) {
-        next += 1
-        accumulatedScale /= ClassifiedMediaGridPinchScaleStep
+    return when {
+        scale >= ClassifiedMediaGridPinchScaleStep ->
+            (next + 1).coerceAtMost(ClassifiedMediaGridMaxColumnCount)
+        scale <= 1f / ClassifiedMediaGridPinchScaleStep ->
+            (next - 1).coerceAtLeast(ClassifiedMediaGridMinColumnCount)
+        else -> next
     }
-    while (accumulatedScale <= 1f / ClassifiedMediaGridPinchScaleStep && next > ClassifiedMediaGridMinColumnCount) {
-        next -= 1
-        accumulatedScale *= ClassifiedMediaGridPinchScaleStep
-    }
-    return next.coerceIn(ClassifiedMediaGridMinColumnCount, ClassifiedMediaGridMaxColumnCount)
 }
 
 private fun mediaGridCellKey(entry: MediaGridEntry): String = "media_grid_item_${entry.assetId}"
@@ -3264,6 +3275,7 @@ private fun ClassifiedMediaGridContent(
     columnCount: Int,
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
     onColumnCountChange: (Int) -> Unit,
+    resizeAnimation: Pair<Int, Int>,
     selectionMode: Boolean,
     multiAssetClipIds: Set<Long>,
     onCellClick: (Long) -> Unit,
@@ -3271,7 +3283,7 @@ private fun ClassifiedMediaGridContent(
     onToggleSelection: (Long) -> Unit,
 ) {
     val appContainer = (LocalContext.current.applicationContext as LikeListManagerApp).container
-    LaunchedEffect(sourceRevision, items) {
+    LaunchedEffect(sourceRevision) {
         appContainer.mediaGridThumbnailManager.updateSourceSnapshot(
             revision = sourceRevision,
             ordered = items.asSequence().filterIsInstance<MediaGridCellItem>().map { e ->
@@ -3283,7 +3295,7 @@ private fun ClassifiedMediaGridContent(
     DisposableEffect(Unit) {
         onDispose { appContainer.mediaGridThumbnailManager.updateViewport(emptyList(), columnCount) }
     }
-    LaunchedEffect(state, items) {
+    LaunchedEffect(state, items, columnCount) {
         snapshotFlow { state.layoutInfo }.collect { layout ->
             val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2f
             appContainer.mediaGridThumbnailManager.updateViewport(layout.visibleItemsInfo.mapNotNull { info ->
@@ -3316,9 +3328,11 @@ private fun ClassifiedMediaGridContent(
             when (item) {
                 is MediaGridHeaderItem -> ClassifiedMediaGridHeader(item)
                 is MediaGridCellItem -> ClassifiedMediaGridCell(
+                    modifier = Modifier.animateItem(),
                     entry = item.entry,
                     sort = sort,
                     columnCount = columnCount,
+                    resizeAnimation = resizeAnimation,
                     selectionMode = selectionMode,
                     multiAsset = item.entry.clipId in multiAssetClipIds,
                     selected = item.entry.clipId in selectedClipIds,
@@ -3360,10 +3374,12 @@ private fun captureClassifiedMediaGridScrollAnchor(
             abs(itemCenterY - viewportCenterY)
         }
         ?.let { info ->
+            val itemCenterY = info.offset.y + info.size.height / 2f
             ClassifiedMediaGridScrollAnchor(
                 key = info.key as String,
                 index = info.index,
                 offset = info.offset.y,
+                centerOffset = itemCenterY - viewportCenterY,
             )
         }
 }
@@ -3374,11 +3390,16 @@ private fun Modifier.mediaGridPinchToResize(
 ): Modifier = pointerInput(currentColumnCount) {
     awaitEachGesture {
         var accumulatedScale = 1f
+        var locked = false
         while (true) {
             val event = awaitPointerEvent()
             val pressed = event.changes.filter { it.pressed }
             if (pressed.size < 2) {
                 if (event.changes.none { it.pressed }) break
+                continue
+            }
+            if (locked) {
+                event.changes.forEach { it.consume() }
                 continue
             }
             val previousDistance = distanceBetween(pressed[0].previousPosition, pressed[1].previousPosition)
@@ -3388,8 +3409,8 @@ private fun Modifier.mediaGridPinchToResize(
                 val nextColumnCount = classifiedMediaGridColumnCountForScale(currentColumnCount, accumulatedScale)
                 if (nextColumnCount != currentColumnCount) {
                     onColumnCountChange(nextColumnCount)
+                    locked = true
                     event.changes.forEach { it.consume() }
-                    break
                 }
             }
             if (event.changes.none { it.pressed }) break
@@ -3421,9 +3442,11 @@ private fun ClassifiedMediaGridHeader(item: MediaGridHeaderItem) {
 
 @Composable
 private fun ClassifiedMediaGridCell(
+    modifier: Modifier = Modifier,
     entry: MediaGridEntry,
     sort: ClassifiedSortState,
     columnCount: Int,
+    resizeAnimation: Pair<Int, Int>,
     selectionMode: Boolean,
     multiAsset: Boolean,
     selected: Boolean,
@@ -3432,6 +3455,12 @@ private fun ClassifiedMediaGridCell(
     thumbnailManager: com.lyco256.llm.data.MediaGridThumbnailManager,
     thumbnailImageLoader: coil.ImageLoader,
 ) {
+    val resizeScale = remember { Animatable(1f) }
+    LaunchedEffect(resizeAnimation.second) {
+        if (resizeAnimation.second == 0) return@LaunchedEffect
+        resizeScale.snapTo(if (resizeAnimation.first > 0) 1.06f else 0.94f)
+        resizeScale.animateTo(1f, tween(180))
+    }
     val thumbnailState by thumbnailManager.state(entry.assetId).collectAsState()
     val invalidLocalPath = entry.localPath?.let { !java.io.File(it).isFile } == true
     val error = thumbnailState is MediaGridThumbnailState.Failed || entry.displayUrl == null || invalidLocalPath
@@ -3443,9 +3472,13 @@ private fun ClassifiedMediaGridCell(
     val selectionBackground = mediaGridSelectionBackground(MaterialTheme.colorScheme.primary, multiAsset)
     val selectionCheckColor = if (multiAsset) Color.White else Color.Black
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .aspectRatio(1f)
+            .graphicsLayer {
+                scaleX = resizeScale.value
+                scaleY = resizeScale.value
+            }
             .pointerInput(entry.clipId, selectionMode) {
                 detectTapGestures(
                     onLongPress = {

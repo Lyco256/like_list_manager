@@ -15,6 +15,11 @@
 
 # Source Files Guide
 
+## 2026-07 single-step media-grid resize
+
+- Media-grid pinch resizing changes exactly one column at direction recognition, locks until all pointers are released, and animates only composed media cells.
+- Stable asset keys and center offsets preserve the central asset across header regrouping. Resize updates the latest viewport without rebuilding the ordered source snapshot or thumbnails.
+
 この文書は、like list managerの全体構成、現状の実装、変更時に最初に読む個別文書への索引です。
 
 個別ソースの説明は `docs/` 配下に、ソースと同じディレクトリ構造で配置しています。ファイル名は元ソース名に `.md` を追加した形式です。
