@@ -20,6 +20,7 @@ import java.security.MessageDigest
 data class MediaGridThumbnailSource(
     val assetId: Long, val mediaKey: String, val localPath: String?,
     val previewUrl: String?, val remoteUrl: String?, val size: Long = 0L, val modified: Long = 0L,
+    val downloadState: String? = null,
 )
 
 class MediaGridThumbnailStore(context: Context) {

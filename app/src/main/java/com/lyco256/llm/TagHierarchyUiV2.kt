@@ -3291,7 +3291,7 @@ private fun ClassifiedMediaGridContent(
             revision = sourceRevision,
             ordered = items.asSequence().filterIsInstance<MediaGridCellItem>().map { e ->
                 val a = e.entry
-                MediaGridThumbnailSource(a.assetId, a.mediaKey, a.localPath, a.previewUrl ?: a.remoteUrl ?: a.displayUrl?.takeUnless { it == a.localPath }, a.remoteUrl)
+                MediaGridThumbnailSource(a.assetId, a.mediaKey, a.localPath, a.previewUrl ?: a.remoteUrl ?: a.displayUrl?.takeUnless { it == a.localPath }, a.remoteUrl, downloadState = a.downloadState)
             }.toList(),
         )
     }
@@ -3304,7 +3304,7 @@ private fun ClassifiedMediaGridContent(
             appContainer.mediaGridThumbnailManager.updateViewport(layout.visibleItemsInfo.mapNotNull { info ->
                 val item = itemByKey[info.key] as? MediaGridCellItem ?: return@mapNotNull null
                 val e = item.entry
-                MediaGridViewportRequest(MediaGridThumbnailSource(e.assetId, e.mediaKey, e.localPath, e.previewUrl ?: e.remoteUrl ?: e.displayUrl?.takeUnless { it == e.localPath }, e.remoteUrl), kotlin.math.abs((info.offset.y + info.size.height / 2f - center).toInt()), info.index)
+                MediaGridViewportRequest(MediaGridThumbnailSource(e.assetId, e.mediaKey, e.localPath, e.previewUrl ?: e.remoteUrl ?: e.displayUrl?.takeUnless { it == e.localPath }, e.remoteUrl, downloadState = e.downloadState), kotlin.math.abs((info.offset.y + info.size.height / 2f - center).toInt()), info.index)
             }, columnCount)
         }
     }
@@ -3528,8 +3528,8 @@ private fun ClassifiedMediaGridCell(
                     imageLoader = thumbnailImageLoader,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
-                    onSuccess = { thumbnailManager.onDisplaySuccess(MediaGridThumbnailSource(entry.assetId, entry.mediaKey, entry.localPath, entry.previewUrl ?: entry.remoteUrl ?: entry.displayUrl?.takeUnless { it == entry.localPath }, entry.remoteUrl)) },
-                    onError = { thumbnailManager.onDisplayError(MediaGridThumbnailSource(entry.assetId, entry.mediaKey, entry.localPath, entry.previewUrl ?: entry.remoteUrl ?: entry.displayUrl?.takeUnless { it == entry.localPath }, entry.remoteUrl), (thumbnailState as MediaGridThumbnailState.Ready).file) },
+                    onSuccess = { thumbnailManager.onDisplaySuccess(MediaGridThumbnailSource(entry.assetId, entry.mediaKey, entry.localPath, entry.previewUrl ?: entry.remoteUrl ?: entry.displayUrl?.takeUnless { it == entry.localPath }, entry.remoteUrl, downloadState = entry.downloadState)) },
+                    onError = { thumbnailManager.onDisplayError(MediaGridThumbnailSource(entry.assetId, entry.mediaKey, entry.localPath, entry.previewUrl ?: entry.remoteUrl ?: entry.displayUrl?.takeUnless { it == entry.localPath }, entry.remoteUrl, downloadState = entry.downloadState), (thumbnailState as MediaGridThumbnailState.Ready).file) },
                 )
         }
         if (!selectionMode && sort.baseOrder == ClassifiedSortBase.LikeCount && entry.likeCount != null) {

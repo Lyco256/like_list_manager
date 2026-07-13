@@ -41,7 +41,7 @@ class MediaGridThumbnailManager(private val store: MediaGridThumbnailStore, priv
         sources.forEach { source ->
             val current = works[source.assetId]
             if (current != null && current.source != source && current.state.value !is MediaGridThumbnailState.Generating) {
-                works[source.assetId] = Work(source, MutableStateFlow(MediaGridThumbnailState.Waiting))
+                works[source.assetId] = Work(source, MutableStateFlow(initialState(source)))
             }
         }
         startIfNeeded()
@@ -90,7 +90,8 @@ class MediaGridThumbnailManager(private val store: MediaGridThumbnailStore, priv
     }
 
     private fun ensureWork(id: Long): Work = works.getOrPut(id) {
-        Work(sources.firstOrNull { it.assetId == id } ?: MediaGridThumbnailSource(id, "", null, null, null), MutableStateFlow(MediaGridThumbnailState.Waiting))
+        val source = sources.firstOrNull { it.assetId == id } ?: MediaGridThumbnailSource(id, "", null, null, null)
+        Work(source, MutableStateFlow(initialState(source)))
     }
 
     private fun pruneUiState() {
@@ -114,18 +115,18 @@ class MediaGridThumbnailManager(private val store: MediaGridThumbnailStore, priv
                 if (source?.previewUrl == null && source?.remoteUrl == null) 0 else 1
             })
             .mapNotNull { (id, _) -> works[id] }
-            .firstOrNull { it.state.value is MediaGridThumbnailState.Waiting }
+            .firstOrNull { it.state.value is MediaGridThumbnailState.Waiting && !isKnownFailure(it.source) }
             ?: sources.indices.asSequence()
                 .filter { it in (first - columns..last + columns) && sources[it].assetId !in visible }
                 .sortedWith(compareBy<Int> { kotlin.math.abs(it - center) }.thenBy { if (direction > 0) -it else it })
                 .mapNotNull { works[sources[it].assetId] }
-                .firstOrNull { it.state.value is MediaGridThumbnailState.Waiting }
+                .firstOrNull { it.state.value is MediaGridThumbnailState.Waiting && !isKnownFailure(it.source) }
         if (candidate == null) {
             val source = sources.indices.asSequence()
                 .filter { it in (first - columns * 50..last + columns * 50) }
                 .sortedWith(compareBy<Int> { kotlin.math.abs(it - center) }.thenBy { if (direction > 0) -it else it })
                 .mapNotNull { sources.getOrNull(it) }
-                .firstOrNull { cacheIdentity(it) !in completedKeys }
+                .firstOrNull { cacheIdentity(it) !in completedKeys && !isKnownFailure(it) }
             if (source == null) return
             generate(source, wide = true); return
         }
@@ -151,4 +152,10 @@ class MediaGridThumbnailManager(private val store: MediaGridThumbnailStore, priv
     }
 
     private fun cacheIdentity(source: MediaGridThumbnailSource) = listOf(source.assetId, source.mediaKey, source.localPath, source.previewUrl, source.remoteUrl, source.size, source.modified).joinToString("|")
+
+    private fun isKnownFailure(source: MediaGridThumbnailSource) =
+        source.downloadState == "failed" || (source.localPath == null && source.previewUrl == null && source.remoteUrl == null)
+
+    private fun initialState(source: MediaGridThumbnailSource) =
+        if (isKnownFailure(source)) MediaGridThumbnailState.Failed else MediaGridThumbnailState.Waiting
 }

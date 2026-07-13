@@ -146,15 +146,24 @@ class MainActivityComposeTest {
     @Test
     fun classifiedDisplayToggleSwitchesBetweenCardAndMediaGridAndSurvivesActivityRecreation() {
         fun waitDisplayed(tag: String) {
-            composeRule.waitUntil(30_000) {
-                runCatching {
-                    composeRule.onNodeWithTag(tag, useUnmergedTree = true).assertIsDisplayed()
-                    true
-                }.getOrDefault(false)
+            runCatching {
+                composeRule.waitUntil(30_000) {
+                    runCatching {
+                        composeRule.onNodeWithTag(tag, useUnmergedTree = true).assertIsDisplayed()
+                        true
+                    }.getOrDefault(false)
+                }
+            }.getOrElse { cause ->
+                throw AssertionError("Timed out waiting for displayed testTag: $tag", cause)
             }
         }
         val now = Instant.now().toString()
-        val missingPath = File(storage().imageDirectory(), "classified-grid-missing.webp").absolutePath
+        val photoPath = File(storage().imageDirectory(), "classified-grid-photo.webp").apply {
+            writeBytes(bitmapBytes(4, 4, android.graphics.Color.RED))
+        }.absolutePath
+        val videoPath = File(storage().imageDirectory(), "classified-grid-video.webp").apply {
+            writeBytes(bitmapBytes(4, 4, android.graphics.Color.BLUE))
+        }.absolutePath
         val clipAndAssetIds = runBlocking {
             storage().withDatabase { database ->
                 val clipId = database.clipDao().insertClip(
@@ -183,9 +192,9 @@ class MainActivityComposeTest {
                             clipId = clipId,
                             mediaKey = "grid-photo",
                             type = "photo",
-                            remoteUrl = "https://example.test/grid-photo.jpg",
+                            remoteUrl = null,
                             previewUrl = null,
-                            localPath = null,
+                            localPath = photoPath,
                             width = 1200,
                             height = 1200,
                             sizeBytes = null,
@@ -197,8 +206,8 @@ class MainActivityComposeTest {
                             mediaKey = "grid-video",
                             type = "video_thumbnail",
                             remoteUrl = null,
-                            previewUrl = "https://example.test/grid-video.jpg",
-                            localPath = null,
+                            previewUrl = null,
+                            localPath = videoPath,
                             width = 1200,
                             height = 1200,
                             sizeBytes = null,
@@ -211,7 +220,7 @@ class MainActivityComposeTest {
                             type = "photo",
                             remoteUrl = null,
                             previewUrl = null,
-                            localPath = missingPath,
+                            localPath = null,
                             width = 1200,
                             height = 1200,
                             sizeBytes = null,
