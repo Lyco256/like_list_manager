@@ -385,6 +385,10 @@ fun EnhancedClassifiedScreen(
                 uiState = uiState,
                 hierarchy = uiState.tagHierarchy,
                 displayMode = displayMode,
+                matchingClipCount = when (mediaGridState.status) {
+                    MediaGridLoadStatus.Calculating -> null
+                    MediaGridLoadStatus.Ready -> mediaGridState.matchingClipCount
+                },
                 onOpen = { filterDialogOpen = true },
                 onOpenSort = { sortDialogOpen = true },
                 onToggleDisplayMode = onToggleDisplayMode,
@@ -402,7 +406,7 @@ fun EnhancedClassifiedScreen(
                 mediaGridState.hasMatchingClipButNoMedia -> HierarchyEmptyState("この条件に一致する画像・動画サムネイルはありません")
                 else -> ClassifiedMediaGridContent(
                     items = mediaGridItems,
-                    sourceRevision = mediaGridState.sourceRevision,
+                    sourceRevision = mediaGridState.sourceRevision.toInt(),
                     sort = uiState.sort,
                     columnCount = mediaGridColumnCount,
                     state = mediaGridLazyState,
@@ -487,7 +491,7 @@ fun EnhancedClassifiedScreen(
     }
     if (bulkTagDialogOpen && selectedVisibleMediaGridClipIds.isNotEmpty()) {
         val initialTagStates = aggregateBulkTagStates(
-            selectedVisibleMediaGridClipIds.map { mediaGridState.tagIdsByClip[it].orEmpty() },
+            selectedVisibleMediaGridClipIds.map { (mediaGridState.tagIdsByClip[it] ?: LongArray(0)).toSet() },
             uiState.tagHierarchy.tags.map { it.tag.id },
         )
         MediaGridBulkTagDialog(
@@ -1208,6 +1212,7 @@ private fun TagFilterSummaryRow(
     uiState: MainUiState,
     hierarchy: TagHierarchy,
     displayMode: ClassifiedDisplayMode,
+    matchingClipCount: Int?,
     onOpen: () -> Unit,
     onOpenSort: () -> Unit,
     onToggleDisplayMode: () -> Unit,
@@ -1230,7 +1235,7 @@ private fun TagFilterSummaryRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "一致件数:${uiState.classified.size}件",
+                "一致件数:${if (displayMode == ClassifiedDisplayMode.MediaGrid) matchingClipCount?.toString() ?: "計算中" else uiState.classified.size}件",
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.labelSmall,

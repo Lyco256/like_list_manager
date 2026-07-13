@@ -15,6 +15,12 @@
 
 # Source Files Guide
 
+## 2026-07-13 card/grid duplicate-work removal
+
+- `MainUiState`の未分類・投稿者候補・分類済み一覧は遅延評価し、グリッド経路はカード一覧・スクロールキー・item keyを評価しない。
+- Repositoryは明示的なrevision付き`MediaGridSourceSnapshot`を発行し、投稿日・local day・投稿者正規化・タグID配列・対象Asset件数をsource更新時に前計算する。
+- グリッド結果cacheはsource revisionとタグ構造revisionを使い、全source/階層の`hashCode()`を使わない。`tagIdsByClip`は`LongArray`で保持し、一括タグDialog境界だけ集合化する。
+
 ## 2026-07 single-step media-grid resize
 
 - Media-grid pinch resizing changes exactly one column at direction recognition, locks until all pointers are released, and animates only composed media cells.

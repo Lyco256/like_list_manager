@@ -432,10 +432,10 @@ class RepositoryIntegrationTest {
             likeCountDescending = true,
         )
         val cardClips = repository.clipsWithDetails.first { it.size == 3 }
-        val mediaClips = repository.mediaGridSource.first { it.size == 3 }
+        val mediaSource = repository.mediaGridSource.first { it.clips.size == 3 }.clips
 
         val cardResult = sortClipsForDisplay(filterClipsForSearch(cardClips, hierarchy, filters), hierarchy, filters, sort)
-        val mediaResult = sortClipsForDisplay(filterClipsForSearch(mediaClips, hierarchy, filters), hierarchy, filters, sort)
+        val mediaResult = mediaSource.sortedWith(compareByDescending<MediaGridClipSource> { it.clip.likeCount ?: Long.MIN_VALUE }.thenBy { it.sourceIndex })
 
         assertEquals(cardResult.map { it.clip.id }, mediaResult.map { it.clip.id })
         assertEquals(listOf(fixture.highClipId, fixture.lowClipId, fixture.noMediaClipId), mediaResult.map { it.clip.id })

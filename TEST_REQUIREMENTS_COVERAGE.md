@@ -65,6 +65,12 @@
 
 ## 2026-07-13 wide thumbnail preparation
 
+## 2026-07-13 card/grid duplicate-work removal
+
+- ローカル安全確認: `run-safe-debug-check.cmd` のBuild / UnitTest / Lint / Successを確認。
+- 実装確認対象: MainUiState遅延評価、カード経路限定scroll key、明示的source revision、タグ構造revision、source更新時前計算、LongArrayタグ保持、グリッドmatchingClipCount表示。
+- 隔離実機: `run-safe-integration-check.cmd -DebugMethod wireless` を本命上書き前に実行する。
+
 - Manager receives the ordered source snapshot once per grid item revision; viewport updates do not rebuild the full source list.
 - Serial priority is visible cells, adjacent UI rows, then the current viewport's 50-row local-file range. Selection is recomputed after each completion, with yield and 50 ms pacing for wide preparation.
 - Wide preparation does not create Compose state, image requests, or per-asset Work objects, and never fetches preview/remote URLs. Application foreground/background callbacks allow the active item to finish, then pause.

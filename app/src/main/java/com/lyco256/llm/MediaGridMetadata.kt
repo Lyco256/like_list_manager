@@ -21,14 +21,14 @@ internal class MediaGridMetadataCache(private val maxEntries: Int = 3) {
 }
 
 internal data class MediaGridCacheKey(
-    val sourceRevision: Int,
-    val hierarchyRevision: Int,
+    val sourceRevision: Long,
+    val hierarchyRevision: Long,
     val filter: TweetFilterState,
     val sort: ClassifiedSortState,
 )
 
 internal suspend fun prepareMediaGridMetadata(
-    source: List<MediaGridClipSource>,
+    snapshot: com.lyco256.llm.data.MediaGridSourceSnapshot,
     hierarchy: com.lyco256.llm.data.TagHierarchy,
     filters: TweetFilterState,
     sort: ClassifiedSortState,
@@ -38,6 +38,7 @@ internal suspend fun prepareMediaGridMetadata(
     cache.get(key)?.let { return@withContext it }
     Trace.beginSection("MediaGridMetadataPrepare")
     try {
+        val source = snapshot.clips
         val filtered = ArrayList<MediaGridClipSource>(source.size)
         Trace.beginSection("MediaGridFilter")
         val preparedFilter = prepareMediaGridFilter(hierarchy, filters)
@@ -52,9 +53,9 @@ internal suspend fun prepareMediaGridMetadata(
         val result = ClassifiedMediaGridState(
             sourceRevision = key.sourceRevision,
             entries = buildMediaGridEntries(ordered),
-            tagIdsByClip = filtered.associate { it.clip.id to it.tagIds.toSet() },
+            tagIdsByClip = filtered.associate { it.clip.id to it.tagIds },
             matchingClipCount = filtered.size,
-            matchingMediaCount = ordered.sumOf { it.assets.count { a -> a.assetType == "photo" || a.assetType == "video_thumbnail" } },
+            matchingMediaCount = ordered.sumOf { it.mediaAssetCount },
             isEmptyByFilter = filtered.isEmpty(),
             hasMatchingClipButNoMedia = filtered.isNotEmpty() && ordered.none { it.assets.any { a -> a.assetType == "photo" || a.assetType == "video_thumbnail" } },
         )
@@ -97,9 +98,9 @@ private fun matchesMediaGridFilter(clip: MediaGridClipSource, prepared: Prepared
     val authorKey = TweetAuthorKey(clip.clip.authorId?.takeIf { it.isNotBlank() }, clip.clip.authorUsername.lowercase())
     if (options.selectedAuthors.isNotEmpty() && authorKey !in options.selectedAuthors) return false
     if (options.startDate != null || options.endDate != null) {
-        val date = runCatching { Instant.parse(clip.clip.xCreatedAt).atZone(ZoneId.systemDefault()).toLocalDate() }.getOrNull() ?: return false
-        if (options.startDate != null && date.isBefore(options.startDate)) return false
-        if (options.endDate != null && date.isAfter(options.endDate)) return false
+        val day = clip.postLocalEpochDay ?: return false
+        if (options.startDate != null && day < options.startDate.toEpochDay()) return false
+        if (options.endDate != null && day > options.endDate.toEpochDay()) return false
     }
     if (clip.tagIds.isEmpty() && filters.included.isNotEmpty()) return false
     fun matches(target: Set<Long>): Boolean {
@@ -144,18 +145,18 @@ private fun sortMediaGridClips(
     sort: ClassifiedSortState,
 ): List<MediaGridClipSource> {
     val counts = HashMap<String, Int>()
-    clips.forEach { clip -> counts[clip.clip.authorId.orEmpty() + "\u0000" + clip.clip.authorUsername.lowercase()] = (counts[clip.clip.authorId.orEmpty() + "\u0000" + clip.clip.authorUsername.lowercase()] ?: 0) + 1 }
+    clips.forEach { clip -> counts[clip.authorKey] = (counts[clip.authorKey] ?: 0) + 1 }
     val tagOrder = mediaGridTagDisplayOrderIndex(hierarchy)
     val candidates = mediaGridTagCandidateIds(filters, hierarchy)
     val prepared = ArrayList<PreparedMediaGridClip>(clips.size)
     clips.forEachIndexed { index, clip ->
         var representative = Int.MAX_VALUE
         clip.tagIds.forEach { id -> if (candidates.isEmpty() || id in candidates) representative = minOf(representative, tagOrder[id] ?: Int.MAX_VALUE) }
-        val authorName = clip.clip.authorUsername.lowercase()
-        val authorKey = clip.clip.authorId.orEmpty() + "\u0000" + authorName
+        val authorName = clip.authorNameKey
+        val authorKey = clip.authorKey
         prepared += PreparedMediaGridClip(
             clip,
-            MediaGridSortKey(index, clip.clip.id, runCatching { Instant.parse(clip.clip.xCreatedAt).toEpochMilli() }.getOrDefault(Long.MIN_VALUE), clip.clip.likeCount ?: Long.MIN_VALUE, authorKey, authorName, counts[authorKey] ?: 0, representative),
+            MediaGridSortKey(clip.sourceIndex, clip.clip.id, clip.postTimeMillis ?: Long.MIN_VALUE, clip.clip.likeCount ?: Long.MIN_VALUE, authorKey, authorName, counts[authorKey] ?: 0, representative),
         )
     }
     prepared.sortWith(Comparator { left, right ->

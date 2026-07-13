@@ -707,7 +707,7 @@ class UiStateRenderingTest {
                         ),
                         mediaGridState = ClassifiedMediaGridState(
                             entries = entries,
-                            tagIdsByClip = mapOf(1L to setOf(10L), 2L to setOf(11L)),
+                            tagIdsByClip = mapOf(1L to longArrayOf(10L), 2L to longArrayOf(11L)),
                             matchingClipCount = 2,
                             matchingMediaCount = 3,
                             isEmptyByFilter = false,

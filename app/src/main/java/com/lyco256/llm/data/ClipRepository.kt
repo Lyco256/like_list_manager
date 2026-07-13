@@ -21,6 +21,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.time.Instant
 import java.time.YearMonth
+import java.time.ZoneId
 
 private const val WEBP_QUALITY = 85
 private const val LIKE_COUNT_FINAL_AFTER_DAYS = 7L
@@ -36,7 +37,15 @@ data class MediaGridClipSource(
     override val tags: List<TagEntity>,
     val assets: List<MediaGridAssetRow>,
     val tagIds: LongArray = tags.map { it.id }.toLongArray(),
+    val sourceIndex: Int = 0,
+    val postTimeMillis: Long? = null,
+    val postLocalEpochDay: Long? = null,
+    val authorKey: String = "",
+    val authorNameKey: String = clip.authorUsername.lowercase(),
+    val mediaAssetCount: Int = assets.count { it.assetType == "photo" || it.assetType == "video_thumbnail" },
 ) : ClassifiedClipItem
+
+data class MediaGridSourceSnapshot(val revision: Long, val clips: List<MediaGridClipSource>)
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ClipRepository(
@@ -181,8 +190,9 @@ class ClipRepository(
         }
     }
 
-    val mediaGridSource: Flow<List<MediaGridClipSource>> = postStorageManager.database.flatMapLatest { database ->
-        if (database == null) return@flatMapLatest flowOf(emptyList())
+    private var mediaGridRevision = 0L
+    val mediaGridSource: Flow<MediaGridSourceSnapshot> = postStorageManager.database.flatMapLatest { database ->
+        if (database == null) return@flatMapLatest flowOf(MediaGridSourceSnapshot(++mediaGridRevision, emptyList()))
         val clipDao = database.clipDao()
         val tagDao = database.tagDao()
         combine(
@@ -200,18 +210,26 @@ class ClipRepository(
             val assetsByClip = HashMap<Long, ArrayList<MediaGridAssetRow>>()
             assets.forEach { row -> assetsByClip.getOrPut(row.clipId) { ArrayList() }.add(row) }
 
-            clips.map { clip ->
+            val snapshot = clips.mapIndexed { index, clip ->
                 val clipAssets = assetsByClip[clip.id].orEmpty()
                 val clipTagIds = activeTagsByClip[clip.id] ?: LongArray(0)
                 val clipTags = ArrayList<TagEntity>(clipTagIds.size)
                 clipTagIds.forEach { tagId -> tagsById[tagId]?.let(clipTags::add) }
+                val postTime = runCatching { Instant.parse(clip.xCreatedAt).toEpochMilli() }.getOrNull()
                 MediaGridClipSource(
                     clip = clip,
                     tags = clipTags,
                     assets = clipAssets,
                     tagIds = clipTagIds,
+                    sourceIndex = index,
+                    postTimeMillis = postTime,
+                    postLocalEpochDay = postTime?.let { java.time.Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().toEpochDay() },
+                    authorKey = "${clip.authorId.orEmpty()}\u0000${clip.authorUsername.lowercase()}",
+                    authorNameKey = clip.authorUsername.lowercase(),
+                    mediaAssetCount = clipAssets.count { it.assetType == "photo" || it.assetType == "video_thumbnail" },
                 )
             }
+            MediaGridSourceSnapshot(++mediaGridRevision, snapshot)
         }
     }
 

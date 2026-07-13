@@ -252,23 +252,23 @@ data class MainUiState(
     val filters: TweetFilterState = TweetFilterState(),
     val sort: ClassifiedSortState = ClassifiedSortState(),
 ) {
-    val unclassified: List<ClipWithDetails> = clips.filter { it.tags.isEmpty() }
-    val authorOptions: List<TweetAuthorOption> = buildAuthorOptions(clips)
-    val classified: List<ClipWithDetails> = sortClipsForDisplay(
+    val unclassified: List<ClipWithDetails> by lazy { clips.filter { it.tags.isEmpty() } }
+    val authorOptions: List<TweetAuthorOption> by lazy { buildAuthorOptions(clips) }
+    val classified: List<ClipWithDetails> by lazy { sortClipsForDisplay(
         clips = filterClipsForSearch(clips, tagHierarchy, filters),
         hierarchy = tagHierarchy,
         filters = filters,
         sort = sort,
-    )
+    ) }
     val query: String = filters.query
     val tagFilters: Map<TagNodeRef, TagFilterState> = filters.tagFilters
 }
 
 data class ClassifiedMediaGridState(
     val status: MediaGridLoadStatus = MediaGridLoadStatus.Ready,
-    val sourceRevision: Int = 0,
+    val sourceRevision: Long = 0,
     val entries: List<MediaGridEntry> = emptyList(),
-    val tagIdsByClip: Map<Long, Set<Long>> = emptyMap(),
+    val tagIdsByClip: Map<Long, LongArray> = emptyMap(),
     val matchingClipCount: Int = 0,
     val matchingMediaCount: Int = 0,
     val isEmptyByFilter: Boolean = true,
@@ -346,11 +346,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         filters,
         sort,
     ) { source, hierarchy, filterValue, sortValue -> Triple(source, hierarchy, filterValue to sortValue) }
-        .transformLatest { (source, hierarchy, conditions) ->
+        .transformLatest { (snapshot, hierarchy, conditions) ->
             val (filterValue, sortValue) = conditions
             emit(ClassifiedMediaGridState(status = MediaGridLoadStatus.Calculating))
-            val key = MediaGridCacheKey(source.hashCode(), hierarchy.hashCode(), filterValue, sortValue)
-            emit(prepareMediaGridMetadata(source, hierarchy, filterValue, sortValue, mediaGridCache, key))
+            val key = MediaGridCacheKey(snapshot.revision, hierarchy.structuralRevision, filterValue, sortValue)
+            emit(prepareMediaGridMetadata(snapshot, hierarchy, filterValue, sortValue, mediaGridCache, key))
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ClassifiedMediaGridState(status = MediaGridLoadStatus.Calculating))
 
@@ -656,7 +656,11 @@ fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSett
     val unclassifiedListState = rememberLazyListState()
     val tagListState = rememberLazyListState()
     val classifiedListStates = remember { mutableMapOf<String, LazyListState>() }
-    val classifiedScrollKey = uiState.classifiedScrollKey()
+    val classifiedScrollKey = if (classifiedDisplayMode == ClassifiedDisplayMode.Card) {
+        uiState.classifiedScrollKey()
+    } else {
+        "classified-card-inactive"
+    }
     val mediaGridState by viewModel.classifiedMediaGridState.collectAsState()
     val classifiedListState = remember(classifiedScrollKey) {
         classifiedListStates.getOrPut(classifiedScrollKey) { LazyListState() }

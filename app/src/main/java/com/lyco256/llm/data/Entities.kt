@@ -214,6 +214,7 @@ data class TagHierarchy(
     val tags: List<TagWithCount> = emptyList(),
     val clipTags: List<ClipTagEntity> = emptyList(),
 ) {
+    val structuralRevision: Long = groups.fold(tags.fold(17L) { acc, tag -> acc * 31 + tag.tag.id * 31 + tag.tag.parentGroupId.orZero() + tag.tag.sortOrder }) { acc, group -> acc * 31 + group.id * 31 + group.parentGroupId.orZero() + group.sortOrder }
     val nodesByParent: Map<Long?, List<TagTreeNode>> = buildList<TagTreeNode> {
         addAll(groups.map { TagGroupNode(it, 0) })
         addAll(tags.map { TagLeafNode(it.tag, it.count) })
@@ -242,7 +243,10 @@ data class TagHierarchy(
         }
         return childTagIds
     }
+
 }
+
+private fun Long?.orZero(): Long = this ?: 0L
 
 enum class TagFilterState { NONE, INCLUDED, REQUIRED, EXCLUDED }
 
