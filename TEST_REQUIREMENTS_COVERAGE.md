@@ -112,6 +112,14 @@
 - `TagHierarchyUiV2` uses a stable `pointerInput(Unit)`, keeps the actual grid column count unchanged during tracking, suppresses two-finger cell actions after morph start, and cancels stale plans when source revision or items change.
 - Required device order was completed: isolated integration check succeeded, then production-package debug overwrite succeeded with package metadata invariance.
 
+## 2026-07 seamless media-grid morph overlay
+
+- `MediaGridMorphTest` now covers linear Rect interpolation, bounded crossfade alpha, same-Asset single-layer rendering, and finite zero-width slots.
+- `MediaGridMorphOverlay` remains absent in Idle and is composed only for the four active morph/handoff phases above the same normal grid. The overlay is viewport-plan bounded and does not create a second `LazyVerticalGrid`.
+- The RenderModel and its distinct Asset map are remembered by the immutable session plan. Progress does not rebuild item lists, maps, thumbnail sources, or ImageRequests; the overlay observes only existing Thumbnail Manager StateFlows.
+- Target handoff dispatches the column callback once, keeps Overlay at progress 1, waits for the target anchor cell after layout and correction, eases a shared Rect delta for at most 80ms when needed, holds two frames, and only then completes the session.
+- `animateItem()` and the former cell `Animatable` resize scale are suppressed/removed for morph and handoff. Header background, height, and Y are interpolated in the overlay; video, like-count, selection, and error visuals are crossfaded with their Asset.
+
 - `run-safe-debug-check.cmd`: Build、UnitTest、Lint 成功。
 - 実装: 256×256 JPEG quality 60、cacheDir再生成、inSampleSize縮小デコード、直列最新viewport優先、セル単位StateFlow、専用ImageLoader設定。
 - `run-safe-integration-check.cmd -DebugMethod wireless`: Success。隔離packageでIntegrationTestまで完了。

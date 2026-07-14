@@ -80,6 +80,10 @@ class MediaGridThumbnailManager(private val store: MediaGridThumbnailStore, priv
     @Synchronized fun state(assetId: Long, source: MediaGridThumbnailSource): StateFlow<MediaGridThumbnailState> =
         requireNotNull(ensureWork(assetId, source)).state
 
+    /** Read an already materialized cell state without creating work or changing the queue. */
+    @Synchronized fun stateIfPresent(assetId: Long): StateFlow<MediaGridThumbnailState>? =
+        works[assetId]?.state
+
     @Synchronized fun onDisplayError(source: MediaGridThumbnailSource, file: File) {
         if (sourceByAssetId[source.assetId] != source) return
         val key = cacheIdentity(source)

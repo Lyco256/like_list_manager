@@ -101,6 +101,47 @@ class MediaGridMorphTest {
         assertTrue(plan.plannedItemCount < 100)
     }
 
+    @Test
+    fun slotRectAndAlphaAreContinuousAndBounded() {
+        val slot = MediaGridMorphSlot(
+            startRect = Rect(0f, 10f, 100f, 110f),
+            endRect = Rect(200f, 30f, 280f, 110f),
+            startAssetKey = "asset:A",
+            endAssetKey = "asset:B",
+            startItemIndex = 0,
+            endItemIndex = 1,
+            hasStart = true,
+            hasEnd = true,
+        )
+        assertEquals(slot.startRect, mediaGridMorphRect(slot, 0f))
+        assertEquals(slot.endRect, mediaGridMorphRect(slot, 1f))
+        assertEquals(Rect(100f, 20f, 190f, 110f), mediaGridMorphRect(slot, 0.5f))
+        assertEquals(0.5f, mediaGridMorphStartAlpha(slot, 0.5f), 0.0001f)
+        assertEquals(0.5f, mediaGridMorphEndAlpha(slot, 0.5f), 0.0001f)
+        assertEquals(2, mediaGridMorphLayerCount(slot))
+    }
+
+    @Test
+    fun sameAssetUsesOneLayerAndZeroWidthSlotStaysFinite() {
+        val same = MediaGridMorphSlot(
+            startRect = Rect(0f, 0f, 100f, 100f),
+            endRect = Rect(100f, 0f, 200f, 100f),
+            startAssetKey = "asset:A",
+            endAssetKey = "asset:A",
+            startItemIndex = 0,
+            endItemIndex = 0,
+            hasStart = true,
+            hasEnd = true,
+        )
+        val zero = same.copy(startRect = Rect(400f, 50f, 400f, 50f), startAssetKey = null, hasStart = false)
+        assertEquals(1, mediaGridMorphLayerCount(same))
+        assertEquals(1f, mediaGridMorphStartAlpha(same, 0.35f), 0.0001f)
+        assertEquals(0f, mediaGridMorphEndAlpha(same, 0.35f), 0.0001f)
+        val rect = mediaGridMorphRect(zero, 0.5f)
+        assertTrue(rect.left.isFinite() && rect.top.isFinite() && rect.right.isFinite() && rect.bottom.isFinite())
+        assertEquals(1, mediaGridMorphLayerCount(zero))
+    }
+
     private fun trackingSession(columnCount: Int, scale: Float): MediaGridMorphSession = MediaGridMorphSession.begin(
         currentColumnCount = columnCount,
         scale = scale,

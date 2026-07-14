@@ -127,27 +127,28 @@ internal data class MediaGridMorphPlan(
             val slotCountPerRow = max(from.columnCount, to.columnCount).coerceAtLeast(1)
             val usedStart = HashSet<String>()
             val usedEnd = HashSet<String>()
+            val allEndByAsset = toRows.flatten().associateBy { it.assetKey }
+            val allStartAssets = fromRows.asSequence().flatten().map { it.assetKey }.toSet()
             val slots = ArrayList<MediaGridMorphSlot>(rowCount * slotCountPerRow)
 
             repeat(rowCount) { rowIndex ->
                 val startRow = fromRows.getOrNull(rowIndex).orEmpty()
                 val endRow = toRows.getOrNull(rowIndex).orEmpty()
-                repeat(slotCountPerRow) { slotIndex ->
-                    val start = startRow.getOrNull(slotIndex)?.takeUnless { !usedStart.add(it.assetKey) }
-                    val end = endRow.getOrNull(slotIndex)?.takeUnless { !usedEnd.add(it.assetKey) }
-                    if (start == null && end == null) return@repeat
-                    val startRect = start?.rect ?: zeroWidthRectAtRight(to.viewport, end?.rect ?: Rect.Zero)
-                    val endRect = end?.rect ?: zeroWidthRectAtRight(from.viewport, start?.rect ?: Rect.Zero)
-                    slots += MediaGridMorphSlot(
-                        startRect = startRect,
-                        endRect = endRect,
-                        startAssetKey = start?.assetKey,
-                        endAssetKey = end?.assetKey,
-                        startItemIndex = start?.itemIndex,
-                        endItemIndex = end?.itemIndex,
-                        hasStart = start != null,
-                        hasEnd = end != null,
-                    )
+                buildMorphRowSlots(startRow, endRow, slotCountPerRow, usedStart, usedEnd, allEndByAsset, allStartAssets).forEach { (start, end) ->
+                    if (start != null || end != null) {
+                        val startRect = start?.rect ?: zeroWidthRectAtRight(to.viewport, end?.rect ?: Rect.Zero)
+                        val endRect = end?.rect ?: zeroWidthRectAtRight(from.viewport, start?.rect ?: Rect.Zero)
+                        slots += MediaGridMorphSlot(
+                            startRect = startRect,
+                            endRect = endRect,
+                            startAssetKey = start?.assetKey,
+                            endAssetKey = end?.assetKey,
+                            startItemIndex = start?.itemIndex,
+                            endItemIndex = end?.itemIndex,
+                            hasStart = start != null,
+                            hasEnd = end != null,
+                        )
+                    }
                 }
             }
 
@@ -183,6 +184,40 @@ internal data class MediaGridMorphPlan(
             return shiftedPlan.copy(anchor = chooseAnchor(shiftedPlan, pinchCenter, fromMedia, toMedia))
         }
     }
+}
+
+private fun buildMorphRowSlots(
+    startRow: List<MediaGridMorphMedia>,
+    endRow: List<MediaGridMorphMedia>,
+    slotCount: Int,
+    usedStart: MutableSet<String>,
+    usedEnd: MutableSet<String>,
+    allEndByAsset: Map<String, MediaGridMorphMedia>,
+    allStartAssets: Set<String>,
+): List<Pair<MediaGridMorphMedia?, MediaGridMorphMedia?>> {
+    val slots = arrayOfNulls<Pair<MediaGridMorphMedia?, MediaGridMorphMedia?>>(slotCount)
+    startRow.forEachIndexed { index, start ->
+        if (!usedStart.add(start.assetKey)) return@forEachIndexed
+        val matching = allEndByAsset[start.assetKey]?.takeUnless { it.assetKey in usedEnd }
+        val fallback = endRow.getOrNull(index)?.takeUnless {
+            it.assetKey in usedEnd || it.assetKey in allStartAssets || matching != null
+        }
+        val end = matching ?: fallback
+        if (end != null) usedEnd.add(end.assetKey)
+        slots[index.coerceAtMost(slotCount - 1)] = start to end
+    }
+    endRow.forEachIndexed { index, end ->
+        if (end.assetKey in usedEnd) return@forEachIndexed
+        val targetIndex = when {
+            index < slots.size && slots[index] == null -> index
+            else -> slots.indexOfFirst { it == null }
+        }
+        if (targetIndex >= 0) {
+            usedEnd.add(end.assetKey)
+            slots[targetIndex] = null to end
+        }
+    }
+    return slots.filterNotNull()
 }
 
 internal data class MediaGridMorphSettleResult(

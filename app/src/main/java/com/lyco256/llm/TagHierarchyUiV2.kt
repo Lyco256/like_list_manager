@@ -4,7 +4,6 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.BorderStroke
@@ -320,9 +319,10 @@ fun EnhancedClassifiedScreen(
     var selectedMediaGridClipIds by remember { mutableStateOf(emptySet<Long>()) }
     var mediaGridSelectionMode by remember { mutableStateOf(false) }
     var bulkTagDialogOpen by remember { mutableStateOf(false) }
-    var mediaGridResizeAnimation by remember { mutableStateOf(0 to 0) }
     var mediaGridMorphSession by remember { mutableStateOf(MediaGridMorphSession.idle(mediaGridColumnCount)) }
     var mediaGridHandoffAnchor by remember { mutableStateOf<MediaGridMorphAnchor?>(null) }
+    var mediaGridHandoffCorrection by remember { mutableStateOf(Offset.Zero) }
+    var mediaGridJustCompletedHandoff by remember { mutableStateOf(false) }
     val itemKeys = remember(displayMode, uiState.clips, uiState.filters, uiState.sort, uiState.tagHierarchy) {
         if (displayMode == ClassifiedDisplayMode.Card) uiState.classified.map { it.clip.id } else emptyList()
     }
@@ -356,9 +356,9 @@ fun EnhancedClassifiedScreen(
                 mediaGridMorphSession = result.session
                 result.targetColumnCountToHandoff?.let { next ->
                     mediaGridHandoffAnchor = result.session.plan?.anchor
-                    mediaGridResizeAnimation = (if (next > mediaGridColumnCount) 1 else -1) to (mediaGridResizeAnimation.second + 1)
+                    mediaGridHandoffCorrection = Offset.Zero
+                    mediaGridJustCompletedHandoff = false
                     onMediaGridColumnCountChange(next)
-                    mediaGridMorphSession = result.session.completeGridHandoff()
                 }
             }
             if (mediaGridMorphSession.phase != MediaGridMorphPhase.SettlingToCurrent &&
@@ -373,6 +373,10 @@ fun EnhancedClassifiedScreen(
     }
     if (displayMode == ClassifiedDisplayMode.Card) PreserveScrollAnchor(listState, "classified", itemKeys)
     LaunchedEffect(mediaGridColumnCount, mediaGridItems, mediaGridHandoffAnchor) {
+        if (mediaGridJustCompletedHandoff && mediaGridHandoffAnchor == null) {
+            mediaGridJustCompletedHandoff = false
+            return@LaunchedEffect
+        }
         val morphAnchor = mediaGridHandoffAnchor
         if (morphAnchor != null) {
             val assetKey = morphAnchor.toSlot.endAssetKey ?: morphAnchor.assetKey
@@ -392,9 +396,37 @@ fun EnhancedClassifiedScreen(
                 val targetCenter = target.offset.y + target.size.height / 2f
                 mediaGridLazyState.scrollBy(targetCenter - morphAnchor.fromViewportCenterY)
             }
+            withFrameNanos { }
+            val laidOutTarget = mediaGridLazyState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == targetKey }
+            if (laidOutTarget == null) return@LaunchedEffect
+            val actualTop = laidOutTarget.offset.y.toFloat()
+            val expectedTop = morphAnchor.toSlot.endRect.top
+            val actualLeft = laidOutTarget.offset.x.toFloat()
+            val expectedLeft = morphAnchor.toSlot.endRect.left
+            val deltaX = actualLeft - expectedLeft
+            val deltaY = actualTop - expectedTop
+            if (abs(deltaX) > 1f || abs(deltaY) > 1f) {
+                val start = System.nanoTime()
+                val durationNanos = 80_000_000L
+                while (true) {
+                    withFrameNanos { now ->
+                        val fraction = ((now - start).toFloat() / durationNanos).coerceIn(0f, 1f)
+                        mediaGridHandoffCorrection = Offset(deltaX * fraction, deltaY * fraction)
+                    }
+                    if (System.nanoTime() - start >= durationNanos) break
+                }
+            } else {
+                mediaGridHandoffCorrection = Offset.Zero
+            }
+            withFrameNanos { }
+            withFrameNanos { }
+            mediaGridHandoffCorrection = Offset.Zero
             mediaGridHandoffAnchor = null
+            mediaGridJustCompletedHandoff = true
+            mediaGridMorphSession = mediaGridMorphSession.completeGridHandoff()
             return@LaunchedEffect
         }
+        if (mediaGridMorphSession.phase == MediaGridMorphPhase.AwaitingGridHandoff) return@LaunchedEffect
         val anchor = mediaGridAnchor ?: return@LaunchedEffect
         if (mediaGridItems.isEmpty()) return@LaunchedEffect
         withFrameNanos { }
@@ -464,7 +496,7 @@ fun EnhancedClassifiedScreen(
                     state = mediaGridLazyState,
                     morphSession = mediaGridMorphSession,
                     onMorphSessionChange = { mediaGridMorphSession = it },
-                    resizeAnimation = mediaGridResizeAnimation,
+                    handoffCorrection = mediaGridHandoffCorrection,
                     onCellClick = onMediaGridCellClick,
                     selectedClipIds = selectedVisibleMediaGridClipIds,
                     selectionMode = mediaGridSelectionMode,
@@ -3343,7 +3375,7 @@ private fun ClassifiedMediaGridContent(
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
     morphSession: MediaGridMorphSession,
     onMorphSessionChange: (MediaGridMorphSession) -> Unit,
-    resizeAnimation: Pair<Int, Int>,
+    handoffCorrection: Offset,
     selectionMode: Boolean,
     multiAssetClipIds: Set<Long>,
     onCellClick: (Long) -> Unit,
@@ -3360,6 +3392,18 @@ private fun ClassifiedMediaGridContent(
                 thumbnailSurfaceVariant.copy(alpha = 0.72f),
             ),
         )
+    }
+    val morphRenderModel = remember(morphSession.plan, items, sort, selectionMode, multiAssetClipIds, selectedClipIds) {
+        morphSession.plan?.let { plan ->
+            MediaGridMorphRenderModel.create(
+                plan = plan,
+                items = items,
+                sort = sort,
+                selectionMode = selectionMode,
+                multiAssetClipIds = multiAssetClipIds,
+                selectedClipIds = selectedClipIds,
+            )
+        }
     }
     LaunchedEffect(sourceRevision) {
         appContainer.mediaGridThumbnailManager.updateSourceSnapshot(
@@ -3383,53 +3427,66 @@ private fun ClassifiedMediaGridContent(
             }, columnCount)
         }
     }
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(columnCount),
-        state = state,
-        modifier = Modifier
-            .fillMaxSize()
-            .testTag("classified_media_grid")
-            .mediaGridPinchToResize(
-                currentColumnCount = columnCount,
-                sourceRevision = sourceRevision,
-                sort = sort,
-                items = items,
-                state = state,
-                morphSession = morphSession,
-                onMorphSessionChange = onMorphSessionChange,
-            ),
-        horizontalArrangement = Arrangement.spacedBy(0.dp),
-        verticalArrangement = Arrangement.spacedBy(0.dp),
-    ) {
-        gridItems(
-            items,
-            key = { it.key },
-            contentType = { item -> if (item is MediaGridHeaderItem) "Header" else "MediaCell" },
-            span = { item ->
-                when (item) {
-                    is MediaGridHeaderItem -> GridItemSpan(maxLineSpan)
-                    is MediaGridCellItem -> GridItemSpan(1)
-                }
-            },
-        ) { item ->
-            when (item) {
-                is MediaGridHeaderItem -> ClassifiedMediaGridHeader(item)
-                is MediaGridCellItem -> ClassifiedMediaGridCell(
-                    modifier = Modifier.animateItem(),
-                    entry = item.entry,
+    Box(Modifier.fillMaxSize()) {
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(columnCount),
+            state = state,
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("classified_media_grid")
+                .mediaGridPinchToResize(
+                    currentColumnCount = columnCount,
+                    sourceRevision = sourceRevision,
                     sort = sort,
-                    columnCount = columnCount,
-                    resizeAnimation = resizeAnimation,
-                    selectionMode = selectionMode,
-                    multiAsset = item.entry.clipId in multiAssetClipIds,
-                    selected = item.entry.clipId in selectedClipIds,
-                    onClick = onCellClick,
-                    onToggleSelection = onToggleSelection,
-                    thumbnailManager = appContainer.mediaGridThumbnailManager,
-                    thumbnailImageLoader = appContainer.mediaGridImageLoader,
-                    thumbnailBrush = thumbnailBrush,
-                )
+                    items = items,
+                    state = state,
+                    morphSession = morphSession,
+                    onMorphSessionChange = onMorphSessionChange,
+                ),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
+        ) {
+            gridItems(
+                items,
+                key = { it.key },
+                contentType = { item -> if (item is MediaGridHeaderItem) "Header" else "MediaCell" },
+                span = { item ->
+                    when (item) {
+                        is MediaGridHeaderItem -> GridItemSpan(maxLineSpan)
+                        is MediaGridCellItem -> GridItemSpan(1)
+                    }
+                },
+            ) { item ->
+                when (item) {
+                    is MediaGridHeaderItem -> ClassifiedMediaGridHeader(item)
+                    is MediaGridCellItem -> ClassifiedMediaGridCell(
+                        modifier = if (morphSession.phase == MediaGridMorphPhase.Idle) Modifier.animateItem() else Modifier,
+                        entry = item.entry,
+                        sort = sort,
+                        columnCount = columnCount,
+                        selectionMode = selectionMode,
+                        multiAsset = item.entry.clipId in multiAssetClipIds,
+                        selected = item.entry.clipId in selectedClipIds,
+                        onClick = onCellClick,
+                        onToggleSelection = onToggleSelection,
+                        thumbnailManager = appContainer.mediaGridThumbnailManager,
+                        thumbnailImageLoader = appContainer.mediaGridImageLoader,
+                        thumbnailBrush = thumbnailBrush,
+                    )
+                }
             }
+        }
+        if (morphSession.phase != MediaGridMorphPhase.Idle && morphRenderModel != null) {
+            MediaGridMorphOverlay(
+                model = morphRenderModel,
+                progress = morphSession.progress,
+                thumbnailManager = appContainer.mediaGridThumbnailManager,
+                thumbnailImageLoader = appContainer.mediaGridImageLoader,
+                thumbnailBrush = thumbnailBrush,
+                selectionMode = selectionMode,
+                correctionX = handoffCorrection.x,
+                correctionY = handoffCorrection.y,
+            )
         }
     }
 }
@@ -3691,7 +3748,6 @@ private fun ClassifiedMediaGridCell(
     entry: MediaGridEntry,
     sort: ClassifiedSortState,
     columnCount: Int,
-    resizeAnimation: Pair<Int, Int>,
     selectionMode: Boolean,
     multiAsset: Boolean,
     selected: Boolean,
@@ -3701,12 +3757,6 @@ private fun ClassifiedMediaGridCell(
     thumbnailImageLoader: coil.ImageLoader,
     thumbnailBrush: Brush,
 ) {
-    val resizeScale = remember { Animatable(1f) }
-    LaunchedEffect(resizeAnimation.second) {
-        if (resizeAnimation.second == 0) return@LaunchedEffect
-        resizeScale.snapTo(if (resizeAnimation.first > 0) 1.06f else 0.94f)
-        resizeScale.animateTo(1f, tween(180))
-    }
     val thumbnailSource = MediaGridThumbnailSource(entry.assetId, entry.mediaKey, entry.localPath, entry.previewUrl ?: entry.remoteUrl ?: entry.displayUrl?.takeUnless { it == entry.localPath }, entry.remoteUrl, downloadState = entry.downloadState)
     val thumbnailState by thumbnailManager.state(entry.assetId, thumbnailSource).collectAsState()
     val fallbackUrl = entry.previewUrl ?: entry.remoteUrl ?: entry.displayUrl?.takeUnless { it == entry.localPath }
@@ -3722,10 +3772,6 @@ private fun ClassifiedMediaGridCell(
         modifier = modifier
             .fillMaxWidth()
             .aspectRatio(1f)
-            .graphicsLayer {
-                scaleX = resizeScale.value
-                scaleY = resizeScale.value
-            }
             .pointerInput(entry.clipId, selectionMode) {
                 detectTapGestures(
                     onLongPress = {

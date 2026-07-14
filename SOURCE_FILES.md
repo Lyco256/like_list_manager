@@ -237,6 +237,14 @@ MainActivity / Compose UI
 - Morph plan creation slices the current LazyGrid window plus two rows on each side, builds the adjacent target only from that bounded media window, and preserves global item indexes. Target handoff applies the planned Asset anchor before normal grid scroll-anchor fallback.
 - Pure coverage is in `app/src/test/java/com/lyco256/llm/MediaGridMorphTest.kt`; the source-level contract is documented in `docs/app/src/main/java/com/lyco256/llm/MediaGridMorph.kt.md`.
 
+## 2026-07 seamless media-grid morph overlay
+
+- `MediaGridMorphOverlay.kt` draws a viewport-bounded overlay over the single normal `LazyVerticalGrid` during all non-Idle morph phases; no second grid or `AnimatedContent` is constructed.
+- `MediaGridMorphRenderModel` is created once per session plan and retains distinct slot Assets, metadata, selection, header bands, and the existing thumbnail state references. Progress updates only change interpolated Rects, layer alpha, and GPU transforms.
+- Ready thumbnail state is read without creating Thumbnail Manager work. Overlay rendering does not generate thumbnails, resolve URLs, inspect files, or decode images; Idle releases the model and overlay composition.
+- Target handoff keeps progress 1 visible through callback, new-grid layout, anchor correction, a maximum 80ms shared Rect correction, and two frame boundaries before `completeGridHandoff()`.
+- The old resize scale animation is removed. Normal `animateItem()` placement is disabled during morph and handoff, while the single normal grid remains mounted below the overlay.
+
 - `integrationTest` build typeは `com.lyco256.llm.test` と本番とは異なるDB、画像、Preferencesを使います。
 - テスト用Application containerは本番OAuth/X APIを無効化し、Repositoryテストだけが記録可能なFakeを注入します。
 - AndroidJUnitRunner、Compose UI Test、Room統合、MockWebServerで環境分離、同期、データ保持、画像、HTTP異常系、主要画面を検証します。
