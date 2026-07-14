@@ -149,6 +149,13 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - Pinch-in increases the column count and pinch-out decreases it within the `2..12` range.
 - When the column count changes, the grid restores the nearest visible media-cell anchor instead of jumping back to the top.
 
+## 2026-07 continuous media-grid morph foundation
+
+- The media-grid detector remains `pointerInput(Unit)` and uses `rememberUpdatedState` for the latest column count, items, source revision, state, and callbacks.
+- After the two-finger dead zone, one `MediaGridMorphSession` and one bounded from/to plan are created. During tracking the existing `LazyVerticalGrid` continues to use the from column count.
+- Progress changes are state-only. The real column count callback is invoked once after `SettlingToTarget`; `SettlingToCurrent` returns to the current count without a callback.
+- Source revision, item, sort, or display-mode changes cancel the old plan. Thumbnail viewport/source update structure remains outside progress updates.
+
 ## 2026-07 media-grid tweet dialog
 
 - Media cells use tap detection without merging child semantics, so existing video, like-count, error, and cell tags remain available.

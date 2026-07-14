@@ -227,6 +227,15 @@ MainActivity / Compose UI
 - 初回セルは現在sourceをManagerへ渡すため空sourceのWorkを作らない。広範囲準備はlocalPathのみ・`allowRemote=false`で、欠落localPathのcache identityも完了扱いにして再試行ループを防ぐ。
 - ピンチ検出は安定したpointerInput keyと`rememberUpdatedState`を使い、閾値確定後は全指が離れるまでロックする。静的グラデーションBrushはグリッドで共有する。
 
+## 2026-07 media-grid continuous morph foundation
+
+- `MediaGridMorph.kt` is the pure state/plan boundary for `Idle`, `Tracking`, both settle phases, and `AwaitingGridHandoff`.
+- A session creates one from/to plan for exactly one adjacent column count, bounded to the viewport plus two rows on each side. Slots keep both Rects, Asset keys, item indexes, and presence flags; the wider side defines the slot count.
+- Header bands retain start/end title, Y, height, and presence, including zero-height add/remove transitions. The nearest Media Asset to the pinch center is kept as the Y anchor.
+- Progress is reversible and bounded to `0f..1f`; the real `columnCount` remains unchanged during tracking and the existing callback is dispatched once only after target settle.
+- `TagHierarchyUiV2.kt` keeps `pointerInput(Unit)` stable and reads latest values with `rememberUpdatedState`. Progress updates do not rebuild items or request thumbnails.
+- Pure coverage is in `app/src/test/java/com/lyco256/llm/MediaGridMorphTest.kt`; the source-level contract is documented in `docs/app/src/main/java/com/lyco256/llm/MediaGridMorph.kt.md`.
+
 - `integrationTest` build typeは `com.lyco256.llm.test` と本番とは異なるDB、画像、Preferencesを使います。
 - テスト用Application containerは本番OAuth/X APIを無効化し、Repositoryテストだけが記録可能なFakeを注入します。
 - AndroidJUnitRunner、Compose UI Test、Room統合、MockWebServerで環境分離、同期、データ保持、画像、HTTP異常系、主要画面を検証します。
