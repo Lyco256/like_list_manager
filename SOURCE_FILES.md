@@ -29,8 +29,8 @@
 ## 2026-07-14 final media-grid morph adjustment
 
 - `MediaGridMorph.kt` keeps Header geometry, title-layer alpha, and the session/handoff state calculations independent from Compose and source work.
-- `MediaGridMorphOverlay.kt` keeps an opaque surface behind the bounded overlay, interpolates clipped Header bands, deduplicates existing Thumbnail StateFlow observation by Asset ID, and updates progress/correction through graphics layers.
-- `TagHierarchyUiV2.kt` keeps the normal grid as the only grid, manages handoff correction and completion atomically, and does not compose the morph overlay or its render model while Idle.
+- `MediaGridMorphOverlay.kt` draws only bounded Media Slot/Header ranges; the normal grid remains visible until the plan, stable Asset visuals, Rects, and placeholder brush are ready. Progress/correction are read through graphics layers.
+- `TagHierarchyUiV2.kt` keeps the normal grid as the only grid, prepares the final Header/Media sequence off the UI thread, updates only motion during tracking, and owns the single Morph handoff correction path.
 
 この文書は、like list managerの全体構成、現状の実装、変更時に最初に読む個別文書への索引です。
 
@@ -238,18 +238,18 @@ MainActivity / Compose UI
 - `MediaGridMorph.kt` is the pure state/plan boundary for `Idle`, `Tracking`, both settle phases, and `AwaitingGridHandoff`.
 - A session creates one from/to plan for exactly one adjacent column count, bounded to the viewport plus two rows on each side. Slots keep both Rects, Asset keys, item indexes, and presence flags; the wider side defines the slot count.
 - Header bands retain start/end title, Y, height, and presence, including zero-height add/remove transitions. The nearest Media Asset to the pinch center is kept as the Y anchor.
-- Progress is reversible and bounded to `0f..1f`; the real `columnCount` remains unchanged during tracking and the existing callback is dispatched once only after target settle.
+- The Morph transaction is separate from `MediaGridMorphOverlayMotion.progress`; progress is reversible and bounded to `0f..1f`, while the real `columnCount` remains unchanged during tracking and the callback is dispatched once only after target settle.
 - `TagHierarchyUiV2.kt` keeps `pointerInput(Unit)` stable and reads latest values with `rememberUpdatedState`. Progress updates do not rebuild items or request thumbnails.
-- Morph plan creation slices the current LazyGrid window plus two rows on each side, builds the adjacent target only from that bounded media window, and preserves global item indexes. Target handoff applies the planned Asset anchor before normal grid scroll-anchor fallback.
+- Idle-only preparation slices the current LazyGrid window plus two rows on each side and builds both adjacent candidates; target handoff resolves the anchor by stable Asset key and performs one `scrollToItem` plus the necessary `scrollBy`. Normal anchor restoration is disabled for every non-Idle phase.
 - Pure coverage is in `app/src/test/java/com/lyco256/llm/MediaGridMorphTest.kt`; the source-level contract is documented in `docs/app/src/main/java/com/lyco256/llm/MediaGridMorph.kt.md`.
 
 ## 2026-07 seamless media-grid morph overlay
 
 - `MediaGridMorphOverlay.kt` draws a viewport-bounded overlay over the single normal `LazyVerticalGrid` during all non-Idle morph phases; no second grid or `AnimatedContent` is constructed.
-- `MediaGridMorphRenderModel` is created once per session plan and retains distinct slot Assets, metadata, selection, header bands, and the existing thumbnail state references. Progress updates only change interpolated Rects, layer alpha, and GPU transforms.
+- `MediaGridMorphRenderModel` is created once per session plan, resolves Assets by stable key, and retains slot Assets, metadata, selection, header bands, and placeholder data through handoff. Progress updates only change interpolated Rects, layer alpha, and GPU transforms.
 - Ready thumbnail state is read without creating Thumbnail Manager work. Overlay rendering does not generate thumbnails, resolve URLs, inspect files, or decode images; Idle releases the model and overlay composition.
-- Target handoff keeps progress 1 visible through callback, new-grid layout, anchor correction, a maximum 80ms shared Rect correction, and two frame boundaries before `completeGridHandoff()`.
-- The old resize scale animation is removed. Normal `animateItem()` placement is disabled during morph and handoff, while the single normal grid remains mounted below the overlay.
+- Target handoff keeps progress 1 visible through callback and new-grid layout, performs one anchor correction, then completes without a second post-handoff correction.
+- The old resize scale animation and normal `animateItem()` placement are removed; static per-cell placeholder gradients are shared from one grid brush while the single normal grid remains mounted below the overlay.
 
 - `integrationTest` build typeは `com.lyco256.llm.test` と本番とは異なるDB、画像、Preferencesを使います。
 - テスト用Application containerは本番OAuth/X APIを無効化し、Repositoryテストだけが記録可能なFakeを注入します。

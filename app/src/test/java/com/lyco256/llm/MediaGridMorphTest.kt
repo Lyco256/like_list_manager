@@ -17,34 +17,34 @@ class MediaGridMorphTest {
 
     @Test
     fun progressIsBoundedMonotonicAndReversible() {
-        val increasing = listOf(1.12f, 1.2f, 1.4f, 2f).map {
+        val increasing = listOf(1.02f, 1.08f, 1.4f, 2f).map {
             mediaGridMorphProgressForScale(it, MediaGridMorphDirection.IncreaseColumns)
         }
         assertEquals(0f, increasing.first(), 0.0001f)
         assertTrue(increasing.zipWithNext().all { (a, b) -> b >= a })
         assertTrue(increasing.all { it in 0f..1f })
-        assertEquals(0f, mediaGridMorphProgressForScale(1.08f, MediaGridMorphDirection.IncreaseColumns), 0.0001f)
+        assertEquals(0f, mediaGridMorphProgressForScale(1.01f, MediaGridMorphDirection.IncreaseColumns), 0.0001f)
         assertTrue(mediaGridMorphProgressForScale(1.2f, MediaGridMorphDirection.IncreaseColumns) > 0f)
     }
 
     @Test
     fun releaseUsesHalfThresholdAndTargetHandoffIsOneShot() {
         val session = trackingSession(4, 1.3f)
-        val back = session.updateTracking(1.13f, 10L).release()
+        val back = session.updateTracking(10L).release(0.2f)
         assertEquals(MediaGridMorphPhase.SettlingToCurrent, back.phase)
-        val target = trackingSession(4, 3f).release()
+        val target = trackingSession(4, 3f).release(1f)
         assertEquals(MediaGridMorphPhase.SettlingToTarget, target.phase)
-        val first = target.advanceSettle(180L, 10L)
+        val first = target.advanceSettle(1f, 180L, 10L)
         assertEquals(MediaGridMorphPhase.AwaitingGridHandoff, first.session.phase)
         assertEquals(5, first.targetColumnCountToHandoff)
-        val second = first.session.advanceSettle(180L, 10L)
+        val second = first.session.advanceSettle(1f, 180L, 10L)
         assertEquals(null, second.targetColumnCountToHandoff)
     }
 
     @Test
     fun sourceRevisionChangeCancelsTrackingPlanToCurrentColumns() {
         val session = trackingSession(4, 1.3f)
-        val cancelled = session.updateTracking(1.4f, 11L)
+        val cancelled = session.updateTracking(11L)
         assertEquals(MediaGridMorphPhase.Idle, cancelled.phase)
         assertEquals(4, cancelled.fromColumnCount)
         assertEquals(4, cancelled.toColumnCount)

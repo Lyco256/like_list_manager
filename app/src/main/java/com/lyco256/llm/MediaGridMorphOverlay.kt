@@ -91,16 +91,20 @@ internal data class MediaGridMorphRenderModel(
             selectionMode: Boolean,
             multiAssetClipIds: Set<Long>,
             selectedClipIds: Set<Long>,
-        ): MediaGridMorphRenderModel {
-            val indexes = plan.slots.asSequence()
-                .flatMap { sequenceOf(it.startItemIndex, it.endItemIndex) }
+        ): MediaGridMorphRenderModel? {
+            if (plan.slots.isEmpty()) return null
+            val entriesByAssetKey = items.asSequence()
+                .filterIsInstance<MediaGridCellItem>()
+                .associate { it.entry.stableAssetKey to it.entry }
+            val requiredKeys = plan.slots.asSequence()
+                .flatMap { sequenceOf(it.startAssetKey, it.endAssetKey) }
                 .filterNotNull()
                 .toSet()
-            val entries = indexes.asSequence()
-                .mapNotNull { items.getOrNull(it) as? MediaGridCellItem }
-                .map { it.entry }
+            if (!requiredKeys.all(entriesByAssetKey::containsKey)) return null
+            val entries = requiredKeys.asSequence()
+                .mapNotNull(entriesByAssetKey::get)
                 .distinctBy { it.assetId }
-                .associateBy { "asset:${it.assetId}" }
+                .associateBy { it.stableAssetKey }
             val visuals = entries.mapValues { (_, entry) ->
                 MediaGridMorphAssetVisual(
                     entry = entry,
@@ -114,6 +118,9 @@ internal data class MediaGridMorphRenderModel(
         }
     }
 }
+
+private val MediaGridEntry.stableAssetKey: String
+    get() = "asset:$assetId"
 
 internal fun mediaGridMorphRect(slot: MediaGridMorphSlot, progress: Float): Rect {
     val p = progress.coerceIn(0f, 1f)
@@ -185,10 +192,6 @@ internal fun MediaGridMorphOverlay(
             .clipToBounds()
             .testTag("media_grid_morph_overlay"),
     ) {
-        Surface(
-            modifier = Modifier.fillMaxSize().testTag("media_grid_morph_surface"),
-            color = MaterialTheme.colorScheme.surface,
-        ) {}
         model.headers.forEach { header ->
             key("morph_header_${header.key}") {
                 MorphHeaderBand(header, model.viewport.width, motion)

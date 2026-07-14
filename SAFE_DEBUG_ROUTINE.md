@@ -58,6 +58,12 @@ Macrobenchmark:
 .\scripts\run-safe-macrobenchmark-check.cmd
 ```
 
+ワイヤレスデバッグ端末では、mDNSのADB TLS endpointを`testDeviceSerial`のhardware serialへ照合して接続する。
+
+```powershell
+.\scripts\run-safe-macrobenchmark-check.cmd -DebugMethod wireless
+```
+
 Snapshot互換テスト:
 
 ```powershell

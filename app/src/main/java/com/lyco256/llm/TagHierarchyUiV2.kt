@@ -152,8 +152,12 @@ import com.lyco256.llm.data.tagColor
 import com.lyco256.llm.data.tagColorSpec
 import com.lyco256.llm.data.tagGradient
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
 import java.time.DayOfWeek
@@ -322,12 +326,19 @@ fun EnhancedClassifiedScreen(
     var mediaGridMorphUiState by remember {
         mutableStateOf(MediaGridMorphUiState(MediaGridMorphSession.idle(mediaGridColumnCount)))
     }
+    val mediaGridMorphMotion = remember { MediaGridMorphOverlayMotion() }
     val itemKeys = remember(displayMode, uiState.clips, uiState.filters, uiState.sort, uiState.tagHierarchy) {
         if (displayMode == ClassifiedDisplayMode.Card) uiState.classified.map { it.clip.id } else emptyList()
     }
     val mediaGridLazyState = rememberLazyGridState()
-    val mediaGridItems = remember(mediaGridState.entries, uiState.sort, mediaGridColumnCount) {
-        buildClassifiedMediaGridItems(mediaGridState.entries, uiState.sort, mediaGridColumnCount)
+    var mediaGridItems by remember { mutableStateOf<List<ClassifiedMediaGridItem>>(emptyList()) }
+    var mediaGridSequenceColumnCount by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(mediaGridState.entries, uiState.sort, mediaGridColumnCount) {
+        val next = withContext(Dispatchers.Default) {
+            buildClassifiedMediaGridItems(mediaGridState.entries, uiState.sort, mediaGridColumnCount)
+        }
+        mediaGridItems = next
+        mediaGridSequenceColumnCount = mediaGridColumnCount
     }
     val mediaGridAnchor = rememberClassifiedMediaGridAnchor(mediaGridLazyState)
     val selectableMediaGridClipIds = remember(mediaGridState.entries) {
@@ -347,6 +358,7 @@ fun EnhancedClassifiedScreen(
                 correction = Offset.Zero,
                 handoffCompleted = false,
             )
+            mediaGridMorphMotion.progress.floatValue = 0f
         }
     }
     LaunchedEffect(mediaGridMorphUiState.session.phase, mediaGridState.sourceRevision) {
@@ -354,20 +366,32 @@ fun EnhancedClassifiedScreen(
             mediaGridMorphUiState.session.phase != MediaGridMorphPhase.SettlingToTarget
         ) return@LaunchedEffect
         var lastFrameNanos = 0L
+        var elapsedMillis = 0L
+        var activeSession = mediaGridMorphUiState.session
         while (true) {
             withFrameNanos { now ->
                 val elapsed = if (lastFrameNanos == 0L) 0L else (now - lastFrameNanos) / 1_000_000L
                 lastFrameNanos = now
-                val result = mediaGridMorphUiState.session.advanceSettle(elapsed, mediaGridState.sourceRevision)
-                mediaGridMorphUiState = mediaGridMorphUiState.copy(session = result.session)
-                result.targetColumnCountToHandoff?.let { next ->
-                    mediaGridMorphUiState = mediaGridMorphUiState.copy(
-                        session = result.session,
-                        handoffAnchor = result.session.plan?.anchor,
-                        correction = Offset.Zero,
-                        handoffCompleted = false,
-                    )
-                    onMediaGridColumnCountChange(next)
+                elapsedMillis = (elapsedMillis + elapsed).coerceAtLeast(0L)
+                val result = activeSession.advanceSettle(
+                    currentProgress = mediaGridMorphMotion.progress.floatValue,
+                    elapsedMillis = elapsedMillis,
+                    currentSourceRevision = mediaGridState.sourceRevision,
+                )
+                mediaGridMorphMotion.progress.floatValue = result.progress
+                if (result.session.phase != activeSession.phase || result.targetColumnCountToHandoff != null) {
+                    activeSession = result.session
+                    result.targetColumnCountToHandoff?.let { next ->
+                        mediaGridMorphUiState = mediaGridMorphUiState.copy(
+                            session = result.session,
+                            handoffAnchor = result.session.plan?.anchor,
+                            correction = Offset.Zero,
+                            handoffCompleted = false,
+                        )
+                        onMediaGridColumnCountChange(next)
+                    } ?: run {
+                        mediaGridMorphUiState = mediaGridMorphUiState.copy(session = result.session)
+                    }
                 }
             }
             if (mediaGridMorphUiState.session.phase != MediaGridMorphPhase.SettlingToCurrent &&
@@ -388,6 +412,7 @@ fun EnhancedClassifiedScreen(
         }
         val morphAnchor = mediaGridMorphUiState.handoffAnchor
         if (morphAnchor != null) {
+            if (mediaGridSequenceColumnCount != mediaGridColumnCount) return@LaunchedEffect
             val assetKey = morphAnchor.toSlot.endAssetKey ?: morphAnchor.assetKey
             val targetKey = "media_grid_item_${assetKey.removePrefix("asset:")}"
             if (mediaGridItems.isEmpty()) return@LaunchedEffect
@@ -413,29 +438,6 @@ fun EnhancedClassifiedScreen(
             withFrameNanos { }
             val laidOutTarget = mediaGridLazyState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == targetKey }
             if (laidOutTarget == null) return@LaunchedEffect
-            val actualTop = laidOutTarget.offset.y.toFloat()
-            val expectedTop = morphAnchor.toSlot.endRect.top
-            val actualLeft = laidOutTarget.offset.x.toFloat()
-            val expectedLeft = morphAnchor.toSlot.endRect.left
-            val deltaX = actualLeft - expectedLeft
-            val deltaY = actualTop - expectedTop
-            if (abs(deltaX) > 1f || abs(deltaY) > 1f) {
-                val start = System.nanoTime()
-                val durationNanos = 80_000_000L
-                while (true) {
-                    withFrameNanos { now ->
-                        val fraction = ((now - start).toFloat() / durationNanos).coerceIn(0f, 1f)
-                        mediaGridMorphUiState = mediaGridMorphUiState.copy(
-                            correction = Offset(deltaX * fraction, deltaY * fraction),
-                        )
-                    }
-                    if (System.nanoTime() - start >= durationNanos) break
-                }
-            } else {
-                mediaGridMorphUiState = mediaGridMorphUiState.copy(correction = Offset.Zero)
-            }
-            withFrameNanos { }
-            withFrameNanos { }
             val completedSession = mediaGridMorphUiState.session.completeGridHandoff()
             mediaGridMorphUiState = mediaGridMorphUiState.copy(
                 session = completedSession,
@@ -443,9 +445,11 @@ fun EnhancedClassifiedScreen(
                 correction = Offset.Zero,
                 handoffCompleted = true,
             )
+            mediaGridMorphMotion.progress.floatValue = 0f
             return@LaunchedEffect
         }
         if (mediaGridMorphUiState.session.phase == MediaGridMorphPhase.AwaitingGridHandoff) return@LaunchedEffect
+        if (mediaGridMorphUiState.session.phase != MediaGridMorphPhase.Idle) return@LaunchedEffect
         val anchor = mediaGridAnchor ?: return@LaunchedEffect
         if (mediaGridItems.isEmpty()) return@LaunchedEffect
         withFrameNanos { }
@@ -501,7 +505,8 @@ fun EnhancedClassifiedScreen(
         Spacer(Modifier.height(10.dp))
         if (displayMode == ClassifiedDisplayMode.MediaGrid) {
             when {
-                mediaGridState.status == MediaGridLoadStatus.Calculating -> Box(
+                mediaGridState.status == MediaGridLoadStatus.Calculating ||
+                    (mediaGridState.entries.isNotEmpty() && mediaGridItems.isEmpty()) -> Box(
                     Modifier.fillMaxSize().testTag("classified_media_grid_progress"),
                     contentAlignment = Alignment.Center,
                 ) { androidx.compose.material3.CircularProgressIndicator() }
@@ -514,6 +519,7 @@ fun EnhancedClassifiedScreen(
                     columnCount = mediaGridColumnCount,
                     state = mediaGridLazyState,
                     morphState = mediaGridMorphUiState,
+                    morphMotion = mediaGridMorphMotion,
                     onMorphSessionChange = { next ->
                         mediaGridMorphUiState = mediaGridMorphUiState.copy(session = next)
                     },
@@ -3394,6 +3400,7 @@ private fun ClassifiedMediaGridContent(
     columnCount: Int,
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
     morphState: MediaGridMorphUiState,
+    morphMotion: MediaGridMorphOverlayMotion,
     onMorphSessionChange: (MediaGridMorphSession) -> Unit,
     selectionMode: Boolean,
     multiAssetClipIds: Set<Long>,
@@ -3413,8 +3420,6 @@ private fun ClassifiedMediaGridContent(
             ),
         )
     }
-    val morphMotion = remember { MediaGridMorphOverlayMotion() }
-    morphMotion.progress.floatValue = morphSession.progress
     morphMotion.correction.value = morphState.correction
     val morphResources = remember(
         appContainer.mediaGridThumbnailManager,
@@ -3427,7 +3432,7 @@ private fun ClassifiedMediaGridContent(
             thumbnailBrush = thumbnailBrush,
         )
     }
-    val morphRenderModel = remember(morphSession.plan, items, sort, selectionMode, multiAssetClipIds, selectedClipIds) {
+    val morphRenderModel = remember(morphSession.plan) {
         morphSession.plan?.let { plan ->
             MediaGridMorphRenderModel.create(
                 plan = plan,
@@ -3438,6 +3443,17 @@ private fun ClassifiedMediaGridContent(
                 selectedClipIds = selectedClipIds,
             )
         }
+    }
+    var preparedMorphPlans by remember { mutableStateOf<Map<MediaGridMorphDirection, MediaGridMorphPreparedPlan>>(emptyMap()) }
+    LaunchedEffect(sourceRevision, columnCount, sort) {
+        snapshotFlow { state.isScrollInProgress }
+            .filter { isScrolling -> !isScrolling }
+            .collectLatest {
+                val layoutInfo = state.layoutInfo
+                preparedMorphPlans = withContext(Dispatchers.Default) {
+                    buildPreparedMediaGridMorphPlans(items, layoutInfo, columnCount, sourceRevision, sort)
+                }
+            }
     }
     LaunchedEffect(sourceRevision) {
         appContainer.mediaGridThumbnailManager.updateSourceSnapshot(
@@ -3471,10 +3487,10 @@ private fun ClassifiedMediaGridContent(
                 .mediaGridPinchToResize(
                     currentColumnCount = columnCount,
                     sourceRevision = sourceRevision,
-                    sort = sort,
-                    items = items,
                     state = state,
                     morphSession = morphSession,
+                    morphMotion = morphMotion,
+                    preparedMorphPlans = preparedMorphPlans,
                     onMorphSessionChange = onMorphSessionChange,
                 ),
             horizontalArrangement = Arrangement.spacedBy(0.dp),
@@ -3494,7 +3510,7 @@ private fun ClassifiedMediaGridContent(
                 when (item) {
                     is MediaGridHeaderItem -> ClassifiedMediaGridHeader(item)
                     is MediaGridCellItem -> ClassifiedMediaGridCell(
-                        modifier = if (morphSession.phase == MediaGridMorphPhase.Idle) Modifier.animateItem() else Modifier,
+                        modifier = Modifier,
                         entry = item.entry,
                         sort = sort,
                         columnCount = columnCount,
@@ -3563,18 +3579,17 @@ private fun captureClassifiedMediaGridScrollAnchor(
 private fun Modifier.mediaGridPinchToResize(
     currentColumnCount: Int,
     sourceRevision: Long,
-    sort: ClassifiedSortState,
-    items: List<ClassifiedMediaGridItem>,
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
     morphSession: MediaGridMorphSession,
+    morphMotion: MediaGridMorphOverlayMotion,
+    preparedMorphPlans: Map<MediaGridMorphDirection, MediaGridMorphPreparedPlan>,
     onMorphSessionChange: (MediaGridMorphSession) -> Unit,
 ): Modifier {
     val latestColumnCount by rememberUpdatedState(currentColumnCount)
     val latestSourceRevision by rememberUpdatedState(sourceRevision)
-    val latestSort by rememberUpdatedState(sort)
-    val latestItems by rememberUpdatedState(items)
     val latestState by rememberUpdatedState(state)
     val latestMorphSession by rememberUpdatedState(morphSession)
+    val latestPreparedMorphPlans by rememberUpdatedState(preparedMorphPlans)
     val latestOnMorphSessionChange by rememberUpdatedState(onMorphSessionChange)
     return pointerInput(Unit) {
         awaitEachGesture {
@@ -3592,6 +3607,7 @@ private fun Modifier.mediaGridPinchToResize(
                     if (previousDistance > 0f && currentDistance > 0f) {
                         accumulatedScale *= previousDistance / currentDistance
                         if (activeSession.phase == MediaGridMorphPhase.Idle &&
+                            !latestState.isScrollInProgress &&
                             mediaGridMorphDirectionForScale(accumulatedScale) != null
                         ) {
                             val center = Offset(
@@ -3599,30 +3615,12 @@ private fun Modifier.mediaGridPinchToResize(
                                 (pressed[0].position.y + pressed[1].position.y) / 2f,
                             )
                             val direction = mediaGridMorphDirectionForScale(accumulatedScale)!!
-                            val targetColumnCount = mediaGridMorphTargetColumnCount(
-                                latestColumnCount,
-                                direction,
-                            )
-                            val window = buildMediaGridMorphWindow(
-                                items = latestItems,
-                                layoutInfo = latestState.layoutInfo,
-                                currentColumnCount = latestColumnCount,
-                                targetColumnCount = targetColumnCount,
-                                sort = latestSort,
-                            )
-                            val fromSnapshot = buildMediaGridMorphSnapshot(
-                                items = window.fromItems,
-                                columnCount = latestColumnCount,
-                                layoutInfo = latestState.layoutInfo,
-                                globalItemIndexByKey = window.globalItemIndexByKey,
-                            )
-                            val toSnapshot = buildMediaGridMorphSnapshot(
-                                items = window.toItems,
-                                columnCount = targetColumnCount,
-                                layoutInfo = latestState.layoutInfo,
-                                globalItemIndexByKey = window.globalItemIndexByKey,
-                            )
-                            activeSession = MediaGridMorphSession.begin(
+                            val prepared = latestPreparedMorphPlans[direction]
+                                ?.takeIf { it.sourceRevision == latestSourceRevision }
+                                ?: continue
+                            val fromSnapshot = prepared.from
+                            val toSnapshot = prepared.to
+                            val nextSession = MediaGridMorphSession.begin(
                                 currentColumnCount = latestColumnCount,
                                 scale = accumulatedScale,
                                 pinchCenter = center,
@@ -3630,21 +3628,39 @@ private fun Modifier.mediaGridPinchToResize(
                                 fromPlan = fromSnapshot,
                                 toPlan = toSnapshot,
                             ) ?: MediaGridMorphSession.idle(latestColumnCount)
+                            activeSession = nextSession
                             if (activeSession.phase == MediaGridMorphPhase.Tracking) {
+                                morphMotion.progress.floatValue = mediaGridMorphProgressForScale(
+                                    accumulatedScale,
+                                    direction,
+                                )
                                 consumedMorph = true
                                 latestOnMorphSessionChange(activeSession)
                                 event.changes.forEach { it.consume() }
                             }
                         } else if (activeSession.phase == MediaGridMorphPhase.Tracking) {
-                            activeSession = activeSession.updateTracking(accumulatedScale, latestSourceRevision)
+                            val nextSession = activeSession.updateTracking(latestSourceRevision)
+                            if (nextSession.phase != activeSession.phase) {
+                                activeSession = nextSession
+                                morphMotion.progress.floatValue = 0f
+                                latestOnMorphSessionChange(activeSession)
+                                continue
+                            }
+                            activeSession = nextSession
+                            val direction = activeSession.direction
+                            if (direction != null) {
+                                morphMotion.progress.floatValue = mediaGridMorphProgressForScale(
+                                    accumulatedScale,
+                                    direction,
+                                )
+                            }
                             consumedMorph = true
-                            latestOnMorphSessionChange(activeSession)
                             event.changes.forEach { it.consume() }
                         }
                     }
                 } else {
                     if (activeSession.phase == MediaGridMorphPhase.Tracking) {
-                        activeSession = activeSession.release()
+                        activeSession = activeSession.release(morphMotion.progress.floatValue)
                         consumedMorph = true
                         latestOnMorphSessionChange(activeSession)
                     }
@@ -3661,6 +3677,46 @@ private data class MediaGridMorphWindow(
     val toItems: List<ClassifiedMediaGridItem>,
     val globalItemIndexByKey: Map<String, Int>,
 )
+
+private data class MediaGridMorphPreparedPlan(
+    val sourceRevision: Long,
+    val from: MediaGridMorphLayoutSnapshot,
+    val to: MediaGridMorphLayoutSnapshot,
+)
+
+private fun buildPreparedMediaGridMorphPlans(
+    items: List<ClassifiedMediaGridItem>,
+    layoutInfo: androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo,
+    currentColumnCount: Int,
+    sourceRevision: Long,
+    sort: ClassifiedSortState,
+): Map<MediaGridMorphDirection, MediaGridMorphPreparedPlan> {
+    if (items.isEmpty() || layoutInfo.visibleItemsInfo.isEmpty()) return emptyMap()
+    return MediaGridMorphDirection.entries.mapNotNull { direction ->
+        val targetColumnCount = mediaGridMorphTargetColumnCount(currentColumnCount, direction)
+        if (targetColumnCount == currentColumnCount) return@mapNotNull null
+        val window = buildMediaGridMorphWindow(
+            items = items,
+            layoutInfo = layoutInfo,
+            currentColumnCount = currentColumnCount,
+            targetColumnCount = targetColumnCount,
+            sort = sort,
+        )
+        val from = buildMediaGridMorphSnapshot(
+            items = window.fromItems,
+            columnCount = currentColumnCount,
+            layoutInfo = layoutInfo,
+            globalItemIndexByKey = window.globalItemIndexByKey,
+        )
+        val to = buildMediaGridMorphSnapshot(
+            items = window.toItems,
+            columnCount = targetColumnCount,
+            layoutInfo = layoutInfo,
+            globalItemIndexByKey = window.globalItemIndexByKey,
+        )
+        direction to MediaGridMorphPreparedPlan(sourceRevision, from, to)
+    }.toMap()
+}
 
 private fun buildMediaGridMorphWindow(
     items: List<ClassifiedMediaGridItem>,

@@ -90,7 +90,7 @@
 ## 2026-07 single-step media-grid resize
 
 - Pinch direction recognition changes the column count by exactly one within 2–12 and locks further changes until all fingers are released, including reverse movement.
-- The animation starts at recognition time and applies only to currently composed media cells without fade or a second grid; the central Asset remains anchored across header changes.
+- The animation starts after a small direction dead zone and applies only to currently composed media cells without a second grid; the central Asset remains anchored across header changes.
 - Column changes do not regenerate or refetch completed thumbnails or rebuild the ordered source snapshot; the Thumbnail Manager receives the new column count with the latest viewport.
 - Wide preparation advances by cache identity, viewport updates carry direction/index/column count, stale source generations are discarded, and missing local paths fall back from preview URL to remote URL. A decoded JPEG display failure invalidates and retries once.
 
@@ -116,8 +116,8 @@
 
 - `MediaGridMorphTest` now covers linear Rect interpolation, bounded crossfade alpha, same-Asset single-layer rendering, and finite zero-width slots.
 - `MediaGridMorphOverlay` remains absent in Idle and is composed only for the four active morph/handoff phases above the same normal grid. The overlay is viewport-plan bounded and does not create a second `LazyVerticalGrid`.
-- The RenderModel and its distinct Asset map are remembered by the immutable session plan. Progress does not rebuild item lists, maps, thumbnail sources, or ImageRequests; the overlay observes only existing Thumbnail Manager StateFlows.
-- Target handoff dispatches the column callback once, keeps Overlay at progress 1, waits for the target anchor cell after layout and correction, eases a shared Rect delta for at most 80ms when needed, holds two frames, and only then completes the session.
+- The RenderModel and its distinct Asset map are remembered by the immutable session plan and stable Asset keys. Progress does not rebuild item lists, maps, thumbnail sources, or ImageRequests; the overlay observes only existing Thumbnail Manager StateFlows and is withheld until all planned slot visuals/placeholders are available.
+- Target handoff dispatches the column callback once, keeps Overlay at progress 1, performs one anchor `scrollToItem` and one necessary `scrollBy`, then completes without a post-handoff anchor restore.
 - `animateItem()` and the former cell `Animatable` resize scale are suppressed/removed for morph and handoff. Header background, height, and Y are interpolated in the overlay; video, like-count, selection, and error visuals are crossfaded with their Asset.
 
 - `run-safe-debug-check.cmd`: Build、UnitTest、Lint 成功。
@@ -125,9 +125,9 @@
 ## 2026-07-14 final media-grid morph adjustment
 
 - `MediaGridMorphTest` covers continuous Header Y/height interpolation, added/deleted Header height endpoints, changed-title crossfade at progress 0.5, and the one-layer identical-title rule.
-- The overlay uses an opaque surface, maximum-height clipped Header nodes, stable Slot/Header keys, slot-width-derived badge metrics, and one existing Thumbnail StateFlow observation per Asset ID.
-- `MediaGridMorphUiState` applies handoff completion, correction clearing, and overlay removal in one state update after the target grid has had the existing layout/correction frame waits.
-- Safety verification after this change is pending; the required order remains isolated integration check, then safe production-package overwrite.
+- The overlay uses only bounded Slot/Header backgrounds, maximum-height clipped Header nodes, stable Slot/Header keys, slot-width-derived badge metrics, and one existing Thumbnail StateFlow observation per Asset ID. The normal grid remains visible until preparation is complete.
+- `MediaGridMorphUiState` applies handoff completion and overlay removal in one state update after the target grid has laid out; normal anchor restoration is blocked in all non-Idle phases.
+- Safety verification completed: wireless isolated integration check, wireless production-package debug overwrite, and wireless Macrobenchmark all succeeded; the macrobenchmark PostCheck preserved production package metadata and kept benchmark UID separate.
 - 実装: 256×256 JPEG quality 60、cacheDir再生成、inSampleSize縮小デコード、直列最新viewport優先、セル単位StateFlow、専用ImageLoader設定。
 - `run-safe-integration-check.cmd -DebugMethod wireless`: Success。隔離packageでIntegrationTestまで完了。
 - `run-safe-debug-check.cmd -InstallToDevice`: Success。本命packageへ安全に上書きし、スクリプトのpackage情報不変チェックを通過。

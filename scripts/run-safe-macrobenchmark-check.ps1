@@ -1,4 +1,6 @@
 param(
+    [ValidateSet("usb", "wireless")]
+    [string]$DebugMethod = "usb",
     [string]$DeviceConfig = (Join-Path $PSScriptRoot "..\test-device.local.properties")
 )
 
@@ -53,6 +55,35 @@ function Wait-AllowedDevice {
         Start-Sleep -Seconds 2
     } while ([DateTime]::UtcNow -lt $deadline)
     throw "Allowed test device $Serial did not reconnect exactly once within $TimeoutSeconds seconds."
+}
+
+function Resolve-WirelessAllowedDevice {
+    param(
+        [Parameter(Mandatory = $true)][string]$Adb,
+        [Parameter(Mandatory = $true)][string]$HardwareSerial,
+        [int]$TimeoutSeconds = 90
+    )
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        $services = @(Invoke-LoggedAdb -Adb $Adb -Arguments @("mdns", "services"))
+        foreach ($line in $services) {
+            if ($line -match "^\s*(adb-[^\s]+)\s+_adb-tls-connect\._tcp\s+([^\s]+)\s*$" -and $line -match [regex]::Escape($HardwareSerial)) {
+                $serviceEndpoint = "$($Matches[1])._adb-tls-connect._tcp"
+                Invoke-LoggedAdb -Adb $Adb -Arguments @("connect", $serviceEndpoint) | Out-Null
+            }
+        }
+        $devices = @(Invoke-LoggedAdb -Adb $Adb -Arguments @("devices", "-l"))
+        $candidates = @($devices | Where-Object { $_ -match "^\S+\s+device\s" })
+        $matches = @()
+        foreach ($candidate in $candidates) {
+            $endpoint = ($candidate -split "\s+")[0]
+            $reportedSerial = ((Invoke-LoggedAdb -Adb $Adb -Arguments @("-s", $endpoint, "shell", "getprop", "ro.serialno")) -join "").Trim()
+            if ($reportedSerial -eq $HardwareSerial) { $matches += $endpoint }
+        }
+        if ($matches.Count -eq 1) { return $matches[0] }
+        Start-Sleep -Seconds 2
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "Wireless device with hardware serial $HardwareSerial did not resolve to exactly one connected endpoint within $TimeoutSeconds seconds."
 }
 
 function Get-PackageMetadata {
@@ -112,6 +143,7 @@ Start-SafeScript -Name "run-safe-macrobenchmark-check" -RepoRoot $repoRoot
 Set-Location $repoRoot
 
 $serial = ""
+$hardwareSerial = ""
 $productionPackage = ""
 $benchmarkPackage = ""
 $macrobenchmarkHostPackage = ""
@@ -139,8 +171,8 @@ try {
             }
         }
 
-        $script:serial = $properties["testDeviceSerial"]
-        if ([string]::IsNullOrWhiteSpace($script:serial)) { throw "testDeviceSerial is required in $configPath" }
+        $script:hardwareSerial = $properties["testDeviceSerial"]
+        if ([string]::IsNullOrWhiteSpace($script:hardwareSerial)) { throw "testDeviceSerial is required in $configPath" }
         if ($properties["allowCoLocatedProductionApp"] -ne "true") { throw "allowCoLocatedProductionApp=true is required in $configPath" }
         $script:productionPackage = $properties["productionPackage"]
         $script:benchmarkPackage = $properties["benchmarkPackage"]
@@ -157,6 +189,12 @@ try {
         $script:adb = Join-Path $env:LOCALAPPDATA "Android\Sdk\platform-tools\adb.exe"
         if (-not (Test-Path -LiteralPath $script:adb)) { throw "adb was not found: $script:adb" }
         $script:aapt = Get-Aapt
+        if ($DebugMethod -eq "wireless") {
+            $script:serial = Resolve-WirelessAllowedDevice -Adb $script:adb -HardwareSerial $script:hardwareSerial
+        } else {
+            $script:serial = $script:hardwareSerial
+            Wait-AllowedDevice -Adb $script:adb -Serial $script:serial
+        }
         Wait-AllowedDevice -Adb $script:adb -Serial $script:serial
         $env:ANDROID_SERIAL = $script:serial
 

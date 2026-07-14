@@ -146,15 +146,24 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 ## 2026-07-14 final media-grid morph adjustment
 
 - Morph Header bands use one maximum-height node, clipped while Y and height interpolate from the start layout to the end layout. Changed titles crossfade with `1-progress` and `progress`; identical titles use one layer.
-- The morph overlay draws an opaque surface first, uses stable slot/header keys, and reads progress/correction in graphics layers. RenderModel, lists, maps, thumbnail sources, and ImageRequests are session-scoped rather than progress-scoped.
+- The morph overlay draws only bounded Slot/Header backgrounds, uses stable slot/header keys, and reads progress/correction in graphics layers. RenderModel, lists, maps, thumbnail sources, and ImageRequests are session-scoped rather than progress-scoped.
 - Overlay thumbnail observation is deduplicated by Asset ID and only uses already-present manager StateFlows, so starting a morph does not start thumbnail generation, network work, or file checks.
-- Video, selection, card, and like-count badges use the slot width and the same Asset alpha as their image. `MediaGridMorphUiState` atomically manages the session, anchor, correction, and handoff completion so correction is not cleared while the overlay is still visible.
+- Video, selection, card, and like-count badges use the slot width and the same Asset alpha as their image. `MediaGridMorphUiState` atomically manages the transaction, anchor, and handoff completion so correction is not cleared while the overlay is still visible.
 
 ## 2026-07 media grid pinch / anchor follow-up
 
 - `EnhancedClassifiedScreen` now keeps a saved media-grid column count in `MainScreen` and updates it from pinch gestures.
 - Pinch-in increases the column count and pinch-out decreases it within the `2..12` range.
 - When the column count changes, the grid restores the nearest visible media-cell anchor instead of jumping back to the top.
+
+## 2026-07-14 media-grid structure stabilization
+
+- The final Header/Media item sequence is prepared on `Dispatchers.Default`; a new sequence replaces the old one only after it is complete, so a column change never exposes an empty grid.
+- A stopped viewport prepares bounded `+1` and `-1` Morph candidates. Scrolling does not update candidates, and a pinch is ignored while the LazyGrid is still scrolling.
+- Morph transaction state is separate from `MediaGridMorphOverlayMotion.progress`. Pointer movement updates only the stable motion holder read by overlay graphics layers; the parent, LazyGrid items, RenderModel, maps, and thumbnail requests are not rebuilt per pointer update.
+- The RenderModel is remembered by the immutable plan only and resolves entries by stable `asset:<assetId>` keys. Overlay composition is withheld until all planned visual keys are present.
+- Normal Media cells and headers have no placement/appearance animation. Their shared static gradient brush is created once per grid and reused by every cell.
+- Normal anchor restoration runs only in `Idle`; Morph handoff alone performs the anchor `scrollToItem` and one required `scrollBy`, then hides the overlay and completes in one state transition.
 
 ## 2026-07 continuous media-grid morph foundation
 

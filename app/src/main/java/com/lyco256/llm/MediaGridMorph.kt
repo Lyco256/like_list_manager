@@ -222,6 +222,8 @@ private fun buildMorphRowSlots(
 
 internal data class MediaGridMorphSettleResult(
     val session: MediaGridMorphSession,
+    val progress: Float,
+    val elapsedMillis: Long,
     val targetColumnCountToHandoff: Int? = null,
 )
 
@@ -249,11 +251,9 @@ internal data class MediaGridMorphSession(
     val fromColumnCount: Int,
     val toColumnCount: Int,
     val direction: MediaGridMorphDirection?,
-    val progress: Float,
     val pinchCenter: Offset?,
     val sourceRevision: Long?,
     val plan: MediaGridMorphPlan?,
-    val settleElapsedMillis: Long = 0L,
     val targetHandoffDispatched: Boolean = false,
 ) {
     companion object {
@@ -262,7 +262,6 @@ internal data class MediaGridMorphSession(
             fromColumnCount = currentColumnCount,
             toColumnCount = currentColumnCount,
             direction = null,
-            progress = 0f,
             pinchCenter = null,
             sourceRevision = null,
             plan = null,
@@ -286,7 +285,6 @@ internal data class MediaGridMorphSession(
                 fromColumnCount = currentColumnCount,
                 toColumnCount = target,
                 direction = direction,
-                progress = mediaGridMorphProgressForScale(scale, direction, deadZoneScale),
                 pinchCenter = pinchCenter,
                 sourceRevision = sourceRevision,
                 plan = plan,
@@ -294,54 +292,48 @@ internal data class MediaGridMorphSession(
         }
     }
 
-    fun updateTracking(
-        scale: Float,
-        currentSourceRevision: Long,
-        deadZoneScale: Float = MediaGridMorphDefaults.DeadZoneScale,
-    ): MediaGridMorphSession {
+    fun updateTracking(currentSourceRevision: Long): MediaGridMorphSession {
         if (phase != MediaGridMorphPhase.Tracking) return this
         if (sourceRevision != currentSourceRevision) return idle(fromColumnCount)
-        return copy(progress = mediaGridMorphProgressForScale(scale, direction!!, deadZoneScale))
+        return this
     }
 
-    fun release(): MediaGridMorphSession = when (phase) {
+    fun release(progress: Float): MediaGridMorphSession = when (phase) {
         MediaGridMorphPhase.Tracking -> copy(
             phase = if (progress < MediaGridMorphDefaults.ReleaseThreshold) {
                 MediaGridMorphPhase.SettlingToCurrent
             } else {
                 MediaGridMorphPhase.SettlingToTarget
             },
-            settleElapsedMillis = 0L,
         )
         else -> this
     }
 
     fun advanceSettle(
+        currentProgress: Float,
         elapsedMillis: Long,
         currentSourceRevision: Long,
         durationMillis: Long = MediaGridMorphDefaults.SettleDurationMillis,
     ): MediaGridMorphSettleResult {
         if (phase != MediaGridMorphPhase.SettlingToCurrent && phase != MediaGridMorphPhase.SettlingToTarget) {
-            return MediaGridMorphSettleResult(this)
+            return MediaGridMorphSettleResult(this, currentProgress, 0L)
         }
-        if (sourceRevision != currentSourceRevision) return MediaGridMorphSettleResult(idle(fromColumnCount))
+        if (sourceRevision != currentSourceRevision) return MediaGridMorphSettleResult(idle(fromColumnCount), 0f, 0L)
         val duration = durationMillis.coerceAtLeast(1L)
-        val nextElapsed = (settleElapsedMillis + elapsedMillis.coerceAtLeast(0L)).coerceAtMost(duration)
+        val nextElapsed = elapsedMillis.coerceAtLeast(0L).coerceAtMost(duration)
         val fraction = nextElapsed.toFloat() / duration
         val targetProgress = if (phase == MediaGridMorphPhase.SettlingToTarget) 1f else 0f
-        val nextProgress = progress + (targetProgress - progress) * fraction
+        val nextProgress = currentProgress + (targetProgress - currentProgress) * fraction
         val reached = nextElapsed >= duration
-        if (!reached) return MediaGridMorphSettleResult(copy(progress = nextProgress, settleElapsedMillis = nextElapsed))
+        if (!reached) return MediaGridMorphSettleResult(this, nextProgress, nextElapsed)
         if (phase == MediaGridMorphPhase.SettlingToCurrent) {
-            return MediaGridMorphSettleResult(idle(fromColumnCount))
+            return MediaGridMorphSettleResult(idle(fromColumnCount), 0f, nextElapsed)
         }
         val next = copy(
             phase = MediaGridMorphPhase.AwaitingGridHandoff,
-            progress = 1f,
-            settleElapsedMillis = nextElapsed,
             targetHandoffDispatched = true,
         )
-        return MediaGridMorphSettleResult(next, targetColumnCountToHandoff = toColumnCount.takeUnless { targetHandoffDispatched })
+        return MediaGridMorphSettleResult(next, 1f, nextElapsed, targetColumnCountToHandoff = toColumnCount.takeUnless { targetHandoffDispatched })
     }
 
     fun cancelForSourceChange(currentColumnCount: Int): MediaGridMorphSession = idle(currentColumnCount)
@@ -350,7 +342,7 @@ internal data class MediaGridMorphSession(
 }
 
 internal object MediaGridMorphDefaults {
-    const val DeadZoneScale: Float = 1.12f
+    const val DeadZoneScale: Float = 1.02f
     const val ReleaseThreshold: Float = 0.5f
     const val SettleDurationMillis: Long = 180L
     const val OverscanRows: Int = 2
