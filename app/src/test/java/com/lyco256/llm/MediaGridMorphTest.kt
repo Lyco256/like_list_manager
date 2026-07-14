@@ -42,6 +42,16 @@ class MediaGridMorphTest {
     }
 
     @Test
+    fun sourceRevisionChangeCancelsTrackingPlanToCurrentColumns() {
+        val session = trackingSession(4, 1.3f)
+        val cancelled = session.updateTracking(1.4f, 11L)
+        assertEquals(MediaGridMorphPhase.Idle, cancelled.phase)
+        assertEquals(4, cancelled.fromColumnCount)
+        assertEquals(4, cancelled.toColumnCount)
+        assertEquals(null, cancelled.plan)
+    }
+
+    @Test
     fun fourToFiveCreatesZeroWidthRightEdgeSlotAndKeepsAssetOrder() {
         val from = snapshot(4, (0 until 8).map { media(('A'.code + it).toChar().toString(), it, it / 4, it % 4) })
         val to = snapshot(5, (0 until 10).map { media(('A'.code + it).toChar().toString(), it, it / 5, it % 5) })

@@ -362,8 +362,7 @@ private fun scoped(
     val media = snapshot.mediaItems().filter { it.rect.bottom >= top && it.rect.top <= bottom }
     val firstMediaTop = media.minOfOrNull { it.rect.top }
     val relatedHeaders = snapshot.headers().filter { header ->
-        header.rect.bottom >= top && header.rect.top <= bottom ||
-            firstMediaTop != null && header.rect.top <= firstMediaTop
+        header.rect.bottom >= top && header.rect.top <= bottom
     }
     val precedingHeader = firstMediaTop?.let { mediaTop ->
         snapshot.headers().filter { it.rect.top <= mediaTop }.maxByOrNull { it.rect.top }

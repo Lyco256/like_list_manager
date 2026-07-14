@@ -234,6 +234,7 @@ MainActivity / Compose UI
 - Header bands retain start/end title, Y, height, and presence, including zero-height add/remove transitions. The nearest Media Asset to the pinch center is kept as the Y anchor.
 - Progress is reversible and bounded to `0f..1f`; the real `columnCount` remains unchanged during tracking and the existing callback is dispatched once only after target settle.
 - `TagHierarchyUiV2.kt` keeps `pointerInput(Unit)` stable and reads latest values with `rememberUpdatedState`. Progress updates do not rebuild items or request thumbnails.
+- Morph plan creation slices the current LazyGrid window plus two rows on each side, builds the adjacent target only from that bounded media window, and preserves global item indexes. Target handoff applies the planned Asset anchor before normal grid scroll-anchor fallback.
 - Pure coverage is in `app/src/test/java/com/lyco256/llm/MediaGridMorphTest.kt`; the source-level contract is documented in `docs/app/src/main/java/com/lyco256/llm/MediaGridMorph.kt.md`.
 
 - `integrationTest` build typeは `com.lyco256.llm.test` と本番とは異なるDB、画像、Preferencesを使います。

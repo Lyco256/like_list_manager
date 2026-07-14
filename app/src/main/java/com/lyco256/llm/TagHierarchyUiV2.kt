@@ -322,6 +322,7 @@ fun EnhancedClassifiedScreen(
     var bulkTagDialogOpen by remember { mutableStateOf(false) }
     var mediaGridResizeAnimation by remember { mutableStateOf(0 to 0) }
     var mediaGridMorphSession by remember { mutableStateOf(MediaGridMorphSession.idle(mediaGridColumnCount)) }
+    var mediaGridHandoffAnchor by remember { mutableStateOf<MediaGridMorphAnchor?>(null) }
     val itemKeys = remember(displayMode, uiState.clips, uiState.filters, uiState.sort, uiState.tagHierarchy) {
         if (displayMode == ClassifiedDisplayMode.Card) uiState.classified.map { it.clip.id } else emptyList()
     }
@@ -354,6 +355,7 @@ fun EnhancedClassifiedScreen(
                 val result = mediaGridMorphSession.advanceSettle(elapsed, mediaGridState.sourceRevision)
                 mediaGridMorphSession = result.session
                 result.targetColumnCountToHandoff?.let { next ->
+                    mediaGridHandoffAnchor = result.session.plan?.anchor
                     mediaGridResizeAnimation = (if (next > mediaGridColumnCount) 1 else -1) to (mediaGridResizeAnimation.second + 1)
                     onMediaGridColumnCountChange(next)
                     mediaGridMorphSession = result.session.completeGridHandoff()
@@ -370,7 +372,29 @@ fun EnhancedClassifiedScreen(
         }
     }
     if (displayMode == ClassifiedDisplayMode.Card) PreserveScrollAnchor(listState, "classified", itemKeys)
-    LaunchedEffect(mediaGridColumnCount, mediaGridItems) {
+    LaunchedEffect(mediaGridColumnCount, mediaGridItems, mediaGridHandoffAnchor) {
+        val morphAnchor = mediaGridHandoffAnchor
+        if (morphAnchor != null) {
+            val assetKey = morphAnchor.toSlot.endAssetKey ?: morphAnchor.assetKey
+            val targetKey = "media_grid_item_${assetKey.removePrefix("asset:")}"
+            if (mediaGridItems.isEmpty()) return@LaunchedEffect
+            val targetIndex = mediaGridItems.indexOfFirst { it.key == targetKey }
+                .takeIf { it >= 0 }
+                ?: run {
+                    mediaGridHandoffAnchor = null
+                    return@LaunchedEffect
+                }
+            withFrameNanos { }
+            mediaGridLazyState.scrollToItem(targetIndex)
+            withFrameNanos { }
+            val target = mediaGridLazyState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == targetKey }
+            if (target != null) {
+                val targetCenter = target.offset.y + target.size.height / 2f
+                mediaGridLazyState.scrollBy(targetCenter - morphAnchor.fromViewportCenterY)
+            }
+            mediaGridHandoffAnchor = null
+            return@LaunchedEffect
+        }
         val anchor = mediaGridAnchor ?: return@LaunchedEffect
         if (mediaGridItems.isEmpty()) return@LaunchedEffect
         withFrameNanos { }
@@ -3487,18 +3511,30 @@ private fun Modifier.mediaGridPinchToResize(
                                 (pressed[0].position.x + pressed[1].position.x) / 2f,
                                 (pressed[0].position.y + pressed[1].position.y) / 2f,
                             )
-                            val fromItems = latestItems
+                            val direction = mediaGridMorphDirectionForScale(accumulatedScale)!!
                             val targetColumnCount = mediaGridMorphTargetColumnCount(
                                 latestColumnCount,
-                                mediaGridMorphDirectionForScale(accumulatedScale)!!,
+                                direction,
                             )
-                            val targetItems = buildClassifiedMediaGridItems(
-                                fromItems.filterIsInstance<MediaGridCellItem>().map { it.entry },
-                                latestSort,
-                                targetColumnCount,
+                            val window = buildMediaGridMorphWindow(
+                                items = latestItems,
+                                layoutInfo = latestState.layoutInfo,
+                                currentColumnCount = latestColumnCount,
+                                targetColumnCount = targetColumnCount,
+                                sort = latestSort,
                             )
-                            val fromSnapshot = buildMediaGridMorphSnapshot(fromItems, latestColumnCount, latestState.layoutInfo)
-                            val toSnapshot = buildMediaGridMorphSnapshot(targetItems, targetColumnCount, latestState.layoutInfo)
+                            val fromSnapshot = buildMediaGridMorphSnapshot(
+                                items = window.fromItems,
+                                columnCount = latestColumnCount,
+                                layoutInfo = latestState.layoutInfo,
+                                globalItemIndexByKey = window.globalItemIndexByKey,
+                            )
+                            val toSnapshot = buildMediaGridMorphSnapshot(
+                                items = window.toItems,
+                                columnCount = targetColumnCount,
+                                layoutInfo = latestState.layoutInfo,
+                                globalItemIndexByKey = window.globalItemIndexByKey,
+                            )
                             activeSession = MediaGridMorphSession.begin(
                                 currentColumnCount = latestColumnCount,
                                 scale = accumulatedScale,
@@ -3533,10 +3569,39 @@ private fun Modifier.mediaGridPinchToResize(
     }
 }
 
+private data class MediaGridMorphWindow(
+    val fromItems: List<ClassifiedMediaGridItem>,
+    val toItems: List<ClassifiedMediaGridItem>,
+    val globalItemIndexByKey: Map<String, Int>,
+)
+
+private fun buildMediaGridMorphWindow(
+    items: List<ClassifiedMediaGridItem>,
+    layoutInfo: androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo,
+    currentColumnCount: Int,
+    targetColumnCount: Int,
+    sort: ClassifiedSortState,
+): MediaGridMorphWindow {
+    if (items.isEmpty() || layoutInfo.visibleItemsInfo.isEmpty()) {
+        return MediaGridMorphWindow(emptyList(), emptyList(), emptyMap())
+    }
+    val firstVisibleIndex = layoutInfo.visibleItemsInfo.minOf { it.index }
+    val lastVisibleIndex = layoutInfo.visibleItemsInfo.maxOf { it.index }
+    val rowPadding = (maxOf(currentColumnCount, targetColumnCount) * MediaGridMorphDefaults.OverscanRows + 2)
+    val start = (firstVisibleIndex - rowPadding).coerceAtLeast(0)
+    val end = (lastVisibleIndex + rowPadding + 1).coerceAtMost(items.size)
+    val fromItems = items.subList(start, end).toList()
+    val globalItemIndexByKey = fromItems.mapIndexed { index, item -> item.key to start + index }.toMap()
+    val entries = fromItems.filterIsInstance<MediaGridCellItem>().map { it.entry }
+    val toItems = buildClassifiedMediaGridItems(entries, sort, targetColumnCount)
+    return MediaGridMorphWindow(fromItems, toItems, globalItemIndexByKey)
+}
+
 private fun buildMediaGridMorphSnapshot(
     items: List<ClassifiedMediaGridItem>,
     columnCount: Int,
     layoutInfo: androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo,
+    globalItemIndexByKey: Map<String, Int> = emptyMap(),
 ): MediaGridMorphLayoutSnapshot {
     val viewport = Rect(
         left = 0f,
@@ -3585,7 +3650,7 @@ private fun buildMediaGridMorphSnapshot(
                 generated += MediaGridMorphLayoutItem.Media(
                     MediaGridMorphMedia(
                         assetKey = "asset:${item.entry.assetId}",
-                        itemIndex = index,
+                        itemIndex = globalItemIndexByKey[item.key] ?: index,
                         rect = rect,
                     ),
                 )

@@ -108,6 +108,7 @@
 
 - `MediaGridMorphTest` covers the 2..12 adjacent-column bound, extreme-scale clamping, reversible progress, the 0.5 release threshold, one-shot target handoff, 4→5 zero-width right-edge slot, Asset correspondence, Header add/remove/title change, and bounded planning for 10,000 items.
 - `MediaGridMorphPlan` keeps only viewport-neighborhood rows and related headers; progress updates reuse the immutable plan and do not touch the item list, thumbnail manager, image requests, files, or DB.
+- The Compose path now slices the current viewport plus two rows before creating the target window, and applies the planned Asset anchor during target handoff.
 - `TagHierarchyUiV2` uses a stable `pointerInput(Unit)`, keeps the actual grid column count unchanged during tracking, suppresses two-finger cell actions after morph start, and cancels stale plans when source revision or items change.
 - Required device order was completed: isolated integration check succeeded, then production-package debug overwrite succeeded with package metadata invariance.
 
