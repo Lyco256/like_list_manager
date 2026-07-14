@@ -16,11 +16,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
@@ -30,12 +35,26 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.lyco256.llm.data.MediaGridThumbnailManager
 import com.lyco256.llm.data.MediaGridThumbnailState
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.math.max
+
+@Stable
+internal class MediaGridMorphOverlayMotion {
+    val progress = mutableFloatStateOf(0f)
+    val correction = mutableStateOf(androidx.compose.ui.geometry.Offset.Zero)
+}
+
+@Stable
+internal class MediaGridMorphOverlayResources(
+    val thumbnailManager: MediaGridThumbnailManager,
+    val thumbnailImageLoader: coil.ImageLoader,
+    val thumbnailBrush: Brush,
+)
 
 private fun mediaGridThumbnailSource(entry: MediaGridEntry) =
     com.lyco256.llm.data.MediaGridThumbnailSource(
@@ -47,6 +66,7 @@ private fun mediaGridThumbnailSource(entry: MediaGridEntry) =
         downloadState = entry.downloadState,
     )
 
+@Immutable
 internal data class MediaGridMorphAssetVisual(
     val entry: MediaGridEntry,
     val thumbnailSource: com.lyco256.llm.data.MediaGridThumbnailSource,
@@ -56,6 +76,7 @@ internal data class MediaGridMorphAssetVisual(
 )
 
 /** Immutable session render data. It is created once per plan and released with the Idle phase. */
+@Immutable
 internal data class MediaGridMorphRenderModel(
     val slots: List<MediaGridMorphSlot>,
     val headers: List<MediaGridMorphHeaderBand>,
@@ -123,19 +144,40 @@ internal fun mediaGridMorphLayerCount(slot: MediaGridMorphSlot): Int = when {
     else -> 0
 }
 
+internal fun mediaGridMorphHeaderY(header: MediaGridMorphHeaderBand, progress: Float): Float =
+    lerp(header.startY, header.endY, progress.coerceIn(0f, 1f))
+
+internal fun mediaGridMorphHeaderHeight(header: MediaGridMorphHeaderBand, progress: Float): Float =
+    lerp(header.startHeight, header.endHeight, progress.coerceIn(0f, 1f)).coerceAtLeast(0f)
+
+internal fun mediaGridMorphStartTitleAlpha(header: MediaGridMorphHeaderBand, progress: Float): Float = when {
+    header.startTitle.isNullOrBlank() -> 0f
+    header.startTitle == header.endTitle -> 1f
+    else -> (1f - progress.coerceIn(0f, 1f)).coerceIn(0f, 1f)
+}
+
+internal fun mediaGridMorphEndTitleAlpha(header: MediaGridMorphHeaderBand, progress: Float): Float = when {
+    header.endTitle.isNullOrBlank() -> 0f
+    header.startTitle == header.endTitle -> 0f
+    else -> progress.coerceIn(0f, 1f)
+}
+
+internal fun mediaGridMorphTitleLayerCount(header: MediaGridMorphHeaderBand): Int = when {
+    header.startTitle.isNullOrBlank() && header.endTitle.isNullOrBlank() -> 0
+    header.startTitle == header.endTitle -> 1
+    else -> listOfNotNull(header.startTitle, header.endTitle).count { it.isNotBlank() }
+}
+
 private fun lerp(start: Float, end: Float, progress: Float): Float = start + (end - start) * progress
 
 @Composable
 internal fun MediaGridMorphOverlay(
     model: MediaGridMorphRenderModel,
-    progress: Float,
-    thumbnailManager: MediaGridThumbnailManager,
-    thumbnailImageLoader: coil.ImageLoader,
-    thumbnailBrush: Brush,
+    motion: MediaGridMorphOverlayMotion,
+    resources: MediaGridMorphOverlayResources,
     selectionMode: Boolean,
-    correctionX: Float = 0f,
-    correctionY: Float = 0f,
 ) {
+    val thumbnailStates = rememberMorphThumbnailStates(model, resources.thumbnailManager)
     val density = LocalDensity.current
     Box(
         modifier = Modifier
@@ -143,95 +185,216 @@ internal fun MediaGridMorphOverlay(
             .clipToBounds()
             .testTag("media_grid_morph_overlay"),
     ) {
+        Surface(
+            modifier = Modifier.fillMaxSize().testTag("media_grid_morph_surface"),
+            color = MaterialTheme.colorScheme.surface,
+        ) {}
         model.headers.forEach { header ->
-            MorphHeaderBand(header, progress, model.viewport.width, correctionX, correctionY, thumbnailBrush)
+            key("morph_header_${header.key}") {
+                MorphHeaderBand(header, model.viewport.width, motion)
+            }
         }
         model.slots.forEachIndexed { index, slot ->
-            val rect = mediaGridMorphRect(slot, progress)
-            val maxWidth = max(slot.startRect.width, slot.endRect.width)
-            if (maxWidth <= 0f || rect.width <= 0.01f || rect.height <= 0.01f) return@forEachIndexed
-            val scale = (rect.width / maxWidth).coerceIn(0f, 1f)
-            val maxSize = with(density) { maxWidth.toDp() }
-            val start = slot.startAssetKey?.let(model.assetByKey::get)
-            val end = slot.endAssetKey?.let(model.assetByKey::get)
-            val same = start != null && start.entry.assetId == end?.entry?.assetId
-            val startAlpha = mediaGridMorphStartAlpha(slot, progress)
-            val endAlpha = mediaGridMorphEndAlpha(slot, progress)
-            Box(
-                modifier = Modifier
-                    .size(maxSize)
-                    .graphicsLayer {
-                        translationX = rect.left + correctionX
-                        translationY = rect.top + correctionY
-                        scaleX = scale
-                        scaleY = scale
-                        transformOrigin = TransformOrigin(0f, 0f)
-                        clip = true
-                    }
-                    .testTag("media_grid_morph_slot_$index"),
-            ) {
-                Box(Modifier.fillMaxSize().background(thumbnailBrush))
-                if (same) {
-                    MorphAssetLayer(
-                        visual = start ?: end,
-                        alpha = 1f,
-                        thumbnailManager = thumbnailManager,
-                        thumbnailImageLoader = thumbnailImageLoader,
-                        selectionMode = selectionMode,
-                        thumbnailBrush = thumbnailBrush,
-                    )
-                } else {
-                    if (start != null) MorphAssetLayer(start, startAlpha, thumbnailManager, thumbnailImageLoader, selectionMode, thumbnailBrush)
-                    if (end != null) MorphAssetLayer(end, endAlpha, thumbnailManager, thumbnailImageLoader, selectionMode, thumbnailBrush)
-                }
+            key("morph_slot_${slot.startItemIndex ?: -1}_${slot.endItemIndex ?: -1}_$index") {
+                MorphSlot(
+                    index = index,
+                    slot = slot,
+                    model = model,
+                    thumbnailStates = thumbnailStates,
+                    motion = motion,
+                    resources = resources,
+                    selectionMode = selectionMode,
+                    density = density,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun MorphHeaderBand(
-    header: MediaGridMorphHeaderBand,
-    progress: Float,
-    width: Float,
-    correctionX: Float,
-    correctionY: Float,
-    brush: Brush,
+private fun rememberMorphThumbnailStates(
+    model: MediaGridMorphRenderModel,
+    thumbnailManager: MediaGridThumbnailManager,
+): Map<Long, State<MediaGridThumbnailState>?> {
+    val visuals = remember(model.assetByKey, thumbnailManager) {
+        model.assetByKey.values.distinctBy { it.entry.assetId }
+    }
+    val result = LinkedHashMap<Long, State<MediaGridThumbnailState>?>(visuals.size)
+    visuals.forEach { visual ->
+        key("morph_thumbnail_${visual.entry.assetId}") {
+            val stateFlow: StateFlow<MediaGridThumbnailState>? = remember(visual.entry.assetId, thumbnailManager) {
+                thumbnailManager.stateIfPresent(visual.entry.assetId)
+            }
+            result[visual.entry.assetId] = stateFlow?.collectAsState()
+        }
+    }
+    return result
+}
+
+@Composable
+private fun MorphSlot(
+    index: Int,
+    slot: MediaGridMorphSlot,
+    model: MediaGridMorphRenderModel,
+    thumbnailStates: Map<Long, State<MediaGridThumbnailState>?>,
+    motion: MediaGridMorphOverlayMotion,
+    resources: MediaGridMorphOverlayResources,
+    selectionMode: Boolean,
+    density: androidx.compose.ui.unit.Density,
 ) {
-    val density = LocalDensity.current
-    val top = lerp(header.startY, header.endY, progress)
-    val height = lerp(header.startHeight, header.endHeight, progress).coerceAtLeast(0f)
-    if (height <= 0f) return
+    val maxWidth = max(slot.startRect.width, slot.endRect.width).coerceAtLeast(0.01f)
+    val maxHeight = max(slot.startRect.height, slot.endRect.height).coerceAtLeast(0.01f)
+    val maxWidthDp = with(density) { maxWidth.toDp() }
+    val start = slot.startAssetKey?.let(model.assetByKey::get)
+    val end = slot.endAssetKey?.let(model.assetByKey::get)
+    val same = start != null && start.entry.assetId == end?.entry?.assetId
     Box(
         modifier = Modifier
-            .size(with(density) { width.toDp() }, with(density) { height.toDp() })
-            .graphicsLayer { translationX = correctionX; translationY = top + correctionY }
+            .size(with(density) { maxWidth.toDp() }, with(density) { maxHeight.toDp() })
+            .graphicsLayer {
+                val rect = mediaGridMorphRect(slot, motion.progress.floatValue)
+                translationX = rect.left + motion.correction.value.x
+                translationY = rect.top + motion.correction.value.y
+                scaleX = (rect.width / maxWidth).coerceIn(0f, 1f)
+                scaleY = (rect.height / maxHeight).coerceIn(0f, 1f)
+                transformOrigin = TransformOrigin(0f, 0f)
+                clip = true
+            }
+            .testTag("media_grid_morph_slot_$index"),
+    ) {
+        Box(Modifier.fillMaxSize().background(resources.thumbnailBrush))
+        if (same) {
+            MorphAssetLayer(
+                visual = start ?: end,
+                side = MorphAssetSide.Single,
+                slot = slot,
+                thumbnailState = start?.let { thumbnailStates[it.entry.assetId] },
+                maxSlotWidth = maxWidthDp,
+                motion = motion,
+                thumbnailImageLoader = resources.thumbnailImageLoader,
+                selectionMode = selectionMode,
+                thumbnailBrush = resources.thumbnailBrush,
+            )
+        } else {
+            if (start != null) MorphAssetLayer(
+                visual = start,
+                side = MorphAssetSide.Start,
+                slot = slot,
+                thumbnailState = thumbnailStates[start.entry.assetId],
+                maxSlotWidth = maxWidthDp,
+                motion = motion,
+                thumbnailImageLoader = resources.thumbnailImageLoader,
+                selectionMode = selectionMode,
+                thumbnailBrush = resources.thumbnailBrush,
+            )
+            if (end != null) MorphAssetLayer(
+                visual = end,
+                side = MorphAssetSide.End,
+                slot = slot,
+                thumbnailState = thumbnailStates[end.entry.assetId],
+                maxSlotWidth = maxWidthDp,
+                motion = motion,
+                thumbnailImageLoader = resources.thumbnailImageLoader,
+                selectionMode = selectionMode,
+                thumbnailBrush = resources.thumbnailBrush,
+            )
+        }
+    }
+}
+
+private enum class MorphAssetSide { Single, Start, End }
+
+@Composable
+private fun MorphHeaderBand(
+    header: MediaGridMorphHeaderBand,
+    width: Float,
+    motion: MediaGridMorphOverlayMotion,
+) {
+    val density = LocalDensity.current
+    val maxHeight = max(header.startHeight, header.endHeight).coerceAtLeast(0.01f)
+    Box(
+        modifier = Modifier
+            .size(with(density) { width.toDp() }, with(density) { maxHeight.toDp() })
+            .graphicsLayer {
+                val progress = motion.progress.floatValue
+                translationY = mediaGridMorphHeaderY(header, progress) + motion.correction.value.y
+                scaleY = (mediaGridMorphHeaderHeight(header, progress) / maxHeight).coerceIn(0f, 1f)
+                translationX = motion.correction.value.x
+                transformOrigin = TransformOrigin(0f, 0f)
+                clip = true
+            }
             .background(MaterialTheme.colorScheme.surface)
             .testTag("media_grid_morph_header_${header.key}"),
     ) {
-        val title = if (progress < 0.5f) header.startTitle ?: header.endTitle else header.endTitle ?: header.startTitle
-        if (!title.isNullOrBlank()) Text(title, Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.titleSmall)
+        val startTitle = header.startTitle
+        val endTitle = header.endTitle
+        if (startTitle != null && startTitle == endTitle && startTitle.isNotBlank()) {
+            MorphHeaderTitle(startTitle, header, MorphAssetSide.Single, motion)
+        } else {
+            if (!startTitle.isNullOrBlank()) MorphHeaderTitle(startTitle, header, MorphAssetSide.Start, motion)
+            if (!endTitle.isNullOrBlank()) MorphHeaderTitle(endTitle, header, MorphAssetSide.End, motion)
+        }
     }
 }
 
 @Composable
+private fun MorphHeaderTitle(
+    title: String,
+    header: MediaGridMorphHeaderBand,
+    side: MorphAssetSide,
+    motion: MediaGridMorphOverlayMotion,
+) {
+    Text(
+        title,
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .graphicsLayer {
+                alpha = when (side) {
+                    MorphAssetSide.Single -> 1f
+                    MorphAssetSide.Start -> mediaGridMorphStartTitleAlpha(header, motion.progress.floatValue)
+                    MorphAssetSide.End -> mediaGridMorphEndTitleAlpha(header, motion.progress.floatValue)
+                }
+            }
+            .testTag(
+                when (side) {
+                    MorphAssetSide.Single -> "media_grid_morph_title_${header.key}"
+                    MorphAssetSide.Start -> "media_grid_morph_start_title_${header.key}"
+                    MorphAssetSide.End -> "media_grid_morph_end_title_${header.key}"
+                },
+            ),
+        style = MaterialTheme.typography.titleSmall,
+    )
+}
+
+@Composable
 private fun MorphAssetLayer(
-    visual: MediaGridMorphAssetVisual?,
-    alpha: Float,
-    thumbnailManager: MediaGridThumbnailManager,
+    visual: MediaGridMorphAssetVisual,
+    side: MorphAssetSide,
+    slot: MediaGridMorphSlot,
+    thumbnailState: State<MediaGridThumbnailState>?,
+    maxSlotWidth: Dp,
+    motion: MediaGridMorphOverlayMotion,
     thumbnailImageLoader: coil.ImageLoader,
     selectionMode: Boolean,
     thumbnailBrush: Brush,
 ) {
-    if (visual == null || alpha <= 0f) return
-    val stateFlow: StateFlow<MediaGridThumbnailState>? = remember(visual.entry.assetId, thumbnailManager) {
-        thumbnailManager.stateIfPresent(visual.entry.assetId)
-    }
-    val thumbnailState = stateFlow?.collectAsState()?.value
-    val readyFile = (thumbnailState as? MediaGridThumbnailState.Ready)?.file
-    val error = thumbnailState is MediaGridThumbnailState.Failed || visual.entry.downloadState == "failed" ||
+    val state = thumbnailState?.value
+    val readyFile = (state as? MediaGridThumbnailState.Ready)?.file
+    val error = state is MediaGridThumbnailState.Failed || visual.entry.downloadState == "failed" ||
         (visual.entry.localPath == null && visual.entry.previewUrl == null && visual.entry.remoteUrl == null)
-    Box(Modifier.fillMaxSize().alpha(alpha).testTag("media_grid_morph_asset_${visual.entry.assetId}")) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                alpha = when (side) {
+                    MorphAssetSide.Single -> 1f
+                    MorphAssetSide.Start -> mediaGridMorphStartAlpha(slot, motion.progress.floatValue)
+                    MorphAssetSide.End -> mediaGridMorphEndAlpha(slot, motion.progress.floatValue)
+                }
+            }
+            .testTag("media_grid_morph_asset_${visual.entry.assetId}"),
+    ) {
         if (!error && readyFile != null) {
             AsyncImage(
                 model = readyFile,
@@ -245,46 +408,45 @@ private fun MorphAssetLayer(
                 Icon(Icons.Filled.ErrorOutline, contentDescription = "エラー", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
             }
         }
-        MorphAssetBadges(visual, selectionMode)
+        MorphAssetBadges(visual, selectionMode, maxSlotWidth)
     }
+}
+
+private data class MorphBadgeMetrics(
+    val padding: Dp,
+    val selection: Dp,
+    val video: Dp,
+    val card: Dp,
+    val cardVisual: Dp,
+)
+
+private fun morphBadgeMetrics(slotWidth: Dp): MorphBadgeMetrics {
+    val width = slotWidth.value.coerceAtLeast(1f)
+    fun scaled(fraction: Float, min: Float, max: Float) = (width * fraction).coerceIn(min, max).dp
+    return MorphBadgeMetrics(
+        padding = scaled(0.04f, 2f, 4f),
+        selection = scaled(0.24f, 14f, 28f),
+        video = scaled(0.2f, 10f, 24f),
+        card = scaled(0.24f, 24f, 28f),
+        cardVisual = scaled(0.18f, 12f, 20f),
+    )
 }
 
 @Composable
-private fun BoxScope.MorphAssetBadges(visual: MediaGridMorphAssetVisual, selectionMode: Boolean) {
-    val columnCount = 4
-    val videoIconSize = morphVideoIconSize(columnCount)
-    val overlayPadding = 4.dp
+private fun BoxScope.MorphAssetBadges(visual: MediaGridMorphAssetVisual, selectionMode: Boolean, slotWidth: Dp) {
+    val metrics = morphBadgeMetrics(slotWidth)
     if (visual.showLikeCount && visual.entry.likeCount != null) {
-        Surface(Modifier.align(Alignment.TopStart).padding(overlayPadding), color = Color.Black.copy(alpha = 0.68f)) {
-            Text(formatLikeCount(visual.entry.likeCount), Modifier.padding(horizontal = 6.dp, vertical = 2.dp), color = Color.White, style = MaterialTheme.typography.labelSmall)
+        Surface(Modifier.align(Alignment.TopStart).padding(metrics.padding), color = Color.Black.copy(alpha = 0.68f)) {
+            Text(formatLikeCount(visual.entry.likeCount), Modifier.padding(horizontal = metrics.padding * 1.5f, vertical = metrics.padding * 0.5f), color = Color.White, style = MaterialTheme.typography.labelSmall)
         }
     }
     if (visual.entry.type == "video_thumbnail") {
-        Icon(Icons.Filled.PlayArrow, contentDescription = "再生", tint = Color.White, modifier = Modifier.align(Alignment.TopEnd).padding(overlayPadding).size(videoIconSize))
+        Icon(Icons.Filled.PlayArrow, contentDescription = "再生", tint = Color.White, modifier = Modifier.align(Alignment.TopEnd).padding(metrics.padding).size(metrics.video))
     }
     if (selectionMode) {
-        Surface(Modifier.align(Alignment.TopStart).padding(overlayPadding).size(morphSelectionIndicatorSize(columnCount)), color = Color.Transparent) {
-            if (visual.selected) Icon(Icons.Filled.Check, contentDescription = "選択済み", tint = if (visual.multiAsset) Color.White else Color.Black, modifier = Modifier.fillMaxSize().background(mediaGridSelectionBackground(MaterialTheme.colorScheme.primary, visual.multiAsset), androidx.compose.foundation.shape.CircleShape).padding(4.dp))
+        Surface(Modifier.align(Alignment.TopStart).padding(metrics.padding).size(metrics.selection), color = Color.Transparent) {
+            if (visual.selected) Icon(Icons.Filled.Check, contentDescription = "選択済み", tint = if (visual.multiAsset) Color.White else Color.Black, modifier = Modifier.fillMaxSize().background(mediaGridSelectionBackground(MaterialTheme.colorScheme.primary, visual.multiAsset), androidx.compose.foundation.shape.CircleShape).padding(metrics.padding))
         }
-        if (columnCount <= 6) Icon(Icons.Filled.ViewList, contentDescription = "カードを表示", tint = Color.White, modifier = Modifier.align(Alignment.BottomEnd).padding(overlayPadding).size(morphCardDialogVisualSize(columnCount)))
+        Icon(Icons.Filled.ViewList, contentDescription = "カードを表示", tint = Color.White, modifier = Modifier.align(Alignment.BottomEnd).padding(metrics.padding).size(metrics.cardVisual))
     }
-}
-
-private fun morphSelectionIndicatorSize(columnCount: Int) = when (columnCount.coerceIn(2, 12)) {
-    2, 3 -> 28.dp
-    4, 5, 6 -> 24.dp
-    7, 8, 9 -> 18.dp
-    else -> 14.dp
-}
-
-private fun morphVideoIconSize(columnCount: Int) = when (columnCount.coerceIn(2, 12)) {
-    2, 3 -> 24.dp
-    4, 5, 6 -> 20.dp
-    7, 8, 9 -> 14.dp
-    else -> 10.dp
-}
-
-private fun morphCardDialogVisualSize(columnCount: Int) = when (columnCount.coerceIn(2, 12)) {
-    2, 3 -> 20.dp
-    else -> 18.dp
 }

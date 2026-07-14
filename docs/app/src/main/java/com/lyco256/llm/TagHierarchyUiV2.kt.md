@@ -143,6 +143,13 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - `ClassifiedMediaGridCell` shows `media_grid_like_count_<assetId>` only when `sort.baseOrder == ClassifiedSortBase.LikeCount` and the cell has a non-null like count.
 - The card view and the existing lightweight media source stay separate.
 
+## 2026-07-14 final media-grid morph adjustment
+
+- Morph Header bands use one maximum-height node, clipped while Y and height interpolate from the start layout to the end layout. Changed titles crossfade with `1-progress` and `progress`; identical titles use one layer.
+- The morph overlay draws an opaque surface first, uses stable slot/header keys, and reads progress/correction in graphics layers. RenderModel, lists, maps, thumbnail sources, and ImageRequests are session-scoped rather than progress-scoped.
+- Overlay thumbnail observation is deduplicated by Asset ID and only uses already-present manager StateFlows, so starting a morph does not start thumbnail generation, network work, or file checks.
+- Video, selection, card, and like-count badges use the slot width and the same Asset alpha as their image. `MediaGridMorphUiState` atomically manages the session, anchor, correction, and handoff completion so correction is not cleared while the overlay is still visible.
+
 ## 2026-07 media grid pinch / anchor follow-up
 
 - `EnhancedClassifiedScreen` now keeps a saved media-grid column count in `MainScreen` and updates it from pinch gestures.

@@ -319,10 +319,9 @@ fun EnhancedClassifiedScreen(
     var selectedMediaGridClipIds by remember { mutableStateOf(emptySet<Long>()) }
     var mediaGridSelectionMode by remember { mutableStateOf(false) }
     var bulkTagDialogOpen by remember { mutableStateOf(false) }
-    var mediaGridMorphSession by remember { mutableStateOf(MediaGridMorphSession.idle(mediaGridColumnCount)) }
-    var mediaGridHandoffAnchor by remember { mutableStateOf<MediaGridMorphAnchor?>(null) }
-    var mediaGridHandoffCorrection by remember { mutableStateOf(Offset.Zero) }
-    var mediaGridJustCompletedHandoff by remember { mutableStateOf(false) }
+    var mediaGridMorphUiState by remember {
+        mutableStateOf(MediaGridMorphUiState(MediaGridMorphSession.idle(mediaGridColumnCount)))
+    }
     val itemKeys = remember(displayMode, uiState.clips, uiState.filters, uiState.sort, uiState.tagHierarchy) {
         if (displayMode == ClassifiedDisplayMode.Card) uiState.classified.map { it.clip.id } else emptyList()
     }
@@ -339,30 +338,40 @@ fun EnhancedClassifiedScreen(
     }
     val selectedVisibleMediaGridClipIds = selectedMediaGridClipIds.intersect(selectableMediaGridClipIds)
     LaunchedEffect(mediaGridState.sourceRevision, mediaGridState.entries, uiState.sort, displayMode) {
-        if (mediaGridMorphSession.phase != MediaGridMorphPhase.Idle) {
-            mediaGridMorphSession = mediaGridMorphSession.cancelForSourceChange(mediaGridColumnCount)
+        if (mediaGridMorphUiState.session.phase != MediaGridMorphPhase.Idle ||
+            mediaGridMorphUiState.handoffAnchor != null
+        ) {
+            mediaGridMorphUiState = mediaGridMorphUiState.copy(
+                session = mediaGridMorphUiState.session.cancelForSourceChange(mediaGridColumnCount),
+                handoffAnchor = null,
+                correction = Offset.Zero,
+                handoffCompleted = false,
+            )
         }
     }
-    LaunchedEffect(mediaGridMorphSession.phase, mediaGridState.sourceRevision) {
-        if (mediaGridMorphSession.phase != MediaGridMorphPhase.SettlingToCurrent &&
-            mediaGridMorphSession.phase != MediaGridMorphPhase.SettlingToTarget
+    LaunchedEffect(mediaGridMorphUiState.session.phase, mediaGridState.sourceRevision) {
+        if (mediaGridMorphUiState.session.phase != MediaGridMorphPhase.SettlingToCurrent &&
+            mediaGridMorphUiState.session.phase != MediaGridMorphPhase.SettlingToTarget
         ) return@LaunchedEffect
         var lastFrameNanos = 0L
         while (true) {
             withFrameNanos { now ->
                 val elapsed = if (lastFrameNanos == 0L) 0L else (now - lastFrameNanos) / 1_000_000L
                 lastFrameNanos = now
-                val result = mediaGridMorphSession.advanceSettle(elapsed, mediaGridState.sourceRevision)
-                mediaGridMorphSession = result.session
+                val result = mediaGridMorphUiState.session.advanceSettle(elapsed, mediaGridState.sourceRevision)
+                mediaGridMorphUiState = mediaGridMorphUiState.copy(session = result.session)
                 result.targetColumnCountToHandoff?.let { next ->
-                    mediaGridHandoffAnchor = result.session.plan?.anchor
-                    mediaGridHandoffCorrection = Offset.Zero
-                    mediaGridJustCompletedHandoff = false
+                    mediaGridMorphUiState = mediaGridMorphUiState.copy(
+                        session = result.session,
+                        handoffAnchor = result.session.plan?.anchor,
+                        correction = Offset.Zero,
+                        handoffCompleted = false,
+                    )
                     onMediaGridColumnCountChange(next)
                 }
             }
-            if (mediaGridMorphSession.phase != MediaGridMorphPhase.SettlingToCurrent &&
-                mediaGridMorphSession.phase != MediaGridMorphPhase.SettlingToTarget
+            if (mediaGridMorphUiState.session.phase != MediaGridMorphPhase.SettlingToCurrent &&
+                mediaGridMorphUiState.session.phase != MediaGridMorphPhase.SettlingToTarget
             ) break
         }
     }
@@ -372,12 +381,12 @@ fun EnhancedClassifiedScreen(
         }
     }
     if (displayMode == ClassifiedDisplayMode.Card) PreserveScrollAnchor(listState, "classified", itemKeys)
-    LaunchedEffect(mediaGridColumnCount, mediaGridItems, mediaGridHandoffAnchor) {
-        if (mediaGridJustCompletedHandoff && mediaGridHandoffAnchor == null) {
-            mediaGridJustCompletedHandoff = false
+    LaunchedEffect(mediaGridColumnCount, mediaGridItems, mediaGridMorphUiState.handoffAnchor) {
+        if (mediaGridMorphUiState.handoffCompleted && mediaGridMorphUiState.handoffAnchor == null) {
+            mediaGridMorphUiState = mediaGridMorphUiState.copy(handoffCompleted = false)
             return@LaunchedEffect
         }
-        val morphAnchor = mediaGridHandoffAnchor
+        val morphAnchor = mediaGridMorphUiState.handoffAnchor
         if (morphAnchor != null) {
             val assetKey = morphAnchor.toSlot.endAssetKey ?: morphAnchor.assetKey
             val targetKey = "media_grid_item_${assetKey.removePrefix("asset:")}"
@@ -385,7 +394,12 @@ fun EnhancedClassifiedScreen(
             val targetIndex = mediaGridItems.indexOfFirst { it.key == targetKey }
                 .takeIf { it >= 0 }
                 ?: run {
-                    mediaGridHandoffAnchor = null
+                    mediaGridMorphUiState = mediaGridMorphUiState.copy(
+                        session = mediaGridMorphUiState.session.cancelForSourceChange(mediaGridColumnCount),
+                        handoffAnchor = null,
+                        correction = Offset.Zero,
+                        handoffCompleted = false,
+                    )
                     return@LaunchedEffect
                 }
             withFrameNanos { }
@@ -411,22 +425,27 @@ fun EnhancedClassifiedScreen(
                 while (true) {
                     withFrameNanos { now ->
                         val fraction = ((now - start).toFloat() / durationNanos).coerceIn(0f, 1f)
-                        mediaGridHandoffCorrection = Offset(deltaX * fraction, deltaY * fraction)
+                        mediaGridMorphUiState = mediaGridMorphUiState.copy(
+                            correction = Offset(deltaX * fraction, deltaY * fraction),
+                        )
                     }
                     if (System.nanoTime() - start >= durationNanos) break
                 }
             } else {
-                mediaGridHandoffCorrection = Offset.Zero
+                mediaGridMorphUiState = mediaGridMorphUiState.copy(correction = Offset.Zero)
             }
             withFrameNanos { }
             withFrameNanos { }
-            mediaGridHandoffCorrection = Offset.Zero
-            mediaGridHandoffAnchor = null
-            mediaGridJustCompletedHandoff = true
-            mediaGridMorphSession = mediaGridMorphSession.completeGridHandoff()
+            val completedSession = mediaGridMorphUiState.session.completeGridHandoff()
+            mediaGridMorphUiState = mediaGridMorphUiState.copy(
+                session = completedSession,
+                handoffAnchor = null,
+                correction = Offset.Zero,
+                handoffCompleted = true,
+            )
             return@LaunchedEffect
         }
-        if (mediaGridMorphSession.phase == MediaGridMorphPhase.AwaitingGridHandoff) return@LaunchedEffect
+        if (mediaGridMorphUiState.session.phase == MediaGridMorphPhase.AwaitingGridHandoff) return@LaunchedEffect
         val anchor = mediaGridAnchor ?: return@LaunchedEffect
         if (mediaGridItems.isEmpty()) return@LaunchedEffect
         withFrameNanos { }
@@ -494,9 +513,10 @@ fun EnhancedClassifiedScreen(
                     sort = uiState.sort,
                     columnCount = mediaGridColumnCount,
                     state = mediaGridLazyState,
-                    morphSession = mediaGridMorphSession,
-                    onMorphSessionChange = { mediaGridMorphSession = it },
-                    handoffCorrection = mediaGridHandoffCorrection,
+                    morphState = mediaGridMorphUiState,
+                    onMorphSessionChange = { next ->
+                        mediaGridMorphUiState = mediaGridMorphUiState.copy(session = next)
+                    },
                     onCellClick = onMediaGridCellClick,
                     selectedClipIds = selectedVisibleMediaGridClipIds,
                     selectionMode = mediaGridSelectionMode,
@@ -3373,9 +3393,8 @@ private fun ClassifiedMediaGridContent(
     sort: ClassifiedSortState,
     columnCount: Int,
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
-    morphSession: MediaGridMorphSession,
+    morphState: MediaGridMorphUiState,
     onMorphSessionChange: (MediaGridMorphSession) -> Unit,
-    handoffCorrection: Offset,
     selectionMode: Boolean,
     multiAssetClipIds: Set<Long>,
     onCellClick: (Long) -> Unit,
@@ -3383,6 +3402,7 @@ private fun ClassifiedMediaGridContent(
     onToggleSelection: (Long) -> Unit,
 ) {
     val appContainer = (LocalContext.current.applicationContext as LikeListManagerApp).container
+    val morphSession = morphState.session
     val itemByKey = remember(items) { items.associateBy { it.key } }
     val thumbnailSurfaceVariant = MaterialTheme.colorScheme.surfaceVariant
     val thumbnailBrush = remember(thumbnailSurfaceVariant) {
@@ -3391,6 +3411,20 @@ private fun ClassifiedMediaGridContent(
                 thumbnailSurfaceVariant,
                 thumbnailSurfaceVariant.copy(alpha = 0.72f),
             ),
+        )
+    }
+    val morphMotion = remember { MediaGridMorphOverlayMotion() }
+    morphMotion.progress.floatValue = morphSession.progress
+    morphMotion.correction.value = morphState.correction
+    val morphResources = remember(
+        appContainer.mediaGridThumbnailManager,
+        appContainer.mediaGridImageLoader,
+        thumbnailBrush,
+    ) {
+        MediaGridMorphOverlayResources(
+            thumbnailManager = appContainer.mediaGridThumbnailManager,
+            thumbnailImageLoader = appContainer.mediaGridImageLoader,
+            thumbnailBrush = thumbnailBrush,
         )
     }
     val morphRenderModel = remember(morphSession.plan, items, sort, selectionMode, multiAssetClipIds, selectedClipIds) {
@@ -3479,13 +3513,9 @@ private fun ClassifiedMediaGridContent(
         if (morphSession.phase != MediaGridMorphPhase.Idle && morphRenderModel != null) {
             MediaGridMorphOverlay(
                 model = morphRenderModel,
-                progress = morphSession.progress,
-                thumbnailManager = appContainer.mediaGridThumbnailManager,
-                thumbnailImageLoader = appContainer.mediaGridImageLoader,
-                thumbnailBrush = thumbnailBrush,
+                motion = morphMotion,
+                resources = morphResources,
                 selectionMode = selectionMode,
-                correctionX = handoffCorrection.x,
-                correctionY = handoffCorrection.y,
             )
         }
     }

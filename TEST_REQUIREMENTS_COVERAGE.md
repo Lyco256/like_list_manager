@@ -121,6 +121,13 @@
 - `animateItem()` and the former cell `Animatable` resize scale are suppressed/removed for morph and handoff. Header background, height, and Y are interpolated in the overlay; video, like-count, selection, and error visuals are crossfaded with their Asset.
 
 - `run-safe-debug-check.cmd`: Build、UnitTest、Lint 成功。
+
+## 2026-07-14 final media-grid morph adjustment
+
+- `MediaGridMorphTest` covers continuous Header Y/height interpolation, added/deleted Header height endpoints, changed-title crossfade at progress 0.5, and the one-layer identical-title rule.
+- The overlay uses an opaque surface, maximum-height clipped Header nodes, stable Slot/Header keys, slot-width-derived badge metrics, and one existing Thumbnail StateFlow observation per Asset ID.
+- `MediaGridMorphUiState` applies handoff completion, correction clearing, and overlay removal in one state update after the target grid has had the existing layout/correction frame waits.
+- Safety verification after this change is pending; the required order remains isolated integration check, then safe production-package overwrite.
 - 実装: 256×256 JPEG quality 60、cacheDir再生成、inSampleSize縮小デコード、直列最新viewport優先、セル単位StateFlow、専用ImageLoader設定。
 - `run-safe-integration-check.cmd -DebugMethod wireless`: Success。隔離packageでIntegrationTestまで完了。
 - `run-safe-debug-check.cmd -InstallToDevice`: Success。本命packageへ安全に上書きし、スクリプトのpackage情報不変チェックを通過。

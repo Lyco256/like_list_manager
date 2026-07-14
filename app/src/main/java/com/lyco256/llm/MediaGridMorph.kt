@@ -225,6 +225,24 @@ internal data class MediaGridMorphSettleResult(
     val targetColumnCountToHandoff: Int? = null,
 )
 
+/**
+ * UI handoff state kept as one snapshot so the overlay is never visible with a
+ * correction that belongs to an already completed handoff.
+ */
+internal data class MediaGridMorphUiState(
+    val session: MediaGridMorphSession,
+    val handoffAnchor: MediaGridMorphAnchor? = null,
+    val correction: Offset = Offset.Zero,
+    val handoffCompleted: Boolean = false,
+)
+
+internal fun MediaGridMorphUiState.idle(currentColumnCount: Int): MediaGridMorphUiState = copy(
+    session = session.cancelForSourceChange(currentColumnCount),
+    handoffAnchor = null,
+    correction = Offset.Zero,
+    handoffCompleted = false,
+)
+
 /** Immutable state machine. It has no Compose, image, file, or data-source work. */
 internal data class MediaGridMorphSession(
     val phase: MediaGridMorphPhase,

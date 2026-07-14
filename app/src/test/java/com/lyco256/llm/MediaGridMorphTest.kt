@@ -89,6 +89,38 @@ class MediaGridMorphTest {
     }
 
     @Test
+    fun headerGeometryAndTitlesInterpolateWithoutThresholdSwitch() {
+        val header = MediaGridMorphHeaderBand(
+            key = "day",
+            startTitle = "月",
+            endTitle = "週",
+            startY = 10f,
+            endY = 30f,
+            startHeight = 40f,
+            endHeight = 0f,
+            hasStart = true,
+            hasEnd = true,
+        )
+        assertEquals(10f, mediaGridMorphHeaderY(header, 0f), 0.0001f)
+        assertEquals(20f, mediaGridMorphHeaderY(header, 0.5f), 0.0001f)
+        assertEquals(0f, mediaGridMorphHeaderHeight(header, 1f), 0.0001f)
+        assertEquals(0.5f, mediaGridMorphStartTitleAlpha(header, 0.5f), 0.0001f)
+        assertEquals(0.5f, mediaGridMorphEndTitleAlpha(header, 0.5f), 0.0001f)
+        assertEquals(2, mediaGridMorphTitleLayerCount(header))
+    }
+
+    @Test
+    fun sameHeaderTitleUsesOneOpaqueLayerAndAddedHeaderFadesIn() {
+        val same = MediaGridMorphHeaderBand("same", "月", "月", 0f, 0f, 40f, 40f, true, true)
+        val added = MediaGridMorphHeaderBand("added", null, "週", 0f, 0f, 0f, 40f, false, true)
+        assertEquals(1, mediaGridMorphTitleLayerCount(same))
+        assertEquals(1f, mediaGridMorphStartTitleAlpha(same, 0.5f), 0.0001f)
+        assertEquals(0f, mediaGridMorphEndTitleAlpha(same, 0.5f), 0.0001f)
+        assertEquals(0f, mediaGridMorphStartTitleAlpha(added, 0f), 0.0001f)
+        assertEquals(0.5f, mediaGridMorphEndTitleAlpha(added, 0.5f), 0.0001f)
+    }
+
+    @Test
     fun tenThousandItemsProduceOnlyViewportNeighborhoodPlan() {
         val fromItems = (0 until 10_000).map { media("asset-$it", it, it / 4, it % 4) }
         val toItems = (0 until 10_000).map { media("asset-$it", it, it / 5, it % 5) }

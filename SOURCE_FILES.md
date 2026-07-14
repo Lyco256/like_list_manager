@@ -26,6 +26,12 @@
 - Media-grid pinch resizing changes exactly one column at direction recognition, locks until all pointers are released, and animates only composed media cells.
 - Stable asset keys and center offsets preserve the central asset across header regrouping. Resize updates the latest viewport without rebuilding the ordered source snapshot or thumbnails.
 
+## 2026-07-14 final media-grid morph adjustment
+
+- `MediaGridMorph.kt` keeps Header geometry, title-layer alpha, and the session/handoff state calculations independent from Compose and source work.
+- `MediaGridMorphOverlay.kt` keeps an opaque surface behind the bounded overlay, interpolates clipped Header bands, deduplicates existing Thumbnail StateFlow observation by Asset ID, and updates progress/correction through graphics layers.
+- `TagHierarchyUiV2.kt` keeps the normal grid as the only grid, manages handoff correction and completion atomically, and does not compose the morph overlay or its render model while Idle.
+
 この文書は、like list managerの全体構成、現状の実装、変更時に最初に読む個別文書への索引です。
 
 個別ソースの説明は `docs/` 配下に、ソースと同じディレクトリ構造で配置しています。ファイル名は元ソース名に `.md` を追加した形式です。
