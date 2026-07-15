@@ -62,6 +62,19 @@ android {
             buildConfigField("String", "API_PREFERENCES_NAME", "\"api_benchmark_settings\"")
             buildConfigField("String", "X_API_BASE_URL", "\"http://127.0.0.1/disabled\"")
         }
+        create("benchmarkSetup") {
+            initWith(getByName("benchmark"))
+            isDebuggable = true
+            matchingFallbacks += listOf("benchmark")
+        }
+    }
+
+    sourceSets {
+        getByName("benchmarkSetup") {
+            java.srcDir("src/benchmark/java")
+            res.srcDir("src/benchmark/res")
+            manifest.srcFile("src/benchmark/AndroidManifest.xml")
+        }
     }
 
     testBuildType = "integrationTest"

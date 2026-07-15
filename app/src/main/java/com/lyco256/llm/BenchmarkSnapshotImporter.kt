@@ -33,10 +33,7 @@ internal object BenchmarkSnapshotImporter {
             .commit()
     }
 
-    fun importIfPresent(context: Context) {
-        if (BuildConfig.BUILD_TYPE != "benchmark") return
-        val handoff = File(requireNotNull(context.getExternalFilesDir("media-grid-snapshot")), ARCHIVE_NAME)
-        if (!handoff.isFile) return
+    private fun importSnapshot(context: Context, handoff: File) {
         requireNotNull(context.getExternalFilesDir(VALIDATION_DIRECTORY)).deleteRecursively()
         val staging = File(context.cacheDir, "benchmark-snapshot-staging")
         try {
@@ -85,25 +82,30 @@ internal object BenchmarkSnapshotImporter {
 
     fun prepareRequiredSnapshot(context: Context) {
         check(BuildConfig.BUILD_TYPE == "benchmark") { "Benchmark snapshot setup is benchmark-only" }
-        prepareBenchmarkStorage(context)
-        val handoff = File(requireNotNull(context.getExternalFilesDir("media-grid-snapshot")), ARCHIVE_NAME)
-        val marker = File(requireNotNull(context.getExternalFilesDir(VALIDATION_DIRECTORY)), "snapshot.json")
+        val snapshotDirectory = requireNotNull(context.getExternalFilesDir("media-grid-snapshot"))
+        val validationDirectory = requireNotNull(context.getExternalFilesDir(VALIDATION_DIRECTORY))
+        val handoff = File(snapshotDirectory, ARCHIVE_NAME)
+        val marker = File(validationDirectory, "snapshot.json")
         try {
-            if (handoff.isFile) {
-                requireNotNull(context.getExternalFilesDir(VALIDATION_DIRECTORY)).deleteRecursively()
-                deleteBenchmarkData(context)
-                importIfPresent(context)
-            }
-            try {
-                requirePreparedSnapshot(context)
-            } catch (error: Throwable) {
+            // State machine is intentionally centralized here:
+            // 1) a valid completion marker wins and prevents re-import;
+            // 2) otherwise an available handoff is the normal import state;
+            // 3) only marker-less/no-handoff state fails.
+            if (marker.isFile && runCatching { requirePreparedSnapshot(context) }.isSuccess) return
+            if (!handoff.isFile) {
                 throw IllegalStateException(
-                    "Required benchmark snapshot was not prepared; handoff=${handoff.absolutePath}, marker=${marker.absolutePath}",
-                    error,
+                    "Benchmark snapshot is not prepared: completion marker is invalid or missing and " +
+                        "handoff ZIP is missing (handoff=${handoff.absolutePath}, marker=${marker.absolutePath})",
                 )
             }
+            prepareBenchmarkStorage(context)
+            validationDirectory.deleteRecursively()
+            deleteBenchmarkData(context)
+            importSnapshot(context, handoff)
+            requirePreparedSnapshot(context)
         } catch (t: Throwable) {
             deleteBenchmarkData(context)
+            validationDirectory.deleteRecursively()
             throw IllegalStateException("Required benchmark snapshot setup failed", t)
         }
     }
