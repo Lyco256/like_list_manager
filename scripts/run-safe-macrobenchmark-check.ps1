@@ -374,11 +374,32 @@ function New-ProductionSnapshot {
     return $archive
 }
 
+function Get-BenchmarkExternalStorageRoots {
+    $roots = New-Object System.Collections.Generic.List[string]
+    $roots.Add("/sdcard")
+    try {
+        $lines = Invoke-QuietAdb -Arguments @("-s", $script:serial, "shell", "ls", "-d", "/storage/*")
+        foreach ($line in $lines) {
+            $root = $line.ToString().Trim()
+            if ($root -match "^/storage/[^/]+$" -and $root -ne "/storage/self") { $roots.Add($root) }
+        }
+    } catch { Write-SafeLog "Could not enumerate external storage roots; using known roots only." }
+    if ($script:productionDbRoot -match "^(/storage/[^/]+)/Android/data/$([regex]::Escape($script:productionPackage))/files/post_data$") {
+        $roots.Add($Matches[1])
+    }
+    return @($roots | Select-Object -Unique)
+}
+
 function Import-SnapshotToBenchmarkTarget {
-    $remoteRoot = "/sdcard/Android/data/$($script:benchmarkPackage)/files/media-grid-snapshot"
-    Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "mkdir", "-p", $remoteRoot) | Out-Null
-    Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "push", $script:snapshotArchive, "$remoteRoot/media-grid-snapshot.zip") -TimeoutSeconds $timeouts.Install -WorkingDirectory $script:repoRoot
-    $script:snapshotRemoteRoot = $remoteRoot
+    $remoteRoots = @(Get-BenchmarkExternalStorageRoots | ForEach-Object { "$_/Android/data/$($script:benchmarkPackage)/files/media-grid-snapshot" })
+    $script:snapshotRemoteRoots = @()
+    foreach ($remoteRoot in ($remoteRoots | Select-Object -Unique)) {
+        $script:snapshotRemoteRoots += $remoteRoot
+        Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-rf", $remoteRoot) | Out-Null
+        Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "mkdir", "-p", $remoteRoot) | Out-Null
+        Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "push", $script:snapshotArchive, "$remoteRoot/media-grid-snapshot.zip") -TimeoutSeconds $timeouts.Install -WorkingDirectory $script:repoRoot
+    }
+    $script:snapshotRemoteRoot = $script:snapshotRemoteRoots[0]
 }
 
 function Pull-MediaGridBenchmarkMetrics {
@@ -471,8 +492,8 @@ function Write-MediaGridBenchmarkResultsCsv {
 }
 
 function Remove-SnapshotArtifacts {
-    if ($script:snapshotRemoteRoot) {
-        try { Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-rf", $script:snapshotRemoteRoot) | Out-Null } catch { Write-SafeLog "Snapshot shared cleanup failed: $script:snapshotRemoteRoot" }
+    foreach ($remoteRoot in @($script:snapshotRemoteRoots + $script:snapshotRemoteRoot | Where-Object { $_ })) {
+        try { Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-rf", $remoteRoot) | Out-Null } catch { Write-SafeLog "Snapshot shared cleanup failed: $remoteRoot" }
     }
     foreach ($path in @($script:snapshotRoot, $script:snapshotArchive)) {
         if ($path) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
@@ -580,6 +601,7 @@ $productionDataBefore = ""
 $snapshotRoot = ""
 $snapshotArchive = ""
 $snapshotRemoteRoot = ""
+$snapshotRemoteRoots = @()
 $metricsRemoteRoot = ""
 $metricsLocalRoot = ""
 $productionDbRoot = ""
@@ -645,10 +667,12 @@ try {
 
     if ($CleanupOnly) {
         Invoke-SafePhase -Name "CleanupOnly" -Action {
-            $remoteRoot = "/sdcard/Android/data/$($script:benchmarkPackage)/files"
-            Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-rf", "$remoteRoot/media-grid-snapshot") | Out-Null
-            Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-rf", "$remoteRoot/media-grid-metrics") | Out-Null
-            Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-rf", "$remoteRoot/media-grid-validation") | Out-Null
+            $cleanupRoots = @(Get-BenchmarkExternalStorageRoots | ForEach-Object { "$_/Android/data/$($script:benchmarkPackage)/files" })
+            foreach ($remoteRoot in ($cleanupRoots | Select-Object -Unique)) {
+                Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-rf", "$remoteRoot/media-grid-snapshot") | Out-Null
+                Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-rf", "$remoteRoot/media-grid-metrics") | Out-Null
+                Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-rf", "$remoteRoot/media-grid-validation") | Out-Null
+            }
             foreach ($path in @(
                     (Join-Path $repoRoot "build\media-grid-benchmark-snapshot"),
                     (Join-Path $repoRoot "build\media-grid-benchmark-snapshot.zip"),

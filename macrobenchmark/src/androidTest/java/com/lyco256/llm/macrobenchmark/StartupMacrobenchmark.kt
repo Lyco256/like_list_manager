@@ -7,6 +7,8 @@ import androidx.benchmark.macro.StartupTimingMetric
 import androidx.benchmark.macro.junit4.MacrobenchmarkRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.LargeTest
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.UiDevice
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -16,33 +18,68 @@ import org.junit.runner.RunWith
 class StartupMacrobenchmark {
     @get:Rule
     val benchmarkRule = MacrobenchmarkRule()
+    private var validationRoot = "/sdcard/Android/data/com.lyco256.llm.test.benchmark/files/media-grid-validation"
 
     @Test
-    fun coldStartup() = benchmarkRule.measureRepeated(
-        packageName = "com.lyco256.llm.test.benchmark",
-        metrics = listOf(StartupTimingMetric()),
-        compilationMode = CompilationMode.Partial(),
-        startupMode = StartupMode.COLD,
-        iterations = 5,
-        setupBlock = { },
-    ) {
-        startActivityAndWait(Intent().setClassName(TARGET, ACTIVITY).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+    fun coldStartup() {
+        prepareSnapshot()
+        benchmarkRule.measureRepeated(
+            packageName = TARGET,
+            metrics = listOf(StartupTimingMetric()),
+            compilationMode = CompilationMode.Partial(),
+            startupMode = StartupMode.COLD,
+            iterations = 5,
+            setupBlock = { },
+        ) {
+            startActivityAndWait(Intent().setClassName(TARGET, ACTIVITY).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        }
     }
 
     @Test
-    fun warmStartup() = benchmarkRule.measureRepeated(
-        packageName = "com.lyco256.llm.test.benchmark",
-        metrics = listOf(StartupTimingMetric()),
-        compilationMode = CompilationMode.Partial(),
-        startupMode = StartupMode.WARM,
-        iterations = 5,
-        setupBlock = { },
-    ) {
-        startActivityAndWait(Intent().setClassName(TARGET, ACTIVITY).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+    fun warmStartup() {
+        prepareSnapshot()
+        benchmarkRule.measureRepeated(
+            packageName = TARGET,
+            metrics = listOf(StartupTimingMetric()),
+            compilationMode = CompilationMode.Partial(),
+            startupMode = StartupMode.WARM,
+            iterations = 5,
+            setupBlock = { },
+        ) {
+            startActivityAndWait(Intent().setClassName(TARGET, ACTIVITY).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        }
     }
 
     private companion object {
         const val TARGET = "com.lyco256.llm.test.benchmark"
         const val ACTIVITY = "com.lyco256.llm.MainActivity"
+        const val SETUP_ACTIVITY = "com.lyco256.llm.BenchmarkSnapshotSetupActivity"
+    }
+
+    private fun prepareSnapshot() {
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        device.executeShellCommand("am force-stop $TARGET")
+        val result = device.executeShellCommand("am start -W -n $TARGET/$SETUP_ACTIVITY")
+        validationRoot = resolveValidationRoot(device)
+        val marker = device.executeShellCommand("cat $validationRoot/snapshot.json")
+        val error = device.executeShellCommand("cat $validationRoot/setup-error.txt")
+        if (!result.contains("Status: ok") || !marker.contains("\"ready\":true")) {
+            throw IllegalStateException("Benchmark snapshot setup failed: am=$result marker=$marker error=$error")
+        }
+    }
+
+    private fun resolveValidationRoot(device: UiDevice): String {
+        val roots = buildList {
+            add("/sdcard")
+            device.executeShellCommand("ls -d /storage/*").lineSequence()
+                .map(String::trim)
+                .filter { it.startsWith("/storage/") && it != "/storage/self" }
+                .forEach(::add)
+        }.distinct()
+        return roots.firstOrNull { root ->
+            device.executeShellCommand("cat $root/Android/data/$TARGET/files/media-grid-validation/snapshot.json")
+                .contains("\"ready\":true")
+        }?.let { "$it/Android/data/$TARGET/files/media-grid-validation" }
+            ?: "/sdcard/Android/data/$TARGET/files/media-grid-validation"
     }
 }

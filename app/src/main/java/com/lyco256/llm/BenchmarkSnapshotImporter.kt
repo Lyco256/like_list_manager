@@ -83,6 +83,44 @@ internal object BenchmarkSnapshotImporter {
         }
     }
 
+    fun prepareRequiredSnapshot(context: Context) {
+        check(BuildConfig.BUILD_TYPE == "benchmark") { "Benchmark snapshot setup is benchmark-only" }
+        prepareBenchmarkStorage(context)
+        val handoff = File(requireNotNull(context.getExternalFilesDir("media-grid-snapshot")), ARCHIVE_NAME)
+        val marker = File(requireNotNull(context.getExternalFilesDir(VALIDATION_DIRECTORY)), "snapshot.json")
+        try {
+            if (handoff.isFile) {
+                requireNotNull(context.getExternalFilesDir(VALIDATION_DIRECTORY)).deleteRecursively()
+                deleteBenchmarkData(context)
+                importIfPresent(context)
+            }
+            try {
+                requirePreparedSnapshot(context)
+            } catch (error: Throwable) {
+                throw IllegalStateException(
+                    "Required benchmark snapshot was not prepared; handoff=${handoff.absolutePath}, marker=${marker.absolutePath}",
+                    error,
+                )
+            }
+        } catch (t: Throwable) {
+            deleteBenchmarkData(context)
+            throw IllegalStateException("Required benchmark snapshot setup failed", t)
+        }
+    }
+
+    fun requirePreparedSnapshot(context: Context) {
+        check(BuildConfig.BUILD_TYPE == "benchmark") { "Benchmark snapshot validation is benchmark-only" }
+        val database = context.getDatabasePath(BuildConfig.STORAGE_DATABASE_NAME)
+        val marker = File(requireNotNull(context.getExternalFilesDir(VALIDATION_DIRECTORY)), "snapshot.json")
+        require(marker.isFile) { "Required benchmark snapshot marker is missing" }
+        val markerText = marker.readText(Charsets.UTF_8)
+        require(markerText.contains("\"ready\":true")) { "Required benchmark snapshot marker is not ready" }
+        require(markerText.contains("\"databasePath\":\"${database.absolutePath}\"")) {
+            "Required benchmark snapshot DB path does not match Room DB path: ${database.absolutePath}"
+        }
+        validateMediaGridInput(database, File(context.filesDir, BuildConfig.STORAGE_IMAGES_DIRECTORY))
+    }
+
     fun resetGeneratedResults(context: Context) {
         if (BuildConfig.BUILD_TYPE == "benchmark") File(context.cacheDir, "media_grid_thumbnails_generated").deleteRecursively()
     }

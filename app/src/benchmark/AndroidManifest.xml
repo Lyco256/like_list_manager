@@ -11,6 +11,11 @@
         tools:replace="android:label">
         <profileable android:shell="true" />
         <activity
+            android:name=".BenchmarkSnapshotSetupActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true" />
+        <activity
             android:name="net.openid.appauth.RedirectUriReceiverActivity"
             tools:node="remove" />
     </application>

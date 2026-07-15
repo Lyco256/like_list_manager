@@ -16,11 +16,11 @@ class LikeListManagerApp : Application() {
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: android.app.Activity) {
                 startedActivities++
-                container.mediaGridThumbnailManager.setForeground(true)
+                if (::container.isInitialized) container.mediaGridThumbnailManager.setForeground(true)
             }
             override fun onActivityStopped(activity: android.app.Activity) {
                 startedActivities = (startedActivities - 1).coerceAtLeast(0)
-                if (startedActivities == 0) container.mediaGridThumbnailManager.setForeground(false)
+                if (startedActivities == 0 && ::container.isInitialized) container.mediaGridThumbnailManager.setForeground(false)
             }
             override fun onActivityCreated(a: android.app.Activity, s: android.os.Bundle?) = Unit
             override fun onActivityResumed(a: android.app.Activity) = Unit
@@ -34,7 +34,7 @@ class LikeListManagerApp : Application() {
         if (!::container.isInitialized) {
             if (BuildConfig.BUILD_TYPE == "benchmark") {
                 BenchmarkSnapshotImporter.prepareBenchmarkStorage(this)
-                BenchmarkSnapshotImporter.importIfPresent(this)
+                BenchmarkSnapshotImporter.requirePreparedSnapshot(this)
             }
             container = AppContainer(this, MediaGridBenchmarkSettings.resolve(intent))
         }

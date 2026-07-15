@@ -29,6 +29,7 @@ class MediaGridPerformanceMacrobenchmark {
     private val modes = listOf("FRAME_ONLY", "PRIORITY_ONLY", "CACHED_UI", "ENCODER_ONLY", "FULL")
     private val scenarios = listOf("fast_round_trip", "slow_drag", "settle_after_scroll")
     private val pinchScenarios = listOf("pinch_4_5_4", "pinch_8_9_8", "pinch_return")
+    private var validationRoot = "/sdcard/Android/data/com.lyco256.llm.test.benchmark/files/media-grid-validation"
     private val traceNames = listOf(
         "MediaGridViewportCapture", "MediaGridViewportPublish", "MediaGridPrioritySelect",
         "MediaGridCacheLookup", "MediaGridSourceRead", "MediaGridSourceDecode",
@@ -45,6 +46,7 @@ class MediaGridPerformanceMacrobenchmark {
     @Test
     fun twoPointerColumnMorphs() {
         modes.forEach { mode -> pinchScenarios.forEach { scenario ->
+            prepareSnapshot()
             benchmarkRule.measureRepeated(
                     packageName = TARGET,
                     metrics = metrics(),
@@ -77,6 +79,7 @@ class MediaGridPerformanceMacrobenchmark {
     }
 
     private fun measure(mode: String, scenario: String) {
+        prepareSnapshot()
         benchmarkRule.measureRepeated(
             packageName = TARGET,
             metrics = metrics(),
@@ -98,6 +101,34 @@ class MediaGridPerformanceMacrobenchmark {
     }
 
     private fun metrics() = listOf(FrameTimingMetric()) + traceNames.map(::TraceSectionMetric)
+
+    private fun prepareSnapshot() {
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        device.executeShellCommand("am force-stop $TARGET")
+        val result = device.executeShellCommand("am start -W -n $TARGET/$SETUP_ACTIVITY")
+        val markerPath = resolveValidationRoot(device)
+        validationRoot = markerPath
+        val marker = device.executeShellCommand("cat $validationRoot/snapshot.json")
+        val error = device.executeShellCommand("cat $validationRoot/setup-error.txt")
+        if (!result.contains("Status: ok") || !marker.contains("\"ready\":true")) {
+            throw IllegalStateException("Benchmark snapshot setup failed: am=$result marker=$marker error=$error")
+        }
+    }
+
+    private fun resolveValidationRoot(device: UiDevice): String {
+        val roots = buildList {
+            add("/sdcard")
+            device.executeShellCommand("ls -d /storage/*").lineSequence()
+                .map(String::trim)
+                .filter { it.startsWith("/storage/") && it != "/storage/self" }
+                .forEach(::add)
+        }.distinct()
+        return roots.firstOrNull { root ->
+            device.executeShellCommand("cat $root/Android/data/$TARGET/files/media-grid-validation/snapshot.json")
+                .contains("\"ready\":true")
+        }?.let { "$it/Android/data/$TARGET/files/media-grid-validation" }
+            ?: "/sdcard/Android/data/$TARGET/files/media-grid-validation"
+    }
 
     private fun intentFor(mode: String, scenario: String, resetGenerated: Boolean, flushMetrics: Boolean = false): Intent = Intent(Intent.ACTION_MAIN)
         .setClassName(TARGET, ACTIVITY)
@@ -153,9 +184,9 @@ class MediaGridPerformanceMacrobenchmark {
     }
 
     private fun assertEffectiveMediaGridReady(device: UiDevice) {
-        val path = "/sdcard/Android/data/$TARGET/files/media-grid-validation/effective.json"
-        val snapshotPath = "/sdcard/Android/data/$TARGET/files/media-grid-validation/snapshot.json"
-        val runtimePath = "/sdcard/Android/data/$TARGET/files/media-grid-validation/runtime.json"
+        val path = "$validationRoot/effective.json"
+        val snapshotPath = "$validationRoot/snapshot.json"
+        val runtimePath = "$validationRoot/runtime.json"
         val deadline = SystemClock.uptimeMillis() + 10_000L
         var last = ""
         while (SystemClock.uptimeMillis() < deadline) {
@@ -179,5 +210,6 @@ class MediaGridPerformanceMacrobenchmark {
     private companion object {
         const val TARGET = "com.lyco256.llm.test.benchmark"
         const val ACTIVITY = "com.lyco256.llm.MainActivity"
+        const val SETUP_ACTIVITY = "com.lyco256.llm.BenchmarkSnapshotSetupActivity"
     }
 }
