@@ -2,6 +2,8 @@ package com.lyco256.llm
 
 import android.app.Application
 import com.lyco256.llm.data.AppContainer
+import com.lyco256.llm.data.MediaGridBenchmarkSettings
+import com.lyco256.llm.BuildConfig
 
 class LikeListManagerApp : Application() {
     lateinit var container: AppContainer
@@ -9,7 +11,7 @@ class LikeListManagerApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        container = AppContainer(this)
+        if (BuildConfig.BUILD_TYPE != "benchmark") container = AppContainer(this)
         var startedActivities = 0
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: android.app.Activity) {
@@ -26,5 +28,15 @@ class LikeListManagerApp : Application() {
             override fun onActivitySaveInstanceState(a: android.app.Activity, s: android.os.Bundle) = Unit
             override fun onActivityDestroyed(a: android.app.Activity) = Unit
         })
+    }
+
+    fun initializeForActivity(intent: android.content.Intent?) {
+        if (!::container.isInitialized) {
+            if (BuildConfig.BUILD_TYPE == "benchmark") {
+                BenchmarkSnapshotImporter.prepareBenchmarkStorage(this)
+                BenchmarkSnapshotImporter.importIfPresent(this)
+            }
+            container = AppContainer(this, MediaGridBenchmarkSettings.resolve(intent))
+        }
     }
 }

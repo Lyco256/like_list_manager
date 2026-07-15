@@ -317,6 +317,8 @@ fun EnhancedClassifiedScreen(
     onDelete: (ClipEntity) -> Unit,
     onAuthorClick: (ClipEntity) -> Unit,
 ) {
+    val appContainer = (LocalContext.current.applicationContext as LikeListManagerApp).container
+    val benchmarkContext = LocalContext.current
     var filterDialogOpen by remember { mutableStateOf(false) }
     var sortDialogOpen by remember { mutableStateOf(false) }
     var clearConfirmationOpen by remember { mutableStateOf(false) }
@@ -404,6 +406,32 @@ fun EnhancedClassifiedScreen(
             selectedMediaGridClipIds = selectedVisibleMediaGridClipIds
         }
     }
+    LaunchedEffect(
+        displayMode,
+        mediaGridState.status,
+        mediaGridState.sourceRevision,
+        mediaGridState.matchingClipCount,
+        mediaGridState.matchingMediaCount,
+    ) {
+        if (BuildConfig.BUILD_TYPE != "benchmark" ||
+            displayMode != ClassifiedDisplayMode.MediaGrid ||
+            mediaGridState.status != MediaGridLoadStatus.Ready ||
+            mediaGridState.sourceRevision <= 0
+        ) return@LaunchedEffect
+        // Export one stable readiness record for the host-side benchmark
+        // precondition. This is not a frame/progress log and avoids crashing
+        // the target Activity when the input is invalid.
+        delay(1_500)
+        BenchmarkSnapshotImporter.writeEffectiveMediaGridValidation(
+            context = benchmarkContext,
+            sourceRevision = mediaGridState.sourceRevision,
+            sourceClipCount = mediaGridState.sourceClipCount,
+            sourceMediaAssetCount = mediaGridState.sourceMediaAssetCount,
+            sourceTaggedClipCount = mediaGridState.sourceTaggedClipCount,
+            matchingClipCount = mediaGridState.matchingClipCount,
+            matchingMediaCount = mediaGridState.matchingMediaCount,
+        )
+    }
     if (displayMode == ClassifiedDisplayMode.Card) PreserveScrollAnchor(listState, "classified", itemKeys)
     LaunchedEffect(mediaGridColumnCount, mediaGridItems, mediaGridMorphUiState.handoffAnchor) {
         if (mediaGridMorphUiState.handoffCompleted && mediaGridMorphUiState.handoffAnchor == null) {
@@ -438,6 +466,9 @@ fun EnhancedClassifiedScreen(
             withFrameNanos { }
             val laidOutTarget = mediaGridLazyState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == targetKey }
             if (laidOutTarget == null) return@LaunchedEffect
+            appContainer.mediaGridBenchmarkMetrics.trace("MediaGridMorphHandoff") {
+                appContainer.mediaGridBenchmarkMetrics.count("morphHandoff")
+            }
             val completedSession = mediaGridMorphUiState.session.completeGridHandoff()
             mediaGridMorphUiState = mediaGridMorphUiState.copy(
                 session = completedSession,
@@ -3409,6 +3440,7 @@ private fun ClassifiedMediaGridContent(
     onToggleSelection: (Long) -> Unit,
 ) {
     val appContainer = (LocalContext.current.applicationContext as LikeListManagerApp).container
+    val benchmarkSettings = appContainer.mediaGridBenchmarkSettings
     val morphSession = morphState.session
     val itemByKey = remember(items) { items.associateBy { it.key } }
     val thumbnailSurfaceVariant = MaterialTheme.colorScheme.surfaceVariant
@@ -3430,18 +3462,22 @@ private fun ClassifiedMediaGridContent(
             thumbnailManager = appContainer.mediaGridThumbnailManager,
             thumbnailImageLoader = appContainer.mediaGridImageLoader,
             thumbnailBrush = thumbnailBrush,
+            benchmarkMetrics = appContainer.mediaGridBenchmarkMetrics,
         )
     }
     val morphRenderModel = remember(morphSession.plan) {
         morphSession.plan?.let { plan ->
-            MediaGridMorphRenderModel.create(
+            appContainer.mediaGridBenchmarkMetrics.trace("MediaGridMorphPlan") {
+                appContainer.mediaGridBenchmarkMetrics.count("morphPlan")
+                MediaGridMorphRenderModel.create(
                 plan = plan,
                 items = items,
                 sort = sort,
                 selectionMode = selectionMode,
                 multiAssetClipIds = multiAssetClipIds,
                 selectedClipIds = selectedClipIds,
-            )
+                )
+            }
         }
     }
     var preparedMorphPlans by remember { mutableStateOf<Map<MediaGridMorphDirection, MediaGridMorphPreparedPlan>>(emptyMap()) }
@@ -3451,12 +3487,15 @@ private fun ClassifiedMediaGridContent(
             .collectLatest {
                 val layoutInfo = state.layoutInfo
                 preparedMorphPlans = withContext(Dispatchers.Default) {
-                    buildPreparedMediaGridMorphPlans(items, layoutInfo, columnCount, sourceRevision, sort)
+                    appContainer.mediaGridBenchmarkMetrics.trace("MediaGridMorphPlan") {
+                        appContainer.mediaGridBenchmarkMetrics.count("morphPlan")
+                        buildPreparedMediaGridMorphPlans(items, layoutInfo, columnCount, sourceRevision, sort)
+                    }
                 }
             }
     }
     LaunchedEffect(sourceRevision) {
-        appContainer.mediaGridThumbnailManager.updateSourceSnapshot(
+        if (benchmarkSettings.viewportEnabled) appContainer.mediaGridThumbnailManager.updateSourceSnapshot(
             revision = sourceRevision,
             ordered = items.asSequence().filterIsInstance<MediaGridCellItem>().map { e ->
                 val a = e.entry
@@ -3465,11 +3504,12 @@ private fun ClassifiedMediaGridContent(
         )
     }
     DisposableEffect(Unit) {
-        onDispose { appContainer.mediaGridThumbnailManager.updateViewport(emptyList(), columnCount) }
+        onDispose { if (benchmarkSettings.viewportEnabled) appContainer.mediaGridThumbnailManager.updateViewport(emptyList(), columnCount) }
     }
     LaunchedEffect(state, items, columnCount) {
         snapshotFlow { state.layoutInfo }.collect { layout ->
             val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2f
+            if (!benchmarkSettings.viewportEnabled) return@collect
             appContainer.mediaGridThumbnailManager.updateViewport(layout.visibleItemsInfo.mapNotNull { info ->
                 val item = itemByKey[info.key] as? MediaGridCellItem ?: return@mapNotNull null
                 val e = item.entry
@@ -3522,11 +3562,12 @@ private fun ClassifiedMediaGridContent(
                         thumbnailManager = appContainer.mediaGridThumbnailManager,
                         thumbnailImageLoader = appContainer.mediaGridImageLoader,
                         thumbnailBrush = thumbnailBrush,
+                        benchmarkSettings = benchmarkSettings,
                     )
                 }
             }
         }
-        if (morphSession.phase != MediaGridMorphPhase.Idle && morphRenderModel != null) {
+        if (benchmarkSettings.uiImageEnabled && morphSession.phase != MediaGridMorphPhase.Idle && morphRenderModel != null) {
             MediaGridMorphOverlay(
                 model = morphRenderModel,
                 motion = morphMotion,
@@ -3842,11 +3883,12 @@ private fun ClassifiedMediaGridCell(
     thumbnailManager: com.lyco256.llm.data.MediaGridThumbnailManager,
     thumbnailImageLoader: coil.ImageLoader,
     thumbnailBrush: Brush,
+    benchmarkSettings: com.lyco256.llm.data.MediaGridBenchmarkSettings,
 ) {
     val thumbnailSource = MediaGridThumbnailSource(entry.assetId, entry.mediaKey, entry.localPath, entry.previewUrl ?: entry.remoteUrl ?: entry.displayUrl?.takeUnless { it == entry.localPath }, entry.remoteUrl, downloadState = entry.downloadState)
-    val thumbnailState by thumbnailManager.state(entry.assetId, thumbnailSource).collectAsState()
-    val fallbackUrl = entry.previewUrl ?: entry.remoteUrl ?: entry.displayUrl?.takeUnless { it == entry.localPath }
-    val error = thumbnailState is MediaGridThumbnailState.Failed || (entry.localPath == null && fallbackUrl == null) || entry.downloadState == "failed"
+    val thumbnailState = if (benchmarkSettings.uiImageEnabled) thumbnailManager.state(entry.assetId, thumbnailSource).collectAsState().value else null
+    val fallbackUrl = if (benchmarkSettings.networkAllowed) entry.previewUrl ?: entry.remoteUrl ?: entry.displayUrl?.takeUnless { it == entry.localPath } else null
+    val error = benchmarkSettings.uiImageEnabled && (thumbnailState is MediaGridThumbnailState.Failed || (entry.localPath == null && fallbackUrl == null) || entry.downloadState == "failed")
     val selectionIndicatorSize = mediaGridSelectionIndicatorSize(columnCount)
     val videoIconSize = mediaGridVideoIconSize(columnCount)
     val cardDialogSize = mediaGridCardDialogSize(columnCount)
@@ -3890,7 +3932,7 @@ private fun ClassifiedMediaGridCell(
                 )
             }
         } else {
-            if (thumbnailState is MediaGridThumbnailState.Ready) AsyncImage(
+            if (benchmarkSettings.uiImageEnabled && thumbnailState is MediaGridThumbnailState.Ready) AsyncImage(
                     model = (thumbnailState as MediaGridThumbnailState.Ready).file,
                     contentDescription = null,
                     imageLoader = thumbnailImageLoader,

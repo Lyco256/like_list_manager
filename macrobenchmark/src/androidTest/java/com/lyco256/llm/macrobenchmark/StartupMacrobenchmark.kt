@@ -1,5 +1,6 @@
 package com.lyco256.llm.macrobenchmark
 
+import android.content.Intent
 import androidx.benchmark.macro.CompilationMode
 import androidx.benchmark.macro.StartupMode
 import androidx.benchmark.macro.StartupTimingMetric
@@ -23,9 +24,9 @@ class StartupMacrobenchmark {
         compilationMode = CompilationMode.Partial(),
         startupMode = StartupMode.COLD,
         iterations = 5,
-        setupBlock = { pressHome() },
+        setupBlock = { },
     ) {
-        startActivityAndWait()
+        startActivityAndWait(Intent().setClassName(TARGET, ACTIVITY).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
     }
 
     @Test
@@ -35,8 +36,13 @@ class StartupMacrobenchmark {
         compilationMode = CompilationMode.Partial(),
         startupMode = StartupMode.WARM,
         iterations = 5,
-        setupBlock = { pressHome() },
+        setupBlock = { },
     ) {
-        startActivityAndWait()
+        startActivityAndWait(Intent().setClassName(TARGET, ACTIVITY).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+    }
+
+    private companion object {
+        const val TARGET = "com.lyco256.llm.test.benchmark"
+        const val ACTIVITY = "com.lyco256.llm.MainActivity"
     }
 }

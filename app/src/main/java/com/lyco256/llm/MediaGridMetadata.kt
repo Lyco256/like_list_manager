@@ -69,6 +69,9 @@ internal suspend fun prepareMediaGridMetadata(
         val built = buildMediaGridResult(ordered)
         val result = ClassifiedMediaGridState(
             sourceRevision = key.sourceRevision,
+            sourceClipCount = source.size,
+            sourceMediaAssetCount = source.sumOf { it.mediaAssetCount },
+            sourceTaggedClipCount = source.count { it.tagIds.isNotEmpty() },
             entries = built.entries,
             tagIdsByClip = filtered.associate { it.clip.id to it.tagIds },
             matchingClipCount = filtered.size,

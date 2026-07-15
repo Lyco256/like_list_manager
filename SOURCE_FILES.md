@@ -274,3 +274,12 @@ MainActivity / Compose UI
 # メディアグリッド高速化の入口
 
 `MediaGridMetadata.kt`が軽量スナップショットの絞り込み・正規化済みcache key・実効sortだけの準備・標準安定ソート・Asset展開・最大3件LRUキャッシュを担当する。Repositoryのsourceはactive Clip/Asset/ClipTagの3 Flowだけで、タグIDの`LongArray`と前計算済み投稿者キーを保持する。保存順ではsortを省略し、cache hitでは`Calculating`を表示しない。
+- `docs/app/src/test/java/com/lyco256/llm/data/TagColorPaletteTest.kt.md`
+
+## 2026-07-14 実装22
+
+- `MediaGridBenchmark.kt` owns the benchmark-only five-mode startup settings and no-op metrics for normal builds.
+- `BenchmarkSnapshotImporter.kt` imports only the benchmark target handoff, rewrites absolute local paths, and never copies Preferences or credentials.
+- `MediaGridThumbnailManager.kt`, `MediaGridThumbnailStore.kt`, `TagHierarchyUiV2.kt`, and `MediaGridMorphOverlay.kt` own separated paths and Trace/counter sections.
+- `MediaGridPerformanceMacrobenchmark.kt` runs identical five-iteration scroll and real two-pointer pinch scenarios.
+- `run-safe-macrobenchmark-check.cmd` is the only snapshot entry and generates `build/reports/media-grid-benchmark/latest-summary.md` after cleanup and production invariance checks.

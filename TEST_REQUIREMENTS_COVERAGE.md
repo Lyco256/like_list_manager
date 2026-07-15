@@ -131,3 +131,19 @@
 - 実装: 256×256 JPEG quality 60、cacheDir再生成、inSampleSize縮小デコード、直列最新viewport優先、セル単位StateFlow、専用ImageLoader設定。
 - `run-safe-integration-check.cmd -DebugMethod wireless`: Success。隔離packageでIntegrationTestまで完了。
 - `run-safe-debug-check.cmd -InstallToDevice`: Success。本命packageへ安全に上書きし、スクリプトのpackage情報不変チェックを通過。
+
+## 2026-07-14 実装22 coverage
+
+| Requirement | Implementation / evidence | Status |
+|---|---|---|
+| Five modes and startup-only resolution | `MediaGridBenchmarkSettings`, `AppContainer` | Implemented; normal builds remain FULL/no-op |
+| run-as-only read-only snapshot | `run-safe-macrobenchmark-check.ps1` | Implemented; unavailable run-as fails without fallback |
+| No credentials/preferences | whitelist of DB/WAL/SHM, JPEG cache, and `files/images` | Implemented |
+| target-only import and localPath rewrite | `BenchmarkSnapshotImporter` | Implemented |
+| no network | benchmark network config, disabled gateways, `allowRemote=false` | Implemented |
+| Trace/counters and separated paths | `MediaGridBenchmarkMetrics`, manager/store/UI/morph | Implemented |
+| identical 5-iteration scroll/pinch scenarios | `MediaGridPerformanceMacrobenchmark` | Implemented in test source; runtime measurement not reached because snapshot precondition failed |
+| report and deltas | safe macrobenchmark summary writer | Report generated; values are N/A because the target did not receive a snapshot/metric export |
+| production invariance | safe script PostCheck metadata and data hashes | Verification path implemented; runtime DB/media hash comparison was not reached because production `run-as` is unavailable |
+
+実装22では本番最適化（worker数、Coil/cache容量、生成間隔、viewport間引き、画像反映延期）を変更していない。

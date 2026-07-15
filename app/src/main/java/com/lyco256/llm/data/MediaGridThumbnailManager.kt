@@ -15,7 +15,12 @@ sealed interface MediaGridThumbnailState { data object Waiting : MediaGridThumbn
 data class MediaGridViewportRequest(val source: MediaGridThumbnailSource, val distance: Int, val index: Int = 0)
 
 /** One serial worker. The queue is intentionally not materialized: every completion re-selects from the latest viewport. */
-class MediaGridThumbnailManager(private val store: MediaGridThumbnailStore, private val scope: CoroutineScope) {
+class MediaGridThumbnailManager(
+    private val store: MediaGridThumbnailStore,
+    private val scope: CoroutineScope,
+    private val settings: MediaGridBenchmarkSettings = MediaGridBenchmarkSettings(),
+    private val metrics: MediaGridBenchmarkMetrics = MediaGridBenchmarkMetrics.forSettings(settings),
+) {
     private class Work(var source: MediaGridThumbnailSource, val state: MutableStateFlow<MediaGridThumbnailState>) {
         var generation: Long = 0L
     }
@@ -55,6 +60,7 @@ class MediaGridThumbnailManager(private val store: MediaGridThumbnailStore, priv
     }
 
     @Synchronized fun updateViewport(requests: List<MediaGridViewportRequest>, columnCount: Int = columns) {
+        metrics.trace("MediaGridViewportCapture") { metrics.count("viewportCapture") }
         columns = columnCount.coerceAtLeast(1)
         val nextCenter = requests.map { it.index }.average().takeUnless { it.isNaN() }?.toFloat()
         if (nextCenter != null) {
@@ -72,6 +78,7 @@ class MediaGridThumbnailManager(private val store: MediaGridThumbnailStore, priv
         // before wide preparation is considered, but never for the full snapshot.
         uiIds().forEach(::ensureWork)
         pruneUiState()
+        metrics.trace("MediaGridViewportPublish") { metrics.count("viewportPublish") }
         startIfNeeded()
     }
 
@@ -99,6 +106,7 @@ class MediaGridThumbnailManager(private val store: MediaGridThumbnailStore, priv
     }
 
     @Synchronized fun onDisplaySuccess(source: MediaGridThumbnailSource) {
+        metrics.trace("MediaGridCellImageApply") { metrics.count("cellImageApply") }
         displayRetries.remove(cacheIdentity(source))
     }
 
@@ -140,6 +148,8 @@ class MediaGridThumbnailManager(private val store: MediaGridThumbnailStore, priv
                 .sortedWith(compareBy<Int> { kotlin.math.abs(it - center) }.thenBy { if (direction > 0) -it else it })
                 .mapNotNull { works[sources[it].assetId] }
                 .firstOrNull { it.state.value is MediaGridThumbnailState.Waiting && !isKnownFailure(it.source) }
+        metrics.trace("MediaGridPrioritySelect") { metrics.count("prioritySelect") }
+        if (!settings.encoderEnabled && !settings.cacheUiEnabled) return
         if (candidate == null) {
             val source = sources.indices.asSequence()
                 .filter { it in (first - columns * 50..last + columns * 50) }
@@ -158,7 +168,13 @@ class MediaGridThumbnailManager(private val store: MediaGridThumbnailStore, priv
         work?.let { it.state.value = MediaGridThumbnailState.Generating }
         job = scope.launch(Dispatchers.IO) {
             val startedSource = source
-            val result = runCatching { store.getOrCreate(startedSource, allowRemote = !wide) }
+            val result: Result<File> = runCatching {
+                if (settings.mode == MediaGridBenchmarkMode.CACHED_UI) {
+                    store.cached(startedSource) ?: error("cached JPEG missing")
+                } else {
+                    store.getOrCreate(startedSource, allowRemote = if (settings.enabled) false else !wide)
+                }
+            }
             if (wide) { yield(); delay(50) }
             synchronized(this@MediaGridThumbnailManager) {
                 val current = sourceByAssetId[startedSource.assetId]
@@ -168,7 +184,14 @@ class MediaGridThumbnailManager(private val store: MediaGridThumbnailStore, priv
                     completedKeys += cacheIdentity(startedSource)
                 }
                 if (work != null && generation == work.generation && current == startedSource) {
-                    work.state.value = result.fold({ completedKeys += cacheIdentity(startedSource); MediaGridThumbnailState.Ready(it) }, { MediaGridThumbnailState.Failed })
+                    work.state.value = result.fold({
+                        completedKeys += cacheIdentity(startedSource)
+                        if (settings.uiImageEnabled) metrics.trace("MediaGridReadyPublish") {
+                            metrics.count("readyPublish")
+                            MediaGridThumbnailState.Ready(it)
+                        }
+                        else MediaGridThumbnailState.Waiting
+                    }, { MediaGridThumbnailState.Failed })
                 }
                 job = null; startIfNeeded()
             }
