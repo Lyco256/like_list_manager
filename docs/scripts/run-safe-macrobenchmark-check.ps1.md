@@ -1,5 +1,7 @@
 # `run-safe-macrobenchmark-check.ps1`
 
+2026-07-17: The generated summary and CSV include the `single_fling` scenario alongside the existing scroll and pinch scenarios.
+
 通常実行は端末側の `media-grid-metrics`、instrumentation完了marker、benchmark targetデータを終了時に削除しない。ADBが途中で切断されても、端末上で開始済みのinstrumentationは継続し、結果をapp-specific外部領域へ保存する。
 
 後から回収する場合は `.\scripts\run-safe-macrobenchmark-check.cmd -DebugMethod wireless -RecoverMetricsOnly` を使う。回収確認後に端末側成果を削除する場合だけ `.\scripts\run-safe-macrobenchmark-check.cmd -DebugMethod wireless -CleanupOnly` を使う。
