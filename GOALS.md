@@ -1,4 +1,4 @@
-# like list manager Goals
+﻿# like list manager Goals
 
 ## プロダクトの目的
 

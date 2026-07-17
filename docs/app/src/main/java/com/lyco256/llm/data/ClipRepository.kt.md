@@ -17,7 +17,7 @@
 - OAuth: 認証Intent生成、code交換、`/users/me`、session保存、token更新、logout/revoke
 - OAuth: 認証Intent生成、code交換、`/users/me`、session保存、token更新、logout/revoke。logoutはrevoke失敗を呼び出し側へ返し、ローカルのsessionは必ず削除する
 - 同期: 月間上限確認、liked postsのpagination、新規投稿だけ保存、rate limit保存
-- media: photoは回線を問わずWebP lossy quality 85へ変換して保存、video/GIF thumbnailはWi-Fi時だけ元形式で保存
+- media: photoは回線を問わずWebP lossy quality 85へ変換して保存、video/GIFはpreviewImageUrlからthumbnailを取得して同じWebP保存経路を使う。新規同期では`wifi_waiting`を作らず、取得・変換失敗時も投稿を保存してassetを`failed`で記録する
 - 設定画面: Client ID、ログイン状態、月間/API使用量、保存件数、画像枚数、ツイートデータ容量のスナップショットを公開
 - `PostStorageManager` の現在DBへFlowと更新操作を接続し、保存先変更後は新しいDBへ自動で切り替える
 - 保存先一覧、移動見積もり、移動実行をViewModelへ公開

@@ -154,7 +154,6 @@ import com.lyco256.llm.data.tagGradient
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -324,22 +323,17 @@ fun EnhancedClassifiedScreen(
     var selectedMediaGridClipIds by remember { mutableStateOf(emptySet<Long>()) }
     var mediaGridSelectionMode by remember { mutableStateOf(false) }
     var bulkTagDialogOpen by remember { mutableStateOf(false) }
-    var mediaGridMorphUiState by remember {
-        mutableStateOf(MediaGridMorphUiState(MediaGridMorphSession.idle(mediaGridColumnCount)))
-    }
-    val mediaGridMorphMotion = remember { MediaGridMorphOverlayMotion() }
     val itemKeys = remember(displayMode, uiState.clips, uiState.filters, uiState.sort, uiState.tagHierarchy) {
         if (displayMode == ClassifiedDisplayMode.Card) uiState.classified.map { it.clip.id } else emptyList()
     }
     val mediaGridLazyState = rememberLazyGridState()
     var mediaGridItems by remember { mutableStateOf<List<ClassifiedMediaGridItem>>(emptyList()) }
-    var mediaGridSequenceColumnCount by remember { mutableStateOf<Int?>(null) }
+    var pendingPinchAnchor by remember { mutableStateOf<ClassifiedMediaGridScrollAnchor?>(null) }
     LaunchedEffect(mediaGridState.entries, uiState.sort, mediaGridColumnCount) {
         val next = withContext(Dispatchers.Default) {
             buildClassifiedMediaGridItems(mediaGridState.entries, uiState.sort, mediaGridColumnCount)
         }
         mediaGridItems = next
-        mediaGridSequenceColumnCount = mediaGridColumnCount
     }
     val mediaGridAnchor = rememberClassifiedMediaGridAnchor(mediaGridLazyState)
     val selectableMediaGridClipIds = remember(mediaGridState.entries) {
@@ -349,121 +343,35 @@ fun EnhancedClassifiedScreen(
         mediaGridState.entries.groupingBy { it.clipId }.eachCount().filterValues { it >= 2 }.keys
     }
     val selectedVisibleMediaGridClipIds = selectedMediaGridClipIds.intersect(selectableMediaGridClipIds)
-    LaunchedEffect(mediaGridState.sourceRevision, mediaGridState.entries, uiState.sort, displayMode) {
-        if (mediaGridMorphUiState.session.phase != MediaGridMorphPhase.Idle ||
-            mediaGridMorphUiState.handoffAnchor != null
-        ) {
-            mediaGridMorphUiState = mediaGridMorphUiState.copy(
-                session = mediaGridMorphUiState.session.cancelForSourceChange(mediaGridColumnCount),
-                handoffAnchor = null,
-                correction = Offset.Zero,
-                handoffCompleted = false,
-            )
-            mediaGridMorphMotion.progress.floatValue = 0f
-        }
-    }
-    LaunchedEffect(mediaGridMorphUiState.session.phase, mediaGridState.sourceRevision) {
-        if (mediaGridMorphUiState.session.phase != MediaGridMorphPhase.SettlingToCurrent &&
-            mediaGridMorphUiState.session.phase != MediaGridMorphPhase.SettlingToTarget
-        ) return@LaunchedEffect
-        var lastFrameNanos = 0L
-        var elapsedMillis = 0L
-        var activeSession = mediaGridMorphUiState.session
-        while (true) {
-            withFrameNanos { now ->
-                val elapsed = if (lastFrameNanos == 0L) 0L else (now - lastFrameNanos) / 1_000_000L
-                lastFrameNanos = now
-                elapsedMillis = (elapsedMillis + elapsed).coerceAtLeast(0L)
-                val result = activeSession.advanceSettle(
-                    currentProgress = mediaGridMorphMotion.progress.floatValue,
-                    elapsedMillis = elapsedMillis,
-                    currentSourceRevision = mediaGridState.sourceRevision,
-                )
-                mediaGridMorphMotion.progress.floatValue = result.progress
-                if (result.session.phase != activeSession.phase || result.targetColumnCountToHandoff != null) {
-                    activeSession = result.session
-                    result.targetColumnCountToHandoff?.let { next ->
-                        mediaGridMorphUiState = mediaGridMorphUiState.copy(
-                            session = result.session,
-                            handoffAnchor = result.session.plan?.anchor,
-                            correction = Offset.Zero,
-                            handoffCompleted = false,
-                        )
-                        onMediaGridColumnCountChange(next)
-                    } ?: run {
-                        mediaGridMorphUiState = mediaGridMorphUiState.copy(session = result.session)
-                    }
-                }
-            }
-            if (mediaGridMorphUiState.session.phase != MediaGridMorphPhase.SettlingToCurrent &&
-                mediaGridMorphUiState.session.phase != MediaGridMorphPhase.SettlingToTarget
-            ) break
-        }
-    }
     LaunchedEffect(mediaGridState.status, selectableMediaGridClipIds) {
         if (mediaGridState.status == MediaGridLoadStatus.Ready) {
             selectedMediaGridClipIds = selectedVisibleMediaGridClipIds
         }
     }
+    LaunchedEffect(mediaGridState.sourceRevision, mediaGridState.entries, uiState.sort, displayMode) {
+        pendingPinchAnchor = null
+    }
     if (displayMode == ClassifiedDisplayMode.Card) PreserveScrollAnchor(listState, "classified", itemKeys)
-    LaunchedEffect(mediaGridColumnCount, mediaGridItems, mediaGridMorphUiState.handoffAnchor) {
-        if (mediaGridMorphUiState.handoffCompleted && mediaGridMorphUiState.handoffAnchor == null) {
-            mediaGridMorphUiState = mediaGridMorphUiState.copy(handoffCompleted = false)
-            return@LaunchedEffect
-        }
-        val morphAnchor = mediaGridMorphUiState.handoffAnchor
-        if (morphAnchor != null) {
-            if (mediaGridSequenceColumnCount != mediaGridColumnCount) return@LaunchedEffect
-            val assetKey = morphAnchor.toSlot.endAssetKey ?: morphAnchor.assetKey
-            val targetKey = "media_grid_item_${assetKey.removePrefix("asset:")}"
-            if (mediaGridItems.isEmpty()) return@LaunchedEffect
-            val targetIndex = mediaGridItems.indexOfFirst { it.key == targetKey }
-                .takeIf { it >= 0 }
-                ?: run {
-                    mediaGridMorphUiState = mediaGridMorphUiState.copy(
-                        session = mediaGridMorphUiState.session.cancelForSourceChange(mediaGridColumnCount),
-                        handoffAnchor = null,
-                        correction = Offset.Zero,
-                        handoffCompleted = false,
-                    )
-                    return@LaunchedEffect
-                }
-            withFrameNanos { }
-            mediaGridLazyState.scrollToItem(targetIndex)
-            withFrameNanos { }
-            val target = mediaGridLazyState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == targetKey }
-            if (target != null) {
-                val targetCenter = target.offset.y + target.size.height / 2f
-                mediaGridLazyState.scrollBy(targetCenter - morphAnchor.fromViewportCenterY)
-            }
-            withFrameNanos { }
-            val laidOutTarget = mediaGridLazyState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == targetKey }
-            if (laidOutTarget == null) return@LaunchedEffect
-            val completedSession = mediaGridMorphUiState.session.completeGridHandoff()
-            mediaGridMorphUiState = mediaGridMorphUiState.copy(
-                session = completedSession,
-                handoffAnchor = null,
-                correction = Offset.Zero,
-                handoffCompleted = true,
-            )
-            mediaGridMorphMotion.progress.floatValue = 0f
-            return@LaunchedEffect
-        }
-        if (mediaGridMorphUiState.session.phase == MediaGridMorphPhase.AwaitingGridHandoff) return@LaunchedEffect
-        if (mediaGridMorphUiState.session.phase != MediaGridMorphPhase.Idle) return@LaunchedEffect
-        val anchor = mediaGridAnchor ?: return@LaunchedEffect
+    LaunchedEffect(mediaGridColumnCount, mediaGridItems) {
+        val anchor = pendingPinchAnchor ?: mediaGridAnchor ?: return@LaunchedEffect
         if (mediaGridItems.isEmpty()) return@LaunchedEffect
-        withFrameNanos { }
         val targetIndex = mediaGridItems.indexOfFirst { it.key == anchor.key }
             .takeIf { it >= 0 }
             ?: anchor.index.coerceIn(0, mediaGridItems.lastIndex)
-        mediaGridLazyState.scrollToItem(targetIndex, anchor.offset)
-        withFrameNanos { }
-        val target = mediaGridLazyState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == anchor.key }
-        if (target != null) {
-            val viewportCenter = (mediaGridLazyState.layoutInfo.viewportStartOffset + mediaGridLazyState.layoutInfo.viewportEndOffset) / 2f
-            mediaGridLazyState.scrollBy(target.offset.y + target.size.height / 2f - viewportCenter - anchor.centerOffset)
+        var target: androidx.compose.foundation.lazy.grid.LazyGridItemInfo? = null
+        repeat(3) {
+            if (target == null) {
+                withFrameNanos { }
+                mediaGridLazyState.scrollToItem(targetIndex, anchor.offset)
+                withFrameNanos { }
+                target = mediaGridLazyState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == anchor.key }
+            }
         }
+        target?.let { laidOutTarget ->
+            val viewportCenter = (mediaGridLazyState.layoutInfo.viewportStartOffset + mediaGridLazyState.layoutInfo.viewportEndOffset) / 2f
+            mediaGridLazyState.scrollBy(laidOutTarget.offset.y + laidOutTarget.size.height / 2f - viewportCenter - anchor.centerOffset)
+        }
+        pendingPinchAnchor = null
     }
     BackHandler(enabled = displayMode == ClassifiedDisplayMode.MediaGrid && mediaGridSelectionMode && !bulkTagDialogOpen) {
         mediaGridSelectionMode = false
@@ -519,10 +427,12 @@ fun EnhancedClassifiedScreen(
                     sort = uiState.sort,
                     columnCount = mediaGridColumnCount,
                     state = mediaGridLazyState,
-                    morphState = mediaGridMorphUiState,
-                    morphMotion = mediaGridMorphMotion,
-                    onMorphSessionChange = { next ->
-                        mediaGridMorphUiState = mediaGridMorphUiState.copy(session = next)
+                    onPinchFinished = { anchor, nextColumnCount ->
+                        val changed = nextColumnCount != mediaGridColumnCount
+                        pendingPinchAnchor = anchor.takeIf { changed }
+                        if (changed) {
+                            onMediaGridColumnCountChange(nextColumnCount)
+                        }
                     },
                     onCellClick = onMediaGridCellClick,
                     selectedClipIds = selectedVisibleMediaGridClipIds,
@@ -3400,9 +3310,7 @@ private fun ClassifiedMediaGridContent(
     sort: ClassifiedSortState,
     columnCount: Int,
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
-    morphState: MediaGridMorphUiState,
-    morphMotion: MediaGridMorphOverlayMotion,
-    onMorphSessionChange: (MediaGridMorphSession) -> Unit,
+    onPinchFinished: (ClassifiedMediaGridScrollAnchor?, Int) -> Unit,
     selectionMode: Boolean,
     multiAssetClipIds: Set<Long>,
     onCellClick: (Long) -> Unit,
@@ -3410,7 +3318,6 @@ private fun ClassifiedMediaGridContent(
     onToggleSelection: (Long) -> Unit,
 ) {
     val appContainer = (LocalContext.current.applicationContext as LikeListManagerApp).container
-    val morphSession = morphState.session
     val itemByKey = remember(items) { items.associateBy { it.key } }
     val thumbnailSurfaceVariant = MaterialTheme.colorScheme.surfaceVariant
     val thumbnailBrush = remember(thumbnailSurfaceVariant) {
@@ -3420,41 +3327,6 @@ private fun ClassifiedMediaGridContent(
                 thumbnailSurfaceVariant.copy(alpha = 0.72f),
             ),
         )
-    }
-    morphMotion.correction.value = morphState.correction
-    val morphResources = remember(
-        appContainer.mediaGridThumbnailManager,
-        appContainer.mediaGridImageLoader,
-        thumbnailBrush,
-    ) {
-        MediaGridMorphOverlayResources(
-            thumbnailManager = appContainer.mediaGridThumbnailManager,
-            thumbnailImageLoader = appContainer.mediaGridImageLoader,
-            thumbnailBrush = thumbnailBrush,
-        )
-    }
-    val morphRenderModel = remember(morphSession.plan) {
-        morphSession.plan?.let { plan ->
-            MediaGridMorphRenderModel.create(
-                plan = plan,
-                items = items,
-                sort = sort,
-                selectionMode = selectionMode,
-                multiAssetClipIds = multiAssetClipIds,
-                selectedClipIds = selectedClipIds,
-            )
-        }
-    }
-    var preparedMorphPlans by remember { mutableStateOf<Map<MediaGridMorphDirection, MediaGridMorphPreparedPlan>>(emptyMap()) }
-    LaunchedEffect(sourceRevision, columnCount, sort) {
-        snapshotFlow { state.isScrollInProgress }
-            .filter { isScrolling -> !isScrolling }
-            .collectLatest {
-                val layoutInfo = state.layoutInfo
-                preparedMorphPlans = withContext(Dispatchers.Default) {
-                    buildPreparedMediaGridMorphPlans(items, layoutInfo, columnCount, sourceRevision, sort)
-                }
-            }
     }
     LaunchedEffect(sourceRevision) {
         appContainer.mediaGridThumbnailManager.updateSourceSnapshot(
@@ -3489,10 +3361,7 @@ private fun ClassifiedMediaGridContent(
                     currentColumnCount = columnCount,
                     sourceRevision = sourceRevision,
                     state = state,
-                    morphSession = morphSession,
-                    morphMotion = morphMotion,
-                    preparedMorphPlans = preparedMorphPlans,
-                    onMorphSessionChange = onMorphSessionChange,
+                    onPinchFinished = onPinchFinished,
                 ),
             horizontalArrangement = Arrangement.spacedBy(0.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
@@ -3527,14 +3396,6 @@ private fun ClassifiedMediaGridContent(
                 }
             }
         }
-        if (morphSession.phase != MediaGridMorphPhase.Idle && morphRenderModel != null) {
-            MediaGridMorphOverlay(
-                model = morphRenderModel,
-                motion = morphMotion,
-                resources = morphResources,
-                selectionMode = selectionMode,
-            )
-        }
     }
 }
 
@@ -3554,17 +3415,29 @@ private fun rememberClassifiedMediaGridAnchor(
 
 private fun captureClassifiedMediaGridScrollAnchor(
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
+    preferredCenter: Offset? = null,
 ): ClassifiedMediaGridScrollAnchor? {
     val layoutInfo = state.layoutInfo
     if (layoutInfo.visibleItemsInfo.isEmpty()) return null
     val viewportCenterY = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2f
-    return layoutInfo.visibleItemsInfo
-        .asSequence()
-        .filter { (it.key as? String)?.startsWith("media_grid_item_") == true }
-        .minByOrNull {
-            val itemCenterY = it.offset.y + it.size.height / 2f
-            abs(itemCenterY - viewportCenterY)
+    val viewportCenter = Offset(layoutInfo.viewportSize.width / 2f, viewportCenterY)
+    val center = preferredCenter ?: viewportCenter
+    val mediaItems = layoutInfo.visibleItemsInfo.filter { (it.key as? String)?.startsWith("media_grid_item_") == true }
+    val selected = preferredCenter?.let { pinchCenter ->
+        mediaItems.firstOrNull { info ->
+            pinchCenter.x >= info.offset.x && pinchCenter.x <= info.offset.x + info.size.width &&
+                pinchCenter.y >= info.offset.y && pinchCenter.y <= info.offset.y + info.size.height
         }
+    } ?: mediaItems.minByOrNull {
+        val itemCenter = Offset(
+            it.offset.x + it.size.width / 2f,
+            it.offset.y + it.size.height / 2f,
+        )
+        val dx = itemCenter.x - center.x
+        val dy = itemCenter.y - center.y
+        dx * dx + dy * dy
+    }
+    return selected
         ?.let { info ->
             val itemCenterY = info.offset.y + info.size.height / 2f
             ClassifiedMediaGridScrollAnchor(
@@ -3581,91 +3454,53 @@ private fun Modifier.mediaGridPinchToResize(
     currentColumnCount: Int,
     sourceRevision: Long,
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
-    morphSession: MediaGridMorphSession,
-    morphMotion: MediaGridMorphOverlayMotion,
-    preparedMorphPlans: Map<MediaGridMorphDirection, MediaGridMorphPreparedPlan>,
-    onMorphSessionChange: (MediaGridMorphSession) -> Unit,
+    onPinchFinished: (ClassifiedMediaGridScrollAnchor?, Int) -> Unit,
 ): Modifier {
     val latestColumnCount by rememberUpdatedState(currentColumnCount)
     val latestSourceRevision by rememberUpdatedState(sourceRevision)
     val latestState by rememberUpdatedState(state)
-    val latestMorphSession by rememberUpdatedState(morphSession)
-    val latestPreparedMorphPlans by rememberUpdatedState(preparedMorphPlans)
-    val latestOnMorphSessionChange by rememberUpdatedState(onMorphSessionChange)
+    val latestOnPinchFinished by rememberUpdatedState(onPinchFinished)
     return pointerInput(Unit) {
         awaitEachGesture {
             var accumulatedScale = 1f
-            var activeSession = latestMorphSession
             var hadTwoPointers = false
-            var consumedMorph = false
+            var pinchAccepted = false
+            var gestureFinished = false
+            var gestureSourceRevision: Long? = null
+            var gestureAnchor: ClassifiedMediaGridScrollAnchor? = null
             while (true) {
                 val event = awaitPointerEvent()
                 val pressed = event.changes.filter { it.pressed }
                 if (pressed.size >= 2) {
-                    hadTwoPointers = true
+                    if (!hadTwoPointers) {
+                        hadTwoPointers = true
+                        pinchAccepted = !latestState.isScrollInProgress
+                        gestureSourceRevision = latestSourceRevision
+                        val center = Offset(
+                            (pressed[0].position.x + pressed[1].position.x) / 2f,
+                            (pressed[0].position.y + pressed[1].position.y) / 2f,
+                        )
+                        gestureAnchor = captureClassifiedMediaGridScrollAnchor(latestState, center)
+                    }
                     val previousDistance = distanceBetween(pressed[0].previousPosition, pressed[1].previousPosition)
                     val currentDistance = distanceBetween(pressed[0].position, pressed[1].position)
-                    if (previousDistance > 0f && currentDistance > 0f) {
+                    if (pinchAccepted && previousDistance > 0f && currentDistance > 0f) {
                         accumulatedScale *= previousDistance / currentDistance
-                        if (activeSession.phase == MediaGridMorphPhase.Idle &&
-                            !latestState.isScrollInProgress &&
-                            mediaGridMorphDirectionForScale(accumulatedScale) != null
-                        ) {
-                            val center = Offset(
-                                (pressed[0].position.x + pressed[1].position.x) / 2f,
-                                (pressed[0].position.y + pressed[1].position.y) / 2f,
-                            )
-                            val direction = mediaGridMorphDirectionForScale(accumulatedScale)!!
-                            val prepared = latestPreparedMorphPlans[direction]
-                                ?.takeIf { it.sourceRevision == latestSourceRevision }
-                                ?: continue
-                            val fromSnapshot = prepared.from
-                            val toSnapshot = prepared.to
-                            val nextSession = MediaGridMorphSession.begin(
-                                currentColumnCount = latestColumnCount,
-                                scale = accumulatedScale,
-                                pinchCenter = center,
-                                sourceRevision = latestSourceRevision,
-                                fromPlan = fromSnapshot,
-                                toPlan = toSnapshot,
-                            ) ?: MediaGridMorphSession.idle(latestColumnCount)
-                            activeSession = nextSession
-                            if (activeSession.phase == MediaGridMorphPhase.Tracking) {
-                                morphMotion.progress.floatValue = mediaGridMorphProgressForScale(
-                                    accumulatedScale,
-                                    direction,
-                                )
-                                consumedMorph = true
-                                latestOnMorphSessionChange(activeSession)
-                                event.changes.forEach { it.consume() }
-                            }
-                        } else if (activeSession.phase == MediaGridMorphPhase.Tracking) {
-                            val nextSession = activeSession.updateTracking(latestSourceRevision)
-                            if (nextSession.phase != activeSession.phase) {
-                                activeSession = nextSession
-                                morphMotion.progress.floatValue = 0f
-                                latestOnMorphSessionChange(activeSession)
-                                continue
-                            }
-                            activeSession = nextSession
-                            val direction = activeSession.direction
-                            if (direction != null) {
-                                morphMotion.progress.floatValue = mediaGridMorphProgressForScale(
-                                    accumulatedScale,
-                                    direction,
-                                )
-                            }
-                            consumedMorph = true
-                            event.changes.forEach { it.consume() }
-                        }
                     }
-                } else {
-                    if (activeSession.phase == MediaGridMorphPhase.Tracking) {
-                        activeSession = activeSession.release(morphMotion.progress.floatValue)
-                        consumedMorph = true
-                        latestOnMorphSessionChange(activeSession)
+                    event.changes.forEach { it.consume() }
+                } else if (hadTwoPointers && !gestureFinished) {
+                    gestureFinished = true
+                    val nextColumnCount = if (
+                        pinchAccepted && gestureSourceRevision == latestSourceRevision
+                    ) {
+                        mediaGridColumnCountAfterPinchRelease(latestColumnCount, accumulatedScale)
+                    } else {
+                        latestColumnCount
                     }
-                    if (hadTwoPointers || consumedMorph) event.changes.forEach { it.consume() }
+                    latestOnPinchFinished(gestureAnchor, nextColumnCount)
+                    event.changes.forEach { it.consume() }
+                } else if (hadTwoPointers) {
+                    event.changes.forEach { it.consume() }
                 }
                 if (event.changes.none { it.pressed }) break
             }

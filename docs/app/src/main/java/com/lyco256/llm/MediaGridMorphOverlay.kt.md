@@ -9,3 +9,7 @@
 - Video, like-count, selection, and error visuals are included in the same crossfade layer. The overlay has no input handlers.
 - No full-grid opaque surface is drawn. Each Media Slot and Header band owns only its bounded background; Header bands are composed at maximum height, interpolate background/Y/occupied height in a clipped graphics layer, and crossfade changed titles in two layers (one for identical titles).
 - Progress and handoff correction are read by graphics layers through a stable motion holder; the overlay model, slot/header keys, thumbnail sources, and Asset map are not recreated for each progress update. The normal grid remains below the overlay whenever preparation is incomplete.
+
+## Current product-path status
+
+This component is intentionally retained for a later animation branch. The current production `TagHierarchyUiV2` path does not call `MediaGridMorphOverlay` or create its render model, so the normal grid remains the only visible and interactive grid during pinch and after release.

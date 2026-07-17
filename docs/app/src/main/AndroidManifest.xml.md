@@ -11,7 +11,7 @@
 ## 現状の重要設定
 
 - `INTERNET`: X APIと画像取得に必要です。
-- `ACCESS_NETWORK_STATE`: 動画サムネイルをWi-Fi時だけ保存する判定に使います。
+- `ACCESS_NETWORK_STATE`: 旧来のネットワーク状態ヘルパー用に宣言されています。現行のメディア保存経路はWi-Fi接続を条件にしません。
 - callback: `likelistmanager://oauth/x/callback`
 - callback受信先: AppAuthの `RedirectUriReceiverActivity`
 

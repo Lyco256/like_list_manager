@@ -87,7 +87,7 @@
 - `run-safe-debug-check.cmd` passed Build, UnitTest, and Lint after the change. Isolation-device verification remains required before production overwrite.
 
 隔離実機チェックは`run-safe-integration-check.cmd -DebugMethod wireless`で実施し、Build・UnitTest・Lint・IntegrationTestのSuccessを確認する。本命上書きは隔離チェック成功後に`run-safe-debug-check.cmd -InstallToDevice`で実施する。Paging、低解像度サムネイル、画像処理キューは対象外。
-## 2026-07 single-step media-grid resize
+## 2026-07 single-step media-grid resize（履歴: 現行経路では不使用）
 
 - Pinch direction recognition changes the column count by exactly one within 2–12 and locks further changes until all fingers are released, including reverse movement.
 - The animation starts after a small direction dead zone and applies only to currently composed media cells without a second grid; the central Asset remains anchored across header changes.
@@ -96,7 +96,7 @@
 
 ## 2026-07 media-grid thumbnail cache
 
-## 2026-07-13 thumbnail state transitions and pinch lock
+## 2026-07-13 thumbnail state transitions and pinch lock（履歴: 現行経路では不使用）
 
 - Revision is `Long` from repository snapshot through UI and Thumbnail Manager; no `Int` conversion remains.
 - One Asset keeps the same StateFlow across source changes. A generation token prevents stale Ready/Failed publication, and the latest source is rescheduled from Waiting or known Failed.
@@ -104,7 +104,7 @@
 - Pinch detection uses a stable pointer-input key, reads the latest column count/callback, commits at most one column, and remains locked through recomposition and reverse motion until all pointers are released. Boundary gestures at 2 and 12 columns also lock.
 - The grid creates the static skeleton gradient once and passes the shared Brush to cells.
 
-## 2026-07 continuous media-grid morph foundation
+## 2026-07 continuous media-grid morph foundation（履歴: 現行経路では不使用）
 
 - `MediaGridMorphTest` covers the 2..12 adjacent-column bound, extreme-scale clamping, reversible progress, the 0.5 release threshold, one-shot target handoff, 4→5 zero-width right-edge slot, Asset correspondence, Header add/remove/title change, and bounded planning for 10,000 items.
 - `MediaGridMorphPlan` keeps only viewport-neighborhood rows and related headers; progress updates reuse the immutable plan and do not touch the item list, thumbnail manager, image requests, files, or DB.
@@ -112,7 +112,7 @@
 - `TagHierarchyUiV2` uses a stable `pointerInput(Unit)`, keeps the actual grid column count unchanged during tracking, suppresses two-finger cell actions after morph start, and cancels stale plans when source revision or items change.
 - Required device order was completed: isolated integration check succeeded, then production-package debug overwrite succeeded with package metadata invariance.
 
-## 2026-07 seamless media-grid morph overlay
+## 2026-07 seamless media-grid morph overlay（履歴: 現行経路では不使用）
 
 - `MediaGridMorphTest` now covers linear Rect interpolation, bounded crossfade alpha, same-Asset single-layer rendering, and finite zero-width slots.
 - `MediaGridMorphOverlay` remains absent in Idle and is composed only for the four active morph/handoff phases above the same normal grid. The overlay is viewport-plan bounded and does not create a second `LazyVerticalGrid`.
@@ -122,7 +122,7 @@
 
 - `run-safe-debug-check.cmd`: Build、UnitTest、Lint 成功。
 
-## 2026-07-14 final media-grid morph adjustment
+## 2026-07-14 final media-grid morph adjustment（履歴: 現行経路では不使用）
 
 - `MediaGridMorphTest` covers continuous Header Y/height interpolation, added/deleted Header height endpoints, changed-title crossfade at progress 0.5, and the one-layer identical-title rule.
 - The overlay uses only bounded Slot/Header backgrounds, maximum-height clipped Header nodes, stable Slot/Header keys, slot-width-derived badge metrics, and one existing Thumbnail StateFlow observation per Asset ID. The normal grid remains visible until preparation is complete.
@@ -147,3 +147,9 @@
 | production invariance | safe script PostCheck metadata and data hashes | Verification path implemented; runtime DB/media hash comparison was not reached because production `run-as` is unavailable |
 
 実装22では本番最適化（worker数、Coil/cache容量、生成間隔、viewport間引き、画像反映延期）を変更していない。
+
+## 2026-07-17 simple column-change stabilization
+
+- Unit: `MediaGridMorphTest` covers threshold miss, pinch-in `+1`, pinch-out `-1`, final cumulative ratio after direction reversal, cancellation, 2..12 bounds, and the one-step limit through `mediaGridColumnCountAfterPinchRelease`.
+- Integration: `MainActivityComposeTest.classifiedDisplayToggleSwitchesBetweenCardAndMediaGridAndSurvivesActivityRecreation` uses real two-pointer input to cover 4→5→4, threshold-miss no-op, repeated round trips, anchor position, immediate cell dialog interaction, post-change scroll, and absence of `media_grid_morph_overlay`.
+- The product path no longer creates morph sessions or overlays during pinch. `MediaGridMorph.kt` and `MediaGridMorphOverlay.kt` remain retained components for later animation work.

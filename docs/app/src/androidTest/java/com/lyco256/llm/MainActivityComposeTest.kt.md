@@ -70,3 +70,7 @@
 - The media-grid filtering fixture recreates the Activity after replacing its complete Room snapshot so the classified and media-grid flows are observed from the same state.
 - The classified grid flow taps a media cell, verifies the existing tweet card opens inside `media_grid_tweet_dialog`, closes it, and confirms the grid remains available with the same cell geometry.
 - The same test taps both a photo and a video thumbnail belonging to one clip and verifies that both open the same tweet card dialog.
+
+## Current simple column-change coverage
+
+- The real two-pointer test verifies 4→5→4 changes, a threshold-miss no-op, repeated round trips, stable media-cell position, immediate cell interaction, scroll after the change, and absence of `media_grid_morph_overlay` after every release.

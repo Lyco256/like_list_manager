@@ -9,3 +9,7 @@
 - Source revision changes cancel the session to the current column count. Target settle produces one handoff result; tracking never mutates the real grid column count.
 - `MediaGridMorphUiState` keeps the transaction, anchor, correction, and handoff-completed flag; progress is never copied into this parent state. Target handoff resolves a stable Asset key, performs one `scrollToItem` and one necessary Y correction, and completes without a later anchor restore.
 - The file has no Compose rendering, image loading, file access, DB access, or source-list subscription.
+
+## Current product-path status
+
+The morph state machine and its pure layout helpers are retained as a later animation foundation. The current product grid does not create a `MediaGridMorphSession`; `mediaGridColumnCountAfterPinchRelease` is the only helper used by the production pinch path and resolves the final gesture ratio to no change or one adjacent column step.

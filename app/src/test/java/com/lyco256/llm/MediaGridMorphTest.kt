@@ -16,6 +16,27 @@ class MediaGridMorphTest {
     }
 
     @Test
+    fun pinchReleaseUsesFinalCumulativeRatioAndChangesAtMostOneColumn() {
+        assertEquals(4, mediaGridColumnCountAfterPinchRelease(4, null))
+        assertEquals(4, mediaGridColumnCountAfterPinchRelease(4, 1.01f))
+        assertEquals(5, mediaGridColumnCountAfterPinchRelease(4, 1.04f))
+        assertEquals(3, mediaGridColumnCountAfterPinchRelease(4, 0.96f))
+        assertEquals(5, mediaGridColumnCountAfterPinchRelease(4, 2f))
+        assertEquals(3, mediaGridColumnCountAfterPinchRelease(4, 0.25f))
+    }
+
+    @Test
+    fun pinchReleaseAllowsDirectionReversalToUseTheFinalRatio() {
+        val returnedToStart = (100f / 80f) * (80f / 100f)
+        val stillNetPinchIn = (100f / 80f) * (80f / 90f)
+
+        assertEquals(4, mediaGridColumnCountAfterPinchRelease(4, returnedToStart))
+        assertEquals(5, mediaGridColumnCountAfterPinchRelease(4, stillNetPinchIn))
+        assertEquals(12, mediaGridColumnCountAfterPinchRelease(12, 1.5f))
+        assertEquals(2, mediaGridColumnCountAfterPinchRelease(2, 0.5f))
+    }
+
+    @Test
     fun progressIsBoundedMonotonicAndReversible() {
         val increasing = listOf(1.02f, 1.08f, 1.4f, 2f).map {
             mediaGridMorphProgressForScale(it, MediaGridMorphDirection.IncreaseColumns)

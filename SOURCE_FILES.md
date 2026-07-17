@@ -21,12 +21,19 @@
 - Repositoryは明示的なrevision付き`MediaGridSourceSnapshot`を発行し、投稿日・local day・投稿者正規化・タグID配列・対象Asset件数をsource更新時に前計算する。
 - グリッド結果cacheはsource revisionとタグ構造revisionを使い、全source/階層の`hashCode()`を使わない。`tagIdsByClip`は`LongArray`で保持し、一括タグDialog境界だけ集合化する。
 
-## 2026-07 single-step media-grid resize
+## Current media-grid column change path
+
+- The product path keeps the normal `LazyVerticalGrid` visible throughout a two-pointer gesture and changes the saved column count only once on release.
+- `mediaGridColumnCountAfterPinchRelease` resolves the final accumulated distance ratio to no change or one adjacent column step; threshold, reversal, cancellation, and 2..12 bounds are pure-testable.
+- Pinch-start anchor selection prefers the media cell under the pinch center, then the nearest visible media cell. Stable item keys and relative center offsets are restored after the normal grid rebuild.
+- The product path does not create or call `MediaGridMorphSession`, `MediaGridMorphOverlay`, morph settle effects, or grid handoff effects. Existing morph calculation/rendering files remain for later animation work.
+
+## 2026-07 single-step media-grid resize（履歴: 現行経路では不使用）
 
 - Media-grid pinch resizing changes exactly one column at direction recognition, locks until all pointers are released, and animates only composed media cells.
 - Stable asset keys and center offsets preserve the central asset across header regrouping. Resize updates the latest viewport without rebuilding the ordered source snapshot or thumbnails.
 
-## 2026-07-14 final media-grid morph adjustment
+## 2026-07-14 final media-grid morph adjustment（履歴: 現行経路では不使用）
 
 - `MediaGridMorph.kt` keeps Header geometry, title-layer alpha, and the session/handoff state calculations independent from Compose and source work.
 - `MediaGridMorphOverlay.kt` draws only bounded Media Slot/Header ranges; the normal grid remains visible until the plan, stable Asset visuals, Rects, and placeholder brush are ready. Progress/correction are read through graphics layers.
@@ -97,7 +104,7 @@ MainActivity / Compose UI
 - 選択中のSDカードがない場合は空DBへ切り替えず、閲覧・編集・同期を停止
 - 保存先設定と移動復旧状態は内部SharedPreferencesへ保存
 - PhotoはWebP lossy quality 85で保存
-- 動画/GIF本体は保存せず、preview thumbnailをWi-Fi時だけ元形式で保存
+- 動画/GIF本体は保存せず、previewImageUrlからthumbnailを取得してWebPで保存する。新規同期ではWi-Fi待ち状態を作らない
 - 投稿IDのunique制約で重複保存を防止
 - 月間取得数、月別API使用量履歴、警告/停止判定値、15分rate limitを記録
 - 初回サンプルデータはDBが空の場合だけ投入
@@ -135,6 +142,7 @@ MainActivity / Compose UI
 
 - `docs/app/build.gradle.kts.md`
 - `docs/app/src/main/AndroidManifest.xml.md`
+- `docs/app/src/main/res/drawable/ic_x_logo.xml.md`
 - `docs/app/src/main/res/values/styles.xml.md`
 
 ### Application・UI
@@ -145,7 +153,7 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/OcrUi.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/TagColorUi.kt.md`
-- Classified tab card/grid switching is handled in `MainActivity.kt` and `TagHierarchyUiV2.kt`; the grid path is built from `MediaGridEntry` rows over `uiState.classified`.
+- Classified tab card/grid switching is handled in `MainActivity.kt` and `TagHierarchyUiV2.kt`; the grid path is built from `ClassifiedMediaGridState` over the lightweight repository source, while the card path continues to use `uiState.classified`.
 
 ### Data・API
 
@@ -164,6 +172,7 @@ MainActivity / Compose UI
 ### Tests
 
 - `docs/app/src/test/java/com/lyco256/llm/TagHierarchyTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/MediaGridMorphTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/UiStateRenderingTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/SearchFilterDatabaseIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LikeListDatabaseMigrationTest.kt.md`
@@ -177,6 +186,9 @@ MainActivity / Compose UI
 - `docs/macrobenchmark/src/main/AndroidManifest.xml.md`
 - `docs/macrobenchmark/src/main/res/xml/macrobenchmark_network_security_config.xml.md`
 - `docs/macrobenchmark/src/androidTest/java/com/lyco256/llm/macrobenchmark/StartupMacrobenchmark.kt.md`
+- `docs/macrobenchmark/src/androidTest/java/com/lyco256/llm/macrobenchmark/PersistentBenchmarkRunner.kt.md`
+- `docs/macrobenchmark/src/androidTest/java/com/lyco256/llm/macrobenchmark/MediaGridPerformanceMacrobenchmark.kt.md`
+- `docs/app/src/benchmark/java/com/lyco256/llm/BenchmarkSnapshotSetupActivity.kt.md`
 
 ### Scripts
 
@@ -198,7 +210,7 @@ MainActivity / Compose UI
 - タグ色変更は12色パレットで実装済み
 - 動画/GIF本体は保存しない
 - DBはversion 7で、version 1→2・2→3・3→4・4→5・5→6・6→7のmigrationを実装済み
-- 階層・複合絞り込み・制約・件数表示の単体テストと、version 1→2・2→3・3→4・4→5のmigration testを実装済み
+- 階層・複合絞り込み・制約・件数表示の単体テストと、version 1→2・2→3・3→4・4→5・5→6・6→7のmigration testを実装済み
 - 実際のXログインとliked posts同期はユーザーのClient IDとXアカウントで実機確認が必要
 
 ## 関連文書
@@ -226,14 +238,14 @@ MainActivity / Compose UI
 - `MIXED` は全件削除予定と全件追加予定を交互に切り替え、適用確認後も複数選択状態を維持する。
 - いいね数見出しは2〜4列/5〜8列/9〜12列で200/500/1000単位、週見出しは月曜〜日曜の期間表示。
 
-## 2026-07-13 サムネイル状態遷移・ピンチロック残存修正
+## 2026-07-13 サムネイル状態遷移・ピンチロック残存修正（履歴: 現行経路では不使用）
 
 - `MediaGridSourceSnapshot`、`ClassifiedMediaGridState`、UI、Thumbnail Managerのrevisionは全経路で`Long`を使い、変換・切り詰めを行わない。
 - Thumbnail ManagerはAsset IDからsourceをMapで参照し、AssetごとのStateFlowをsource変更後も維持する。source変更時はgeneration tokenで旧生成結果を破棄し、最新sourceをWaitingまたは既知のFailedへ戻す。
 - 初回セルは現在sourceをManagerへ渡すため空sourceのWorkを作らない。広範囲準備はlocalPathのみ・`allowRemote=false`で、欠落localPathのcache identityも完了扱いにして再試行ループを防ぐ。
 - ピンチ検出は安定したpointerInput keyと`rememberUpdatedState`を使い、閾値確定後は全指が離れるまでロックする。静的グラデーションBrushはグリッドで共有する。
 
-## 2026-07 media-grid continuous morph foundation
+## 2026-07 media-grid continuous morph foundation（履歴: 現行経路では不使用）
 
 - `MediaGridMorph.kt` is the pure state/plan boundary for `Idle`, `Tracking`, both settle phases, and `AwaitingGridHandoff`.
 - A session creates one from/to plan for exactly one adjacent column count, bounded to the viewport plus two rows on each side. Slots keep both Rects, Asset keys, item indexes, and presence flags; the wider side defines the slot count.
@@ -243,7 +255,7 @@ MainActivity / Compose UI
 - Idle-only preparation slices the current LazyGrid window plus two rows on each side and builds both adjacent candidates; target handoff resolves the anchor by stable Asset key and performs one `scrollToItem` plus the necessary `scrollBy`. Normal anchor restoration is disabled for every non-Idle phase.
 - Pure coverage is in `app/src/test/java/com/lyco256/llm/MediaGridMorphTest.kt`; the source-level contract is documented in `docs/app/src/main/java/com/lyco256/llm/MediaGridMorph.kt.md`.
 
-## 2026-07 seamless media-grid morph overlay
+## 2026-07 seamless media-grid morph overlay（履歴: 現行経路では不使用）
 
 - `MediaGridMorphOverlay.kt` draws a viewport-bounded overlay over the single normal `LazyVerticalGrid` during all non-Idle morph phases; no second grid or `AnimatedContent` is constructed.
 - `MediaGridMorphRenderModel` is created once per session plan, resolves Assets by stable key, and retains slot Assets, metadata, selection, header bands, and placeholder data through handoff. Progress updates only change interpolated Rects, layer alpha, and GPU transforms.
@@ -281,6 +293,6 @@ MainActivity / Compose UI
 - `app/src/benchmark/java/com/lyco256/llm/data/MediaGridBenchmark.kt` owns benchmark-only settings, frame timing, and result export. It is not part of debug, release, or integrationTest source sets.
 - `app/src/benchmark/java/com/lyco256/llm/BenchmarkSnapshotImporter.kt` imports only the benchmark target handoff, rewrites absolute local paths, and never copies Preferences or credentials.
 - `app/src/benchmark/java/com/lyco256/llm/BenchmarkMainActivity.kt` selects the classified media-grid startup state only for the benchmark variant; production `MainActivity` has no benchmark state or result handling.
-- `MediaGridThumbnailManager.kt`, `MediaGridThumbnailStore.kt`, `TagHierarchyUiV2.kt`, and `MediaGridMorphOverlay.kt` contain only the production grid path. They do not call benchmark metrics, counters, or Trace sections.
+- `MediaGridThumbnailManager.kt`, `MediaGridThumbnailStore.kt`, and the normal portions of `TagHierarchyUiV2.kt` contain the production grid path. `MediaGridMorphOverlay.kt` remains retained morph code and is not called by the current product path. None of these call benchmark metrics, counters, or Trace sections.
 - `MediaGridPerformanceMacrobenchmark.kt` runs identical five-iteration scroll and real two-pointer pinch scenarios.
 - `run-safe-macrobenchmark-check.cmd` is the only snapshot entry and generates `build/reports/media-grid-benchmark/latest-summary.md` after cleanup and production invariance checks.

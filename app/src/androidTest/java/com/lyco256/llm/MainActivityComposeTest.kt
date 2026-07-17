@@ -268,11 +268,35 @@ class MainActivityComposeTest {
         composeRule.waitForIdle()
         val afterPinchIn = gridItemBounds(photoTag)
         assertTrue(afterPinchIn.width < beforePinch.width)
+        assertTrue(kotlin.math.abs(afterPinchIn.top - beforePinch.top) < 8f)
+        assertTrue(composeRule.onAllNodesWithTag("media_grid_morph_overlay", useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
 
         pinchOnGrid("classified_media_grid", centerSpan = 180f, endSpan = 260f)
         composeRule.waitForIdle()
         val afterPinchOut = gridItemBounds(photoTag)
         assertTrue(afterPinchOut.width > afterPinchIn.width)
+        assertTrue(kotlin.math.abs(afterPinchOut.top - beforePinch.top) < 8f)
+        assertTrue(composeRule.onAllNodesWithTag("media_grid_morph_overlay", useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+
+        pinchOnGrid("classified_media_grid", centerSpan = 260f, endSpan = 258f)
+        composeRule.waitForIdle()
+        assertTrue(kotlin.math.abs(gridItemBounds(photoTag).width - afterPinchOut.width) < 1f)
+
+        composeRule.onNodeWithTag(photoTag, useUnmergedTree = true).performClick()
+        waitDisplayed("media_grid_tweet_dialog")
+        composeRule.onNodeWithTag("media_grid_tweet_dialog_close").performClick()
+        waitDisplayed("classified_media_grid")
+
+        pinchOnGrid("classified_media_grid", centerSpan = 260f, endSpan = 180f)
+        composeRule.waitForIdle()
+        val secondPinchIn = gridItemBounds(photoTag)
+        assertTrue(secondPinchIn.width < afterPinchOut.width)
+        assertTrue(composeRule.onAllNodesWithTag("media_grid_morph_overlay", useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+        pinchOnGrid("classified_media_grid", centerSpan = 180f, endSpan = 260f)
+        composeRule.waitForIdle()
+        assertTrue(kotlin.math.abs(gridItemBounds(photoTag).width - afterPinchOut.width) < 1f)
+        composeRule.onNodeWithTag("classified_media_grid").performScrollToIndex(2)
+        waitDisplayed(errorTag)
 
         composeRule.activityRule.scenario.recreate()
 

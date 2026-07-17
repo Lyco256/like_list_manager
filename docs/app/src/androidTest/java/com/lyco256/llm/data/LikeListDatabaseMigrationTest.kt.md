@@ -6,7 +6,7 @@
 
 ## 役割
 
-version 1相当のタグDB、version 2相当の投稿DB、version 3相当の同期状態DBを作成し、`MIGRATION_1_2`、`MIGRATION_2_3`、`MIGRATION_3_4` が既存データを保持することをAndroidテスト環境で検証します。
+version 1相当のタグDB、version 2相当の投稿DB、version 3相当の同期状態DBを作成し、`MIGRATION_1_2`、`MIGRATION_2_3`、`MIGRATION_3_4` が既存データを保持することをAndroidテスト環境で検証します。後続のテストで`MIGRATION_4_5`、`MIGRATION_5_6`、`MIGRATION_6_7`も個別に検証します。
 
 ## 実行
 
@@ -18,6 +18,10 @@ version 3→4では既存使用量の保持、継続token列のNULL初期値、m
 ## 2026-07-03 追加確認
 
 - version 4->5では `api_usage_months` の作成、既存 `sync_state.usageMonth` と `monthlyFetchedCount` のバックフィル、既存 `sync_state` の保持を検証します。
+
+- version 5->6では既存のグループとタグに`colorId = "standard"`を設定するバックフィルを検証します。
+
+- version 6->7では`clips`のOCR列追加と、`ocrText`の空文字・`ocrUpdatedAt`のNULLという既定値を検証します。
 
 ## 2026-07 OCR update
 

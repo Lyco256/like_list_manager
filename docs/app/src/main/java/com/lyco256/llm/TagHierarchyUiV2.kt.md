@@ -143,20 +143,20 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - `ClassifiedMediaGridCell` shows `media_grid_like_count_<assetId>` only when `sort.baseOrder == ClassifiedSortBase.LikeCount` and the cell has a non-null like count.
 - The card view and the existing lightweight media source stay separate.
 
-## 2026-07-14 final media-grid morph adjustment
+## 2026-07-14 final media-grid morph adjustment（履歴: 現行経路では不使用）
 
 - Morph Header bands use one maximum-height node, clipped while Y and height interpolate from the start layout to the end layout. Changed titles crossfade with `1-progress` and `progress`; identical titles use one layer.
 - The morph overlay draws only bounded Slot/Header backgrounds, uses stable slot/header keys, and reads progress/correction in graphics layers. RenderModel, lists, maps, thumbnail sources, and ImageRequests are session-scoped rather than progress-scoped.
 - Overlay thumbnail observation is deduplicated by Asset ID and only uses already-present manager StateFlows, so starting a morph does not start thumbnail generation, network work, or file checks.
 - Video, selection, card, and like-count badges use the slot width and the same Asset alpha as their image. `MediaGridMorphUiState` atomically manages the transaction, anchor, and handoff completion so correction is not cleared while the overlay is still visible.
 
-## 2026-07 media grid pinch / anchor follow-up
+## 2026-07 media grid pinch / anchor follow-up（履歴: 現行経路では不使用）
 
 - `EnhancedClassifiedScreen` now keeps a saved media-grid column count in `MainScreen` and updates it from pinch gestures.
 - Pinch-in increases the column count and pinch-out decreases it within the `2..12` range.
 - When the column count changes, the grid restores the nearest visible media-cell anchor instead of jumping back to the top.
 
-## 2026-07-14 media-grid structure stabilization
+## 2026-07-14 media-grid structure stabilization（履歴: 現行経路では不使用）
 
 - The final Header/Media item sequence is prepared on `Dispatchers.Default`; a new sequence replaces the old one only after it is complete, so a column change never exposes an empty grid.
 - A stopped viewport prepares bounded `+1` and `-1` Morph candidates. Scrolling does not update candidates, and a pinch is ignored while the LazyGrid is still scrolling.
@@ -165,7 +165,7 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - Normal Media cells and headers have no placement/appearance animation. Their shared static gradient brush is created once per grid and reused by every cell.
 - Normal anchor restoration runs only in `Idle`; Morph handoff alone performs the anchor `scrollToItem` and one required `scrollBy`, then hides the overlay and completes in one state transition.
 
-## 2026-07 continuous media-grid morph foundation
+## 2026-07 continuous media-grid morph foundation（履歴: 現行経路では不使用）
 
 - The media-grid detector remains `pointerInput(Unit)` and uses `rememberUpdatedState` for the latest column count, items, source revision, state, and callbacks.
 - After the two-finger dead zone, one `MediaGridMorphSession` and one bounded from/to plan are created. During tracking the existing `LazyVerticalGrid` continues to use the from column count.
@@ -193,6 +193,14 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - The image itself is never overlaid or dimmed by selection. Selection is represented only by the top-left indicator: a white outer ring, a light-blue checkbox with a black check for single-asset clips, or a blue checkbox with a white check shared by all cells of a multi-asset clip.
 - A single long-press that starts selection mode emits one `LongPress` haptic feedback; later selection changes, deselection, bulk selection, pinch, dialog, and mode close do not emit additional feedback.
 - The card-dialog action keeps an appropriately small rounded-square surface inside its touch target for 2–6 columns and remains absent for 7–12 columns.
+
+## Current simple column-change path
+
+- The production grid keeps one normal `LazyVerticalGrid` visible during the entire two-pointer gesture. It does not render or update a morph overlay, motion progress, settle animation, or grid handoff.
+- `mediaGridColumnCountAfterPinchRelease` uses the final accumulated distance ratio only when the gesture ends. A threshold miss, cancellation, source revision change, or 2/12 boundary leaves the count unchanged; a successful gesture changes exactly one adjacent column.
+- Pinch-in increases columns and pinch-out decreases columns. Direction reversal is resolved from the final cumulative ratio rather than from an early locked direction.
+- The pinch-start anchor prefers the visible media item below the pinch center and otherwise the nearest visible media item. The stable item key and relative center offset are restored after the normal grid rebuild, with finite layout retries and no retained overlay state.
+- `MediaGridMorphSession`, `MediaGridMorphOverlay`, and the related bounded layout-preparation helpers remain in the source for later animation work but are not called by the current product path.
 # メディアグリッド高速化追補
 
 グリッドのメタデータ処理はカード表示と分離し、ファイル存在確認・画像デコードを枠生成前に行わない。複数選択はCalculating中に解除せず、Ready結果で選択可能Clipとの交差を更新する。

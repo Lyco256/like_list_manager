@@ -385,6 +385,25 @@ internal fun mediaGridMorphProgressForScale(
     return raw.coerceIn(0f, 1f)
 }
 
+/**
+ * Resolves one completed two-pointer gesture without changing the grid while the fingers move.
+ * A null scale represents a cancelled or never-established pinch.
+ */
+internal fun mediaGridColumnCountAfterPinchRelease(
+    currentColumnCount: Int,
+    accumulatedScale: Float?,
+    deadZoneScale: Float = MediaGridMorphDefaults.DeadZoneScale,
+    releaseThreshold: Float = MediaGridMorphDefaults.ReleaseThreshold,
+): Int {
+    if (accumulatedScale == null || !accumulatedScale.isFinite() || releaseThreshold !in 0f..1f) {
+        return currentColumnCount
+    }
+    val direction = mediaGridMorphDirectionForScale(accumulatedScale, deadZoneScale) ?: return currentColumnCount
+    val progress = mediaGridMorphProgressForScale(accumulatedScale, direction, deadZoneScale)
+    if (progress < releaseThreshold) return currentColumnCount
+    return mediaGridMorphTargetColumnCount(currentColumnCount, direction)
+}
+
 private fun MediaGridMorphLayoutSnapshot.mediaItems(): List<MediaGridMorphMedia> = items
     .asSequence()
     .mapNotNull { (it as? MediaGridMorphLayoutItem.Media)?.media }

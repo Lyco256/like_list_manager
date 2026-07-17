@@ -82,9 +82,9 @@
 - `buildClassifiedMediaGridItemsAddsHeadersForDateAndLikeBuckets` / `buildClassifiedMediaGridItemsUsesWeekAndMonthBucketsForWiderGrids` / `buildClassifiedMediaGridItemsLeavesDefaultSortWithoutHeaders`
   - `sort.baseOrder` と `columnCount` に応じて header item が増減し、日・週・月と 200/500/1000 単位の bucket が切り替わることを確認します。
   - `Default` では header を出さず、`日付不明` / `いいね数不明` / `10万以上` もそれぞれ最後にまとまることを確認します。
-## 2026-07 media grid pinch bounds
+## 2026-07 media grid pinch bounds（補助関数の履歴テスト）
 
-- `classifiedMediaGridColumnCountFollowsPinchScaleAndClampsBounds` now covers pinch-in growth, pinch-out shrinkage, and the `2..12` clamp range for the media-grid column helper.
+- `classifiedMediaGridColumnCountFollowsPinchScaleAndClampsBounds` は旧来の`classifiedMediaGridColumnCountForScale`補助関数について、pinch-in増加、pinch-out減少、`2..12`境界を確認します。現行の本番release経路は`mediaGridColumnCountAfterPinchRelease`を使い、そのテストは`MediaGridMorphTest`にあります。
 
 ## 2026-07 media grid selection color
 
