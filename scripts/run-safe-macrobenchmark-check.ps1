@@ -2,18 +2,21 @@ param(
     [ValidateSet("usb", "wireless")]
     [string]$DebugMethod = "usb",
     [string]$DeviceConfig = (Join-Path $PSScriptRoot "..\test-device.local.properties"),
-    [switch]$CleanupOnly
+    [switch]$CleanupOnly,
+    [switch]$RecoverMetricsOnly,
+    [switch]$DiagnosticsOnly
 )
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "SafeScriptCommon.ps1")
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$script:repoRoot = $repoRoot
 $timeouts = @{
     Preflight = 300
     Build = 1800
     Install = 600
-    Macrobenchmark = 5400
+    Macrobenchmark = 10800
 }
 
 function Invoke-LoggedAdb {
@@ -47,13 +50,89 @@ function Capture-BenchmarkFailureLog {
         Write-SafeLog "Filtered benchmark runtime log (failure diagnostics):"
         foreach ($line in $lines) {
             $text = ($line | Out-String).TrimEnd()
-            if ($text -match 'com\.lyco256\.llm\.test\.benchmark|AndroidRuntime|FATAL EXCEPTION|Benchmark target|BenchmarkSnapshotSetup|media-grid') {
+            if ($text -match 'com\.lyco256\.llm\.test\.benchmark|com\.lyco256\.llm\.macrobenchmark|AndroidJUnitRunner|PersistentBenchmarkRunner|AndroidRuntime|FATAL EXCEPTION|Benchmark target|BenchmarkSnapshotSetup|media-grid') {
                 Write-SafeLog $text
             }
         }
     } catch {
         Write-SafeLog "Filtered benchmark log capture failed: $($_.Exception.Message)"
     }
+}
+
+function Send-BenchmarkSnapshotToInternalHandoff {
+    param(
+        [Parameter(Mandatory = $true)][string]$Archive,
+        [Parameter(Mandatory = $true)][string]$Adb,
+        [Parameter(Mandatory = $true)][string]$Serial,
+        [Parameter(Mandatory = $true)][string]$PackageName
+    )
+    $handoff = "files/benchmark-handoff/media-grid-snapshot.zip"
+    $arguments = @("-s", $Serial, "exec-in", "run-as", $PackageName, "dd", "of=$handoff", "bs=64K", "conv=fsync")
+    Write-SafeLog ""
+    Write-SafeLog "> $Adb $(Join-SafeCommandArguments -Arguments $arguments)"
+
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $Adb
+    $startInfo.Arguments = Join-SafeCommandArguments -Arguments $arguments
+    $startInfo.WorkingDirectory = $script:repoRoot
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    $stream = $null
+    try {
+        if (-not $process.Start()) { throw "Could not start adb exec-in for internal benchmark handoff." }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $stream = [System.IO.File]::OpenRead($Archive)
+        $localLength = $stream.Length
+        $stream.CopyTo($process.StandardInput.BaseStream)
+        $blockSize = 64 * 1024
+        $padding = ($blockSize - ($localLength % $blockSize)) % $blockSize
+        if ($padding -gt 0) {
+            $zeroPadding = [byte[]]::new([int]$padding)
+            $process.StandardInput.BaseStream.Write($zeroPadding, 0, $zeroPadding.Length)
+        }
+        $process.StandardInput.BaseStream.Flush()
+        $process.StandardInput.Close()
+        if (-not $process.WaitForExit($timeouts.Install * 1000)) {
+            try { $process.Kill() } catch { }
+            throw "Timed out transferring benchmark snapshot to internal app storage. exec-in is required; no external-storage fallback is allowed."
+        }
+        $stdout = $stdoutTask.Result
+        $stderr = $stderrTask.Result
+        if ($stdout) { Write-SafeLog $stdout.TrimEnd() }
+        if ($stderr) { Write-SafeLog $stderr.TrimEnd() }
+        if ($process.ExitCode -ne 0) {
+            throw "adb exec-in internal benchmark handoff failed with exit code $($process.ExitCode). exec-in is required; no external-storage fallback is allowed."
+        }
+    } finally {
+        if ($stream) { $stream.Dispose() }
+        $process.Dispose()
+    }
+
+    $local = Get-Item -LiteralPath $Archive -ErrorAction Stop
+    $handoffAbsolute = "/data/user/0/$PackageName/$handoff"
+    $trimmedHandoff = "$handoffAbsolute.trimmed"
+    Invoke-LoggedAdb -Adb $Adb -Arguments @(
+        "-s", $Serial, "exec-out", "run-as", $PackageName, "sh", "-c",
+        "toybox head -c $($local.Length) '$handoffAbsolute' > '$trimmedHandoff' && mv '$trimmedHandoff' '$handoffAbsolute'"
+    ) | Out-Null
+    $localHash = (Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash.ToLowerInvariant()
+    $remoteHashText = (Invoke-LoggedAdb -Adb $Adb -Arguments @("-s", $Serial, "shell", "run-as", $PackageName, "sha256sum", $handoff)) -join "`n"
+    $remoteHashMatch = [regex]::Match($remoteHashText, "(?i)([0-9a-f]{64})")
+    if (-not $remoteHashMatch.Success) { throw "Could not read SHA-256 for internal benchmark handoff." }
+    $remoteHash = $remoteHashMatch.Groups[1].Value.ToLowerInvariant()
+    $remoteSizeText = ((Invoke-LoggedAdb -Adb $Adb -Arguments @("-s", $Serial, "shell", "run-as", $PackageName, "stat", "-c", "%s", $handoff)) -join "").Trim()
+    [long]$remoteSize = 0
+    if (-not [long]::TryParse($remoteSizeText, [ref]$remoteSize)) { throw "Could not read size for internal benchmark handoff: $remoteSizeText" }
+    if ($local.Length -ne $remoteSize -or $localHash -ne $remoteHash) {
+        throw "Internal benchmark handoff verification failed: localSize=$($local.Length) remoteSize=$remoteSize localSha256=$localHash remoteSha256=$remoteHash"
+    }
+    Write-SafeLog "Internal benchmark handoff verified: size=$remoteSize sha256=$remoteHash"
 }
 
 function Wait-AllowedDevice {
@@ -79,6 +158,27 @@ function Wait-AllowedDevice {
     throw "Allowed test device $Serial did not reconnect exactly once within $TimeoutSeconds seconds."
 }
 
+function Resolve-RemovableStorageRoot {
+    param([switch]$Required)
+    $volumes = @(Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "sm", "list-volumes", "all"))
+    $uuids = @($volumes | ForEach-Object {
+            $match = [regex]::Match($_.ToString(), "^public:\S+\s+mounted\s+(\S+)$")
+            if ($match.Success) { $match.Groups[1].Value }
+        } | Where-Object { $_ } | Select-Object -Unique)
+    if ($uuids.Count -ne 1) {
+        if ($Required) { throw "Exactly one mounted removable SD volume is required; found $($uuids.Count)." }
+        return ""
+    }
+    $root = "/storage/$($uuids[0])"
+    & $script:adb -s $script:serial shell test -d $root 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        if ($Required) { throw "Mounted removable SD root is not accessible: $root" }
+        return ""
+    }
+    Write-SafeLog "Removable benchmark output root: $root"
+    return $root
+}
+
 function Resolve-WirelessAllowedDevice {
     param(
         [Parameter(Mandatory = $true)][string]$Adb,
@@ -99,6 +199,7 @@ function Resolve-WirelessAllowedDevice {
         $matches = @()
         foreach ($candidate in $candidates) {
             $endpoint = ($candidate -split "\s+")[0]
+            if ($endpoint -eq $HardwareSerial) { continue }
             $reportedSerial = ((Invoke-LoggedAdb -Adb $Adb -Arguments @("-s", $endpoint, "shell", "getprop", "ro.serialno")) -join "").Trim()
             if ($reportedSerial -eq $HardwareSerial) { $matches += $endpoint }
         }
@@ -119,7 +220,7 @@ function Get-PackageMetadata {
         throw "Required package is not installed: $PackageName"
     }
     $details = (Invoke-LoggedAdb -Adb $Adb -Arguments @("-s", $Serial, "shell", "dumpsys", "package", $PackageName) |
-        Select-String "firstInstallTime=|lastUpdateTime=|versionCode=|codePath=" |
+        Select-String "firstInstallTime=|lastUpdateTime=|versionCode=|codePath=|dataDir=" |
         ForEach-Object { $_.Line.Trim() }) -join "`n"
     $uidLines = @(Invoke-LoggedAdb -Adb $Adb -Arguments @("-s", $Serial, "shell", "cmd", "package", "list", "packages", "-U", $PackageName))
     $uid = ($uidLines | Where-Object { $_ -match "^package:$([regex]::Escape($PackageName))\s+uid:\d+$" } | Select-Object -First 1)
@@ -193,6 +294,17 @@ function Test-RunAsFile {
     foreach ($line in $output) { Write-SafeLog ($line | Out-String).TrimEnd() }
     $script:SafeLastErrorSummary = Get-SafeErrorSummaryFromText -Lines @($output | ForEach-Object { $_.ToString() })
     throw "Could not inspect production file through run-as: $RelativePath ($($script:SafeLastErrorSummary))"
+}
+
+function Test-RunAsDirectory {
+    param([Parameter(Mandatory = $true)][string]$RelativePath)
+    $arguments = @("-s", $script:serial, "shell", "run-as", $script:productionPackage, "test", "-d", $RelativePath)
+    $output = @(& $script:adb @arguments 2>&1)
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -eq 0) { return $true }
+    if ($exitCode -eq 1) { return $false }
+    foreach ($line in $output) { Write-SafeLog ($line | Out-String).TrimEnd() }
+    throw "Could not inspect production directory through run-as: $RelativePath"
 }
 
 function Copy-RunAsBinary {
@@ -338,6 +450,16 @@ function Select-RepresentativeOriginals {
     return @($selected)
 }
 
+function Get-Sha256Text {
+    param([Parameter(Mandatory = $true)][string]$Value)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        return (($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Value)) | ForEach-Object { $_.ToString("x2") }) -join "")
+    } finally {
+        $sha.Dispose()
+    }
+}
+
 function New-ProductionSnapshot {
     $snapshotRoot = Join-Path $script:repoRoot "build\media-grid-benchmark-snapshot"
     $archive = Join-Path $script:repoRoot "build\media-grid-benchmark-snapshot.zip"
@@ -360,65 +482,258 @@ function New-ProductionSnapshot {
         if (Test-RunAsFile -RelativePath $path) { Copy-RunAsBinary -RelativePath $path -Destination (Join-Path $snapshotRoot ("db/" + ([IO.Path]::GetFileName($path)))) }
     }
     if (-not (Test-Path -LiteralPath (Join-Path $snapshotRoot "db/like_list_manager.db") -PathType Leaf)) { throw "Production Room database was not found through run-as." }
+    if (-not (Test-RunAsDirectory -RelativePath $script:productionCacheRoot)) {
+        throw "Production 256px thumbnail cache is missing; CACHED_UI cannot be prepared without copied JPEGs."
+    }
     $cachePaths = @(Get-RunAsFiles -FindRoot $script:productionCacheRoot | Where-Object { [IO.Path]::GetExtension($_).ToLowerInvariant() -eq ".jpg" })
+    if ($cachePaths.Count -eq 0) {
+        throw "Production 256px thumbnail cache contains no JPEGs; CACHED_UI cannot be prepared."
+    }
     foreach ($path in $cachePaths) {
         $destination = Join-Path $snapshotRoot ("cache/media_grid_thumbnails/" + ([IO.Path]::GetFileName($path)))
         Copy-RunAsBinary -RelativePath $path -Destination $destination
     }
     $originals = Select-RepresentativeOriginals -Paths @(Get-RunAsFiles -FindRoot $script:productionImagesRoot)
+    $originalMetadata = New-Object System.Collections.Generic.List[object]
     foreach ($path in $originals) {
-        Copy-RunAsBinary -RelativePath $path -Destination (Join-Path $snapshotRoot ("originals/" + ([IO.Path]::GetFileName($path))))
+        $extension = [IO.Path]::GetExtension($path).ToLowerInvariant()
+        $snapshotName = "$(Get-Sha256Text -Value $path)$extension"
+        $sizeText = ((Invoke-RunAsText -Arguments @("stat", "-c", "%s", $path)) -join "").Trim()
+        $modifiedText = ((Invoke-RunAsText -Arguments @("stat", "-c", "%Y", $path)) -join "").Trim()
+        if ($sizeText -notmatch "^\d+$" -or $modifiedText -notmatch "^\d+$") {
+            throw "Could not read production media metadata: $path (size=$sizeText modified=$modifiedText)"
+        }
+        Copy-RunAsBinary -RelativePath $path -Destination (Join-Path $snapshotRoot "originals/$snapshotName")
+        $originalMetadata.Add([pscustomobject]@{
+            snapshotName = $snapshotName
+            originalPath = $path
+            size = [long]$sizeText
+            modified = [long]$modifiedText * 1000L
+        })
     }
+    [IO.File]::WriteAllText(
+        (Join-Path $snapshotRoot "original-metadata.json"),
+        ($originalMetadata | ConvertTo-Json -Compress),
+        [Text.Encoding]::UTF8
+    )
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [System.IO.Compression.ZipFile]::CreateFromDirectory($snapshotRoot, $archive)
     return $archive
 }
 
-function Get-BenchmarkExternalStorageRoots {
-    $roots = New-Object System.Collections.Generic.List[string]
-    $roots.Add("/sdcard")
-    $roots.Add("/storage/emulated/0")
-    try {
-        $lines = Invoke-QuietAdb -Arguments @("-s", $script:serial, "shell", "ls", "-d", "/storage/*")
-        foreach ($line in $lines) {
-            $root = $line.ToString().Trim()
-            if ($root -eq "/storage/emulated") { $roots.Add("/storage/emulated/0") }
-            elseif ($root -match "^/storage/[^/]+$" -and $root -ne "/storage/self") { $roots.Add($root) }
-        }
-    } catch { Write-SafeLog "Could not enumerate external storage roots; using known roots only." }
-    if ($script:productionDbRoot -match "^(/storage/[^/]+)/Android/data/$([regex]::Escape($script:productionPackage))/files/post_data$") {
-        $roots.Add($Matches[1])
-    }
-    return @($roots | Select-Object -Unique)
+function Import-SnapshotToBenchmarkTarget {
+    Send-BenchmarkSnapshotToInternalHandoff -Archive $script:snapshotArchive -Adb $script:adb -Serial $script:serial -PackageName $script:benchmarkPackage
 }
 
-function Import-SnapshotToBenchmarkTarget {
-    $script:snapshotStagingRemotePath = "/storage/emulated/0/Android/data/$($script:benchmarkPackage)/files/benchmark-snapshot-input.zip"
-    Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-f", $script:snapshotStagingRemotePath) | Out-Null
-    Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "push", $script:snapshotArchive, $script:snapshotStagingRemotePath) -TimeoutSeconds $timeouts.Install -WorkingDirectory $script:repoRoot
-
-    $remoteRoots = @(Get-BenchmarkExternalStorageRoots | ForEach-Object { "$_/Android/data/$($script:benchmarkPackage)/files/media-grid-snapshot" })
-    $script:snapshotRemoteRoots = @()
-    foreach ($remoteRoot in ($remoteRoots | Select-Object -Unique)) {
-        $script:snapshotRemoteRoots += $remoteRoot
-        Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "run-as", $script:benchmarkPackage, "mkdir", "-p", $remoteRoot) | Out-Null
-        Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-f", "$remoteRoot/media-grid-snapshot.zip") | Out-Null
-        Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "run-as", $script:benchmarkPackage, "cp", $script:snapshotStagingRemotePath, "$remoteRoot/media-grid-snapshot.zip") | Out-Null
+function Assert-BenchmarkSnapshotReady {
+    param(
+        [Parameter(Mandatory = $true)][string]$PackageMetadata,
+        [Parameter(Mandatory = $true)][string]$ExpectedDataInode
+    )
+    $validationRoot = "/sdcard/Android/data/$($script:benchmarkPackage)/files/media-grid-validation"
+    $markerText = (Invoke-LoggedAdb -Adb $script:adb -Arguments @(
+            "-s", $script:serial, "shell", "cat", "$validationRoot/snapshot.json"
+        )) -join "`n"
+    try {
+        $marker = $markerText | ConvertFrom-Json
+    } catch {
+        throw "Benchmark snapshot marker is not valid JSON: $markerText"
     }
-    $script:snapshotRemoteRoot = $script:snapshotRemoteRoots[0]
+    if ($marker.ready -ne $true) { throw "Benchmark snapshot marker is not ready: $markerText" }
+    foreach ($field in @("activeClips", "activeMediaAssets", "taggedMediaClips", "localMediaAssets", "cachedJpegs")) {
+        $value = 0L
+        if (-not [long]::TryParse(([string]$marker.$field), [ref]$value) -or $value -le 0) {
+            throw "Benchmark snapshot validation count is not positive: $field=$($marker.$field) marker=$markerText"
+        }
+    }
+    $dataDirMatch = [regex]::Match($PackageMetadata, "(?m)^dataDir=(\S+)$")
+    if (-not $dataDirMatch.Success) { throw "Benchmark package dataDir was not found in package metadata." }
+    $expectedDatabasePath = "$($dataDirMatch.Groups[1].Value)/databases/like_list_manager_benchmark.db"
+    if ([string]$marker.databasePath -ne $expectedDatabasePath) {
+        throw "Benchmark snapshot runtime DB path mismatch: marker=$($marker.databasePath) expected=$expectedDatabasePath"
+    }
+    [long]$markerInode = 0
+    [long]$expectedInodeValue = 0
+    if (-not [long]::TryParse(([string]$marker.dataInode), [ref]$markerInode) -or
+        -not [long]::TryParse($ExpectedDataInode, [ref]$expectedInodeValue) -or
+        $markerInode -ne $expectedInodeValue) {
+        throw "Benchmark data inode changed across APK update: setup=$ExpectedDataInode marker=$($marker.dataInode)"
+    }
+    Write-SafeLog "Benchmark snapshot ready: activeClips=$($marker.activeClips) activeMediaAssets=$($marker.activeMediaAssets) taggedMediaClips=$($marker.taggedMediaClips) localMediaAssets=$($marker.localMediaAssets) cachedJpegs=$($marker.cachedJpegs) databasePath=$($marker.databasePath) dataInode=$($marker.dataInode)"
 }
 
 function Pull-MediaGridBenchmarkMetrics {
-    $remoteRoot = "/sdcard/Android/data/$($script:benchmarkPackage)/files/media-grid-metrics"
+    $remoteRoot = "$($script:removableStorageRoot)/Android/data/$($script:benchmarkPackage)/files/media-grid-metrics"
     $localRoot = Join-Path $script:repoRoot "build\reports\media-grid-benchmark\raw"
     $script:metricsRemoteRoot = $remoteRoot
     $script:metricsLocalRoot = $localRoot
     Remove-Item -LiteralPath $localRoot -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $script:repoRoot "build\reports\media-grid-benchmark\results.csv") -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force -Path $localRoot | Out-Null
-    $pull = Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "pull", $remoteRoot, $localRoot) -TimeoutSeconds $timeouts.Install -WorkingDirectory $script:repoRoot
+    $asciiPullRoot = Join-Path $env:TEMP "like-list-manager-metrics-$PID"
+    Remove-Item -LiteralPath $asciiPullRoot -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $asciiPullRoot | Out-Null
+    try {
+        Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "pull", $remoteRoot, $asciiPullRoot) -TimeoutSeconds $timeouts.Install -WorkingDirectory $script:repoRoot
+        Copy-Item -Path (Join-Path $asciiPullRoot "*") -Destination $localRoot -Recurse -Force
+    } finally {
+        Remove-Item -LiteralPath $asciiPullRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
     $files = @(Get-ChildItem -LiteralPath $localRoot -Filter "*.json" -File -Recurse -ErrorAction SilentlyContinue)
     if ($files.Count -eq 0) { throw "Benchmark target exported no media-grid metric JSON files." }
+}
+
+function Install-AndStartDetachedMacrobenchmark {
+    $testPackage = "$($script:macrobenchmarkHostPackage).test"
+    $runner = "$testPackage/com.lyco256.llm.macrobenchmark.PersistentBenchmarkRunner"
+    $runRoot = "$($script:removableStorageRoot)/Android/data/$($script:macrobenchmarkHostPackage)/files/media-grid-run"
+    $remoteLauncher = "/data/local/tmp/llm-media-grid-benchmark-launch.sh"
+    $remoteOutput = "/data/local/tmp/llm-media-grid-benchmark-output.txt"
+    $localLauncher = Join-Path $env:TEMP "llm-media-grid-benchmark-launch-$PID.sh"
+    $script:benchmarkRunRoot = $runRoot
+    Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "install", "-r", $script:macrobenchmarkHostApk) -TimeoutSeconds $timeouts.Install -WorkingDirectory $script:repoRoot
+    Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "install", "-r", "-t", $script:macrobenchmarkTestApk) -TimeoutSeconds $timeouts.Install -WorkingDirectory $script:repoRoot
+    Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-rf", $runRoot) | Out-Null
+    $launcherText = @(
+        "#!/system/bin/sh",
+        "toybox nohup am instrument -w -e androidx.benchmark.suppressErrors NOT-SELF-INSTRUMENTING '$runner' > '$remoteOutput' 2>&1 < /dev/null &"
+    ) -join "`n"
+    [IO.File]::WriteAllText($localLauncher, $launcherText, [Text.Encoding]::ASCII)
+    try {
+        Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-f", $remoteOutput, $remoteLauncher) | Out-Null
+        Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "push", $localLauncher, $remoteLauncher) -TimeoutSeconds $timeouts.Install -WorkingDirectory $script:repoRoot
+        Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "chmod", "700", $remoteLauncher) | Out-Null
+        Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", $remoteLauncher) | Out-Null
+        Start-Sleep -Seconds 3
+        Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-f", $remoteLauncher) | Out-Null
+    } finally {
+        Remove-Item -LiteralPath $localLauncher -Force -ErrorAction SilentlyContinue
+    }
+    Write-SafeLog "Detached macrobenchmark started on-device via nohup. ADB may disconnect without stopping instrumentation."
+}
+
+function Wait-DetachedMacrobenchmarkCompletion {
+    $testPackage = "$($script:macrobenchmarkHostPackage).test"
+    if (-not $script:benchmarkRunRoot) {
+        $script:benchmarkRunRoot = "$($script:removableStorageRoot)/Android/data/$($script:macrobenchmarkHostPackage)/files/media-grid-run"
+    }
+    $completion = "$($script:benchmarkRunRoot)/completion.json"
+    $running = "$($script:benchmarkRunRoot)/running.json"
+    $remoteOutput = "/data/local/tmp/llm-media-grid-benchmark-output.txt"
+    $waitStarted = [DateTime]::UtcNow
+    $lastRunnerOutputCheck = [DateTime]::MinValue
+    $nextDeviceProbe = [DateTime]::UtcNow
+    $runningConfirmed = $false
+    $deadline = [DateTime]::UtcNow.AddSeconds($timeouts.Macrobenchmark)
+    $lastConnectionNotice = [DateTime]::MinValue
+    do {
+        if ([DateTime]::UtcNow -lt $nextDeviceProbe) {
+            Start-Sleep -Seconds 60
+            continue
+        }
+        $connected = $false
+        try {
+            $state = @(& $script:adb -s $script:serial get-state 2>$null)
+            $connected = $LASTEXITCODE -eq 0 -and (($state -join "").Trim() -eq "device")
+        } catch { }
+        if (-not $connected -and $DebugMethod -eq "wireless") {
+            try {
+                $script:serial = Resolve-WirelessAllowedDevice -Adb $script:adb -HardwareSerial $script:hardwareSerial -TimeoutSeconds 15
+                $env:ANDROID_SERIAL = $script:serial
+                $connected = $true
+                Write-SafeLog "Wireless ADB reconnected while the device-side benchmark continued."
+            } catch {
+                if (([DateTime]::UtcNow - $lastConnectionNotice).TotalSeconds -ge 60) {
+                    Write-SafeLog "Wireless ADB is unavailable; benchmark continues on-device and results remain recoverable."
+                    $lastConnectionNotice = [DateTime]::UtcNow
+                }
+            }
+        }
+        if ($connected) {
+            & $script:adb -s $script:serial shell test -f $completion 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                $result = @(Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "cat", $completion))
+                $text = ($result -join "`n").Trim()
+                try { $json = $text | ConvertFrom-Json } catch { $json = $null }
+                if ($json -and $json.state -eq "complete") {
+                    Write-SafeLog "Detached macrobenchmark completion marker: $text"
+                    if ([int]$json.resultCode -ne -1) {
+                        throw "Detached macrobenchmark reported failure: $text"
+                    }
+                    return
+                }
+            }
+            & $script:adb -s $script:serial shell test -f $running 2>$null
+            $hasRunningMarker = $LASTEXITCODE -eq 0
+            if ($hasRunningMarker) { $runningConfirmed = $true }
+            & $script:adb -s $script:serial shell test -f $remoteOutput 2>$null
+            $hasRunnerOutput = $LASTEXITCODE -eq 0
+            $shouldCheckRunnerOutput = $hasRunnerOutput -and
+                ((-not $hasRunningMarker -and ([DateTime]::UtcNow - $waitStarted).TotalSeconds -ge 10) -or
+                 ([DateTime]::UtcNow - $lastRunnerOutputCheck).TotalMinutes -ge 5)
+            if ($shouldCheckRunnerOutput) {
+                $runnerOutput = ((Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "tail", "-n", "80", $remoteOutput)) -join "`n").Trim()
+                $lastRunnerOutputCheck = [DateTime]::UtcNow
+                if ($runnerOutput -match "Process crashed|INSTRUMENTATION_FAILED|INSTRUMENTATION_STATUS_CODE:\s*-2|shortMsg=") {
+                    throw "Device-side macrobenchmark failed before completion: $runnerOutput"
+                }
+                if (-not $hasRunningMarker -and $runnerOutput -match "INSTRUMENTATION_CODE:") {
+                    throw "Device-side macrobenchmark ended without publishing a completion marker: $runnerOutput"
+                }
+            }
+            if (-not $hasRunningMarker -and ([DateTime]::UtcNow - $waitStarted).TotalSeconds -ge 30) {
+                throw "Device-side macrobenchmark did not publish its running marker within 30 seconds."
+            }
+        }
+        $nextDeviceProbe = if ($runningConfirmed) { [DateTime]::UtcNow.AddMinutes(5) } else { [DateTime]::UtcNow.AddSeconds(5) }
+        Start-Sleep -Seconds $(if ($runningConfirmed) { 60 } else { 5 })
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "Timed out waiting for the detached macrobenchmark. Device-side metrics and completion files were preserved for later recovery."
+}
+
+function Test-DeviceBenchmarkRunStateExists {
+    $script:benchmarkRunRoot = "$($script:removableStorageRoot)/Android/data/$($script:macrobenchmarkHostPackage)/files/media-grid-run"
+    & $script:adb -s $script:serial shell test -f "$($script:benchmarkRunRoot)/completion.json" 2>$null
+    if ($LASTEXITCODE -eq 0) { return $true }
+    & $script:adb -s $script:serial shell test -f "$($script:benchmarkRunRoot)/running.json" 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        $pids = @(& $script:adb -s $script:serial shell pidof $script:macrobenchmarkHostPackage 2>$null)
+        if (-not [string]::IsNullOrWhiteSpace(($pids -join "").Trim())) { return $true }
+        Write-SafeLog "Ignoring stale running marker because the macrobenchmark host process is not active."
+    }
+    return $false
+}
+
+function Get-DetachedBenchmarkDiagnostics {
+    $testPackage = "$($script:macrobenchmarkHostPackage).test"
+    $runRoot = "$($script:removableStorageRoot)/Android/data/$($script:macrobenchmarkHostPackage)/files/media-grid-run"
+    foreach ($path in @("$runRoot/running.json", "$runRoot/completion.json")) {
+        & $script:adb -s $script:serial shell test -f $path 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-SafeLog "Device diagnostic file: $path"
+            Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "cat", $path) | Out-Null
+        } else {
+            Write-SafeLog "Device diagnostic file missing: $path"
+        }
+    }
+    $remoteOutput = "/data/local/tmp/llm-media-grid-benchmark-output.txt"
+    & $script:adb -s $script:serial shell test -f $remoteOutput 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Write-SafeLog "Device diagnostic file tail: $remoteOutput"
+        Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "tail", "-n", "80", $remoteOutput) | Out-Null
+    } else {
+        Write-SafeLog "Device diagnostic file missing: $remoteOutput"
+    }
+    Write-SafeLog "Active instrumentation diagnostics:"
+    Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "dumpsys", "activity", "instrumentation") | Out-Null
+    foreach ($package in @($script:macrobenchmarkHostPackage, $testPackage, $script:benchmarkPackage)) {
+        $pids = @(& $script:adb -s $script:serial shell pidof $package 2>$null)
+        Write-SafeLog "pidof $package = $(($pids -join ' ').Trim())"
+    }
+    Write-SafeLog "Storage volumes:"
+    Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "sm", "list-volumes", "all") | Out-Null
+    Write-SafeLog "Storage capacity:"
+    Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "df", "-h") | Out-Null
 }
 
 function Write-MediaGridBenchmarkResultsCsv {
@@ -497,21 +812,58 @@ function Write-MediaGridBenchmarkResultsCsv {
     else { Remove-Item -LiteralPath $resultCsv -Force -ErrorAction SilentlyContinue }
 }
 
-function Remove-SnapshotArtifacts {
-    foreach ($remoteRoot in @($script:snapshotRemoteRoots + $script:snapshotRemoteRoot | Where-Object { $_ })) {
-        try { Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-rf", $remoteRoot) | Out-Null } catch { Write-SafeLog "Snapshot shared cleanup failed: $remoteRoot" }
-    }
+function Remove-LocalSnapshotArtifacts {
     foreach ($path in @($script:snapshotRoot, $script:snapshotArchive)) {
         if ($path) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
     }
-    if ($script:snapshotStagingRemotePath) {
-        try { Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-f", $script:snapshotStagingRemotePath) | Out-Null } catch { Write-SafeLog "Snapshot staging cleanup failed: $($script:snapshotStagingRemotePath)" }
+}
+
+function Clear-DeviceBenchmarkArtifacts {
+    $benchmarkFilesRoot = "/sdcard/Android/data/$($script:benchmarkPackage)/files"
+    foreach ($package in @($script:benchmarkPackage, $script:macrobenchmarkHostPackage, "$($script:macrobenchmarkHostPackage).test")) {
+        Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "am", "force-stop", $package) | Out-Null
     }
-    if ($script:metricsRemoteRoot) {
-        try { Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-rf", $script:metricsRemoteRoot) | Out-Null } catch { Write-SafeLog "Benchmark metrics shared cleanup failed: $script:metricsRemoteRoot" }
+    $clearResult = (Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "pm", "clear", $script:benchmarkPackage)) -join "`n"
+    if (-not $clearResult.Contains("Success")) {
+        throw "Benchmark target clear did not report success: $clearResult"
     }
-    if ($script:benchmarkPackage -and $script:serial) {
-        try { Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-rf", "/sdcard/Android/data/$($script:benchmarkPackage)/files/media-grid-validation") | Out-Null } catch { Write-SafeLog "Benchmark validation cleanup failed" }
+    foreach ($package in @($script:macrobenchmarkHostPackage, "$($script:macrobenchmarkHostPackage).test")) {
+        $hostClear = (Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "pm", "clear", $package)) -join "`n"
+        if (-not $hostClear.Contains("Success")) { throw "Benchmark host clear did not report success for $package`: $hostClear" }
+    }
+    $storageRoots = @("/sdcard")
+    if ($script:removableStorageRoot) { $storageRoots += $script:removableStorageRoot }
+    foreach ($root in @(
+            "$benchmarkFilesRoot/media-grid-metrics",
+            "$benchmarkFilesRoot/media-grid-validation",
+            "/sdcard/Android/data/$($script:macrobenchmarkHostPackage)/files/media-grid-run",
+            "/sdcard/Android/data/$($script:macrobenchmarkHostPackage).test/files/media-grid-run"
+        )) {
+        Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-rf", $root) | Out-Null
+    }
+    foreach ($storageRoot in ($storageRoots | Select-Object -Unique)) {
+        foreach ($package in @($script:benchmarkPackage, $script:macrobenchmarkHostPackage, "$($script:macrobenchmarkHostPackage).test")) {
+            foreach ($root in @("$storageRoot/Android/data/$package", "$storageRoot/Android/media/$package")) {
+                Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-rf", $root) | Out-Null
+            }
+        }
+    }
+    Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-f", "/data/local/tmp/llm-media-grid-benchmark-launch.sh", "/data/local/tmp/llm-media-grid-benchmark-output.txt") | Out-Null
+}
+
+function Assert-NoDeviceBenchmarkArtifacts {
+    foreach ($path in @(
+            "$($script:removableStorageRoot)/Android/data/$($script:benchmarkPackage)/files/media-grid-metrics",
+            "$($script:removableStorageRoot)/Android/data/$($script:macrobenchmarkHostPackage)/files/media-grid-run"
+        )) {
+        & $script:adb -s $script:serial shell test -d $path 2>$null
+        $testExitCode = $LASTEXITCODE
+        if ($testExitCode -eq 1) { continue }
+        if ($testExitCode -ne 0) { throw "Could not inspect device benchmark artifact directory: $path" }
+        $output = @(Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "ls", "-A", $path))
+        if (@($output | Where-Object { -not [string]::IsNullOrWhiteSpace($_.ToString()) }).Count -gt 0) {
+            throw "Device benchmark artifacts are still present at $path. Run -RecoverMetricsOnly, then explicitly run -CleanupOnly before starting another benchmark."
+        }
     }
 }
 
@@ -606,23 +958,21 @@ $benchmarkApk = ""
 $benchmarkSetupApk = ""
 $macrobenchmarkHostApk = ""
 $macrobenchmarkTestApk = ""
+$benchmarkSetupDataInode = ""
+$benchmarkSetupMetadata = ""
+$benchmarkFinalMetadata = ""
 $productionBefore = ""
 $productionDataBefore = ""
 $snapshotRoot = ""
 $snapshotArchive = ""
-$snapshotRemoteRoot = ""
-$snapshotRemoteRoots = @()
-$snapshotStagingRemotePath = ""
 $metricsRemoteRoot = ""
 $metricsLocalRoot = ""
+$benchmarkRunRoot = ""
+$removableStorageRoot = ""
 $productionDbRoot = ""
 $productionImagesRoot = ""
 $productionCacheRoot = ""
 $runError = $null
-
-$metricReportDirectory = Join-Path $repoRoot "build\reports\media-grid-benchmark"
-Remove-Item -LiteralPath (Join-Path $metricReportDirectory "raw") -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath (Join-Path $metricReportDirectory "results.csv") -Force -ErrorAction SilentlyContinue
 
 try {
     Invoke-SafePhase -Name "Preflight" -Action {
@@ -666,6 +1016,7 @@ try {
         }
         Wait-AllowedDevice -Adb $script:adb -Serial $script:serial
         $env:ANDROID_SERIAL = $script:serial
+        $script:removableStorageRoot = Resolve-RemovableStorageRoot -Required:(-not $CleanupOnly)
 
         if (Test-Path -LiteralPath "C:\Program Files\Android\Android Studio\jbr") {
             $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
@@ -678,18 +1029,10 @@ try {
 
     if ($CleanupOnly) {
         Invoke-SafePhase -Name "CleanupOnly" -Action {
-            $cleanupRoots = @(Get-BenchmarkExternalStorageRoots | ForEach-Object { "$_/Android/data/$($script:benchmarkPackage)/files" })
-            foreach ($remoteRoot in ($cleanupRoots | Select-Object -Unique)) {
-                Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-rf", "$remoteRoot/media-grid-snapshot") | Out-Null
-                Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-rf", "$remoteRoot/media-grid-metrics") | Out-Null
-                Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-rf", "$remoteRoot/media-grid-validation") | Out-Null
-            }
-            Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-f", "/storage/emulated/0/Android/data/$($script:benchmarkPackage)/files/benchmark-snapshot-input.zip") | Out-Null
+            Clear-DeviceBenchmarkArtifacts
             foreach ($path in @(
                     (Join-Path $repoRoot "build\media-grid-benchmark-snapshot"),
-                    (Join-Path $repoRoot "build\media-grid-benchmark-snapshot.zip"),
-                    (Join-Path $repoRoot "build\reports\media-grid-benchmark\raw"),
-                    (Join-Path $repoRoot "build\reports\media-grid-benchmark\results.csv")
+                    (Join-Path $repoRoot "build\media-grid-benchmark-snapshot.zip")
                 )) {
                 Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
             }
@@ -697,6 +1040,38 @@ try {
         Complete-SafeScript
         Write-Host "Success"
         exit 0
+    }
+
+    if ($DiagnosticsOnly) {
+        Invoke-SafePhase -Name "DiagnosticsOnly" -Action {
+            Get-DetachedBenchmarkDiagnostics
+        }
+        Complete-SafeScript
+        Write-Host "Success"
+        exit 0
+    }
+
+    if ($RecoverMetricsOnly) {
+        try {
+            Invoke-SafePhase -Name "RecoverMetrics" -Action {
+                if (Test-DeviceBenchmarkRunStateExists) {
+                    Wait-DetachedMacrobenchmarkCompletion
+                }
+                Pull-MediaGridBenchmarkMetrics
+                Write-MediaGridBenchmarkResultsCsv
+            }
+        } catch {
+            Capture-BenchmarkFailureLog
+            throw
+        }
+        Write-MediaGridBenchmarkSummary
+        Complete-SafeScript
+        Write-Host "Success"
+        exit 0
+    }
+
+    Invoke-SafePhase -Name "ArtifactPrecheck" -Action {
+        Assert-NoDeviceBenchmarkArtifacts
     }
 
     try {
@@ -719,19 +1094,26 @@ try {
 
         Invoke-SafePhase -Name "InstallBenchmarkTarget" -Action {
             Wait-AllowedDevice -Adb $script:adb -Serial $script:serial
+            $installedPath = @(& $script:adb -s $script:serial shell pm path $script:benchmarkPackage 2>&1)
+            if ($LASTEXITCODE -eq 0 -and (($installedPath -join "`n").Contains("package:"))) {
+                $preInstallClear = (Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "pm", "clear", $script:benchmarkPackage)) -join "`n"
+                if (-not $preInstallClear.Contains("Success")) { throw "Could not clear prior benchmark-only data before setup APK install: $preInstallClear" }
+            }
             Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "install", "-r", $script:benchmarkSetupApk) -TimeoutSeconds $timeouts.Install -WorkingDirectory $repoRoot
-            $targetMetadata = Get-PackageMetadata -Adb $script:adb -Serial $script:serial -PackageName $script:benchmarkPackage
+            $clearResult = (Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "pm", "clear", $script:benchmarkPackage)) -join "`n"
+            if (-not $clearResult.Contains("Success")) { throw "pm clear did not clear benchmark package only: $clearResult" }
+            $validationRoot = "/sdcard/Android/data/$($script:benchmarkPackage)/files/media-grid-validation"
+            Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "rm", "-rf", $validationRoot) | Out-Null
+            Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "run-as", $script:benchmarkPackage, "mkdir", "-p", "files/benchmark-handoff") | Out-Null
+            $script:benchmarkSetupMetadata = Get-PackageMetadata -Adb $script:adb -Serial $script:serial -PackageName $script:benchmarkPackage
+            $script:benchmarkSetupDataInode = ((Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "run-as", $script:benchmarkPackage, "stat", "-c", "%i", ".")) -join "").Trim()
+            if ($script:benchmarkSetupDataInode -notmatch "^\d+$") { throw "Could not verify benchmark internal data inode: $script:benchmarkSetupDataInode" }
+            $targetMetadata = $script:benchmarkSetupMetadata
             $productionUserId = [regex]::Match($script:productionBefore, "uid:(\d+)").Groups[1].Value
             $targetUserId = [regex]::Match($targetMetadata, "uid:(\d+)").Groups[1].Value
             if (-not $productionUserId -or -not $targetUserId -or $productionUserId -eq $targetUserId) {
                 throw "Production and benchmark target apps do not have distinct Android UIDs."
             }
-        }
-
-        Invoke-SafePhase -Name "PrepareBenchmarkHandoffDirectory" -Action {
-            Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "am", "force-stop", $script:benchmarkPackage) | Out-Null
-            $result = (Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "am", "start", "-W", "-n", "$($script:benchmarkPackage)/com.lyco256.llm.BenchmarkSnapshotSetupActivity", "--ez", "benchmark_prepare_handoff_directory", "true")) -join "`n"
-            if (-not $result.Contains("Status: ok")) { throw "Benchmark handoff directory preparation did not complete: $result" }
         }
 
         Invoke-SafePhase -Name "ReadOnlySnapshot" -Action {
@@ -741,17 +1123,28 @@ try {
 
         Invoke-SafePhase -Name "InstallFinalBenchmarkTarget" -Action {
             Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "install", "-r", $script:benchmarkApk) -TimeoutSeconds $timeouts.Install -WorkingDirectory $repoRoot
-            $targetMetadata = Get-PackageMetadata -Adb $script:adb -Serial $script:serial -PackageName $script:benchmarkPackage
+            $script:benchmarkFinalMetadata = Get-PackageMetadata -Adb $script:adb -Serial $script:serial -PackageName $script:benchmarkPackage
+            $targetMetadata = $script:benchmarkFinalMetadata
             $productionUserId = [regex]::Match($script:productionBefore, "uid:(\d+)").Groups[1].Value
             $targetUserId = [regex]::Match($targetMetadata, "uid:(\d+)").Groups[1].Value
-            if (-not $productionUserId -or -not $targetUserId -or $productionUserId -eq $targetUserId) {
-                throw "Production and benchmark target apps do not have distinct Android UIDs."
+            $setupUserId = [regex]::Match($script:benchmarkSetupMetadata, "uid:(\d+)").Groups[1].Value
+            if (-not $productionUserId -or -not $targetUserId -or $productionUserId -eq $targetUserId -or $setupUserId -ne $targetUserId) {
+                throw "Benchmark UID changed or collides with production: setup=$setupUserId final=$targetUserId production=$productionUserId"
             }
+        }
+
+        Invoke-SafePhase -Name "BenchmarkSnapshotSetup" -Action {
+            Wait-AllowedDevice -Adb $script:adb -Serial $script:serial
+            Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "am", "force-stop", $script:benchmarkPackage) | Out-Null
+            $startResult = (Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "am", "start", "-W", "-n", "$($script:benchmarkPackage)/com.lyco256.llm.BenchmarkSnapshotSetupActivity")) -join "`n"
+            Write-SafeLog "Benchmark setup Activity launch result (diagnostic only): $startResult"
+            Assert-BenchmarkSnapshotReady -PackageMetadata $script:benchmarkFinalMetadata -ExpectedDataInode $script:benchmarkSetupDataInode
         }
 
         Invoke-SafePhase -Name "Macrobenchmark" -Action {
             Wait-AllowedDevice -Adb $script:adb -Serial $script:serial
-            Invoke-SafeNativeCommand -FilePath ".\gradlew.bat" -Arguments @(":macrobenchmark:connectedBenchmarkAndroidTest", "--console=plain", "--no-daemon") -TimeoutSeconds $timeouts.Macrobenchmark -WorkingDirectory $repoRoot
+            Install-AndStartDetachedMacrobenchmark
+            Wait-DetachedMacrobenchmarkCompletion
             Pull-MediaGridBenchmarkMetrics
             Write-MediaGridBenchmarkResultsCsv
         }
@@ -799,5 +1192,5 @@ try {
     Write-MediaGridBenchmarkSummary
     Stop-SafeScriptWithFailure -Exception $_.Exception
 } finally {
-    Remove-SnapshotArtifacts
+    Remove-LocalSnapshotArtifacts
 }

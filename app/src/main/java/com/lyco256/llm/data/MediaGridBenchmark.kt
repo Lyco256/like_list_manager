@@ -2,6 +2,7 @@ package com.lyco256.llm.data
 
 import android.content.Intent
 import android.os.Trace
+import android.os.Environment
 import com.lyco256.llm.BuildConfig
 import java.util.concurrent.atomic.AtomicLong
 import android.content.Context
@@ -159,7 +160,10 @@ class MediaGridFrameTimingCollector {
 object MediaGridBenchmarkMetricsWriter {
     fun write(context: Context, settings: MediaGridBenchmarkSettings, metrics: MediaGridBenchmarkMetrics, frames: MediaGridFrameTimingSummary) {
         if (BuildConfig.BUILD_TYPE != "benchmark") return
-        val root = context.getExternalFilesDir("media-grid-metrics") ?: return
+        val root = context.getExternalFilesDirs("media-grid-metrics")
+            .filterNotNull()
+            .firstOrNull(Environment::isExternalStorageRemovable)
+            ?: error("Removable SD storage is required for benchmark metrics")
         root.mkdirs()
         val safeScenario = settings.scenario.replace(Regex("[^A-Za-z0-9_.-]"), "_")
         val file = File(root, "${settings.mode.name}-$safeScenario-${System.nanoTime()}.json")

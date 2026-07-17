@@ -88,12 +88,7 @@ class MediaGridThumbnailStore(
         val output = File(directory, "$key.jpg")
         metrics.count("cacheLookup")
         val exact = metrics.trace("MediaGridCacheLookup") { output.takeIf { it.isFile && it.length() > 0L } }
-        return exact ?: if (settings.enabled && settings.mode == MediaGridBenchmarkMode.CACHED_UI) {
-            metrics.trace("MediaGridCacheLookup") {
-                directory.listFiles { file -> file.isFile && file.extension.equals("jpg", ignoreCase = true) && file.length() > 0L }
-                    ?.firstOrNull()
-            }
-        } else null
+        return exact
     }
 
     private fun decode(file: File?, urls: List<String>): Bitmap {

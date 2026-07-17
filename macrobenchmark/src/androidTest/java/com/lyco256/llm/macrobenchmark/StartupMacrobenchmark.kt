@@ -18,11 +18,11 @@ import org.junit.runner.RunWith
 class StartupMacrobenchmark {
     @get:Rule
     val benchmarkRule = MacrobenchmarkRule()
-    private var validationRoot = "/sdcard/Android/data/com.lyco256.llm.test.benchmark/files/media-grid-validation"
+    private val validationRoot = "/sdcard/Android/data/com.lyco256.llm.test.benchmark/files/media-grid-validation"
 
     @Test
     fun coldStartup() {
-        prepareSnapshot()
+        assertSnapshotPrepared()
         benchmarkRule.measureRepeated(
             packageName = TARGET,
             metrics = listOf(StartupTimingMetric()),
@@ -37,7 +37,7 @@ class StartupMacrobenchmark {
 
     @Test
     fun warmStartup() {
-        prepareSnapshot()
+        assertSnapshotPrepared()
         benchmarkRule.measureRepeated(
             packageName = TARGET,
             metrics = listOf(StartupTimingMetric()),
@@ -53,37 +53,18 @@ class StartupMacrobenchmark {
     private companion object {
         const val TARGET = "com.lyco256.llm.test.benchmark"
         const val ACTIVITY = "com.lyco256.llm.MainActivity"
-        const val SETUP_ACTIVITY = "com.lyco256.llm.BenchmarkSnapshotSetupActivity"
     }
 
-    private fun prepareSnapshot() {
+    private fun assertSnapshotPrepared() {
         val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
-        device.executeShellCommand("am force-stop $TARGET")
-        val result = device.executeShellCommand("am start -W -n $TARGET/$SETUP_ACTIVITY")
-        validationRoot = resolveValidationRoot(device)
         val marker = device.executeShellCommand("cat $validationRoot/snapshot.json")
         val error = device.executeShellCommand("cat $validationRoot/setup-error.txt")
-        if (!result.contains("Status: ok") || !marker.contains("\"ready\":true")) {
-            throw IllegalStateException("Benchmark snapshot setup failed: am=$result root=$validationRoot marker=$marker error=$error")
+        val requiredCounts = listOf("activeClips", "activeMediaAssets", "taggedMediaClips", "localMediaAssets", "cachedJpegs")
+        val countsReady = requiredCounts.all { field ->
+            Regex("\\\"$field\\\":(\\d+)").find(marker)?.groupValues?.get(1)?.toIntOrNull()?.let { it > 0 } == true
         }
-    }
-
-    private fun resolveValidationRoot(device: UiDevice): String {
-        val roots = buildList {
-            add("/sdcard")
-            add("/storage/emulated/0")
-            device.executeShellCommand("ls -d /storage/*").lineSequence()
-                .map(String::trim)
-                .map { if (it == "/storage/emulated") "/storage/emulated/0" else it }
-                .filter { it.startsWith("/storage/") && it != "/storage/self" }
-                .forEach(::add)
-        }.distinct()
-        return roots.firstOrNull { root ->
-            val validationPath = "$root/Android/data/$TARGET/files/media-grid-validation"
-            val marker = device.executeShellCommand("cat $validationPath/snapshot.json")
-            val error = device.executeShellCommand("cat $validationPath/setup-error.txt")
-            marker.contains("\"ready\":true") || error.isNotBlank()
-        }?.let { "$it/Android/data/$TARGET/files/media-grid-validation" }
-            ?: "/sdcard/Android/data/$TARGET/files/media-grid-validation"
+        if (!marker.contains("\"ready\":true") || !countsReady || !marker.contains("like_list_manager_benchmark.db")) {
+            throw IllegalStateException("Benchmark snapshot is not prepared: root=$validationRoot marker=$marker error=$error")
+        }
     }
 }

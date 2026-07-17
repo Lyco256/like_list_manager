@@ -1,5 +1,11 @@
 # `run-safe-macrobenchmark-check.ps1`
 
+通常実行は端末側の `media-grid-metrics`、instrumentation完了marker、benchmark targetデータを終了時に削除しない。ADBが途中で切断されても、端末上で開始済みのinstrumentationは継続し、結果をapp-specific外部領域へ保存する。
+
+後から回収する場合は `.\scripts\run-safe-macrobenchmark-check.cmd -DebugMethod wireless -RecoverMetricsOnly` を使う。回収確認後に端末側成果を削除する場合だけ `.\scripts\run-safe-macrobenchmark-check.cmd -DebugMethod wireless -CleanupOnly` を使う。
+
+未回収成果が端末にある場合、通常実行は `pm clear` 前に失敗する。通常実行の前に回収と明示cleanupを行う。
+
 Wireless mode: `-DebugMethod wireless` resolves the mDNS `_adb-tls-connect._tcp` endpoint whose reported hardware serial matches `testDeviceSerial`, then uses that endpoint for the same package and UID safety checks. It does not uninstall the production app or clear device data.
 
 同じ実機に本番 `com.lyco256.llm` を残したまま、隔離された性能測定対象 `com.lyco256.llm.test.benchmark` とMacrobenchmarkホスト `com.lyco256.llm.macrobenchmark.host` だけを扱う安全実行スクリプトです。
@@ -13,6 +19,6 @@ Wireless mode: `-DebugMethod wireless` resolves the mDNS `_adb-tls-connect._tcp`
 
 既存の`.cmd`入口からのみ、force-stop済み本命packageへ`run-as`で読み取り専用snapshotを作成する。run-asが利用できない場合はrootや権限回避へfallbackせず失敗する。コピー対象はRoom DB本体/WAL/SHM、既存`media_grid_thumbnails`、`files/images`から選んだ最大256件の元画像だけで、Preferences、DataStore、OAuth/API secret、Cookie、Client IDは対象外。
 
-snapshotはbenchmark targetと同じpackageの一時debuggable setup APKで専用外部handoffへアプリ所有のまま配置し、最終的な非debuggable benchmark APKへ更新してからtarget内部へimportする。測定に使うAPKは`benchmark`だけで、handoffディレクトリ自体はshellで削除・再作成しない。本命package metadataとDB/対象media hashは前後比較し、PC側・共有領域のsnapshotは成功・失敗にかかわらずcleanupする。
+snapshotはbenchmark targetと同じpackageの一時debuggable setup APKを導入してbenchmark packageだけを`pm clear`し、`run-as`で`files/benchmark-handoff`を作成する。PC上のZIPはPowerShellの文字列パイプや外部ストレージを経由せず、`adb exec-in run-as com.lyco256.llm.test.benchmark dd of=files/benchmark-handoff/media-grid-snapshot.zip`の標準入力へFileStreamで直接転送する。端末側のサイズとSHA-256をPC側と照合し、不一致なら最終APKを導入しない。最終的な非debuggable benchmark APKへ`install -r`した後、setup Activityを一度だけ明示起動して内部handoffをimportし、marker、件数、Room DB path、data inodeを検証してからMacrobenchmarkを開始する。測定に使うAPKは`benchmark`だけで、handoff入力にapp-specific外部ストレージ、複数storage root探索、shellから見える外部パス、外部領域間の`run-as cp`を使わない。本命package metadataとDB/対象media hashは前後比較し、PC側snapshotは成功・失敗にかかわらずcleanupする。
 
 `build/reports/media-grid-benchmark/latest-summary.md`には5モード、スクロール/pinchシナリオ、P50/P90/P95/P99/jank、主要Trace/counter、指定差分を出力する。Metric exportが存在しない場合はN/Aと判定不能を明示し、未計測値を推測しない。

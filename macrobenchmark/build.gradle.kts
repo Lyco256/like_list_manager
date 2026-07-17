@@ -11,7 +11,7 @@ android {
         applicationId = "com.lyco256.llm.macrobenchmark.host"
         minSdk = 29
         targetSdk = 36
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "com.lyco256.llm.macrobenchmark.PersistentBenchmarkRunner"
         testInstrumentationRunnerArguments["androidx.benchmark.suppressErrors"] = "NOT-SELF-INSTRUMENTING"
     }
 

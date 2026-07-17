@@ -12,12 +12,6 @@ import java.io.File
 class BenchmarkSnapshotSetupActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (intent.getBooleanExtra("benchmark_prepare_handoff_directory", false)) {
-            getExternalFilesDir("media-grid-snapshot")?.mkdirs()
-            setResult(RESULT_OK)
-            finish()
-            return
-        }
         try {
             BenchmarkSnapshotImporter.prepareRequiredSnapshot(this)
             getExternalFilesDir("media-grid-validation")?.let { File(it, "setup-error.txt").delete() }
