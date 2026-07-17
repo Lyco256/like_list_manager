@@ -1,5 +1,7 @@
 # `TagHierarchyUiV2.kt`
 
+2026-07-17: The classified media grid publishes a lightweight viewport snapshot without calling synchronous thumbnail viewport application. Each cell carries its immutable source index for the worker-side source lookup.
+
 ## 2026-07-10 media-grid bulk tag editing
 
 ## 2026-07-12 mixed tags and header requirements

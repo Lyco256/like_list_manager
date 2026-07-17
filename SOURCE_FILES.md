@@ -15,6 +15,11 @@
 
 # Source Files Guide
 
+## 2026-07 viewport dispatch
+
+- `MediaGridViewportDispatch.kt` owns the immutable viewport snapshot, latest-value replacement, revision/duplicate gate, and the existing one-adjacent-row range rule.
+- `MediaGridThumbnailManager.kt` resolves snapshot IDs to the current source and runs thumbnail preparation on one worker. The UI only publishes `MediaGridViewportSnapshot` from `TagHierarchyUiV2.kt`.
+
 ## 2026-07-13 card/grid duplicate-work removal
 
 - `MainUiState`の未分類・投稿者候補・分類済み一覧は遅延評価し、グリッド経路はカード一覧・スクロールキー・item keyを評価しない。

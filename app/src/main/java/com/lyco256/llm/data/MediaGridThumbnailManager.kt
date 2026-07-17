@@ -37,8 +37,12 @@ class MediaGridThumbnailManager(
     private val displayRetries = mutableMapOf<String, Int>()
     private var foreground = true
     private var job: Job? = null
+    private var viewportDispatcher: LatestValueDispatcher<MediaGridViewportSnapshot>? = null
+    private val viewportRevisionGate = MediaGridViewportRevisionGate()
 
     @Synchronized fun updateSourceSnapshot(revision: Long, ordered: List<MediaGridThumbnailSource>) {
+        ensureViewportDispatcherLocked()
+        viewportRevisionGate.setSourceRevision(revision)
         val nextSources = ordered.distinctBy { it.assetId }
         if (sourceRevision == revision && sources == nextSources) return
         sourceRevision = revision
@@ -57,7 +61,29 @@ class MediaGridThumbnailManager(
         startIfNeeded()
     }
 
-    @Synchronized fun updateViewport(requests: List<MediaGridViewportRequest>, columnCount: Int = columns) {
+    fun dispatchViewport(snapshot: MediaGridViewportSnapshot): Boolean {
+        val dispatcher = synchronized(this) {
+            if (sourceRevision != snapshot.sourceRevision) return false
+            ensureViewportDispatcherLocked()
+        }
+        return dispatcher.dispatch(snapshot)
+    }
+
+    fun disposeViewport() {
+        val dispatcher = synchronized(this) {
+            val current = viewportDispatcher
+            viewportDispatcher = null
+            visible = emptyMap()
+            first = 0
+            last = -1
+            job?.cancel()
+            job = null
+            current
+        }
+        dispatcher?.close()
+    }
+
+    @Synchronized private fun updateViewport(requests: List<MediaGridViewportRequest>, columnCount: Int = columns) {
         columns = columnCount.coerceAtLeast(1)
         val nextCenter = requests.map { it.index }.average().takeUnless { it.isNaN() }?.toFloat()
         if (nextCenter != null) {
@@ -76,6 +102,27 @@ class MediaGridThumbnailManager(
         uiIds().forEach(::ensureWork)
         pruneUiState()
         startIfNeeded()
+    }
+
+    private suspend fun processViewportSnapshot(snapshot: MediaGridViewportSnapshot) {
+        val requests = synchronized(this) {
+            if (!viewportRevisionGate.shouldApply(snapshot)) return
+            snapshot.items.mapNotNull { item ->
+                val source = sourceByAssetId[item.assetId]
+                    ?.takeIf { sourceIndex[item.assetId] == item.sourceIndex }
+                    ?: return@mapNotNull null
+                MediaGridViewportRequest(source, item.centerDistance, item.sourceIndex)
+            }
+        }
+        updateViewport(requests, snapshot.columnCount)
+    }
+
+    @Synchronized private fun ensureViewportDispatcherLocked(): LatestValueDispatcher<MediaGridViewportSnapshot> {
+        return viewportDispatcher ?: LatestValueDispatcher(
+            scope = scope,
+            workerDispatcher = Dispatchers.Default,
+            process = ::processViewportSnapshot,
+        ).also { viewportDispatcher = it }
     }
 
     @Synchronized fun setForeground(active: Boolean) { foreground = active; if (active) startIfNeeded() }
@@ -123,8 +170,9 @@ class MediaGridThumbnailManager(
 
     private fun uiIds(): Set<Long> {
         if (visible.isEmpty() || last < first) return emptySet()
-        val margin = columns
-        return (first - margin..last + margin).mapNotNull { sources.getOrNull(it)?.assetId }.toSet()
+        return mediaGridViewportUiIndices(first, last, columns, sources.size)
+            .mapNotNull { sources.getOrNull(it)?.assetId }
+            .toSet()
     }
 
     @Synchronized private fun startIfNeeded() {
