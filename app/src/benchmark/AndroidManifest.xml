@@ -11,6 +11,17 @@
         tools:replace="android:label">
         <profileable android:shell="true" />
         <activity
+            android:name=".MainActivity"
+            tools:node="remove" />
+        <activity
+            android:name=".BenchmarkMainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
             android:name=".BenchmarkSnapshotSetupActivity"
             android:excludeFromRecents="true"
             android:exported="true"

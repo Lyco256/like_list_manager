@@ -119,7 +119,10 @@ afterEvaluate {
         description = "Verifies that the integration-test app cannot share production identity, storage, OAuth, or API settings."
         dependsOn(
             "generateDebugBuildConfig",
+            "generateReleaseBuildConfig",
             "generateIntegrationTestBuildConfig",
+            "processDebugManifestForPackage",
+            "processReleaseManifestForPackage",
             "processIntegrationTestManifestForPackage",
             "generateBenchmarkBuildConfig",
             "processBenchmarkManifestForPackage",
@@ -127,6 +130,12 @@ afterEvaluate {
         doLast {
             val debugConfig = layout.buildDirectory.file(
                 "generated/source/buildConfig/debug/com/lyco256/llm/BuildConfig.java",
+            ).get().asFile.readText()
+            val debugManifest = layout.buildDirectory.file(
+                "intermediates/packaged_manifests/debug/processDebugManifestForPackage/AndroidManifest.xml",
+            ).get().asFile.readText()
+            val releaseManifest = layout.buildDirectory.file(
+                "intermediates/packaged_manifests/release/processReleaseManifestForPackage/AndroidManifest.xml",
             ).get().asFile.readText()
             val testConfig = layout.buildDirectory.file(
                 "generated/source/buildConfig/integrationTest/com/lyco256/llm/BuildConfig.java",
@@ -144,6 +153,12 @@ afterEvaluate {
             check(debugConfig.contains("APPLICATION_ID = \"com.lyco256.llm\""))
             check(debugConfig.contains("TEST_HARNESS = false"))
             check(debugConfig.contains("X_API_BASE_URL = \"https://api.x.com/2\""))
+            check(debugManifest.contains("com.lyco256.llm.MainActivity"))
+            check(!debugManifest.contains("BenchmarkMainActivity"))
+            check(!debugManifest.contains("BenchmarkSnapshotSetupActivity"))
+            check(releaseManifest.contains("com.lyco256.llm.MainActivity"))
+            check(!releaseManifest.contains("BenchmarkMainActivity"))
+            check(!releaseManifest.contains("BenchmarkSnapshotSetupActivity"))
             check(testConfig.contains("APPLICATION_ID = \"com.lyco256.llm.test\""))
             check(testConfig.contains("TEST_HARNESS = true"))
             check(testConfig.contains("STORAGE_DATABASE_NAME = \"like_list_manager_test.db\""))
@@ -152,6 +167,9 @@ afterEvaluate {
             check(testConfig.contains("API_PREFERENCES_NAME = \"api_test_settings\""))
             check(testConfig.contains("X_API_BASE_URL = \"http://127.0.0.1/disabled\""))
             check(testManifest.contains("package=\"com.lyco256.llm.test\""))
+            check(testManifest.contains("com.lyco256.llm.MainActivity"))
+            check(!testManifest.contains("BenchmarkMainActivity"))
+            check(!testManifest.contains("BenchmarkSnapshotSetupActivity"))
             check(!testManifest.contains("RedirectUriReceiverActivity"))
             check(benchmarkConfig.contains("APPLICATION_ID = \"com.lyco256.llm.test.benchmark\""))
             check(benchmarkConfig.contains("TEST_HARNESS = true"))

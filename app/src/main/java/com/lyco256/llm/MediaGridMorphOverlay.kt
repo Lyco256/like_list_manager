@@ -39,7 +39,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.lyco256.llm.data.MediaGridThumbnailManager
-import com.lyco256.llm.data.MediaGridBenchmarkMetrics
 import com.lyco256.llm.data.MediaGridThumbnailState
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.math.max
@@ -55,7 +54,6 @@ internal class MediaGridMorphOverlayResources(
     val thumbnailManager: MediaGridThumbnailManager,
     val thumbnailImageLoader: coil.ImageLoader,
     val thumbnailBrush: Brush,
-    val benchmarkMetrics: MediaGridBenchmarkMetrics,
 )
 
 private fun mediaGridThumbnailSource(entry: MediaGridEntry) =
@@ -186,9 +184,6 @@ internal fun MediaGridMorphOverlay(
     resources: MediaGridMorphOverlayResources,
     selectionMode: Boolean,
 ) {
-    androidx.compose.runtime.LaunchedEffect(model) {
-        resources.benchmarkMetrics.trace("MediaGridMorphFirstDraw") { resources.benchmarkMetrics.count("morphFirstDraw") }
-    }
     val thumbnailStates = rememberMorphThumbnailStates(model, resources.thumbnailManager)
     val density = LocalDensity.current
     Box(

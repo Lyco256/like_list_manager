@@ -5,9 +5,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
-import com.lyco256.llm.data.MediaGridBenchmarkMetricsWriter
-import com.lyco256.llm.data.MediaGridFrameTimingSummary
-import com.lyco256.llm.data.MediaGridFrameTimingCollector
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
@@ -125,10 +122,11 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeParseException
 
-class MainActivity : ComponentActivity() {
+open class MainActivity : ComponentActivity() {
     private lateinit var viewModel: MainViewModel
-    private var benchmarkFrameTiming: MediaGridFrameTimingCollector? = null
-    private var benchmarkMetricsWritten = false
+    protected open val initialAppTab: AppTab = AppTab.Unclassified
+    protected open val initialClassifiedDisplayMode: ClassifiedDisplayMode = ClassifiedDisplayMode.Card
+    protected open val persistScreenState: Boolean = true
     private val authorizationLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val data = result.data
         if (data == null) {
@@ -142,15 +140,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        (application as LikeListManagerApp).initializeForActivity(intent)
-        if (BuildConfig.BUILD_TYPE == "benchmark" && intent.getBooleanExtra("com.lyco256.llm.benchmark.resetGenerated", false)) {
-            BenchmarkSnapshotImporter.resetGeneratedResults(this)
-        }
-        val benchmarkContainer = (application as LikeListManagerApp).container
-        if (benchmarkContainer.mediaGridBenchmarkSettings.enabled) {
-            benchmarkContainer.mediaGridBenchmarkMetrics.reset()
-            benchmarkFrameTiming = MediaGridFrameTimingCollector().also { it.start() }
-        }
         viewModel = ViewModelProvider(this, MainViewModel.factory(application))[MainViewModel::class.java]
         setContent {
             LikeListManagerUi(
@@ -161,6 +150,9 @@ class MainActivity : ComponentActivity() {
                             .onFailure { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
                     }
                 },
+                initialTab = initialAppTab,
+                initialClassifiedDisplayMode = initialClassifiedDisplayMode,
+                persistScreenState = persistScreenState,
             )
         }
     }
@@ -170,28 +162,6 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        if (intent?.getBooleanExtra("com.lyco256.llm.benchmark.flushMetrics", false) == true) {
-            writeBenchmarkMetricsIfNeeded()
-        }
-    }
-
-    override fun onStop() {
-        super.onStop()
-        writeBenchmarkMetricsIfNeeded()
-    }
-
-    private fun writeBenchmarkMetricsIfNeeded() {
-        val app = application as LikeListManagerApp
-        val settings = app.container.mediaGridBenchmarkSettings
-        if (settings.enabled && !benchmarkMetricsWritten) {
-            benchmarkMetricsWritten = true
-            val frames = benchmarkFrameTiming?.stop() ?: MediaGridFrameTimingSummary.fromDurations(emptyList())
-            MediaGridBenchmarkMetricsWriter.write(this, settings, app.container.mediaGridBenchmarkMetrics, frames)
-        }
-    }
 }
 
 enum class AppTab(val label: String) {
@@ -420,7 +390,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             apiSettings.value = repository.loadApiSettings()
             oauthSession.value = repository.loadOAuthSession()
-            if (BuildConfig.BUILD_TYPE != "benchmark") repository.ensureSeedData()
+            if (!BuildConfig.TEST_HARNESS) repository.ensureSeedData()
             refreshSettingsSnapshotInternal()
         }
     }
@@ -658,7 +628,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 }
 
 @Composable
-fun LikeListManagerUi(viewModel: MainViewModel, onLogin: (ApiSettings) -> Unit) {
+fun LikeListManagerUi(
+    viewModel: MainViewModel,
+    onLogin: (ApiSettings) -> Unit,
+    initialTab: AppTab = AppTab.Unclassified,
+    initialClassifiedDisplayMode: ClassifiedDisplayMode = ClassifiedDisplayMode.Card,
+    persistScreenState: Boolean = true,
+) {
     val uiState by viewModel.uiState.collectAsState()
     val mediaGridTweetDialogState by viewModel.mediaGridTweetDialogState.collectAsState()
     MaterialTheme(
@@ -671,7 +647,14 @@ fun LikeListManagerUi(viewModel: MainViewModel, onLogin: (ApiSettings) -> Unit) 
         ),
     ) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            MainScreen(uiState, viewModel, onLogin)
+            MainScreen(
+                uiState = uiState,
+                viewModel = viewModel,
+                onLogin = onLogin,
+                initialTab = initialTab,
+                initialClassifiedDisplayMode = initialClassifiedDisplayMode,
+                persistScreenState = persistScreenState,
+            )
             MediaGridTweetDialog(
                 state = mediaGridTweetDialogState,
                 hierarchy = uiState.tagHierarchy,
@@ -692,25 +675,28 @@ fun LikeListManagerUi(viewModel: MainViewModel, onLogin: (ApiSettings) -> Unit) 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(uiState: MainUiState, viewModel: MainViewModel, onLogin: (ApiSettings) -> Unit) {
-    val benchmarkTarget = BuildConfig.BUILD_TYPE == "benchmark"
-    // The benchmark target must begin every Activity instance in the measured
-    // classified media grid. Do not restore a prior Card/Unclassified state
-    // from the benchmark task; ordinary builds retain their existing state.
-    var tab by if (benchmarkTarget) {
-        remember { mutableStateOf(AppTab.Classified) }
+fun MainScreen(
+    uiState: MainUiState,
+    viewModel: MainViewModel,
+    onLogin: (ApiSettings) -> Unit,
+    initialTab: AppTab = AppTab.Unclassified,
+    initialClassifiedDisplayMode: ClassifiedDisplayMode = ClassifiedDisplayMode.Card,
+    persistScreenState: Boolean = true,
+) {
+    var tab by if (persistScreenState) {
+        rememberSaveable { mutableStateOf(initialTab) }
     } else {
-        rememberSaveable { mutableStateOf(AppTab.Unclassified) }
+        remember { mutableStateOf(initialTab) }
     }
-    var classifiedDisplayMode by if (benchmarkTarget) {
-        remember { mutableStateOf(ClassifiedDisplayMode.MediaGrid) }
+    var classifiedDisplayMode by if (persistScreenState) {
+        rememberSaveable { mutableStateOf(initialClassifiedDisplayMode) }
     } else {
-        rememberSaveable { mutableStateOf(ClassifiedDisplayMode.Card) }
+        remember { mutableStateOf(initialClassifiedDisplayMode) }
     }
-    var classifiedMediaGridColumnCount by if (benchmarkTarget) {
-        remember { mutableStateOf(ClassifiedMediaGridDefaultColumnCount) }
-    } else {
+    var classifiedMediaGridColumnCount by if (persistScreenState) {
         rememberSaveable { mutableStateOf(ClassifiedMediaGridDefaultColumnCount) }
+    } else {
+        remember { mutableStateOf(ClassifiedMediaGridDefaultColumnCount) }
     }
     var settingsOpen by remember { mutableStateOf(false) }
     var syncMessage by remember { mutableStateOf<String?>(null) }

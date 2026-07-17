@@ -9,7 +9,7 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 
 ## 主な責務
 
-- `MainActivity`: Compose起動とAppAuthのActivity Result受信
+- `MainActivity`: 通常Compose起動とAppAuthのActivity Result受信。benchmark Intent、snapshot import、計測State、frame/result出力は扱いません。
 - `MainViewModel`: RepositoryのFlowをUI stateへ合成し、ユーザー操作をRepositoryへ渡す
 - `MainUiState`: 未分類、分類済み、検索条件、並び替え、投稿者一覧、タグ階層、保存先状態、同期状態、設定画面用スナップショットをまとめる
 - `TweetFilterState`: 分類済み画面の文字列検索、検索モード、検索対象、期間、投稿者条件、タグ条件、タグのみtoggleを表す
@@ -97,6 +97,7 @@ UI項目を追加する場合は、対応するViewModel操作、Repository API�
 - The classified toolbar now has a single icon toggle next to filter/sort controls; it does not open a dropdown and does not show the text `MediaGrid`.
 - Grid mode still uses `uiState.classified` as its only source and stays separate from the existing card view.
 - Classified media-grid support now includes divider headings, like-count overlays, pinch-to-change columns from 2 through 12, card popups, tweet-level multi-select, and bulk tag editing; the existing card-list path remains separate.
+- The benchmark-only startup state and frame/result handling live in `app/src/benchmark`; the normal Activity keeps saveable tab/display/column state without build-type mode checks.
 ## 2026-07 media grid lightweight state
 
 - `MainViewModel` now exposes `classifiedMediaGridState`, which combines the lightweight media source with filters, sort config, and tag hierarchy.

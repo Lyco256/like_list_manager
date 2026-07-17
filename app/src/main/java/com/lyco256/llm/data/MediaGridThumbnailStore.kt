@@ -25,18 +25,10 @@ data class MediaGridThumbnailSource(
 
 class MediaGridThumbnailStore(
     context: Context,
-    private val settings: MediaGridBenchmarkSettings = MediaGridBenchmarkSettings(),
-    private val metrics: MediaGridBenchmarkMetrics = MediaGridBenchmarkMetrics.forSettings(settings),
 ) {
-    private val directory = File(
-        context.cacheDir,
-        if (settings.enabled && settings.mode != MediaGridBenchmarkMode.CACHED_UI) "media_grid_thumbnails_generated" else "media_grid_thumbnails",
-    ).apply { mkdirs() }
+    private val directory = File(context.cacheDir, "media_grid_thumbnails").apply { mkdirs() }
 
-    fun resetGeneratedResults() { if (settings.enabled && settings.mode != MediaGridBenchmarkMode.CACHED_UI) directory.deleteRecursively(); directory.mkdirs() }
-
-    suspend fun getOrCreate(source: MediaGridThumbnailSource, allowRemote: Boolean = settings.networkAllowed): File = withContext(Dispatchers.IO) {
-        check(!settings.enabled || !allowRemote) { "Benchmark media path cannot access network" }
+    suspend fun getOrCreate(source: MediaGridThumbnailSource, allowRemote: Boolean = true): File = withContext(Dispatchers.IO) {
         val input = source.localPath?.let(::File)?.takeIf { it.isFile }
         val inputName = input?.absolutePath ?: if (allowRemote) (source.previewUrl ?: source.remoteUrl) else null
             ?: error("No media source")
@@ -44,30 +36,20 @@ class MediaGridThumbnailStore(
         val actualModified = input?.lastModified() ?: source.modified
         val key = sha256("${source.assetId}|${source.mediaKey}|$inputName|$actualSize|$actualModified")
         val output = File(directory, "$key.jpg")
-        metrics.count("cacheLookup")
-        val cached = metrics.trace("MediaGridCacheLookup") { output.isFile && output.length() > 0L }
+        val cached = output.isFile && output.length() > 0L
         if (cached) return@withContext output
         val temporary = File(directory, ".${key}.${Thread.currentThread().id}.tmp")
         try {
-            metrics.count("sourceRead")
-            val bitmap = metrics.trace("MediaGridSourceDecode") { decode(input, if (allowRemote) listOfNotNull(source.previewUrl, source.remoteUrl) else emptyList()) }
-            metrics.count("sourceDecode")
+            val bitmap = decode(input, if (allowRemote) listOfNotNull(source.previewUrl, source.remoteUrl) else emptyList())
             val square = Bitmap.createBitmap(256, 256, Bitmap.Config.RGB_565)
             Canvas(square).drawColor(Color.BLACK)
             val scale = maxOf(256f / bitmap.width, 256f / bitmap.height)
             val w = bitmap.width * scale; val h = bitmap.height * scale
-            metrics.trace("MediaGridThumbnailResize") {
-                Canvas(square).drawBitmap(bitmap, null, RectF((256f - w) / 2f, (256f - h) / 2f, (256f + w) / 2f, (256f + h) / 2f), Paint(Paint.FILTER_BITMAP_FLAG))
+            Canvas(square).drawBitmap(bitmap, null, RectF((256f - w) / 2f, (256f - h) / 2f, (256f + w) / 2f, (256f + h) / 2f), Paint(Paint.FILTER_BITMAP_FLAG))
+            check(square.compress(Bitmap.CompressFormat.JPEG, 60, temporary.outputStream()))
+            if (!temporary.renameTo(output)) {
+                temporary.copyTo(output, overwrite = true); temporary.delete()
             }
-            metrics.count("resize")
-            metrics.trace("MediaGridThumbnailEncode") { check(square.compress(Bitmap.CompressFormat.JPEG, 60, temporary.outputStream())) }
-            metrics.count("encode")
-            metrics.trace("MediaGridThumbnailWrite") {
-                if (!temporary.renameTo(output)) {
-                    temporary.copyTo(output, overwrite = true); temporary.delete()
-                }
-            }
-            metrics.count("write")
             bitmap.recycle(); square.recycle()
             output
         } catch (t: Throwable) {
@@ -86,17 +68,15 @@ class MediaGridThumbnailStore(
         val actualModified = input?.takeIf { it.isFile }?.lastModified() ?: source.modified
         val key = sha256("${source.assetId}|${source.mediaKey}|$inputName|$actualSize|$actualModified")
         val output = File(directory, "$key.jpg")
-        metrics.count("cacheLookup")
-        val exact = metrics.trace("MediaGridCacheLookup") { output.takeIf { it.isFile && it.length() > 0L } }
-        return exact
+        return output.takeIf { it.isFile && it.length() > 0L }
     }
 
     private fun decode(file: File?, urls: List<String>): Bitmap {
-        if (file != null) return metrics.trace("MediaGridSourceRead") { decodeStream(file.inputStream()) }
+        if (file != null) return decodeStream(file.inputStream())
         var last: Throwable? = null
         for (url in urls) try {
             val source = (URL(url).openConnection() as HttpURLConnection).apply { connectTimeout = 10_000; readTimeout = 20_000 }.inputStream
-            return metrics.trace("MediaGridSourceRead") { decodeStream(source) }
+            return decodeStream(source)
         } catch (t: Throwable) { last = t }
         throw last ?: error("No source")
     }

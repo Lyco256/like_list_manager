@@ -52,7 +52,7 @@ class StartupMacrobenchmark {
 
     private companion object {
         const val TARGET = "com.lyco256.llm.test.benchmark"
-        const val ACTIVITY = "com.lyco256.llm.MainActivity"
+        const val ACTIVITY = "com.lyco256.llm.BenchmarkMainActivity"
     }
 
     private fun assertSnapshotPrepared() {

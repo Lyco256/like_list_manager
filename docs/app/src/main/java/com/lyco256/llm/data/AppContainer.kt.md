@@ -12,6 +12,8 @@
 
 `PostStorageManager` → `ApiSettingsStore` / `XOAuthManager` → `ClipRepository` の順で生成します。Room Databaseは保存先マネージャーが現在の保存先に対して開閉します。
 
+メディアグリッド用のThumbnail store、serial manager、専用ImageLoaderもここで1インスタンスずつ生成しますが、benchmark settings、metrics、counterなどの計測依存は生成せず、本番引数にも含めません。benchmark専用Activity・importer・frame計測は `app/src/benchmark` 側に隔離されています。
+
 ## 関連ファイル
 
 - `../LikeListManagerApp.kt.md`: AppContainerの所有者です。

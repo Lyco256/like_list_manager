@@ -3,20 +3,18 @@ package com.lyco256.llm.data
 import android.content.Context
 import com.lyco256.llm.BuildConfig
 
-class AppContainer(context: Context, val mediaGridBenchmarkSettings: MediaGridBenchmarkSettings = MediaGridBenchmarkSettings()) {
-    val mediaGridBenchmarkMetrics = MediaGridBenchmarkMetrics.forSettings(mediaGridBenchmarkSettings)
-    val mediaGridThumbnailStore = MediaGridThumbnailStore(context, mediaGridBenchmarkSettings, mediaGridBenchmarkMetrics)
-    val mediaGridThumbnailManager = MediaGridThumbnailManager(mediaGridThumbnailStore, kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate), mediaGridBenchmarkSettings, mediaGridBenchmarkMetrics)
+class AppContainer(context: Context) {
+    val mediaGridThumbnailStore = MediaGridThumbnailStore(context)
+    val mediaGridThumbnailManager = MediaGridThumbnailManager(
+        mediaGridThumbnailStore,
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate),
+    )
     val mediaGridImageLoader = coil.ImageLoader.Builder(context)
         .crossfade(false)
         .diskCachePolicy(coil.request.CachePolicy.DISABLED)
         .memoryCache {
             val cache = coil.memory.MemoryCache.Builder(context)
-            if (mediaGridBenchmarkSettings.enabled && mediaGridBenchmarkSettings.mode == MediaGridBenchmarkMode.CACHED_UI) {
-                cache.maxSizeBytes(1)
-            } else {
-                cache.maxSizePercent(0.08).maxSizeBytes(32 * 1024 * 1024)
-            }
+            cache.maxSizePercent(0.08).maxSizeBytes(32 * 1024 * 1024)
             cache.build()
         }
         .build()

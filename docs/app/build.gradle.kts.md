@@ -36,6 +36,7 @@ AndroidアプリモジュールのapplicationId、SDK、Java/Kotlin 21、Compose
 - `integrationTest` build typeは `com.lyco256.llm.test` とテスト専用保存名、Fake API/OAuthを使います。
 - 実機テストはAndroidJUnitRunnerで `.test` packageを対象に連続実行します。SC-56CではOrchestratorが正常なテストプロセス終了をクラッシュと誤判定するため使用しません。
 - `benchmark` build typeは軽量なdebug設定を継承しつつAPK自体は非debuggableな `com.lyco256.llm.test.benchmark` を生成し、専用DB・画像・Preferences、disabled OAuth/APIを使用します。R8縮小は性能測定の必須条件ではないため使いません。
+- benchmark専用のActivity、snapshot importer、frame timing/result exportは `app/src/benchmark` に置き、通常の `app/src/main` は参照しません。通常のAppContainer、Thumbnail、UI、Morphは計測用依存を生成・受け取りません。
 - Compose UI Test、Room testing、MockWebServer、sqlite-jdbcでUI・DB・HTTP・snapshotを検証します。
 - Instrumentation Testは `scripts/run-safe-integration-check.cmd` から、メインと `.test` を別package・別UIDで共存させる許可済み実機だけで実行します。
 - `verifyTestEnvironmentIsolation` はdebug/testの生成BuildConfigとtest merged manifestを検査し、本番identity・保存名・API・OAuth receiverの混入を端末接続なしで失敗させます。

@@ -25,7 +25,7 @@
 | 8 | 分類操作 E2E | 主要項目完了 | 付与・解除、DB・件数、popup非伝播、別グループ同名タグの複数同時付与を確認 |
 | 9 | タグ/グループ管理 E2E | 主要項目完了 | 作成、タグ/グループ作成Dialogキャンセル、同名子タグ、tag名称変更/削除、group名称変更/削除、名称変更Dialogキャンセル、タグ/グループ削除Dialogキャンセル、タグの別グループ移動UI、タグ/グループ移動Dialogキャンセル、別タグへの一括追加、別タグへの一括追加Dialogキャンセル、循環/順序ロジックを確認 |
 | 10 | スクロール/大量表示 | 主要項目完了 | SC-56C実機で1,000件末尾/先頭UI、10,000件Room、50件リスクseedを確認 |
-| 11 | Macrobenchmark | 完了 | `scripts/run-safe-macrobenchmark-check.cmd` で SC-56C 上の `com.lyco256.llm.test.benchmark` cold/warm startupを測定し、本番metadata前後不変を確認 |
+| 11 | Macrobenchmark | 構成更新・実機再確認待ち | `app/src/benchmark` の専用Activity/importer/metricsと `scripts/run-safe-macrobenchmark-check.cmd`。本命 `app/src/main` から計測依存を除去し、実機測定は再確認が必要 |
 | 12 | 画像保存/圧縮 | 主要項目完了 | WebP、重複download防止、失敗時投稿保持、複数画像の別WebP保存、破損画像のfailed asset記録、snapshot |
 | 13 | 設定/安全装置 | 主要項目完了 | 設定画面の使用量表示、test login無効、X API設定の保存/trim/消去UI、暗号化設定roundtrip、無効保存先rollback、設定画面の開閉とDB不変、保存先移動確認cancel UIを確認 |
 | 14 | エラー表示/復旧 | 主要項目完了 | 空、未login、HTTP/timeout/JSON、権限不足UI、画像/保存先、continuation再開、Activity再作成後のタブ/フィルター復元、保存先移動copying中断とswitched切替先不可の起動時復旧を確認 |
@@ -136,12 +136,12 @@
 
 | Requirement | Implementation / evidence | Status |
 |---|---|---|
-| Five modes and startup-only resolution | `MediaGridBenchmarkSettings`, `AppContainer` | Implemented; normal builds remain FULL/no-op |
+| Five modes and startup-only resolution | `app/src/benchmark/java/com/lyco256/llm/data/MediaGridBenchmark.kt`, `BenchmarkMainActivity` | Implemented only in benchmark source set; normal builds do not resolve modes |
 | run-as-only read-only snapshot | `run-safe-macrobenchmark-check.ps1` | Implemented; unavailable run-as fails without fallback |
 | No credentials/preferences | whitelist of DB/WAL/SHM, JPEG cache, and `files/images` | Implemented |
 | target-only import and localPath rewrite | `BenchmarkSnapshotImporter` | Implemented |
 | no network | benchmark network config, disabled gateways, `allowRemote=false` | Implemented |
-| Trace/counters and separated paths | `MediaGridBenchmarkMetrics`, manager/store/UI/morph | Implemented |
+| Trace/counters and separated paths | `app/src/benchmark/.../MediaGridBenchmark.kt`; no references from main manager/store/UI/Morph | App-side high-frequency Trace/counter hooks removed; benchmark output fields are empty/N/A |
 | identical 5-iteration scroll/pinch scenarios | `MediaGridPerformanceMacrobenchmark` | Implemented in test source; runtime measurement not reached because snapshot precondition failed |
 | report and deltas | safe macrobenchmark summary writer | Report generated; values are N/A because the target did not receive a snapshot/metric export |
 | production invariance | safe script PostCheck metadata and data hashes | Verification path implemented; runtime DB/media hash comparison was not reached because production `run-as` is unavailable |

@@ -25,6 +25,7 @@
 ## 2026-07 media grid pinch / anchor follow-up
 
 - The large-dataset smoke test identifies the media cell nearest the visible grid center before each column-count change and verifies that same cell remains displayed after the grid is resized.
+- The large-dataset smoke test waits for the asynchronously prepared grid container before its initial display assertion, so a slow device does not turn valid preparation time into a false failure.
 
 ## 2026-07 media-grid tweet dialog
 

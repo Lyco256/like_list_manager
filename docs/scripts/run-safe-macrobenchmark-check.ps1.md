@@ -21,4 +21,4 @@ Wireless mode: `-DebugMethod wireless` resolves the mDNS `_adb-tls-connect._tcp`
 
 snapshotはbenchmark targetと同じpackageの一時debuggable setup APKを導入してbenchmark packageだけを`pm clear`し、`run-as`で`files/benchmark-handoff`を作成する。PC上のZIPはPowerShellの文字列パイプや外部ストレージを経由せず、`adb exec-in run-as com.lyco256.llm.test.benchmark dd of=files/benchmark-handoff/media-grid-snapshot.zip`の標準入力へFileStreamで直接転送する。端末側のサイズとSHA-256をPC側と照合し、不一致なら最終APKを導入しない。最終的な非debuggable benchmark APKへ`install -r`した後、setup Activityを一度だけ明示起動して内部handoffをimportし、marker、件数、Room DB path、data inodeを検証してからMacrobenchmarkを開始する。測定に使うAPKは`benchmark`だけで、handoff入力にapp-specific外部ストレージ、複数storage root探索、shellから見える外部パス、外部領域間の`run-as cp`を使わない。本命package metadataとDB/対象media hashは前後比較し、PC側snapshotは成功・失敗にかかわらずcleanupする。
 
-`build/reports/media-grid-benchmark/latest-summary.md`には5モード、スクロール/pinchシナリオ、P50/P90/P95/P99/jank、主要Trace/counter、指定差分を出力する。Metric exportが存在しない場合はN/Aと判定不能を明示し、未計測値を推測しない。
+`build/reports/media-grid-benchmark/latest-summary.md`には5モード、スクロール/pinchシナリオ、P50/P90/P95/P99/jankを出力する。通常アプリ側の高頻度処理には計測Trace/counterを埋め込まず、従来のTrace/counter欄は空またはN/Aとして扱い、未計測値を推測しない。

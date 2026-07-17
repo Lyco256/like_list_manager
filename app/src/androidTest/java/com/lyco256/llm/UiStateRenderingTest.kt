@@ -597,7 +597,11 @@ class UiStateRenderingTest {
             }
         }
 
-        composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
+        composeRule.waitUntil(30_000) {
+            runCatching {
+                composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
+            }.isSuccess
+        }
         composeRule.onNodeWithTag("media_grid_item_10").assertIsDisplayed()
         composeRule.onNodeWithTag("classified_media_grid").performScrollToIndex(targetIndex)
         composeRule.waitUntil(30_000) {

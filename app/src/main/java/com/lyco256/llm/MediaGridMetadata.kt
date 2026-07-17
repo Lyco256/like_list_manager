@@ -1,6 +1,5 @@
 package com.lyco256.llm
 
-import android.os.Trace
 import com.lyco256.llm.data.MediaGridClipSource
 import com.lyco256.llm.data.TagFilterState
 import com.lyco256.llm.data.TagNodeType
@@ -52,37 +51,26 @@ internal suspend fun prepareMediaGridMetadata(
     key: MediaGridCacheKey,
 ): ClassifiedMediaGridState = withContext(Dispatchers.Default) {
     cache.get(key)?.let { return@withContext it }
-    Trace.beginSection("MediaGridMetadataPrepare")
-    try {
-        val source = snapshot.clips
-        val filtered = ArrayList<MediaGridClipSource>(source.size)
-        Trace.beginSection("MediaGridFilter")
-        val preparedFilter = prepareMediaGridFilter(hierarchy, filters)
-        source.forEach { clip -> if (matchesMediaGridFilter(clip, preparedFilter)) filtered += clip }
-        Trace.endSection()
-        val ordered = if (!mediaGridSortIsEffective(sort)) filtered else {
-            Trace.beginSection("MediaGridSort")
-            sortMediaGridClips(filtered, hierarchy, filters, sort)
-                .also { Trace.endSection() }
-        }
-        Trace.beginSection("MediaGridEntryBuild")
-        val built = buildMediaGridResult(ordered)
-        val result = ClassifiedMediaGridState(
-            sourceRevision = key.sourceRevision,
-            sourceClipCount = source.size,
-            sourceMediaAssetCount = source.sumOf { it.mediaAssetCount },
-            sourceTaggedClipCount = source.count { it.tagIds.isNotEmpty() },
-            entries = built.entries,
-            tagIdsByClip = filtered.associate { it.clip.id to it.tagIds },
-            matchingClipCount = filtered.size,
-            matchingMediaCount = built.matchingMediaCount,
-            isEmptyByFilter = filtered.isEmpty(),
-            hasMatchingClipButNoMedia = filtered.isNotEmpty() && !built.hasMedia,
-        )
-        Trace.endSection()
-        cache.put(key, result)
-        result
-    } finally { Trace.endSection() }
+    val source = snapshot.clips
+    val filtered = ArrayList<MediaGridClipSource>(source.size)
+    val preparedFilter = prepareMediaGridFilter(hierarchy, filters)
+    source.forEach { clip -> if (matchesMediaGridFilter(clip, preparedFilter)) filtered += clip }
+    val ordered = if (!mediaGridSortIsEffective(sort)) filtered else sortMediaGridClips(filtered, hierarchy, filters, sort)
+    val built = buildMediaGridResult(ordered)
+    val result = ClassifiedMediaGridState(
+        sourceRevision = key.sourceRevision,
+        sourceClipCount = source.size,
+        sourceMediaAssetCount = source.sumOf { it.mediaAssetCount },
+        sourceTaggedClipCount = source.count { it.tagIds.isNotEmpty() },
+        entries = built.entries,
+        tagIdsByClip = filtered.associate { it.clip.id to it.tagIds },
+        matchingClipCount = filtered.size,
+        matchingMediaCount = built.matchingMediaCount,
+        isEmptyByFilter = filtered.isEmpty(),
+        hasMatchingClipButNoMedia = filtered.isNotEmpty() && !built.hasMedia,
+    )
+    cache.put(key, result)
+    result
 }
 
 private data class PreparedMediaGridFilter(

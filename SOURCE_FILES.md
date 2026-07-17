@@ -278,8 +278,9 @@ MainActivity / Compose UI
 
 ## 2026-07-14 実装22
 
-- `MediaGridBenchmark.kt` owns the benchmark-only five-mode startup settings and no-op metrics for normal builds.
-- `BenchmarkSnapshotImporter.kt` imports only the benchmark target handoff, rewrites absolute local paths, and never copies Preferences or credentials.
-- `MediaGridThumbnailManager.kt`, `MediaGridThumbnailStore.kt`, `TagHierarchyUiV2.kt`, and `MediaGridMorphOverlay.kt` own separated paths and Trace/counter sections.
+- `app/src/benchmark/java/com/lyco256/llm/data/MediaGridBenchmark.kt` owns benchmark-only settings, frame timing, and result export. It is not part of debug, release, or integrationTest source sets.
+- `app/src/benchmark/java/com/lyco256/llm/BenchmarkSnapshotImporter.kt` imports only the benchmark target handoff, rewrites absolute local paths, and never copies Preferences or credentials.
+- `app/src/benchmark/java/com/lyco256/llm/BenchmarkMainActivity.kt` selects the classified media-grid startup state only for the benchmark variant; production `MainActivity` has no benchmark state or result handling.
+- `MediaGridThumbnailManager.kt`, `MediaGridThumbnailStore.kt`, `TagHierarchyUiV2.kt`, and `MediaGridMorphOverlay.kt` contain only the production grid path. They do not call benchmark metrics, counters, or Trace sections.
 - `MediaGridPerformanceMacrobenchmark.kt` runs identical five-iteration scroll and real two-pointer pinch scenarios.
 - `run-safe-macrobenchmark-check.cmd` is the only snapshot entry and generates `build/reports/media-grid-benchmark/latest-summary.md` after cleanup and production invariance checks.

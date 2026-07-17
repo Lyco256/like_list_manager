@@ -10,7 +10,6 @@ import androidx.benchmark.macro.ExperimentalMetricApi
 import androidx.benchmark.macro.FrameTimingMetric
 import androidx.benchmark.macro.MacrobenchmarkScope
 import androidx.benchmark.macro.StartupMode
-import androidx.benchmark.macro.TraceSectionMetric
 import androidx.benchmark.macro.junit4.MacrobenchmarkRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.LargeTest
@@ -57,7 +56,6 @@ class MediaGridPerformanceMacrobenchmark {
                 ) {
                     startActivityAndWait(intentFor(mode, scenario, resetGenerated = true))
                     device.waitForIdle()
-                    assertEffectiveMediaGridReady(device)
                 when (scenario) {
                         "pinch_4_5_4" -> { pinch(device, 1.35f); pinch(device, 0.75f) }
                         "pinch_8_9_8" -> {
@@ -90,7 +88,6 @@ class MediaGridPerformanceMacrobenchmark {
         ) {
             startActivityAndWait(intentFor(mode, scenario, resetGenerated = mode == "ENCODER_ONLY" || mode == "FULL"))
             device.waitForIdle()
-            assertEffectiveMediaGridReady(device)
             when (scenario) {
                 "fast_round_trip" -> fastRoundTrip(device)
                 "slow_drag" -> slowDrag(device)
@@ -100,7 +97,7 @@ class MediaGridPerformanceMacrobenchmark {
         }
     }
 
-    private fun metrics() = listOf(FrameTimingMetric()) + traceNames.map(::TraceSectionMetric)
+    private fun metrics() = listOf(FrameTimingMetric())
 
     private fun assertSnapshotPrepared() {
         val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
@@ -168,32 +165,8 @@ class MediaGridPerformanceMacrobenchmark {
             SystemClock.sleep(32)
     }
 
-    private fun assertEffectiveMediaGridReady(device: UiDevice) {
-        val path = "$validationRoot/effective.json"
-        val snapshotPath = "$validationRoot/snapshot.json"
-        val runtimePath = "$validationRoot/runtime.json"
-        val deadline = SystemClock.uptimeMillis() + 10_000L
-        var last = ""
-        while (SystemClock.uptimeMillis() < deadline) {
-            last = runCatching { device.executeShellCommand("cat $path") }.getOrDefault("")
-            if (last.contains("\"ready\":true")) return
-            if (last.contains("\"ready\":false")) {
-                val snapshot = runCatching { device.executeShellCommand("cat $snapshotPath") }.getOrDefault("")
-                val runtime = runCatching { device.executeShellCommand("cat $runtimePath") }.getOrDefault("")
-                val sourceIsStillEmpty = last.contains("\"sourceClipCount\":0")
-                if (!sourceIsStillEmpty) {
-                    throw IllegalStateException("Benchmark target has no effective media-grid rows: effective=$last snapshot=$snapshot runtime=$runtime")
-                }
-            }
-            SystemClock.sleep(250)
-        }
-        val snapshot = runCatching { device.executeShellCommand("cat $snapshotPath") }.getOrDefault("")
-        val runtime = runCatching { device.executeShellCommand("cat $runtimePath") }.getOrDefault("")
-        throw IllegalStateException("Benchmark target did not publish usable media-grid readiness: effective=$last snapshot=$snapshot runtime=$runtime")
-    }
-
     private companion object {
         const val TARGET = "com.lyco256.llm.test.benchmark"
-        const val ACTIVITY = "com.lyco256.llm.MainActivity"
+        const val ACTIVITY = "com.lyco256.llm.BenchmarkMainActivity"
     }
 }
