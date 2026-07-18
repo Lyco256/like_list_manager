@@ -132,7 +132,8 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.lyco256.llm.data.MediaGridThumbnailSource
 import com.lyco256.llm.data.MediaGridThumbnailState
-import com.lyco256.llm.data.MediaGridViewportRequest
+import com.lyco256.llm.data.MediaGridViewportItem
+import com.lyco256.llm.data.MediaGridViewportSnapshot
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import com.lyco256.llm.data.AssetEntity
@@ -2960,6 +2961,7 @@ internal data class MediaGridHeaderItem(
 internal data class MediaGridCellItem(
     override val key: String,
     val entry: MediaGridEntry,
+    val sourceIndex: Int,
 ) : ClassifiedMediaGridItem
 
 private data class MediaGridBucketSpec(
@@ -2981,13 +2983,15 @@ internal fun buildClassifiedMediaGridItems(
     columnCount: Int,
 ): List<ClassifiedMediaGridItem> {
     if (sort.baseOrder == ClassifiedSortBase.Default) {
-        return entries.map { entry -> MediaGridCellItem(key = mediaGridCellKey(entry), entry = entry) }
+        return entries.mapIndexed { sourceIndex, entry ->
+            MediaGridCellItem(key = mediaGridCellKey(entry), entry = entry, sourceIndex = sourceIndex)
+        }
     }
 
     val items = ArrayList<ClassifiedMediaGridItem>(entries.size * 2)
     var previousBucketKey: String? = null
-    entries.forEach { entry ->
-        val bucket = mediaGridBucketSpec(entry, sort.baseOrder, columnCount) ?: return@forEach
+    entries.forEachIndexed { sourceIndex, entry ->
+        val bucket = mediaGridBucketSpec(entry, sort.baseOrder, columnCount) ?: return@forEachIndexed
         if (bucket.key != previousBucketKey) {
             items += MediaGridHeaderItem(
                 key = "media_grid_header_${bucket.safeKey}",
@@ -2996,7 +3000,7 @@ internal fun buildClassifiedMediaGridItems(
             )
             previousBucketKey = bucket.key
         }
-        items += MediaGridCellItem(key = mediaGridCellKey(entry), entry = entry)
+        items += MediaGridCellItem(key = mediaGridCellKey(entry), entry = entry, sourceIndex = sourceIndex)
     }
     return items
 }
@@ -3329,25 +3333,45 @@ private fun ClassifiedMediaGridContent(
         )
     }
     LaunchedEffect(sourceRevision) {
-        appContainer.mediaGridThumbnailManager.updateSourceSnapshot(
-            revision = sourceRevision,
-            ordered = items.asSequence().filterIsInstance<MediaGridCellItem>().map { e ->
-                val a = e.entry
-                MediaGridThumbnailSource(a.assetId, a.mediaKey, a.localPath, a.previewUrl ?: a.remoteUrl ?: a.displayUrl?.takeUnless { it == a.localPath }, a.remoteUrl, downloadState = a.downloadState)
-            }.toList(),
-        )
+        withContext(Dispatchers.Default) {
+            appContainer.mediaGridThumbnailManager.updateSourceSnapshot(
+                revision = sourceRevision,
+                ordered = items.asSequence().filterIsInstance<MediaGridCellItem>().map { e ->
+                    val a = e.entry
+                    MediaGridThumbnailSource(a.assetId, a.mediaKey, a.localPath, a.previewUrl ?: a.remoteUrl ?: a.displayUrl?.takeUnless { it == a.localPath }, a.remoteUrl, downloadState = a.downloadState)
+                }.toList(),
+            )
+        }
     }
     DisposableEffect(Unit) {
-        onDispose { appContainer.mediaGridThumbnailManager.updateViewport(emptyList(), columnCount) }
+        onDispose { appContainer.mediaGridThumbnailManager.disposeViewport() }
     }
-    LaunchedEffect(state, items, columnCount) {
+    LaunchedEffect(state, items, columnCount, sourceRevision) {
+        var lastDispatchedSnapshot: MediaGridViewportSnapshot? = null
         snapshotFlow { state.layoutInfo }.collect { layout ->
-            val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2f
-            appContainer.mediaGridThumbnailManager.updateViewport(layout.visibleItemsInfo.mapNotNull { info ->
+            val visibleMediaItems = layout.visibleItemsInfo.mapNotNull { info ->
                 val item = itemByKey[info.key] as? MediaGridCellItem ?: return@mapNotNull null
                 val e = item.entry
-                MediaGridViewportRequest(MediaGridThumbnailSource(e.assetId, e.mediaKey, e.localPath, e.previewUrl ?: e.remoteUrl ?: e.displayUrl?.takeUnless { it == e.localPath }, e.remoteUrl, downloadState = e.downloadState), kotlin.math.abs((info.offset.y + info.size.height / 2f - center).toInt()), info.index)
-            }, columnCount)
+                e.assetId to item.sourceIndex
+            }
+            val centerOrdinal = (visibleMediaItems.size - 1) / 2f
+            val snapshotItems = visibleMediaItems.mapIndexed { index, (assetId, sourceIndex) ->
+                MediaGridViewportItem(
+                    assetId = assetId,
+                    sourceIndex = sourceIndex,
+                    // Use stable visible-order distance; pixel movement must not create work.
+                    centerDistance = abs(index - centerOrdinal).toInt(),
+                )
+            }
+            val snapshot = MediaGridViewportSnapshot(
+                sourceRevision = sourceRevision,
+                columnCount = columnCount,
+                items = snapshotItems,
+            )
+            if (lastDispatchedSnapshot?.sameStructureAs(snapshot) != true) {
+                lastDispatchedSnapshot = snapshot
+                appContainer.mediaGridThumbnailManager.dispatchViewport(snapshot)
+            }
         }
     }
     Box(Modifier.fillMaxSize()) {

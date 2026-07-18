@@ -1,5 +1,12 @@
 # `TagHierarchyUiV2.kt`
 
+2026-07-17: The classified media grid publishes a lightweight viewport snapshot without calling synchronous thumbnail viewport application. Each cell carries its immutable source index for the worker-side source lookup.
+
+## 2026-07 viewport dispatch
+
+- The classified grid converts its source list on `Dispatchers.Default` and publishes only an immutable lightweight `MediaGridViewportSnapshot` from the UI-side viewport observer. It does not synchronously apply thumbnail work or wait for manager completion.
+- Each snapshot carries stable asset ID, source index, center distance, column count, and source revision. The manager performs range, display-map, work, pruning, and next-candidate calculations on its single worker while preserving visible-first, one-adjacent-row preparation, wide preparation, image content, and cell operations.
+
 ## 2026-07-10 media-grid bulk tag editing
 
 ## 2026-07-12 mixed tags and header requirements
@@ -201,6 +208,12 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - Pinch-in increases columns and pinch-out decreases columns. Direction reversal is resolved from the final cumulative ratio rather than from an early locked direction.
 - The pinch-start anchor prefers the visible media item below the pinch center and otherwise the nearest visible media item. The stable item key and relative center offset are restored after the normal grid rebuild, with finite layout retries and no retained overlay state.
 - `MediaGridMorphSession`, `MediaGridMorphOverlay`, and the related bounded layout-preparation helpers remain in the source for later animation work but are not called by the current product path.
+
+## 2026-07-18 第2実装 viewport通知
+
+- `snapshotFlow`は表示セルの安定ID/source index順、列数、source revisionだけを通知し、pixel単位の移動ではmanagerへ再通知しない。
+- `centerDistance`は表示順から作る粗い順位で、候補選択の既存表示中優先を維持する。
+- 列数、filter、sort、画面移動によるsource revisionの変更は最新revision破棄経路を通る。Macrobenchmark/計測処理、thumbnail形式、placeholder、wide範囲は変更しない。
 # メディアグリッド高速化追補
 
 グリッドのメタデータ処理はカード表示と分離し、ファイル存在確認・画像デコードを枠生成前に行わない。複数選択はCalculating中に解除せず、Ready結果で選択可能Clipとの交差を更新する。

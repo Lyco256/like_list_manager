@@ -26,7 +26,7 @@ class MediaGridPerformanceMacrobenchmark {
     @get:Rule val benchmarkRule = MacrobenchmarkRule()
 
     private val modes = listOf("FRAME_ONLY", "PRIORITY_ONLY", "CACHED_UI", "ENCODER_ONLY", "FULL")
-    private val scenarios = listOf("fast_round_trip", "slow_drag", "settle_after_scroll")
+    private val scenarios = listOf("fast_round_trip", "slow_drag", "settle_after_scroll", "single_fling")
     private val pinchScenarios = listOf("pinch_4_5_4", "pinch_8_9_8", "pinch_return")
     private val validationRoot = "/sdcard/Android/data/com.lyco256.llm.test.benchmark/files/media-grid-validation"
     private val traceNames = listOf(
@@ -92,6 +92,7 @@ class MediaGridPerformanceMacrobenchmark {
                 "fast_round_trip" -> fastRoundTrip(device)
                 "slow_drag" -> slowDrag(device)
                 "settle_after_scroll" -> { fastRoundTrip(device); device.waitForIdle(); SystemClock.sleep(350) }
+                "single_fling" -> { singleFling(device); device.waitForIdle() }
             }
             startActivityAndWait(intentFor(mode, scenario, resetGenerated = false, flushMetrics = true))
         }
@@ -132,6 +133,11 @@ class MediaGridPerformanceMacrobenchmark {
             device.swipe(x, (device.displayHeight * 0.72f).toInt(), x, (device.displayHeight * 0.28f).toInt(), 700)
             device.swipe(x, (device.displayHeight * 0.28f).toInt(), x, (device.displayHeight * 0.72f).toInt(), 700)
         }
+    }
+
+    private fun singleFling(device: UiDevice) {
+        val x = device.displayWidth / 2
+        device.swipe(x, (device.displayHeight * 0.78f).toInt(), x, (device.displayHeight * 0.22f).toInt(), 8)
     }
 
     private fun pinch(device: UiDevice, scale: Float) {

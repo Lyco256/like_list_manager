@@ -907,7 +907,7 @@ function Write-MediaGridBenchmarkSummary {
     elseif ($aggregate["PRIORITY_ONLY"] -and $aggregate["ENCODER_ONLY"] -and (($aggregate["ENCODER_ONLY"].P95 - $aggregate["PRIORITY_ONLY"].P95) -ge 5 -or $aggregate["ENCODER_ONLY"].Encode -ge 5)) { $classification = "encoding" }
     elseif ($aggregate["PRIORITY_ONLY"] -and $aggregate["FULL"] -and (($aggregate["FULL"].P95 - $aggregate["PRIORITY_ONLY"].P95) -ge 5)) { $classification = "combined contention" }
     foreach ($mode in @("FRAME_ONLY", "PRIORITY_ONLY", "CACHED_UI", "ENCODER_ONLY", "FULL")) {
-        foreach ($scenario in @("fast_round_trip", "slow_drag", "settle_after_scroll", "pinch_4_5_4", "pinch_8_9_8", "pinch_return")) {
+        foreach ($scenario in @("fast_round_trip", "slow_drag", "settle_after_scroll", "single_fling", "pinch_4_5_4", "pinch_8_9_8", "pinch_return")) {
             $row = $results | Where-Object { $_.Mode -eq $mode -and $_.Scenario -eq $scenario } | Select-Object -First 1
             if ($row) {
                 $rows += "| $mode | $scenario | $($row.P50) | $($row.P90) | $($row.P95) | $($row.P99) | $($row.Jank) | $($row.ViewportMs) | $($row.PriorityMs) | $($row.DecodeMs) | $($row.EncodeMs) | $($row.WriteMs) | $($row.UiApplyMs) | $($row.TraceSummary) | $($row.CounterSummary) |"

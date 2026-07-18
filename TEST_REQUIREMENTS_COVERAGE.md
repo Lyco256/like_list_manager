@@ -153,3 +153,16 @@
 - Unit: `MediaGridMorphTest` covers threshold miss, pinch-in `+1`, pinch-out `-1`, final cumulative ratio after direction reversal, cancellation, 2..12 bounds, and the one-step limit through `mediaGridColumnCountAfterPinchRelease`.
 - Integration: `MainActivityComposeTest.classifiedDisplayToggleSwitchesBetweenCardAndMediaGridAndSurvivesActivityRecreation` uses real two-pointer input to cover 4→5→4, threshold-miss no-op, repeated round trips, anchor position, immediate cell dialog interaction, post-change scroll, and absence of `media_grid_morph_overlay`.
 - The product path no longer creates morph sessions or overlays during pinch. `MediaGridMorph.kt` and `MediaGridMorphOverlay.kt` remain retained components for later animation work.
+
+## 2026-07-18 メディアグリッド スクロール改善 第2実装
+
+| 対象 | 状態 | 証跡 |
+|---|---|---|
+| pixel単位viewport再処理の抑止、安定ID/source index順による重複抑止 | 完了 | `MediaGridViewportSnapshot.sameStructureAs`、`TagHierarchyUiV2.kt`、`MediaGridViewportDispatchTest` |
+| source/viewport/foreground/生成完了/表示結果を単一coordinatorで直列管理 | 完了 | `MediaGridThumbnailManager.kt`、`MediaGridViewportDispatchTest` |
+| 生成中conflate、完了後の最新viewportからの単一候補選択、stale/dispose破棄 | 完了 | `MediaGridViewportDispatchTest` |
+| 非待機holder状態取得、source map/work stateコピー抑止、直接候補走査 | 完了 | `MediaGridThumbnailManager.kt` |
+| 高速fling、画像追従、filter revision、即時セル操作、既存列数変更 | 完了 | `MainActivityComposeTest.kt`、wireless `run-safe-integration-check.cmd` |
+| Macrobenchmark・計測処理 | 今回未実行・未変更 | 要件指定により対象外 |
+
+検証順はwireless実機で隔離統合チェックを先に実行し、続いて本番package安全上書きチェックを実行する。Macrobenchmarkは実行しない。

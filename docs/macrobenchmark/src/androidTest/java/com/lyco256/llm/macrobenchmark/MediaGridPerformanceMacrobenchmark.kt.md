@@ -1,5 +1,7 @@
 # `MediaGridPerformanceMacrobenchmark.kt`
 
+2026-07-17: The scroll scenarios also include `single_fling`, which performs one fast swipe and waits for natural idle before flushing benchmark metrics.
+
 ## 対応ソース
 
 `macrobenchmark/src/androidTest/java/com/lyco256/llm/macrobenchmark/MediaGridPerformanceMacrobenchmark.kt`

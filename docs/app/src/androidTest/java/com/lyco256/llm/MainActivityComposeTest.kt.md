@@ -73,4 +73,15 @@
 
 ## Current simple column-change coverage
 
+## 2026-07-18 第2実装 integration coverage
+
+- The existing large local-media fling test remains the integration gate for fast fling image following, immediate cell action, and filter revision changes.
+- The production path keeps the normal grid and column-change behavior unchanged; no Macrobenchmark or measurement code is added.
+- The same fixture now performs a normal paced drag, a fast fling followed by an immediate touch-down/up retouch, and opens the current visible cell before waiting for thumbnail completion.
+
+## 2026-07 viewport dispatch integration coverage
+
+- `classifiedMediaGridSingleFlingKeepsLatestImageAndImmediateCellActionAfterFilter` seeds 96 local classified media assets, performs one fast fling without waiting between input events, and verifies that the visible range advances and a visible thumbnail reaches `Ready`.
+- The same flow opens a cell immediately after the fling, applies a filter that changes the source revision, verifies that only the target cell remains visible, and opens that cell immediately. This covers image following, no rollback after a screen/filter change, and immediate cell operations.
+
 - The real two-pointer test verifies 4→5→4 changes, a threshold-miss no-op, repeated round trips, stable media-cell position, immediate cell interaction, scroll after the change, and absence of `media_grid_morph_overlay` after every release.
