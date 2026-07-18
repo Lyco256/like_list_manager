@@ -1,4 +1,4 @@
-# LikeTagger 要件・技術仕様メモ
+﻿# LikeTagger 要件・技術仕様メモ
 
 作成日: 2026-05-31  
 対象: Android向け個人用アプリ  
