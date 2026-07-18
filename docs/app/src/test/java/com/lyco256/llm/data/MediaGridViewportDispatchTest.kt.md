@@ -6,4 +6,6 @@
 - consecutive viewport notifications during one generation use the latest viewport after completion;
 - stale revision and dispose notifications are rejected;
 - holder state reads remain available after intentionally stopping the coordinator;
+- visible, adjacent, and wide candidates keep their priority and bounded range;
+- source identity changes reset the stable holder, and display failure retries once before final failure;
 - the existing one-adjacent-row preparation range remains unchanged.

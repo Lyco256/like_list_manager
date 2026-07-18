@@ -7,6 +7,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -60,6 +61,110 @@ class MediaGridViewportDispatchTest {
             assertEquals(listOf(1L, 3L), gateway.calls())
         } finally {
             gateway.releaseSubsequent.complete(Unit)
+            manager.disposeViewport()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun candidatePriorityIsVisibleThenAdjacentThenWide() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val gateway = BlockingGateway()
+        val manager = MediaGridThumbnailManager(gateway, scope)
+        try {
+            manager.updateSourceSnapshot(1L, (1L..5L).map(::source))
+            assertTrue(manager.dispatchViewport(viewport(1L, listOf(3L))))
+            gateway.firstStarted.await()
+            assertEquals(listOf(3L), gateway.calls())
+
+            gateway.releaseFirst.complete(Unit)
+            withTimeout(2_000) {
+                while (gateway.calls().size < 2) delay(5)
+            }
+            assertEquals(4L, gateway.calls()[1])
+        } finally {
+            gateway.releaseSubsequent.complete(Unit)
+            manager.disposeViewport()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun wideCandidateIsSelectedOnlyAfterAdjacentRangeIsExhausted() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val gateway = BlockingGateway()
+        val manager = MediaGridThumbnailManager(gateway, scope)
+        try {
+            val sources = listOf(
+                source(1L),
+                source(2L, downloadState = "failed"),
+                source(3L, downloadState = "failed"),
+                source(4L, downloadState = "failed"),
+                source(5L),
+            )
+            manager.updateSourceSnapshot(1L, sources)
+            assertTrue(manager.dispatchViewport(viewport(1L, listOf(3L))))
+            gateway.firstStarted.await()
+            assertEquals(listOf(5L), gateway.calls())
+        } finally {
+            gateway.releaseFirst.complete(Unit)
+            gateway.releaseSubsequent.complete(Unit)
+            manager.disposeViewport()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun sourceIdentityChangeResetsTheStableHolder() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val gateway = BlockingGateway()
+        val manager = MediaGridThumbnailManager(gateway, scope)
+        val first = source(1L)
+        val replacement = first.copy(mediaKey = "replacement", previewUrl = "https://example.test/replacement.jpg")
+        try {
+            val state = manager.state(1L, first)
+            manager.updateSourceSnapshot(1L, listOf(first))
+            assertTrue(manager.dispatchViewport(viewport(1L, listOf(1L))))
+            gateway.firstStarted.await()
+            gateway.releaseFirst.complete(Unit)
+            withTimeout(2_000) {
+                while (state.value !is MediaGridThumbnailState.Ready) delay(5)
+            }
+
+            manager.updateSourceSnapshot(2L, listOf(replacement))
+            withTimeout(2_000) {
+                while (state.value != MediaGridThumbnailState.Waiting) delay(5)
+            }
+            assertSame(state, manager.stateIfPresent(1L))
+        } finally {
+            gateway.releaseSubsequent.complete(Unit)
+            manager.disposeViewport()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun displayFailureRetriesOnceThenPublishesFinalFailure() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val gateway = ScriptedGateway(listOf(true, false))
+        val manager = MediaGridThumbnailManager(gateway, scope)
+        val source = source(1L, localPath = null, previewUrl = "https://example.test/image.jpg")
+        try {
+            val state = manager.state(1L, source)
+            manager.updateSourceSnapshot(1L, listOf(source))
+            assertTrue(manager.dispatchViewport(viewport(1L, listOf(1L))))
+            withTimeout(2_000) {
+                while (state.value !is MediaGridThumbnailState.Ready) delay(5)
+            }
+
+            manager.onDisplayError(source, File("/tmp/failed-display.jpg"))
+            withTimeout(2_000) {
+                while (state.value != MediaGridThumbnailState.Failed) delay(5)
+            }
+            manager.onDisplayError(source, File("/tmp/failed-display-again.jpg"))
+            delay(50)
+            assertEquals(listOf(1L, 1L), gateway.calls())
+        } finally {
             manager.disposeViewport()
             scope.cancel()
         }
@@ -123,12 +228,18 @@ class MediaGridViewportDispatchTest {
         },
     )
 
-    private fun source(assetId: Long) = MediaGridThumbnailSource(
+    private fun source(
+        assetId: Long,
+        downloadState: String? = null,
+        localPath: String? = "/tmp/media-$assetId.jpg",
+        previewUrl: String? = null,
+    ) = MediaGridThumbnailSource(
         assetId = assetId,
         mediaKey = "media-$assetId",
-        localPath = "/tmp/media-$assetId.jpg",
-        previewUrl = null,
+        localPath = localPath,
+        previewUrl = previewUrl,
         remoteUrl = null,
+        downloadState = downloadState,
     )
 
     private class BlockingGateway : MediaGridThumbnailStoreGateway {
@@ -149,6 +260,24 @@ class MediaGridViewportDispatchTest {
                 releaseSubsequent.await()
             }
             return File("/tmp/thumb-${source.assetId}.jpg")
+        }
+
+        override fun invalidate(file: File) = Unit
+
+        fun calls(): List<Long> = synchronized(startedCalls) { startedCalls.toList() }
+    }
+
+    private class ScriptedGateway(
+        outcomes: List<Boolean>,
+    ) : MediaGridThumbnailStoreGateway {
+        private val remainingOutcomes = ArrayDeque(outcomes)
+        private val startedCalls = mutableListOf<Long>()
+
+        override suspend fun getOrCreate(source: MediaGridThumbnailSource, allowRemote: Boolean): File {
+            synchronized(startedCalls) { startedCalls += source.assetId }
+            val success = synchronized(remainingOutcomes) { remainingOutcomes.removeFirst() }
+            if (!success) error("scripted thumbnail failure")
+            return File("/tmp/scripted-thumb-${source.assetId}.jpg")
         }
 
         override fun invalidate(file: File) = Unit
