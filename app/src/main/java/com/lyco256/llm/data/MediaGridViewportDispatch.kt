@@ -1,15 +1,5 @@
 package com.lyco256.llm.data
 
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.launch
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicReference
-
 data class MediaGridViewportItem(
     val assetId: Long,
     val sourceIndex: Int,
@@ -20,7 +10,18 @@ data class MediaGridViewportSnapshot(
     val sourceRevision: Long,
     val columnCount: Int,
     val items: List<MediaGridViewportItem>,
-)
+) {
+    /** Pixel offsets are intentionally excluded: only the visible structure is a new viewport. */
+    fun sameStructureAs(other: MediaGridViewportSnapshot): Boolean {
+        if (sourceRevision != other.sourceRevision || columnCount != other.columnCount || items.size != other.items.size) return false
+        for (index in items.indices) {
+            val current = items[index]
+            val next = other.items[index]
+            if (current.assetId != next.assetId || current.sourceIndex != next.sourceIndex) return false
+        }
+        return true
+    }
+}
 
 internal fun mediaGridViewportUiIndices(first: Int, last: Int, columns: Int, sourceSize: Int): Set<Int> {
     if (sourceSize <= 0 || last < first) return emptySet()
@@ -40,45 +41,8 @@ internal class MediaGridViewportRevisionGate {
     }
 
     fun shouldApply(snapshot: MediaGridViewportSnapshot): Boolean {
-        if (snapshot.sourceRevision != sourceRevision || snapshot == lastApplied) return false
+        if (snapshot.sourceRevision != sourceRevision || lastApplied?.sameStructureAs(snapshot) == true) return false
         lastApplied = snapshot
         return true
-    }
-}
-
-/** Delivers only the newest unprocessed value through one serial worker. */
-internal class LatestValueDispatcher<T>(
-    scope: CoroutineScope,
-    private val workerDispatcher: CoroutineDispatcher = Dispatchers.Default,
-    private val process: suspend (T) -> Unit,
-) {
-    private val gate = Any()
-    private val closed = AtomicBoolean(false)
-    private val latest = AtomicReference<T?>(null)
-    private val signal = Channel<Unit>(Channel.CONFLATED)
-    private val worker: Job = scope.launch(workerDispatcher) {
-        for (ignored in signal) {
-            val value = latest.getAndSet(null) ?: continue
-            try {
-                process(value)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            }
-        }
-    }
-
-    fun dispatch(value: T): Boolean = synchronized(gate) {
-        if (closed.get()) return false
-        latest.set(value)
-        signal.trySend(Unit).isSuccess
-    }
-
-    fun close() {
-        synchronized(gate) {
-            if (!closed.compareAndSet(false, true)) return
-            latest.set(null)
-            signal.close()
-            worker.cancel()
-        }
     }
 }

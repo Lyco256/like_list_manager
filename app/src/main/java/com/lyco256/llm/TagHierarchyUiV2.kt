@@ -3347,24 +3347,31 @@ private fun ClassifiedMediaGridContent(
         onDispose { appContainer.mediaGridThumbnailManager.disposeViewport() }
     }
     LaunchedEffect(state, items, columnCount, sourceRevision) {
+        var lastDispatchedSnapshot: MediaGridViewportSnapshot? = null
         snapshotFlow { state.layoutInfo }.collect { layout ->
-            val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2f
-            val snapshotItems = layout.visibleItemsInfo.mapNotNull { info ->
+            val visibleMediaItems = layout.visibleItemsInfo.mapNotNull { info ->
                 val item = itemByKey[info.key] as? MediaGridCellItem ?: return@mapNotNull null
                 val e = item.entry
+                e.assetId to item.sourceIndex
+            }
+            val centerOrdinal = (visibleMediaItems.size - 1) / 2f
+            val snapshotItems = visibleMediaItems.mapIndexed { index, (assetId, sourceIndex) ->
                 MediaGridViewportItem(
-                    assetId = e.assetId,
-                    sourceIndex = item.sourceIndex,
-                    centerDistance = abs((info.offset.y + info.size.height / 2f - center).toInt()),
+                    assetId = assetId,
+                    sourceIndex = sourceIndex,
+                    // Use stable visible-order distance; pixel movement must not create work.
+                    centerDistance = abs(index - centerOrdinal).toInt(),
                 )
             }
-            appContainer.mediaGridThumbnailManager.dispatchViewport(
-                MediaGridViewportSnapshot(
-                    sourceRevision = sourceRevision,
-                    columnCount = columnCount,
-                    items = snapshotItems,
-                ),
+            val snapshot = MediaGridViewportSnapshot(
+                sourceRevision = sourceRevision,
+                columnCount = columnCount,
+                items = snapshotItems,
             )
+            if (lastDispatchedSnapshot?.sameStructureAs(snapshot) != true) {
+                lastDispatchedSnapshot = snapshot
+                appContainer.mediaGridThumbnailManager.dispatchViewport(snapshot)
+            }
         }
     }
     Box(Modifier.fillMaxSize()) {

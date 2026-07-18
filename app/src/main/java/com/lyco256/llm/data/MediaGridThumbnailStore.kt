@@ -23,12 +23,17 @@ data class MediaGridThumbnailSource(
     val downloadState: String? = null,
 )
 
+interface MediaGridThumbnailStoreGateway {
+    suspend fun getOrCreate(source: MediaGridThumbnailSource, allowRemote: Boolean = true): File
+    fun invalidate(file: File)
+}
+
 class MediaGridThumbnailStore(
     context: Context,
-) {
+) : MediaGridThumbnailStoreGateway {
     private val directory = File(context.cacheDir, "media_grid_thumbnails").apply { mkdirs() }
 
-    suspend fun getOrCreate(source: MediaGridThumbnailSource, allowRemote: Boolean = true): File = withContext(Dispatchers.IO) {
+    override suspend fun getOrCreate(source: MediaGridThumbnailSource, allowRemote: Boolean): File = withContext(Dispatchers.IO) {
         val input = source.localPath?.let(::File)?.takeIf { it.isFile }
         val inputName = input?.absolutePath ?: if (allowRemote) (source.previewUrl ?: source.remoteUrl) else null
             ?: error("No media source")
@@ -59,7 +64,7 @@ class MediaGridThumbnailStore(
         }
     }
 
-    fun invalidate(file: File) { file.delete() }
+    override fun invalidate(file: File) { file.delete() }
 
     fun cached(source: MediaGridThumbnailSource): File? {
         val input = source.localPath?.let(::File)

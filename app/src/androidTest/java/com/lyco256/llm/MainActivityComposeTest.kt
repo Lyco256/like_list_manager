@@ -391,19 +391,20 @@ class MainActivityComposeTest {
 
         composeRule.onNodeWithTag("classified_media_grid").performScrollToIndex(assetIds.size / 2)
         composeRule.waitForIdle()
-        fastFlingUpOnScreen()
+        slowDragDownOnScreen()
+        fastFlingThenRetouchOnScreen()
         composeRule.waitForIdle()
 
         val visibleAfterFling = visibleGridAssetIds(assetIds)
         assertTrue("fling should advance to a later media range", visibleAfterFling.maxOrNull() ?: 0L > assetIds[assetIds.size / 2])
         val selectedAfterFling = visibleAfterFling.maxOrNull() ?: error("No visible media cell after fling")
         val manager = (composeRule.activity.application as LikeListManagerApp).container.mediaGridThumbnailManager
-        composeRule.waitUntil(30_000) {
-            manager.stateIfPresent(selectedAfterFling)?.value is com.lyco256.llm.data.MediaGridThumbnailState.Ready
-        }
         composeRule.onNodeWithTag("media_grid_item_$selectedAfterFling", useUnmergedTree = true).performClick()
         composeRule.onNodeWithTag("media_grid_tweet_dialog").assertIsDisplayed()
         composeRule.onNodeWithTag("media_grid_tweet_dialog_close").performClick()
+        composeRule.waitUntil(30_000) {
+            manager.stateIfPresent(selectedAfterFling)?.value is com.lyco256.llm.data.MediaGridThumbnailState.Ready
+        }
 
         composeRule.onNodeWithTag("filter_open").performClick()
         composeRule.onNodeWithTag("filter_query").performTextReplacement("ViewportFilterTarget")
@@ -2144,7 +2145,34 @@ class MainActivityComposeTest {
         composeRule.waitForIdle()
     }
 
-    private fun fastFlingUpOnScreen() {
+    private fun slowDragDownOnScreen() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val metrics = composeRule.activity.resources.displayMetrics
+        val downTime = SystemClock.uptimeMillis()
+        val x = metrics.widthPixels * 0.5f
+        val startY = metrics.heightPixels * 0.28f
+        val endY = metrics.heightPixels * 0.72f
+        val steps = 12
+        val events = buildList {
+            add(MotionEvent.ACTION_DOWN to startY)
+            for (step in 1 until steps) {
+                val fraction = step.toFloat() / steps
+                add(MotionEvent.ACTION_MOVE to (startY + (endY - startY) * fraction))
+            }
+            add(MotionEvent.ACTION_UP to endY)
+        }
+        events.forEachIndexed { index, (action, y) ->
+            val event = MotionEvent.obtain(downTime, downTime + index * 40L, action, x, y, 0).apply {
+                source = InputDevice.SOURCE_TOUCHSCREEN
+            }
+            check(instrumentation.uiAutomation.injectInputEvent(event, true))
+            event.recycle()
+        }
+        instrumentation.waitForIdleSync()
+        composeRule.waitForIdle()
+    }
+
+    private fun fastFlingThenRetouchOnScreen() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val metrics = composeRule.activity.resources.displayMetrics
         val downTime = SystemClock.uptimeMillis()
@@ -2167,6 +2195,15 @@ class MainActivityComposeTest {
             check(instrumentation.uiAutomation.injectInputEvent(event, true))
             event.recycle()
         }
+        val retouchTime = SystemClock.uptimeMillis()
+        listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP).forEachIndexed { index, action ->
+            val event = MotionEvent.obtain(retouchTime, retouchTime + index * 8L, action, x, metrics.heightPixels * 0.5f, 0).apply {
+                source = InputDevice.SOURCE_TOUCHSCREEN
+            }
+            check(instrumentation.uiAutomation.injectInputEvent(event, true))
+            event.recycle()
+        }
+        instrumentation.waitForIdleSync()
     }
 
     private fun visibleGridAssetIds(assetIds: List<Long>): List<Long> {

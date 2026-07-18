@@ -17,9 +17,9 @@
 
 ## 2026-07 viewport dispatch
 
-- `MediaGridViewportDispatch.kt` owns the immutable viewport snapshot, latest-value replacement, revision/duplicate gate, and the existing one-adjacent-row range rule.
-- `MediaGridThumbnailManager.kt` resolves snapshot IDs to the current source and runs thumbnail preparation on one worker. The UI only publishes `MediaGridViewportSnapshot` from `TagHierarchyUiV2.kt`.
-- The manager plans display range, UI preparation, work pruning, and the next candidate off the UI thread with short synchronized state updates; `MainActivityComposeTest.kt` covers fast-fling image following, filter-revision rollback prevention, and immediate cell actions.
+- `MediaGridViewportDispatch.kt` owns the immutable viewport snapshot, stable-structure comparison, stale-revision gate, and the existing one-adjacent-row range rule.
+- `MediaGridThumbnailManager.kt` owns source, viewport, foreground, generation completion, display result, and candidate selection on one serial coordinator. The UI only publishes `MediaGridViewportSnapshot` from `TagHierarchyUiV2.kt`.
+- UI holder reads are non-waiting and separated from scheduler state. Viewport processing does not copy all work/completed state or rebuild source maps; visible, adjacent, and wide candidates are directly scanned in the existing priority order.
 
 ## 2026-07-13 card/grid duplicate-work removal
 

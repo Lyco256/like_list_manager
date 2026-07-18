@@ -1,12 +1,13 @@
 # `MediaGridThumbnailManager.kt`
 
-2026-07-17: Viewport updates are delivered through `MediaGridViewportSnapshot` and a single latest-value worker. The UI sends only stable asset IDs, source indexes, center distances, column count, and source revision; source lookup and thumbnail work remain in the manager.
+## 2026-07-18 第2実装
 
-## 2026-07 latest viewport worker
-
-- `updateSourceSnapshot` and `dispatchViewport` keep shared-state sections short; source lookup, display-range planning, work pruning, priority selection, and wide-preparation selection run outside the lock on the manager dispatcher.
-- The viewport dispatcher has one worker and conflated latest-value delivery. It rejects stale source revisions, duplicate snapshots, and notifications after disposal. Thumbnail generation itself remains serial and keeps visible-first, adjacent-row, and wide-preparation priority.
+- Source snapshot、最新viewport、foreground、生成中job、completed cache identity、表示再試行を1本のserial coordinatorだけが変更する。
+- Viewportは最新値メールボックスに保存し、pixel単位の`centerDistance`は構造同一性に使わない。表示セルの安定ID・source indexの並び、列数、source revisionだけが再処理条件になる。
+- 生成中はviewportの保存だけを行い、生成完了時に最新状態から次候補を1回だけ選ぶ。古いrevision、dispose後の生成完了・表示結果は適用しない。
+- UIのholder registryはscheduler状態から分離した`ConcurrentHashMap`で、`state()` / `stateIfPresent()`はcoordinatorを待たずにholderの`StateFlow`を返す。UIはmutableなWorkを共有しない。
+- source更新時だけ`sourceByAssetId`と`sourceIndex`を構築し、viewportごとのMap/Set/全work状態コピーを行わない。
+- 表示中、前後1行、wide preparationは既存の範囲と優先順を維持し、各範囲を直接走査して候補を選ぶ。生成は常に1件直列。
+- 画像形式、256px JPEG quality 60、placeholder、保存先、display failureの1回再試行、foreground pauseは変更していない。
 
 `app/src/main/java/com/lyco256/llm/data/MediaGridThumbnailManager.kt`
-
-本番メディアグリッドのThumbnail生成キューを管理します。1件直列で、完了ごとに最新viewportから表示中・隣接行・広域準備の優先順位を再計算します。source revision、generation token、StateFlow、表示失敗時の1回再試行、foreground/background pauseを保持します。benchmark settings、metrics、counter、Traceは受け取りません。
