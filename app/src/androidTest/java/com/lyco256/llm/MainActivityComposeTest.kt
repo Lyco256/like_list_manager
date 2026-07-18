@@ -331,6 +331,94 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun classifiedMediaGridSingleFlingKeepsLatestImageAndImmediateCellActionAfterFilter() {
+        val now = Instant.now().toString()
+        val imagePath = File(storage().imageDirectory(), "viewport-fling.webp").apply {
+            writeBytes(bitmapBytes(8, 8, android.graphics.Color.MAGENTA))
+        }.absolutePath
+        val assetIds = runBlocking {
+            storage().withDatabase { database ->
+                val tagId = database.tagDao().insertTag(TagEntity(name = "ViewportFlingTag", createdAt = now, updatedAt = now))
+                buildList {
+                    (1L..96L).forEach { index ->
+                        val clipId = database.clipDao().insertClip(
+                            ClipEntity(
+                                xPostId = "viewport-fling-$index",
+                                authorName = "Viewport Author",
+                                authorUsername = "viewport_author",
+                                text = if (index == 96L) "ViewportFilterTarget" else "Viewport fling item $index",
+                                postUrl = "https://x.com/viewport_author/status/$index",
+                                xCreatedAt = now,
+                                savedAt = now,
+                                syncedAt = now,
+                            ),
+                        )
+                        val assetId = 10_000L + index
+                        database.clipDao().insertAssets(
+                            listOf(
+                                AssetEntity(
+                                    id = assetId,
+                                    clipId = clipId,
+                                    mediaKey = "viewport-fling-$index",
+                                    type = "photo",
+                                    remoteUrl = null,
+                                    previewUrl = null,
+                                    localPath = imagePath,
+                                    width = 800,
+                                    height = 800,
+                                    downloadState = "downloaded",
+                                    createdAt = now,
+                                ),
+                            ),
+                        )
+                        database.clipDao().insertClipTag(ClipTagEntity(clipId, tagId, now))
+                        add(assetId)
+                    }
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("tab_classified").performClick()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("classified_display_toggle").fetchSemanticsNodes().isNotEmpty()
+        }
+        if (composeRule.onAllNodesWithTag("classified_media_grid").fetchSemanticsNodes().isEmpty()) {
+            composeRule.onNodeWithTag("classified_display_toggle").performClick()
+        }
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("media_grid_item_${assetIds.first()}").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        composeRule.onNodeWithTag("classified_media_grid").performScrollToIndex(assetIds.size / 2)
+        composeRule.waitForIdle()
+        fastFlingUpOnScreen()
+        composeRule.waitForIdle()
+
+        val visibleAfterFling = visibleGridAssetIds(assetIds)
+        assertTrue("fling should advance to a later media range", visibleAfterFling.maxOrNull() ?: 0L > assetIds[assetIds.size / 2])
+        val selectedAfterFling = visibleAfterFling.maxOrNull() ?: error("No visible media cell after fling")
+        val manager = (composeRule.activity.application as LikeListManagerApp).container.mediaGridThumbnailManager
+        composeRule.waitUntil(30_000) {
+            manager.stateIfPresent(selectedAfterFling)?.value is com.lyco256.llm.data.MediaGridThumbnailState.Ready
+        }
+        composeRule.onNodeWithTag("media_grid_item_$selectedAfterFling", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("media_grid_tweet_dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_tweet_dialog_close").performClick()
+
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_query").performTextReplacement("ViewportFilterTarget")
+        composeRule.onNodeWithTag("filter_apply").performClick()
+        val targetAssetId = assetIds.last()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("media_grid_item_$targetAssetId").fetchSemanticsNodes().isNotEmpty()
+        }
+        assertEquals(listOf(targetAssetId), visibleGridAssetIds(assetIds))
+        composeRule.onNodeWithTag("media_grid_item_$targetAssetId", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("media_grid_tweet_dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_tweet_dialog_close").performClick()
+    }
+
+    @Test
     fun classifiedMediaGridReflectsFilteringSortingAndEmptyStates() {
         val now = Instant.now().toString()
         data class GridFixture(
@@ -2054,6 +2142,39 @@ class MainActivityComposeTest {
         }
         instrumentation.waitForIdleSync()
         composeRule.waitForIdle()
+    }
+
+    private fun fastFlingUpOnScreen() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val metrics = composeRule.activity.resources.displayMetrics
+        val downTime = SystemClock.uptimeMillis()
+        val x = metrics.widthPixels * 0.5f
+        val startY = metrics.heightPixels * 0.82f
+        val endY = metrics.heightPixels * 0.18f
+        val steps = 8
+        val events = buildList {
+            add(MotionEvent.ACTION_DOWN to startY)
+            for (step in 1 until steps) {
+                val fraction = step.toFloat() / steps
+                add(MotionEvent.ACTION_MOVE to (startY + (endY - startY) * fraction))
+            }
+            add(MotionEvent.ACTION_UP to endY)
+        }
+        events.forEachIndexed { index, (action, y) ->
+            val event = MotionEvent.obtain(downTime, downTime + index * 5L, action, x, y, 0).apply {
+                source = InputDevice.SOURCE_TOUCHSCREEN
+            }
+            check(instrumentation.uiAutomation.injectInputEvent(event, true))
+            event.recycle()
+        }
+    }
+
+    private fun visibleGridAssetIds(assetIds: List<Long>): List<Long> {
+        return assetIds.filter { assetId ->
+            composeRule.onAllNodesWithTag("media_grid_item_$assetId", useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
     }
 
     private fun gridItemBounds(tag: String): androidx.compose.ui.geometry.Rect =

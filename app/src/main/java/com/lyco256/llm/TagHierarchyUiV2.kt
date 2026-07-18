@@ -3333,13 +3333,15 @@ private fun ClassifiedMediaGridContent(
         )
     }
     LaunchedEffect(sourceRevision) {
-        appContainer.mediaGridThumbnailManager.updateSourceSnapshot(
-            revision = sourceRevision,
-            ordered = items.asSequence().filterIsInstance<MediaGridCellItem>().map { e ->
-                val a = e.entry
-                MediaGridThumbnailSource(a.assetId, a.mediaKey, a.localPath, a.previewUrl ?: a.remoteUrl ?: a.displayUrl?.takeUnless { it == a.localPath }, a.remoteUrl, downloadState = a.downloadState)
-            }.toList(),
-        )
+        withContext(Dispatchers.Default) {
+            appContainer.mediaGridThumbnailManager.updateSourceSnapshot(
+                revision = sourceRevision,
+                ordered = items.asSequence().filterIsInstance<MediaGridCellItem>().map { e ->
+                    val a = e.entry
+                    MediaGridThumbnailSource(a.assetId, a.mediaKey, a.localPath, a.previewUrl ?: a.remoteUrl ?: a.displayUrl?.takeUnless { it == a.localPath }, a.remoteUrl, downloadState = a.downloadState)
+                }.toList(),
+            )
+        }
     }
     DisposableEffect(Unit) {
         onDispose { appContainer.mediaGridThumbnailManager.disposeViewport() }

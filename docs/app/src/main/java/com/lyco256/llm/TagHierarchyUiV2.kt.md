@@ -2,6 +2,11 @@
 
 2026-07-17: The classified media grid publishes a lightweight viewport snapshot without calling synchronous thumbnail viewport application. Each cell carries its immutable source index for the worker-side source lookup.
 
+## 2026-07 viewport dispatch
+
+- The classified grid converts its source list on `Dispatchers.Default` and publishes only an immutable lightweight `MediaGridViewportSnapshot` from the UI-side viewport observer. It does not synchronously apply thumbnail work or wait for manager completion.
+- Each snapshot carries stable asset ID, source index, center distance, column count, and source revision. The manager performs range, display-map, work, pruning, and next-candidate calculations on its single worker while preserving visible-first, one-adjacent-row preparation, wide preparation, image content, and cell operations.
+
 ## 2026-07-10 media-grid bulk tag editing
 
 ## 2026-07-12 mixed tags and header requirements
