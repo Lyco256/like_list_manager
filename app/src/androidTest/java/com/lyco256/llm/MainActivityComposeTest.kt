@@ -27,7 +27,6 @@ import androidx.compose.ui.test.performTextReplacement
 import com.lyco256.llm.data.AssetEntity
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipTagEntity
-import com.lyco256.llm.data.MediaGridThumbnailSource
 import com.lyco256.llm.data.PostStorageManager
 import com.lyco256.llm.data.TagEntity
 import com.lyco256.llm.data.TagColorId
@@ -239,28 +238,6 @@ class MainActivityComposeTest {
         val assetIds = clipAndAssetIds.second
         waitUntil { clipTagIds(clipId).isNotEmpty() }
 
-        val thumbnailStore = (composeRule.activity.application as LikeListManagerApp).container.mediaGridThumbnailStore
-        runBlocking {
-            thumbnailStore.getOrCreate(
-                MediaGridThumbnailSource(
-                    assetId = assetIds.getValue("grid-photo"),
-                    mediaKey = "grid-photo",
-                    localPath = photoPath,
-                    previewUrl = null,
-                    remoteUrl = null,
-                ),
-            )
-            thumbnailStore.getOrCreate(
-                MediaGridThumbnailSource(
-                    assetId = assetIds.getValue("grid-video"),
-                    mediaKey = "grid-video",
-                    localPath = videoPath,
-                    previewUrl = null,
-                    remoteUrl = null,
-                ),
-            )
-        }
-
         composeRule.onNodeWithTag("tab_classified").performClick()
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithTag("classified_display_toggle").fetchSemanticsNodes().isNotEmpty()
@@ -281,17 +258,14 @@ class MainActivityComposeTest {
         waitDisplayed("classified_media_grid")
         val photoTag = "media_grid_item_${assetIds.getValue("grid-photo")}"
         waitDisplayed(photoTag)
-        val manager = (composeRule.activity.application as LikeListManagerApp).container.mediaGridThumbnailManager
         val photoPlaceholderTag = "media_grid_placeholder_${assetIds.getValue("grid-photo")}"
         composeRule.waitUntil(30_000) {
-            manager.stateIfPresent(assetIds.getValue("grid-photo"))?.value is com.lyco256.llm.data.MediaGridThumbnailState.Ready &&
-                composeRule.onAllNodesWithTag(photoPlaceholderTag).fetchSemanticsNodes().isEmpty()
+            composeRule.onAllNodesWithTag(photoPlaceholderTag).fetchSemanticsNodes().isEmpty()
         }
         assertTrue(composeRule.onAllNodesWithTag(photoPlaceholderTag).fetchSemanticsNodes().isEmpty())
         val videoPlaceholderTag = "media_grid_placeholder_${assetIds.getValue("grid-video")}"
         composeRule.waitUntil(30_000) {
-            manager.stateIfPresent(assetIds.getValue("grid-video"))?.value is com.lyco256.llm.data.MediaGridThumbnailState.Ready &&
-                composeRule.onAllNodesWithTag(videoPlaceholderTag).fetchSemanticsNodes().isEmpty()
+            composeRule.onAllNodesWithTag(videoPlaceholderTag).fetchSemanticsNodes().isEmpty()
         }
         assertTrue(composeRule.onAllNodesWithTag(videoPlaceholderTag).fetchSemanticsNodes().isEmpty())
         waitDisplayed("media_grid_video_badge_${assetIds.getValue("grid-video")}")
@@ -359,18 +333,12 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("filter_query").performTextReplacement("Classified grid clip")
         composeRule.onNodeWithTag("filter_apply").performClick()
         waitDisplayed(photoTag)
-        composeRule.waitUntil(30_000) {
-            manager.stateIfPresent(assetIds.getValue("grid-photo"))?.value is com.lyco256.llm.data.MediaGridThumbnailState.Ready
-        }
 
         composeRule.onNodeWithTag("sort_open").performClick()
         composeRule.onNodeWithTag("sort_base_like").performClick()
         composeRule.onNodeWithTag("sort_like_direction_high").performClick()
         composeRule.onNodeWithTag("sort_apply").performClick()
         waitDisplayed(photoTag)
-        composeRule.waitUntil(30_000) {
-            manager.stateIfPresent(assetIds.getValue("grid-photo"))?.value is com.lyco256.llm.data.MediaGridThumbnailState.Ready
-        }
 
         composeRule.onNodeWithTag(photoTag, useUnmergedTree = true).performClick()
         waitDisplayed("media_grid_tweet_dialog")
@@ -454,13 +422,9 @@ class MainActivityComposeTest {
         val visibleAfterFling = visibleGridAssetIds(assetIds)
         assertTrue("fling should advance to a later media range", visibleAfterFling.maxOrNull() ?: 0L > assetIds[assetIds.size / 2])
         val selectedAfterFling = visibleAfterFling.maxOrNull() ?: error("No visible media cell after fling")
-        val manager = (composeRule.activity.application as LikeListManagerApp).container.mediaGridThumbnailManager
         composeRule.onNodeWithTag("media_grid_item_$selectedAfterFling", useUnmergedTree = true).performClick()
         composeRule.onNodeWithTag("media_grid_tweet_dialog").assertIsDisplayed()
         composeRule.onNodeWithTag("media_grid_tweet_dialog_close").performClick()
-        composeRule.waitUntil(30_000) {
-            manager.stateIfPresent(selectedAfterFling)?.value is com.lyco256.llm.data.MediaGridThumbnailState.Ready
-        }
 
         composeRule.onNodeWithTag("filter_open").performClick()
         composeRule.onNodeWithTag("filter_query").performTextReplacement("ViewportFilterTarget")

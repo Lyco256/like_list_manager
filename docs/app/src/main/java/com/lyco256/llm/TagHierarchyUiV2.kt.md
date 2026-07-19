@@ -2,10 +2,16 @@
 
 2026-07-17: The classified media grid publishes a lightweight viewport snapshot without calling synchronous thumbnail viewport application. Each cell carries its immutable source index for the worker-side source lookup.
 
-## 2026-07 viewport dispatch
+## 2026-07-19 direct preview pipeline
 
-- The classified grid converts its source list on `Dispatchers.Default` and publishes only an immutable lightweight `MediaGridViewportSnapshot` from the UI-side viewport observer. It does not synchronously apply thumbnail work or wait for manager completion.
-- Each snapshot carries stable asset ID, source index, center distance, column count, and source revision. The manager performs range, display-map, work, pruning, and next-candidate calculations on its single worker while preserving visible-first, one-adjacent-row preparation, wide preparation, image content, and cell operations.
+- The current grid no longer publishes a thumbnail-manager viewport or waits for `Waiting`, `Generating`, `Ready`, cache hydration, Idle resume, or wide preparation.
+- Each `ClassifiedMediaGridCell` builds the available local → preview → remote → non-duplicate display candidates and starts `AsyncImage` immediately. Missing local files are omitted; `downloadState == "failed"` does not suppress URL fallback.
+- The measured cell constraints supply the request target size while `ContentScale.Crop` remains unchanged. A stable source-identity-and-size key is applied to both memory and disk cache requests.
+- Visible requests continue during drag and fling. Composition disposal cancels requests for cells leaving the viewport. The only separate work is targetless Coil prefetch for at most one adjacent row in the current direction.
+
+## 2026-07 viewport dispatch (履歴: 第6実装で廃止)
+
+- The former `MediaGridViewportSnapshot` and manager scheduling path have been removed. The current path is documented in the direct preview section above.
 
 ## 2026-07-10 media-grid bulk tag editing
 
@@ -152,10 +158,8 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 
 ## 2026-07-19 media-grid placeholder rendering
 
-- `ClassifiedMediaGridContent` no longer creates or shares a grid-wide thumbnail Brush. Viewport dispatch, source snapshots, coordinator scheduling, generation priority, wide preparation, and column changes remain unchanged.
-- `ClassifiedMediaGridCell` keeps one `MediaGridThumbnailSource` for the cell and derives a pure `MediaGridCellVisualState` of `Placeholder`, `Image`, or `Error`.
-- `Waiting` / `Generating`, `Ready` before the current `AsyncImage` model reports `onSuccess`, and a retry in progress render a cell-local static gradient. `drawWithCache` recreates the two-color Brush only when the cell size or theme colors change; its coordinates run from that cell's top-left to bottom-right.
-- The successful image model is keyed by the current source and Ready file path. A source/model change resets the cell to Placeholder, while a current-model `onError` clears success and continues the existing manager retry path.
+- The former grid-wide thumbnail Brush, viewport dispatcher, coordinator scheduling, generation priority, wide preparation, and thumbnail source model have been removed.
+- The current cell-local placeholder behavior and direct candidate state are documented in the direct preview section above and `MediaGridPlaceholderRendering.kt.md`.
 - `Failed`, unavailable media sources, and `downloadState == "failed"` render the theme's opaque single-color cell background and the existing error icon without a gradient. Image and error cells do not compose the placeholder layer. No shimmer, crossfade, infinite animation, border, spacing, or `SubcomposeAsyncImage` is used.
 - Placeholder layers expose `media_grid_placeholder_<assetId>` only while active; existing cell, error, selection, badge, dialog, and pointer-input tags remain unchanged.
 
@@ -197,7 +201,7 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 
 ## 2026-07 media-grid selection interaction fixes
 
-## 2026-07 media-grid thumbnail cache / viewport priority
+## 2026-07 media-grid thumbnail cache / viewport priority (履歴: 第6実装で廃止)
 
 - メディアグリッドは列数に依存しない256×256px中央クロップJPEG（quality 60）を`cacheDir/media_grid_thumbnails`へ保存する。
 - 元画像は`inJustDecodeBounds`と`inSampleSize`で縮小デコードし、キャッシュ生成は一時ファイル置換で壊れた完成ファイルを残さない。
@@ -216,21 +220,15 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - `mediaGridColumnCountAfterPinchRelease` uses the final accumulated distance ratio only when the gesture ends. A threshold miss, cancellation, source revision change, or 2/12 boundary leaves the count unchanged; a successful gesture changes exactly one adjacent column.
 - Pinch-in increases columns and pinch-out decreases columns. Direction reversal is resolved from the final cumulative ratio rather than from an early locked direction.
 - The pinch-start anchor prefers the visible media item below the pinch center and otherwise the nearest visible media item. The stable item key and relative center offset are restored after the normal grid rebuild, with finite layout retries and no retained overlay state.
-- `MediaGridMorphSession`, `MediaGridMorphOverlay`, and the related bounded layout-preparation helpers remain in the source for later animation work but are not called by the current product path.
+- `MediaGridMorphSession` and the former `MediaGridMorphOverlay` path are not part of the current product source path.
 
-## 2026-07-18 第2実装 viewport通知
+## 2026-07-18 第2実装 viewport通知 (履歴: 第6実装で廃止)
 
-- `snapshotFlow`は表示セルの安定ID/source index順、列数、source revisionだけを通知し、pixel単位の移動ではmanagerへ再通知しない。
-- `centerDistance`は表示順から作る粗い順位で、候補選択の既存表示中優先を維持する。
-- 列数、filter、sort、画面移動によるsource revisionの変更は最新revision破棄経路を通る。Macrobenchmark/計測処理、thumbnail形式、placeholder、wide範囲は変更しない。
+- 旧viewport通知とthumbnail manager経路の記録です。第6実装では、安定した表示index・asset ID・cell sizeを使う直接表示と、隣接1行のtargetless Coil prefetchへ置き換えています。
 # メディアグリッド高速化追補
 
 グリッドのメタデータ処理はカード表示と分離し、ファイル存在確認・画像デコードを枠生成前に行わない。複数選択はCalculating中に解除せず、Ready結果で選択可能Clipとの交差を更新する。
 
-## 2026-07-19 第4実装 viewport監視・操作状態
+## 2026-07-19 第4実装 viewport監視・操作状態 (履歴: 第6実装で廃止)
 
-- `ClassifiedMediaGridContent` はsource一覧構築、`updateSourceSnapshot()`、`state.layoutInfo`の`snapshotFlow`監視を1つの`LaunchedEffect`にまとめる。source一覧の構築だけを`Dispatchers.Default`で行い、登録完了後に監視を開始する。
-- `snapshotFlow`の初回layoutが空、または見出しだけで表示セルがない場合は送信せず、メディアセルを含む最初のlayoutを待つ。メディア項目がない場合だけ監視を終了する。ダミースクロールや強制recomposeは使用しない。
-- UI側の最終送信済みsnapshotは、`dispatchViewport()`が`true`を返した場合だけ更新する。拒否されたsnapshotは保持せず、source revision・items・列数の変更で古い監視をキャンセルして登録からやり直す。
-- `LazyGridState.interactionSource`のdrag状態と`isScrollInProgress`から`Dragging` / `Flinging` / `Idle`を判定し、`distinctUntilChanged()`で状態変化時だけThumbnail Managerへ通知する。操作状態はviewport構造とは独立している。
-- 初回表示・拒否後再送・操作中の生成停止・wide取消・Idle再開は`MediaGridViewportDispatchTest`で検証し、無操作初回表示、カードからの切替、drag/fling、停止後の画像追従は`MainActivityComposeTest`で回帰確認する。
+- 旧viewport監視・生成停止・Idle再開の設計記録です。現行の直接表示とプリフェッチの証跡は、冒頭の direct preview pipeline 節と `MediaGridDirectPreviewTest` にあります。

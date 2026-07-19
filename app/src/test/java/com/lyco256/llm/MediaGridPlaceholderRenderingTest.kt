@@ -1,83 +1,48 @@
 package com.lyco256.llm
 
-import com.lyco256.llm.data.MediaGridThumbnailSource
-import com.lyco256.llm.data.MediaGridThumbnailState
+import com.lyco256.llm.data.MediaGridImageCandidate
+import com.lyco256.llm.data.MediaGridImageSourceKind
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import java.io.File
 
 class MediaGridPlaceholderRenderingTest {
-    private val source = MediaGridThumbnailSource(
-        assetId = 1L,
-        mediaKey = "media-1",
-        localPath = "/data/user/0/com.lyco256.llm/files/image.webp",
-        previewUrl = null,
-        remoteUrl = null,
+    private val candidate = MediaGridImageCandidate(
+        kind = MediaGridImageSourceKind.Local,
+        data = "/data/user/0/com.lyco256.llm/files/image.webp",
+        sourceIdentity = "local|1|media-1|/data/user/0/com.lyco256.llm/files/image.webp|10|20",
     )
-    private val file = File("/data/user/0/com.lyco256.llm/cache/thumb.jpg")
-    private val model = mediaGridImageModelKey(source, file.absolutePath)
 
     @Test
-    fun waitingAndGeneratingArePlaceholders() {
-        assertEquals(MediaGridCellVisualState.Placeholder, state(MediaGridThumbnailState.Waiting))
-        assertEquals(MediaGridCellVisualState.Placeholder, state(MediaGridThumbnailState.Generating))
-    }
-
-    @Test
-    fun readyUntilCurrentModelSucceedsIsPlaceholder() {
-        assertEquals(MediaGridCellVisualState.Placeholder, state(MediaGridThumbnailState.Ready(file)))
-        assertEquals(MediaGridCellVisualState.Image, state(MediaGridThumbnailState.Ready(file), displayed = model))
-    }
-
-    @Test
-    fun modelChangeDoesNotReusePreviousSuccess() {
-        val nextSource = source.copy(mediaKey = "media-2")
-        val nextModel = mediaGridImageModelKey(nextSource, file.absolutePath)
+    fun loadingAndFallbackArePlaceholdersUntilCurrentCandidateSucceeds() {
         assertEquals(
             MediaGridCellVisualState.Placeholder,
-            mediaGridCellVisualState(
-                thumbnailState = MediaGridThumbnailState.Ready(file),
-                hasUsableSource = true,
-                downloadFailed = false,
-                currentImageModel = nextModel,
-                displayedImageModel = model,
-            ),
+            mediaGridCellVisualState(1, -1, null, candidate.sourceIdentity),
+        )
+        assertEquals(
+            MediaGridCellVisualState.Placeholder,
+            mediaGridCellVisualState(2, 1, null, candidate.sourceIdentity),
         )
     }
 
     @Test
-    fun errorsDoNotDrawPlaceholder() {
-        assertEquals(MediaGridCellVisualState.Error, state(MediaGridThumbnailState.Failed))
-        assertEquals(MediaGridCellVisualState.Error, state(MediaGridThumbnailState.Waiting, hasUsableSource = false))
-        assertEquals(MediaGridCellVisualState.Error, state(MediaGridThumbnailState.Waiting, downloadFailed = true))
-    }
-
-    @Test
-    fun anotherAssetCannotReuseDisplayedModel() {
-        val otherSource = source.copy(assetId = 2L)
-        val otherModel = mediaGridImageModelKey(otherSource, file.absolutePath)
+    fun currentCandidateSuccessIsImage() {
         assertEquals(
-            MediaGridCellVisualState.Placeholder,
-            mediaGridCellVisualState(
-                thumbnailState = MediaGridThumbnailState.Ready(file),
-                hasUsableSource = true,
-                downloadFailed = false,
-                currentImageModel = otherModel,
-                displayedImageModel = model,
-            ),
+            MediaGridCellVisualState.Image,
+            mediaGridCellVisualState(1, -1, candidate.sourceIdentity, candidate.sourceIdentity),
         )
     }
 
-    private fun state(
-        thumbnailState: MediaGridThumbnailState,
-        displayed: MediaGridImageModelKey? = null,
-        hasUsableSource: Boolean = true,
-        downloadFailed: Boolean = false,
-    ) = mediaGridCellVisualState(
-        thumbnailState = thumbnailState,
-        hasUsableSource = hasUsableSource,
-        downloadFailed = downloadFailed,
-        currentImageModel = if (thumbnailState is MediaGridThumbnailState.Ready) model else null,
-        displayedImageModel = displayed,
-    )
+    @Test
+    fun candidateChangeDoesNotReusePreviousSuccess() {
+        assertEquals(
+            MediaGridCellVisualState.Placeholder,
+            mediaGridCellVisualState(1, -1, candidate.sourceIdentity, "different"),
+        )
+    }
+
+    @Test
+    fun noCandidatesOrAllCandidatesFailedAreErrors() {
+        assertEquals(MediaGridCellVisualState.Error, mediaGridCellVisualState(0, -1, null, null))
+        assertEquals(MediaGridCellVisualState.Error, mediaGridCellVisualState(2, 2, null, null))
+    }
 }

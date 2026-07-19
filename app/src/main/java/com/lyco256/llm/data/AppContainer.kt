@@ -4,20 +4,26 @@ import android.content.Context
 import com.lyco256.llm.BuildConfig
 
 class AppContainer(context: Context) {
-    val mediaGridThumbnailStore = MediaGridThumbnailStore(context)
-    val mediaGridThumbnailManager = MediaGridThumbnailManager(
-        mediaGridThumbnailStore,
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate),
-    )
     val mediaGridImageLoader = coil.ImageLoader.Builder(context)
         .crossfade(false)
-        .diskCachePolicy(coil.request.CachePolicy.DISABLED)
+        .diskCache {
+            coil.disk.DiskCache.Builder()
+                .directory(java.io.File(context.cacheDir, "media_grid_coil_cache"))
+                .maxSizeBytes(128L * 1024L * 1024L)
+                .build()
+        }
         .memoryCache {
             val cache = coil.memory.MemoryCache.Builder(context)
-            cache.maxSizePercent(0.08).maxSizeBytes(32 * 1024 * 1024)
+            val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            val memoryInfo = android.app.ActivityManager.MemoryInfo()
+            activityManager.getMemoryInfo(memoryInfo)
+            cache.maxSizeBytes(minOf(memoryInfo.totalMem / 8L, 64L * 1024L * 1024L).toInt())
             cache.build()
         }
+        .decoderDispatcher(kotlinx.coroutines.Dispatchers.IO.limitedParallelism(2))
+        .fetcherDispatcher(kotlinx.coroutines.Dispatchers.IO)
         .build()
+    val mediaGridPrefetchController = MediaGridPrefetchController(context, mediaGridImageLoader)
     val postStorageManager = PostStorageManager(
         context,
         PostStorageConfig(
