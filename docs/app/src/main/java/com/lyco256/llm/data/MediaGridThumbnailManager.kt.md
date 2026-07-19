@@ -1,5 +1,13 @@
 # `MediaGridThumbnailManager.kt`
 
+## 2026-07-19 第5実装: viewport cache hydration
+
+- After the existing 100 ms Idle gate and latest viewport application, one `Dispatchers.IO` job checks the visible cells and one adjacent row on each side. Candidates are ordered as visible first, then adjacent priority, and duplicate cache identities are checked once.
+- The job calls `findCached()` only and returns one result event containing source revision, viewport token, hit source/file pairs, and confirmed miss identities. Hits are applied by the coordinator directly to `Waiting` holders as `Ready`; no generation job is used for a hit.
+- Cache misses are remembered only for the current source revision to avoid repeated file stats when the viewport shifts. Miss records do not remove candidates from normal generation; generation success and display invalidation remove the corresponding record.
+- Cache hydration is canceled on Dragging/Flinging, source revision change, foreground leave, viewport replacement, and dispose. Token/revision/viewport/source checks reject stale results. Hydration and normal/wide generation never run concurrently.
+- Scheduler order is fixed: latest viewport, cache hydration, visible misses, adjacent misses, then wide preparation. Existing one-at-a-time generation, ranges, placeholders, display retry, and operation-state behavior remain unchanged.
+
 ## 2026-07-18 第2実装
 
 - Source snapshot、最新viewport、foreground、生成中job、completed cache identity、表示再試行を1本のserial coordinatorだけが変更する。
