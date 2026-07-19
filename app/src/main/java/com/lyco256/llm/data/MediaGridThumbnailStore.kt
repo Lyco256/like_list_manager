@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.BufferedInputStream
+import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
@@ -64,7 +65,8 @@ class MediaGridThumbnailStore(
 
     override suspend fun getOrCreate(source: MediaGridThumbnailSource, allowRemote: Boolean): File = withContext(Dispatchers.IO) {
         val location = cacheLocation(source, allowRemote) ?: error("No media source")
-        if (location.output.isFile && location.output.length() > 0L) return@withContext location.output
+        if (isMediaGridThumbnailCacheFileValid(location.output)) return@withContext location.output
+        location.output.delete()
         val temporary = File(directory, ".${location.key}.${Thread.currentThread().id}.tmp")
         try {
             val bitmap = decode(location.input, location.remoteUrls)
@@ -90,7 +92,7 @@ class MediaGridThumbnailStore(
         cacheLocation(source, allowRemote)?.key
 
     override fun findCached(source: MediaGridThumbnailSource, allowRemote: Boolean): File? =
-        cacheLocation(source, allowRemote)?.output?.takeIf { it.isFile && it.length() > 0L }
+        cacheLocation(source, allowRemote)?.output?.takeIf(::isMediaGridThumbnailCacheFileValid)
 
     override fun invalidate(file: File) { file.delete() }
 
@@ -106,6 +108,9 @@ class MediaGridThumbnailStore(
             remoteUrls = if (input == null && allowRemote) listOfNotNull(source.previewUrl, source.remoteUrl) else emptyList(),
         )
     }
+
+    private fun isMediaGridThumbnailCacheFileValid(file: File): Boolean =
+        mediaGridThumbnailCacheFileIsValid(file)
 
     private fun decode(file: File?, urls: List<String>): Bitmap {
         if (file != null) return decodeStream(file.inputStream())
@@ -135,4 +140,16 @@ class MediaGridThumbnailStore(
         while (w / (sample * 2) >= target && h / (sample * 2) >= target) sample *= 2
         return sample
     }
+}
+
+internal fun mediaGridThumbnailCacheFileIsValid(file: File): Boolean {
+    if (!file.isFile || !file.extension.equals("jpg", ignoreCase = true) || file.length() < 4L) return false
+    return runCatching {
+        RandomAccessFile(file, "r").use { input ->
+            val hasJpegStart = input.readUnsignedByte() == 0xff && input.readUnsignedByte() == 0xd8
+            input.seek(input.length() - 2L)
+            val hasJpegEnd = input.readUnsignedByte() == 0xff && input.readUnsignedByte() == 0xd9
+            hasJpegStart && hasJpegEnd
+        }
+    }.getOrDefault(false)
 }

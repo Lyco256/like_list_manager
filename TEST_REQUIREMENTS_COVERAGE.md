@@ -184,6 +184,8 @@
 |---|---|---|
 | canonical key shared by generation and lookup; local/preview/remote source paths | Implemented | `MediaGridThumbnailStore.kt`, `MediaGridThumbnailStoreKeyTest.kt` |
 | no generation/network/decode/resize/output creation during cache check | Implemented | `findCached()`, cache hydration unit tests |
+| zero-length, corrupt, and temporary files are not cache hits | Implemented | `mediaGridThumbnailCacheFileIsValid()`, `MediaGridThumbnailStoreKeyTest` |
+| zero-length, corrupt, and temporary files are not cache hits | Implemented | `mediaGridThumbnailCacheFileIsValid()`, `MediaGridThumbnailStoreKeyTest` |
 | one IO job/result event; visible and adjacent hits restored together | Implemented | `MediaGridThumbnailManager.kt`, `MediaGridViewportDispatchTest` |
 | miss-only generation and same-revision miss memoization | Implemented | `MediaGridViewportDispatchTest` |
 | Dragging/Flinging/revision/foreground/dispose stale-result cancellation | Implemented | manager cancellation guards and unit coverage |

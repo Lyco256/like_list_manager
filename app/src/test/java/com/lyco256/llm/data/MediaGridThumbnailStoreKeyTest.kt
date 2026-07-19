@@ -1,9 +1,11 @@
 package com.lyco256.llm.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
@@ -39,6 +41,26 @@ class MediaGridThumbnailStoreKeyTest {
             assertNotEquals(first, second)
         } finally {
             localFile.delete()
+        }
+    }
+
+    @Test
+    fun zeroCorruptAndTemporaryFilesAreNotCacheFiles() {
+        val directory = createTempDir(prefix = "media-grid-cache-files")
+        try {
+            val valid = directory.resolve("valid.jpg").apply {
+                writeBytes(byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0x01, 0xff.toByte(), 0xd9.toByte()))
+            }
+            val zero = directory.resolve("zero.jpg")
+            val corrupt = directory.resolve("corrupt.jpg").apply { writeText("not a jpeg") }
+            val temporary = directory.resolve("valid.tmp").apply { writeBytes(valid.readBytes()) }
+
+            assertTrue(mediaGridThumbnailCacheFileIsValid(valid))
+            assertFalse(mediaGridThumbnailCacheFileIsValid(zero))
+            assertFalse(mediaGridThumbnailCacheFileIsValid(corrupt))
+            assertFalse(mediaGridThumbnailCacheFileIsValid(temporary))
+        } finally {
+            directory.deleteRecursively()
         }
     }
 

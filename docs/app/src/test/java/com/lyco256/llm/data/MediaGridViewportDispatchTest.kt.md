@@ -6,6 +6,8 @@
 - Verifies one cache identity is checked once per hydration, known misses are not restatted within a source revision, and hydration completes before generation starts.
 - Verifies Dragging cancellation and stale-result rejection, followed by a fresh Idle hydration using the latest viewport.
 - `MediaGridThumbnailStoreKeyTest.kt` covers the canonical local/preview/remote key paths and local size/modified-time identity changes.
+- The same key test rejects zero-length, structurally corrupt JPEG, and temporary files as cache files.
+- The same key test rejects zero-length, structurally corrupt JPEG, and temporary files as cache files.
 
 2026-07-18 coverage:
 

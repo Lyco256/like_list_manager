@@ -8,6 +8,7 @@ The store implements `MediaGridThumbnailStoreGateway`, allowing coordinator beha
 
 - `mediaGridThumbnailCacheKey()` is the single identity rule used by generation and lookup. It includes asset ID, media key, resolved input name, actual local file size, and actual local modified time.
 - `findCached()` only resolves the expected completed `.jpg` path and accepts it when it is a non-empty regular file. It performs no network access, decode, resize, JPEG compression, or output creation.
+- Cache lookup also rejects files without a `.jpg` extension, empty files, and files without JPEG start/end markers; a structurally invalid output is removed by `getOrCreate()` before regeneration.
 - Local files and preview/remote URL sources use the same resolution logic. `allowRemote = false` remains wide-preparation-only behavior and does not select a URL source.
 - Temporary files and zero-length files are not cache hits; `invalidate()` deletes the completed file and the manager drops its in-memory miss/completion identity before retrying.
 
