@@ -490,3 +490,58 @@ private fun zeroWidthRectAtRight(viewport: Rect, reference: Rect): Rect = Rect(
 )
 
 private fun Rect.translateY(delta: Float): Rect = Rect(left, top + delta, right, bottom + delta)
+
+internal fun mediaGridMorphRect(slot: MediaGridMorphSlot, progress: Float): Rect {
+    val p = progress.coerceIn(0f, 1f)
+    return Rect(
+        left = morphLerp(slot.startRect.left, slot.endRect.left, p),
+        top = morphLerp(slot.startRect.top, slot.endRect.top, p),
+        right = morphLerp(slot.startRect.right, slot.endRect.right, p),
+        bottom = morphLerp(slot.startRect.bottom, slot.endRect.bottom, p),
+    )
+}
+
+internal fun mediaGridMorphStartAlpha(slot: MediaGridMorphSlot, progress: Float): Float {
+    if (!slot.hasStart) return 0f
+    if (slot.startAssetKey == slot.endAssetKey && slot.hasEnd) return 1f
+    return (1f - progress.coerceIn(0f, 1f)).coerceIn(0f, 1f)
+}
+
+internal fun mediaGridMorphEndAlpha(slot: MediaGridMorphSlot, progress: Float): Float {
+    if (!slot.hasEnd) return 0f
+    if (slot.startAssetKey == slot.endAssetKey && slot.hasStart) return 0f
+    return progress.coerceIn(0f, 1f)
+}
+
+internal fun mediaGridMorphLayerCount(slot: MediaGridMorphSlot): Int = when {
+    slot.startAssetKey != null && slot.startAssetKey == slot.endAssetKey -> 1
+    slot.hasStart && slot.hasEnd -> 2
+    slot.hasStart || slot.hasEnd -> 1
+    else -> 0
+}
+
+internal fun mediaGridMorphHeaderY(header: MediaGridMorphHeaderBand, progress: Float): Float =
+    morphLerp(header.startY, header.endY, progress.coerceIn(0f, 1f))
+
+internal fun mediaGridMorphHeaderHeight(header: MediaGridMorphHeaderBand, progress: Float): Float =
+    morphLerp(header.startHeight, header.endHeight, progress.coerceIn(0f, 1f)).coerceAtLeast(0f)
+
+internal fun mediaGridMorphStartTitleAlpha(header: MediaGridMorphHeaderBand, progress: Float): Float = when {
+    header.startTitle.isNullOrBlank() -> 0f
+    header.startTitle == header.endTitle -> 1f
+    else -> (1f - progress.coerceIn(0f, 1f)).coerceIn(0f, 1f)
+}
+
+internal fun mediaGridMorphEndTitleAlpha(header: MediaGridMorphHeaderBand, progress: Float): Float = when {
+    header.endTitle.isNullOrBlank() -> 0f
+    header.startTitle == header.endTitle -> 0f
+    else -> progress.coerceIn(0f, 1f)
+}
+
+internal fun mediaGridMorphTitleLayerCount(header: MediaGridMorphHeaderBand): Int = when {
+    header.startTitle.isNullOrBlank() && header.endTitle.isNullOrBlank() -> 0
+    header.startTitle == header.endTitle -> 1
+    else -> listOfNotNull(header.startTitle, header.endTitle).count { it.isNotBlank() }
+}
+
+private fun morphLerp(start: Float, end: Float, progress: Float): Float = start + (end - start) * progress

@@ -14,7 +14,6 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -93,10 +92,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -116,6 +117,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -126,21 +128,21 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
-import com.lyco256.llm.data.MediaGridThumbnailSource
-import com.lyco256.llm.data.MediaGridThumbnailState
-import com.lyco256.llm.data.MediaGridScrollOperationState
-import com.lyco256.llm.data.MediaGridViewportItem
-import com.lyco256.llm.data.MediaGridViewportSnapshot
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.DisposableEffect
+import coil.request.ImageRequest
 import com.lyco256.llm.data.AssetEntity
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.MediaGridClipSource
+import com.lyco256.llm.data.MediaGridImageCandidateInput
+import com.lyco256.llm.data.MediaGridImageSourceKind
+import com.lyco256.llm.data.MediaGridPrefetchEntry
+import com.lyco256.llm.data.buildMediaGridImageCandidates
+import com.lyco256.llm.data.mediaGridImageCacheKey
 import com.lyco256.llm.data.TagEntity
 import com.lyco256.llm.data.TagFilterState
 import com.lyco256.llm.data.TagGroupEntity
@@ -156,10 +158,9 @@ import com.lyco256.llm.data.tagGradient
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.DayOfWeek
@@ -3325,65 +3326,68 @@ private fun ClassifiedMediaGridContent(
 ) {
     val appContainer = (LocalContext.current.applicationContext as LikeListManagerApp).container
     val itemByKey = remember(items) { items.associateBy { it.key } }
-    val isDragged by state.interactionSource.collectIsDraggedAsState()
-    LaunchedEffect(state, items, columnCount, sourceRevision) {
-        val sources = withContext(Dispatchers.Default) {
-            items.asSequence().filterIsInstance<MediaGridCellItem>().map { e ->
-                val a = e.entry
-                MediaGridThumbnailSource(
-                    a.assetId,
-                    a.mediaKey,
-                    a.localPath,
-                    a.previewUrl ?: a.remoteUrl ?: a.displayUrl?.takeUnless { it == a.localPath },
-                    a.remoteUrl,
-                    downloadState = a.downloadState,
+    val prefetchItems = remember(items) {
+        items.mapIndexedNotNull { itemIndex, item ->
+            (item as? MediaGridCellItem)?.let { cell ->
+                val entry = cell.entry
+                MediaGridPrefetchEntry(
+                    itemIndex = itemIndex,
+                    assetId = entry.assetId,
+                    candidates = buildMediaGridImageCandidates(
+                        MediaGridImageCandidateInput(
+                            assetId = entry.assetId,
+                            mediaKey = entry.mediaKey,
+                            localPath = entry.localPath,
+                            previewUrl = entry.previewUrl,
+                            remoteUrl = entry.remoteUrl,
+                            displayUrl = entry.displayUrl,
+                        ),
+                    ),
                 )
-            }.toList()
-        }
-        appContainer.mediaGridThumbnailManager.updateSourceSnapshot(sourceRevision, sources)
-        if (sources.isEmpty()) return@LaunchedEffect
-
-        var lastDispatchedSnapshot: MediaGridViewportSnapshot? = null
-        snapshotFlow { state.layoutInfo }.collect { layout ->
-            val visibleMediaItems = layout.visibleItemsInfo.mapNotNull { info ->
-                val item = itemByKey[info.key] as? MediaGridCellItem ?: return@mapNotNull null
-                val e = item.entry
-                e.assetId to item.sourceIndex
             }
-            if (visibleMediaItems.isEmpty()) return@collect
-            val centerOrdinal = (visibleMediaItems.size - 1) / 2f
-            val snapshot = MediaGridViewportSnapshot(
+        }
+    }
+    LaunchedEffect(state, items, columnCount, sourceRevision) {
+        var previousFirstItemIndex: Int? = null
+        // The initial viewport warms only the next row after visible AsyncImage requests exist.
+        var previousDirection = 1
+        snapshotFlow {
+            val layout = state.layoutInfo
+            val visibleItems = layout.visibleItemsInfo
+            ClassifiedMediaGridViewportRead(
+                visibleItemIndices = visibleItems.map { it.index }.toSet(),
+                visibleMediaItems = visibleItems.mapNotNull { info ->
+                    (itemByKey[info.key] as? MediaGridCellItem)?.let { it.entry.assetId to info.index }
+                },
+                cellSizePx = visibleItems.firstOrNull { itemByKey[it.key] is MediaGridCellItem }?.size?.width ?: 0,
+            )
+        }.collect { viewport ->
+            if (viewport.visibleMediaItems.isEmpty()) return@collect
+            val firstItemIndex = viewport.visibleItemIndices.minOrNull() ?: return@collect
+            val movement = previousFirstItemIndex?.let {
+                when {
+                    firstItemIndex > it -> 1
+                    firstItemIndex < it -> -1
+                    else -> 0
+                }
+            } ?: 0
+            val directionTurned = movement != 0 && previousDirection != 0 && movement != previousDirection
+            if (movement != 0) previousDirection = movement
+            val direction = if (directionTurned) 0 else previousDirection
+            previousFirstItemIndex = firstItemIndex
+            appContainer.mediaGridPrefetchController.update(
                 sourceRevision = sourceRevision,
                 columnCount = columnCount,
-                items = visibleMediaItems.mapIndexed { index, (assetId, sourceIndex) ->
-                    MediaGridViewportItem(
-                        assetId = assetId,
-                        sourceIndex = sourceIndex,
-                        // Use stable visible-order distance; pixel movement must not create work.
-                        centerDistance = abs(index - centerOrdinal).toInt(),
-                    )
-                },
+                visibleAssetIds = viewport.visibleMediaItems.mapTo(HashSet()) { it.first },
+                items = prefetchItems,
+                visibleItemIndices = viewport.visibleItemIndices,
+                cellSizePx = viewport.cellSizePx,
+                direction = direction,
             )
-            if (lastDispatchedSnapshot?.sameStructureAs(snapshot) != true &&
-                appContainer.mediaGridThumbnailManager.dispatchViewport(snapshot)
-            ) {
-                lastDispatchedSnapshot = snapshot
-            }
         }
     }
-    DisposableEffect(Unit) {
-        onDispose { appContainer.mediaGridThumbnailManager.disposeViewport() }
-    }
-    LaunchedEffect(state) {
-        snapshotFlow {
-            when {
-                isDragged -> MediaGridScrollOperationState.Dragging
-                state.isScrollInProgress -> MediaGridScrollOperationState.Flinging
-                else -> MediaGridScrollOperationState.Idle
-            }
-        }.distinctUntilChanged().collect { operationState ->
-            appContainer.mediaGridThumbnailManager.setScrollOperationState(operationState)
-        }
+    DisposableEffect(appContainer.mediaGridPrefetchController) {
+        onDispose { appContainer.mediaGridPrefetchController.dispose() }
     }
     Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
@@ -3424,8 +3428,7 @@ private fun ClassifiedMediaGridContent(
                         selected = item.entry.clipId in selectedClipIds,
                         onClick = onCellClick,
                         onToggleSelection = onToggleSelection,
-                        thumbnailManager = appContainer.mediaGridThumbnailManager,
-                        thumbnailImageLoader = appContainer.mediaGridImageLoader,
+                        imageLoader = appContainer.mediaGridImageLoader,
                     )
                 }
             }
@@ -3678,6 +3681,12 @@ private fun buildMediaGridMorphSnapshot(
 
 private fun distanceBetween(first: Offset, second: Offset): Float = hypot(first.x - second.x, first.y - second.y)
 
+private data class ClassifiedMediaGridViewportRead(
+    val visibleItemIndices: Set<Int>,
+    val visibleMediaItems: List<Pair<Long, Int>>,
+    val cellSizePx: Int,
+)
+
 @Composable
 private fun ClassifiedMediaGridHeader(item: MediaGridHeaderItem) {
     Surface(
@@ -3709,23 +3718,46 @@ private fun ClassifiedMediaGridCell(
     selected: Boolean,
     onClick: (Long) -> Unit,
     onToggleSelection: (Long) -> Unit,
-    thumbnailManager: com.lyco256.llm.data.MediaGridThumbnailManager,
-    thumbnailImageLoader: coil.ImageLoader,
+    imageLoader: coil.ImageLoader,
 ) {
-    val thumbnailSource = MediaGridThumbnailSource(entry.assetId, entry.mediaKey, entry.localPath, entry.previewUrl ?: entry.remoteUrl ?: entry.displayUrl?.takeUnless { it == entry.localPath }, entry.remoteUrl, downloadState = entry.downloadState)
-    val thumbnailState = thumbnailManager.state(entry.assetId, thumbnailSource).collectAsState().value
-    val latestThumbnailState by rememberUpdatedState(thumbnailState)
-    val fallbackUrl = entry.previewUrl ?: entry.remoteUrl ?: entry.displayUrl?.takeUnless { it == entry.localPath }
-    val hasUsableSource = entry.localPath != null || fallbackUrl != null
-    val currentReady = thumbnailState as? MediaGridThumbnailState.Ready
-    val currentImageModel = currentReady?.let { mediaGridImageModelKey(thumbnailSource, it.file.absolutePath) }
-    var displayedImageModel by remember(thumbnailSource) { mutableStateOf<MediaGridImageModelKey?>(null) }
+    val context = LocalContext.current
+    val candidates = remember(entry.assetId, entry.mediaKey, entry.localPath, entry.previewUrl, entry.remoteUrl, entry.displayUrl) {
+        buildMediaGridImageCandidates(
+            MediaGridImageCandidateInput(
+                assetId = entry.assetId,
+                mediaKey = entry.mediaKey,
+                localPath = entry.localPath,
+                previewUrl = entry.previewUrl,
+                remoteUrl = entry.remoteUrl,
+                displayUrl = entry.displayUrl,
+            ),
+        )
+    }
+    var failedCandidateIndex by remember(candidates) { mutableIntStateOf(-1) }
+    var displayedCandidateIdentity by remember(candidates) { mutableStateOf<String?>(null) }
+    var cellSize by remember(candidates) { mutableStateOf(IntSize.Zero) }
+    val currentCandidateIndex = failedCandidateIndex.coerceAtLeast(0)
+    val currentCandidate = candidates.getOrNull(currentCandidateIndex)
+    val imageCacheKey = remember(currentCandidate, cellSize) {
+        currentCandidate?.let { mediaGridImageCacheKey(it, cellSize.width, cellSize.height) }
+    }
+    val imageRequest = remember(currentCandidate, cellSize, imageCacheKey) {
+        currentCandidate?.let { candidate ->
+            ImageRequest.Builder(context)
+                .data(if (candidate.kind == MediaGridImageSourceKind.Local) File(candidate.data) else candidate.data)
+                // cellSize is captured from the measured cell constraints; never request original size.
+                .size(cellSize.width.coerceAtLeast(1), cellSize.height.coerceAtLeast(1))
+                .memoryCacheKey(imageCacheKey)
+                .diskCacheKey(imageCacheKey)
+                .crossfade(false)
+                .build()
+        }
+    }
     val visualState = mediaGridCellVisualState(
-        thumbnailState = thumbnailState,
-        hasUsableSource = hasUsableSource,
-        downloadFailed = entry.downloadState == "failed",
-        currentImageModel = currentImageModel,
-        displayedImageModel = displayedImageModel,
+        candidateCount = candidates.size,
+        failedCandidateIndex = failedCandidateIndex,
+        displayedCandidateIdentity = displayedCandidateIdentity,
+        currentCandidateIdentity = currentCandidate?.sourceIdentity,
     )
     val selectionIndicatorSize = mediaGridSelectionIndicatorSize(columnCount)
     val videoIconSize = mediaGridVideoIconSize(columnCount)
@@ -3741,6 +3773,7 @@ private fun ClassifiedMediaGridCell(
         modifier = modifier
             .fillMaxWidth()
             .aspectRatio(1f)
+            .onSizeChanged { cellSize = IntSize(it.width, it.height) }
             .pointerInput(entry.clipId, selectionMode) {
                 detectTapGestures(
                     onLongPress = {
@@ -3785,24 +3818,21 @@ private fun ClassifiedMediaGridCell(
                         .testTag("media_grid_placeholder_${entry.assetId}"),
                 )
             }
-            if (currentReady != null) AsyncImage(
-                    model = currentReady.file,
+            if (imageRequest != null) AsyncImage(
+                    model = imageRequest,
                     contentDescription = null,
-                    imageLoader = thumbnailImageLoader,
+                    imageLoader = imageLoader,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
                     onSuccess = {
-                        val latest = latestThumbnailState
-                        if (latest is MediaGridThumbnailState.Ready && latest.file == currentReady.file) {
-                            displayedImageModel = currentImageModel
-                            thumbnailManager.onDisplaySuccess(thumbnailSource)
+                        if (candidates.getOrNull(currentCandidateIndex)?.sourceIdentity == currentCandidate?.sourceIdentity) {
+                            displayedCandidateIdentity = currentCandidate?.sourceIdentity
                         }
                     },
                     onError = {
-                        val latest = latestThumbnailState
-                        if (latest is MediaGridThumbnailState.Ready && latest.file == currentReady.file) {
-                            displayedImageModel = null
-                            thumbnailManager.onDisplayError(thumbnailSource, currentReady.file)
+                        if (candidates.getOrNull(currentCandidateIndex)?.sourceIdentity == currentCandidate?.sourceIdentity) {
+                            displayedCandidateIdentity = null
+                            failedCandidateIndex = currentCandidateIndex + 1
                         }
                     },
                 )

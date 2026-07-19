@@ -2,32 +2,26 @@
 
 この文書は、全体構成、現状の実装、変更目的別入口、個別docs一覧だけを担当する。禁止事項、完了報告、検証手順は置かない。
 
-## 2026-07 media grid headers
+## 2026-07-19 第6実装: direct preview pipeline
 
-- `app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt` now owns `buildClassifiedMediaGridItems`, full-width header items, and the like-count overlay.
-- `MediaGridThumbnailStore.kt` and `MediaGridThumbnailManager.kt` own fixed 256px JPEG cache generation and latest-viewport serial prioritization; `AppContainer` owns their single instances and the grid-only ImageLoader.
-- The same file owns tweet-level long-press selection, shared selection across a tweet's assets, the 2–6 column card-dialog action, specified selection/video overlay sizes, and pending bulk tag editing.
-- `MainActivity.kt` carries filtered media-grid tag IDs; `ClipRepository.kt` and `Daos.kt` apply the final tag set in one transaction.
-- `app/src/test/java/com/lyco256/llm/TagHierarchyTest.kt` covers bucket generation for day/week/month and like-count units.
-- `app/src/androidTest/java/com/lyco256/llm/UiStateRenderingTest.kt` covers the PostTime header, LikeCount header, like overlay, and existing badge/error regressions.
-- `UiStateRenderingTest.kt` and `data/RepositoryIntegrationTest.kt` also cover tweet selection, bulk tag draft/apply/discard behavior, and transaction-level tag replacement.
-- `MediaGridThumbnailManager.kt` keeps one ordered source snapshot and selects from the latest viewport after every serial generation, preferring the current scroll direction on ties. Wide preparation records cache identities so each source advances once, while visible cells and adjacent rows use bounded UI state. Generation validates the source snapshot before publishing Ready; display failures invalidate and retry once.
+Current media-grid image loading is direct Coil loading from `MediaGridDirectPreview.kt`; the former thumbnail generation, hydration, serial manager, wide preparation, and viewport-dispatch files are no longer part of the source set. Existing `cacheDir/media_grid_thumbnails` files and application data are intentionally untouched. Current acceptance evidence is tracked in `TEST_REQUIREMENTS_COVERAGE.md`.
 
-## 2026-07-19 media-grid scroll priority 第4実装
+## 2026-07 media grid direct preview pipeline
 
-- `TagHierarchyUiV2.kt` now builds the ordered media source list, calls `updateSourceSnapshot()`, and starts the viewport observer in one ordered coroutine path. Empty initial layouts are ignored until the first layout containing a media cell; the UI records a viewport as sent only after `dispatchViewport()` returns `true`.
-- `TagHierarchyUiV2.kt` derives `Dragging` from the grid `interactionSource`, `Flinging` from `isScrollInProgress` when not dragging, and otherwise `Idle`; only state transitions are sent to the manager.
-- `MediaGridThumbnailManager.kt` suppresses new visible/adjacent/wide generation during Dragging and Flinging, cancels active wide preparation at operation start, permits an in-flight normal generation to finish, and resumes from the latest visible viewport after 100ms of token-valid Idle.
-- 第5実装では`MediaGridThumbnailStore.kt`のcanonical cache keyと`findCached()`を追加し、`MediaGridThumbnailManager.kt`がIdle後に表示中・前後1行を単一IO jobで一括確認する。ヒットは一件ずつgenerationへ渡さずReadyへ反映し、missだけを既存の表示中→隣接→wide順へ戻す。確認結果はrevision・viewport token・source identityで検証し、操作開始・revision・foreground離脱・dispose時の古い結果を破棄する。
-- The source list, viewport mailbox, operation state, delayed resume token, holder observations, display results, and generation completion remain serialized through the existing coordinator. Placeholder rendering, thumbnail format/identity, candidate ranges/priority, column changes, and Macrobenchmark code are unchanged.
+- `TagHierarchyUiV2.kt` owns the classified grid, headers, sorting, selection, pinch column changes, and cell interactions.
+- `ClassifiedMediaGridCell` builds a stable local → preview → remote → non-duplicate display candidate list and starts `AsyncImage` directly. It measures the cell constraints with `onSizeChanged` and requests that size, with `ContentScale.Crop`, static cell-local placeholder rendering, and one-step fallback on `onError`.
+- `MediaGridDirectPreview.kt` owns candidate availability, source identity/cache-key calculation, and a targetless Coil prefetch controller. Prefetch is limited to the adjacent row in the current direction and is canceled when its target leaves the viewport, the direction changes, or the source/column revision changes.
+- `AppContainer.kt` owns the one shared media-grid `ImageLoader`: crossfade is disabled, disk cache is `cacheDir/media_grid_coil_cache` at 128 MiB, memory cache is `min(totalMem / 8, 64 MiB)`, and decoder parallelism is limited to two.
+- `MediaGridThumbnailManager`, `MediaGridThumbnailStore`, cache hydration, wide preparation, and the former viewport coordinator are removed from the product and source sets. Existing `cacheDir/media_grid_thumbnails` files are not touched.
+- `MediaGridMorph.kt` remains only for the existing pinch calculation/tests; no morph overlay is part of the product path.
 
 # Source Files Guide
 
-## 2026-07 viewport dispatch
+## 2026-07 direct preview viewport path
 
-- `MediaGridViewportDispatch.kt` owns the immutable viewport snapshot, stable-structure comparison, stale-revision gate, and the existing one-adjacent-row range rule.
-- `MediaGridThumbnailManager.kt` owns source, viewport, foreground, generation completion, display result, and candidate selection on one serial coordinator. The UI only publishes `MediaGridViewportSnapshot` from `TagHierarchyUiV2.kt`.
-- UI holder reads are non-waiting and separated from scheduler state. Viewport processing does not copy all work/completed state or rebuild source maps; visible, adjacent, and wide candidates are directly scanned in the existing priority order.
+- The grid viewport observer reads stable item indices, visible asset IDs, and cell size; pixel-only movement does not rebuild the prefetch target list.
+- Dragging and flinging do not stop visible `AsyncImage` requests. Compose disposal cancels requests for cells that leave the composition.
+- The controller cancels targetless prefetch immediately on direction turns and keeps at most `columnCount` candidates in the adjacent row.
 
 ## 2026-07-13 card/grid duplicate-work removal
 
@@ -40,7 +34,7 @@
 - The product path keeps the normal `LazyVerticalGrid` visible throughout a two-pointer gesture and changes the saved column count only once on release.
 - `mediaGridColumnCountAfterPinchRelease` resolves the final accumulated distance ratio to no change or one adjacent column step; threshold, reversal, cancellation, and 2..12 bounds are pure-testable.
 - Pinch-start anchor selection prefers the media cell under the pinch center, then the nearest visible media cell. Stable item keys and relative center offsets are restored after the normal grid rebuild.
-- The product path does not create or call `MediaGridMorphSession`, `MediaGridMorphOverlay`, morph settle effects, or grid handoff effects. Existing morph calculation/rendering files remain for later animation work.
+- The product path does not create or call `MediaGridMorphSession`, `MediaGridMorphOverlay`, morph settle effects, or grid handoff effects. `MediaGridMorph.kt` remains for the existing pure calculation/tests; the former overlay source is removed.
 
 ## 2026-07 single-step media-grid resize（履歴: 現行経路では不使用）
 

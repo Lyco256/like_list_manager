@@ -2,15 +2,22 @@
 
 `app/src/main/java/com/lyco256/llm/MediaGridPlaceholderRendering.kt`
 
+## 2026-07 direct preview pipeline
+
+- `Placeholder` is shown while the current direct Coil candidate is loading or while fallback advances.
+- `Image` is shown only after the current candidate identity reports `AsyncImage.onSuccess`.
+- `Error` is shown only when there are no candidates or every candidate has failed. A failed stored download does not force Error when preview or remote candidates exist.
+- The existing static cell-local `drawWithCache` placeholder is retained. No shimmer, crossfade, `SubcomposeAsyncImage`, format conversion, or RGB_565 path is used.
+
 メディアグリッドのセル単位Placeholder描画と、画像表示状態の純粋な判定を担当します。
 
-## 表示状態
+## 表示状態 (旧サムネイル経路の履歴)
 
 - `Placeholder`: `Waiting` / `Generating`、`Ready`だが現在の画像モデルで`onSuccess`前、または再生成・再読込中。
 - `Image`: 現在の`MediaGridThumbnailSource`と`Ready`ファイルモデルに対する`AsyncImage.onSuccess`済み。
 - `Error`: `Failed`、利用可能な画像元なし、`downloadState == "failed"`。
 
-画像モデルの成功状態はセル内のCompose stateに保持し、`remember(thumbnailSource)`でsource変更時に破棄します。状態判定は`mediaGridCellVisualState`としてJVM単体テスト可能です。
+旧サムネイル経路の説明です。現行の候補 identity と `AsyncImage` 成功状態は、上記 direct preview pipeline の実装に従います。
 
 ## Placeholder描画
 

@@ -2,6 +2,20 @@
 
 `実機レベル統合テスト強化 要件定義.md` に対する、現在の自動テスト・安全実行スクリプト・実機確認の対応状況です。
 
+## 2026-07-19 第6実装: direct preview pipeline
+
+| Requirement | Status | Evidence |
+|---|---|---|
+| local → preview → remote → unique display fallback | Implemented | `MediaGridDirectPreview.kt`, `MediaGridDirectPreviewTest.kt` |
+| missing local fallback, source reset, final Error only after all candidates fail | Implemented | `MediaGridDirectPreviewTest.kt`, `MediaGridPlaceholderRenderingTest.kt` |
+| constraint-sized AsyncImage, direct visible requests during drag/fling, composition cancellation | Implemented | `TagHierarchyUiV2.kt`, `MainActivityComposeTest.kt` |
+| shared Coil loader, 128 MiB disk, min(totalMem/8, 64 MiB) memory, two decoder slots, no crossfade | Implemented | `AppContainer.kt` |
+| stable source/size cache key and local path/length/mtime identity | Implemented | `MediaGridDirectPreview.kt`, `MediaGridDirectPreviewTest.kt` |
+| one adjacent row, direction/viewport cancellation, no visible/prefetch duplicate | Implemented | `MediaGridDirectPreview.kt`, `MediaGridDirectPreviewTest.kt` |
+| old thumbnail generation, hydration, Idle gate, wide preparation removed from product path | Implemented | deleted thumbnail sources/manager/viewport files; `TagHierarchyUiV2.kt` |
+| initial multi-cell load, drag/fling, recreation/filter/sort, mixed source/error regression | Implemented | `MainActivityComposeTest.kt`, `UiStateRenderingTest.kt`; wireless safe integration check succeeded |
+| required verification order; Macrobenchmark not run | Implemented | `run-safe-integration-check.cmd -DebugMethod wireless` and `run-safe-debug-check.cmd -InstallToDevice` succeeded; Macrobenchmark was not run |
+
 ## 安全境界
 
 | 要件 | 状態 | 証跡 |

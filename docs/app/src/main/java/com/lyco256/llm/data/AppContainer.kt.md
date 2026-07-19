@@ -4,6 +4,10 @@
 
 `app/src/main/java/com/lyco256/llm/data/AppContainer.kt`
 
+## 2026-07 direct preview ImageLoader
+
+`AppContainer` owns the single media-grid `ImageLoader` and `MediaGridPrefetchController`. The loader keeps crossfade disabled, enables `cacheDir/media_grid_coil_cache` with a 128 MiB disk limit, caps memory at `min(totalMem / 8, 64 MiB)`, and uses an IO decoder dispatcher limited to two concurrent decodes. The former thumbnail store and serial generation manager are not created.
+
 ## 役割
 
 投稿保存先マネージャー、暗号化設定ストア、OAuthマネージャー、Repositoryを組み立てる簡易DIコンテナです。
@@ -12,7 +16,7 @@
 
 `PostStorageManager` → `ApiSettingsStore` / `XOAuthManager` → `ClipRepository` の順で生成します。Room Databaseは保存先マネージャーが現在の保存先に対して開閉します。
 
-メディアグリッド用のThumbnail store、serial manager、専用ImageLoaderもここで1インスタンスずつ生成しますが、benchmark settings、metrics、counterなどの計測依存は生成せず、本番引数にも含めません。benchmark専用Activity・importer・frame計測は `app/src/benchmark` 側に隔離されています。
+メディアグリッド用の共有ImageLoaderとtargetless prefetch controllerもここで1インスタンスずつ生成します。benchmark settings、metrics、counterなどの計測依存は生成せず、本番引数にも含めません。benchmark専用Activity・importer・frame計測は `app/src/benchmark` 側に隔離されています。
 
 ## 関連ファイル
 

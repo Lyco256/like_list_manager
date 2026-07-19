@@ -1,5 +1,10 @@
 # `app/src/androidTest/java/com/lyco256/llm/MainActivityComposeTest.kt`
 
+## 2026-07-19 direct preview coverage
+
+- The grid fixture now lets the shared Coil loader read local image files directly; it does not pre-generate or hydrate custom thumbnail files.
+- The same tests cover multiple initial visible cells, activity recreation, filter/sort changes, slow drag, fast fling, immediate cell actions, placeholders, and final errors. Direct candidate unit tests cover mixed source ordering and cache identity.
+
 ## 2026-07-19 第5実装 integration coverage
 
 - The classified display-toggle fixture pre-generates the photo and video thumbnail files, then opens the media grid and waits for both cells to reach `Ready` without scrolling. The failed asset remains the mixed cache/non-cache error path.

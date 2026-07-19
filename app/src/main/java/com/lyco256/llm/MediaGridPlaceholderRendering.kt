@@ -5,8 +5,6 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import com.lyco256.llm.data.MediaGridThumbnailSource
-import com.lyco256.llm.data.MediaGridThumbnailState
 
 internal enum class MediaGridCellVisualState {
     Placeholder,
@@ -14,32 +12,16 @@ internal enum class MediaGridCellVisualState {
     Error,
 }
 
-/** Identifies the image model that the cell has acknowledged through AsyncImage.onSuccess. */
-internal data class MediaGridImageModelKey(
-    val source: MediaGridThumbnailSource,
-    val filePath: String,
-)
-
-internal fun mediaGridImageModelKey(
-    source: MediaGridThumbnailSource,
-    filePath: String,
-): MediaGridImageModelKey = MediaGridImageModelKey(source, filePath)
-
 internal fun mediaGridCellVisualState(
-    thumbnailState: MediaGridThumbnailState,
-    hasUsableSource: Boolean,
-    downloadFailed: Boolean,
-    currentImageModel: MediaGridImageModelKey?,
-    displayedImageModel: MediaGridImageModelKey?,
+    candidateCount: Int,
+    failedCandidateIndex: Int,
+    displayedCandidateIdentity: String?,
+    currentCandidateIdentity: String?,
 ): MediaGridCellVisualState {
-    if (thumbnailState is MediaGridThumbnailState.Failed || !hasUsableSource || downloadFailed) {
+    if (candidateCount == 0 || failedCandidateIndex >= candidateCount) {
         return MediaGridCellVisualState.Error
     }
-    return if (
-        thumbnailState is MediaGridThumbnailState.Ready &&
-        currentImageModel != null &&
-        currentImageModel == displayedImageModel
-    ) {
+    return if (currentCandidateIdentity != null && currentCandidateIdentity == displayedCandidateIdentity) {
         MediaGridCellVisualState.Image
     } else {
         MediaGridCellVisualState.Placeholder
