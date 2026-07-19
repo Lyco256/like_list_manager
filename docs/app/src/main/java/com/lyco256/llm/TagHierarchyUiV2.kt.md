@@ -150,6 +150,15 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - `ClassifiedMediaGridCell` shows `media_grid_like_count_<assetId>` only when `sort.baseOrder == ClassifiedSortBase.LikeCount` and the cell has a non-null like count.
 - The card view and the existing lightweight media source stay separate.
 
+## 2026-07-19 media-grid placeholder rendering
+
+- `ClassifiedMediaGridContent` no longer creates or shares a grid-wide thumbnail Brush. Viewport dispatch, source snapshots, coordinator scheduling, generation priority, wide preparation, and column changes remain unchanged.
+- `ClassifiedMediaGridCell` keeps one `MediaGridThumbnailSource` for the cell and derives a pure `MediaGridCellVisualState` of `Placeholder`, `Image`, or `Error`.
+- `Waiting` / `Generating`, `Ready` before the current `AsyncImage` model reports `onSuccess`, and a retry in progress render a cell-local static gradient. `drawWithCache` recreates the two-color Brush only when the cell size or theme colors change; its coordinates run from that cell's top-left to bottom-right.
+- The successful image model is keyed by the current source and Ready file path. A source/model change resets the cell to Placeholder, while a current-model `onError` clears success and continues the existing manager retry path.
+- `Failed`, unavailable media sources, and `downloadState == "failed"` render the theme's opaque single-color cell background and the existing error icon without a gradient. Image and error cells do not compose the placeholder layer. No shimmer, crossfade, infinite animation, border, spacing, or `SubcomposeAsyncImage` is used.
+- Placeholder layers expose `media_grid_placeholder_<assetId>` only while active; existing cell, error, selection, badge, dialog, and pointer-input tags remain unchanged.
+
 ## 2026-07-14 final media-grid morph adjustment（履歴: 現行経路では不使用）
 
 - Morph Header bands use one maximum-height node, clipped while Y and height interpolate from the start layout to the end layout. Changed titles crossfade with `1-progress` and `progress`; identical titles use one layer.
@@ -169,7 +178,7 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - A stopped viewport prepares bounded `+1` and `-1` Morph candidates. Scrolling does not update candidates, and a pinch is ignored while the LazyGrid is still scrolling.
 - Morph transaction state is separate from `MediaGridMorphOverlayMotion.progress`. Pointer movement updates only the stable motion holder read by overlay graphics layers; the parent, LazyGrid items, RenderModel, maps, and thumbnail requests are not rebuilt per pointer update.
 - The RenderModel is remembered by the immutable plan only and resolves entries by stable `asset:<assetId>` keys. Overlay composition is withheld until all planned visual keys are present.
-- Normal Media cells and headers have no placement/appearance animation. Their shared static gradient brush is created once per grid and reused by every cell.
+- Normal Media cells and headers have no placement/appearance animation. Placeholder gradients are static and cell-local; each cell caches its own size-dependent Brush only while its Placeholder state is active.
 - Normal anchor restoration runs only in `Idle`; Morph handoff alone performs the anchor `scrollToItem` and one required `scrollBy`, then hides the overlay and completes in one state transition.
 
 ## 2026-07 continuous media-grid morph foundation（履歴: 現行経路では不使用）

@@ -1,8 +1,12 @@
 package com.lyco256.llm
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.Composable
@@ -10,6 +14,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -184,6 +190,55 @@ class UiStateRenderingTest {
         )
 
         assertMediaGridGeometry(tagPrefix = "media_asset", assets = baseAssets, useEnhanced = true)
+    }
+
+    @Test
+    fun cellPlaceholderRenderingStaysIndependentInLightAndDarkThemes() {
+        var darkTheme by mutableStateOf(false)
+        composeRule.setContent {
+            MaterialTheme(colorScheme = if (darkTheme) darkColorScheme() else lightColorScheme()) {
+                Row {
+                    Box(
+                        Modifier
+                            .size(80.dp)
+                            .mediaGridPlaceholder(
+                                visualState = MediaGridCellVisualState.Placeholder,
+                                startColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 1f),
+                                endColor = MaterialTheme.colorScheme.surface.copy(alpha = 1f),
+                            )
+                            .testTag("placeholder_cell_a"),
+                    )
+                    Box(
+                        Modifier
+                            .size(80.dp)
+                            .mediaGridPlaceholder(
+                                visualState = MediaGridCellVisualState.Placeholder,
+                                startColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 1f),
+                                endColor = MaterialTheme.colorScheme.surface.copy(alpha = 1f),
+                            )
+                            .testTag("placeholder_cell_b"),
+                    )
+                    Box(
+                        Modifier
+                            .size(80.dp)
+                            .mediaGridPlaceholder(
+                                visualState = MediaGridCellVisualState.Image,
+                                startColor = Color.Red,
+                                endColor = Color.Blue,
+                            )
+                            .testTag("image_cell"),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("placeholder_cell_a").assertIsDisplayed()
+        composeRule.onNodeWithTag("placeholder_cell_b").assertIsDisplayed()
+        composeRule.runOnUiThread { darkTheme = true }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("placeholder_cell_a").assertIsDisplayed()
+        composeRule.onNodeWithTag("placeholder_cell_b").assertIsDisplayed()
+        composeRule.onNodeWithTag("image_cell").assertIsDisplayed()
     }
 
     @Test

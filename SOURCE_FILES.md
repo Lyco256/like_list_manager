@@ -159,6 +159,7 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/OcrUi.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/TagColorUi.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/MediaGridPlaceholderRendering.kt.md`
 - Classified tab card/grid switching is handled in `MainActivity.kt` and `TagHierarchyUiV2.kt`; the grid path is built from `ClassifiedMediaGridState` over the lightweight repository source, while the card path continues to use `uiState.classified`.
 
 ### Data・API
@@ -179,6 +180,7 @@ MainActivity / Compose UI
 
 - `docs/app/src/test/java/com/lyco256/llm/TagHierarchyTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/MediaGridMorphTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/MediaGridPlaceholderRenderingTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/UiStateRenderingTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/SearchFilterDatabaseIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LikeListDatabaseMigrationTest.kt.md`
@@ -267,7 +269,7 @@ MainActivity / Compose UI
 - `MediaGridMorphRenderModel` is created once per session plan, resolves Assets by stable key, and retains slot Assets, metadata, selection, header bands, and placeholder data through handoff. Progress updates only change interpolated Rects, layer alpha, and GPU transforms.
 - Ready thumbnail state is read without creating Thumbnail Manager work. Overlay rendering does not generate thumbnails, resolve URLs, inspect files, or decode images; Idle releases the model and overlay composition.
 - Target handoff keeps progress 1 visible through callback and new-grid layout, performs one anchor correction, then completes without a second post-handoff correction.
-- The old resize scale animation and normal `animateItem()` placement are removed; static per-cell placeholder gradients are shared from one grid brush while the single normal grid remains mounted below the overlay.
+- The old resize scale animation and normal `animateItem()` placement are removed; the retained morph documentation is historical and the current normal grid uses cell-local placeholder rendering from `MediaGridPlaceholderRendering.kt`.
 
 - `integrationTest` build typeは `com.lyco256.llm.test` と本番とは異なるDB、画像、Preferencesを使います。
 - テスト用Application containerは本番OAuth/X APIを無効化し、Repositoryテストだけが記録可能なFakeを注入します。
@@ -302,3 +304,10 @@ MainActivity / Compose UI
 - `MediaGridThumbnailManager.kt`, `MediaGridThumbnailStore.kt`, and the normal portions of `TagHierarchyUiV2.kt` contain the production grid path. `MediaGridMorphOverlay.kt` remains retained morph code and is not called by the current product path. None of these call benchmark metrics, counters, or Trace sections.
 - `MediaGridPerformanceMacrobenchmark.kt` runs identical five-iteration scroll and real two-pointer pinch scenarios.
 - `run-safe-macrobenchmark-check.cmd` is the only snapshot entry and generates `build/reports/media-grid-benchmark/latest-summary.md` after cleanup and production invariance checks.
+
+## 2026-07-19 第3実装 placeholder描画
+
+- グリッド共有Brushを廃止し、`MediaGridPlaceholderRendering.kt`の`MediaGridCellVisualState`でセルごとに`Placeholder` / `Image` / `Error`を判定する。
+- `Waiting` / `Generating` / 現在モデルの`onSuccess`前だけ、セル内の左上から右下までを覆う静的グラデーションを`drawWithCache`で描画する。Brushと色Listはセルサイズまたはテーマ色の変更時だけ作り直す。
+- 現在モデルの`onSuccess`後はPlaceholderレイヤーを完全に外し、モデル変更または`onError`ではPlaceholderへ戻す。Failed、画像元なし、download失敗は単色背景と既存エラーアイコンのみ。
+- viewport、coordinator、生成優先度、先読み、キャッシュ、依存関係、列数変更、Macrobenchmarkは変更しない。

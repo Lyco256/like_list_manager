@@ -22,6 +22,10 @@
 - `classifiedMediaGridShowsLikeHeadersAndLikeOverlaysWithoutBreakingBadgesOrErrors` covers LikeCount headers, top-left like overlays, and the null-likeCount no-overlay case.
 - The existing 4-column layout regression still checks the grid geometry and the empty-state path remains unchanged.
 
+## 2026-07-19 第3実装 placeholder rendering
+
+- `cellPlaceholderRenderingStaysIndependentInLightAndDarkThemes` composes two independent placeholder cells in both light and dark color schemes and verifies that an Image-state cell does not add the placeholder rendering modifier.
+
 ## 2026-07 media grid pinch / anchor follow-up
 
 - The large-dataset smoke test identifies the media cell nearest the visible grid center before each column-count change and verifies that same cell remains displayed after the grid is resized.
