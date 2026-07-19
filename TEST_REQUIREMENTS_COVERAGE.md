@@ -177,3 +177,19 @@
 | セル単位・静的・テーマ対応グラデーション | 実装済み | `MediaGridPlaceholderRendering.kt`、`drawWithCache`、ライト/ダークCompose確認 |
 | 高速fling、触れ直し、セル操作、選択、列数・filter・sort・詳細表示 | 既存回帰確認対象 | `MainActivityComposeTest`、`UiStateRenderingTest` |
 | Macrobenchmark | 未実行 | 今回の要件で対象外 |
+
+## 2026-07-19 メディアグリッド スクロール改善 第4実装
+
+| 対象 | 状態 | 証跡 |
+|---|---|---|
+| source登録前viewportの拒否後再送、空layout後の初回非空viewport | 実装・単体確認 | `MediaGridViewportDispatchTest.viewportRejectedBeforeSourceRegistrationCanBeResent`、`emptyInitialViewportDoesNotPreventFirstNonEmptyGeneration`、`TagHierarchyUiV2.kt` |
+| dispatch成功時だけのUI送信済み記録 | 実装 | `ClassifiedMediaGridContent` の`dispatchViewport()`成功条件付き更新 |
+| Idle / Dragging / Flingingの状態判定と変化時通知 | 実装 | `LazyGridState.interactionSource`、`isScrollInProgress`、`distinctUntilChanged()`、`MediaGridScrollOperationState` |
+| 操作中の表示中・隣接・wide新規生成抑制 | 実装・単体確認 | `draggingAndFlingingAllowOneNormalCompletionButDoNotStartTheNextCandidate`、`operationStartCancelsWideWithoutRecordingCompletion` |
+| 最新viewport保持、100ms Idle再開、候補優先順維持 | 実装・単体確認 | `latestViewportIsUsedAfterOperationStops`、managerの`IdleResumeReady`、既存優先順テスト |
+| 再ドラッグ、revision、dispose、foreground離脱による古い再開無効化 | 実装・単体確認 | `idleResumeIsCancelledByRedragRevisionChangeAndDispose`、coordinator token/job |
+| HolderObserved、表示エラー、生成完了経路の操作中抑制 | 実装・単体確認 | `holderObservedAndDisplayErrorDoNotRestartGenerationDuringOperation`、生成完了分岐 |
+| 無操作初回表示、カード→グリッド、drag/fling、停止後追従 | 既存Compose/実機回帰対象 | `MainActivityComposeTest.classifiedDisplayToggleSwitchesBetweenCardAndMediaGridAndSurvivesActivityRecreation`、`classifiedMediaGridSingleFlingKeepsLatestImageAndImmediateCellActionAfterFilter` |
+| placeholder、形式、範囲、列数変更、Macrobenchmark | 変更なし | `MediaGridPlaceholderRendering.kt`、`MediaGridThumbnailStore.kt`、既存列数テスト、Macrobenchmark source setを変更していない |
+
+検証順は第4実装要件に従い、隔離統合テストを先に実行し、その成功後に本番packageの安全上書きチェックを実行する。Macrobenchmarkは変更・実行しない。

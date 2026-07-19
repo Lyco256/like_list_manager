@@ -13,6 +13,13 @@
 - `UiStateRenderingTest.kt` and `data/RepositoryIntegrationTest.kt` also cover tweet selection, bulk tag draft/apply/discard behavior, and transaction-level tag replacement.
 - `MediaGridThumbnailManager.kt` keeps one ordered source snapshot and selects from the latest viewport after every serial generation, preferring the current scroll direction on ties. Wide preparation records cache identities so each source advances once, while visible cells and adjacent rows use bounded UI state. Generation validates the source snapshot before publishing Ready; display failures invalidate and retry once.
 
+## 2026-07-19 media-grid scroll priority 第4実装
+
+- `TagHierarchyUiV2.kt` now builds the ordered media source list, calls `updateSourceSnapshot()`, and starts the viewport observer in one ordered coroutine path. Empty initial layouts are ignored until the first layout containing a media cell; the UI records a viewport as sent only after `dispatchViewport()` returns `true`.
+- `TagHierarchyUiV2.kt` derives `Dragging` from the grid `interactionSource`, `Flinging` from `isScrollInProgress` when not dragging, and otherwise `Idle`; only state transitions are sent to the manager.
+- `MediaGridThumbnailManager.kt` suppresses new visible/adjacent/wide generation during Dragging and Flinging, cancels active wide preparation at operation start, permits an in-flight normal generation to finish, and resumes from the latest visible viewport after 100ms of token-valid Idle.
+- The source list, viewport mailbox, operation state, delayed resume token, holder observations, display results, and generation completion remain serialized through the existing coordinator. Placeholder rendering, thumbnail format/identity, candidate ranges/priority, column changes, and Macrobenchmark code are unchanged.
+
 # Source Files Guide
 
 ## 2026-07 viewport dispatch

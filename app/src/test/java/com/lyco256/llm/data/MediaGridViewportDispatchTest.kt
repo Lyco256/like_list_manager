@@ -18,6 +18,63 @@ import java.io.File
 
 class MediaGridViewportDispatchTest {
     @Test
+    fun viewportRejectedBeforeSourceRegistrationCanBeResent() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val gateway = BlockingGateway()
+        val manager = MediaGridThumbnailManager(gateway, scope)
+        try {
+            assertFalse(manager.dispatchViewport(viewport(1L, listOf(1L))))
+            manager.updateSourceSnapshot(1L, listOf(source(1L)))
+            assertTrue(manager.dispatchViewport(viewport(1L, listOf(1L))))
+            gateway.firstStarted.await()
+        } finally {
+            gateway.releaseFirst.complete(Unit)
+            gateway.releaseSubsequent.complete(Unit)
+            manager.disposeViewport()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun emptyInitialViewportDoesNotPreventFirstNonEmptyGeneration() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val gateway = BlockingGateway()
+        val manager = MediaGridThumbnailManager(gateway, scope)
+        try {
+            manager.updateSourceSnapshot(1L, listOf(source(1L)))
+            assertTrue(manager.dispatchViewport(viewport(1L, emptyList())))
+            assertTrue(manager.dispatchViewport(viewport(1L, listOf(1L))))
+            gateway.firstStarted.await()
+            assertEquals(listOf(1L), gateway.calls())
+        } finally {
+            gateway.releaseFirst.complete(Unit)
+            gateway.releaseSubsequent.complete(Unit)
+            manager.disposeViewport()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun sameAcceptedViewportIsNotAppliedTwice() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val gateway = BlockingGateway()
+        val manager = MediaGridThumbnailManager(gateway, scope)
+        try {
+            manager.updateSourceSnapshot(1L, listOf(source(1L)))
+            val snapshot = viewport(1L, listOf(1L))
+            assertTrue(manager.dispatchViewport(snapshot))
+            assertFalse(manager.dispatchViewport(snapshot))
+            gateway.firstStarted.await()
+            assertEquals(listOf(1L), gateway.calls())
+        } finally {
+            gateway.releaseFirst.complete(Unit)
+            gateway.releaseSubsequent.complete(Unit)
+            manager.disposeViewport()
+            scope.cancel()
+        }
+    }
+
+    @Test
     fun pixelOnlyMovementDoesNotChangeViewportStructure() {
         val first = viewport(20L, listOf(7L), centerDistance = 2)
         val pixelOnly = viewport(20L, listOf(7L), centerDistance = 99)
@@ -84,6 +141,224 @@ class MediaGridViewportDispatchTest {
             assertEquals(4L, gateway.calls()[1])
         } finally {
             gateway.releaseSubsequent.complete(Unit)
+            manager.disposeViewport()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun draggingAndFlingingAllowOneNormalCompletionButDoNotStartTheNextCandidate() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val gateway = BlockingGateway()
+        val manager = MediaGridThumbnailManager(gateway, scope)
+        val state = manager.state(1L, source(1L))
+        try {
+            manager.updateSourceSnapshot(1L, listOf(source(1L), source(2L)))
+            assertTrue(manager.dispatchViewport(viewport(1L, listOf(1L))))
+            gateway.firstStarted.await()
+
+            manager.setScrollOperationState(MediaGridScrollOperationState.Dragging)
+            delay(20)
+            gateway.releaseFirst.complete(Unit)
+            withTimeout(2_000) {
+                while (state.value !is MediaGridThumbnailState.Ready) delay(5)
+            }
+            delay(150)
+            assertEquals(listOf(1L), gateway.calls())
+
+            manager.setScrollOperationState(MediaGridScrollOperationState.Flinging)
+            delay(20)
+            assertEquals(listOf(1L), gateway.calls())
+            manager.setScrollOperationState(MediaGridScrollOperationState.Idle)
+            withTimeout(2_000) {
+                while (gateway.calls().size < 2) delay(5)
+            }
+            assertEquals(listOf(1L, 2L), gateway.calls())
+        } finally {
+            gateway.releaseSubsequent.complete(Unit)
+            manager.disposeViewport()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun operationStartCancelsWideWithoutRecordingCompletion() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val gateway = BlockingGateway()
+        val manager = MediaGridThumbnailManager(gateway, scope)
+        val sources = listOf(
+            source(1L),
+            source(2L, downloadState = "failed"),
+            source(3L, downloadState = "failed"),
+            source(4L, downloadState = "failed"),
+            source(5L),
+        )
+        try {
+            manager.updateSourceSnapshot(1L, sources)
+            assertTrue(manager.dispatchViewport(viewport(1L, listOf(3L))))
+            gateway.firstStarted.await()
+            assertEquals(listOf(false), gateway.allowRemoteCalls())
+
+            manager.setScrollOperationState(MediaGridScrollOperationState.Dragging)
+            delay(30)
+            assertEquals(listOf(5L), gateway.calls())
+            manager.setScrollOperationState(MediaGridScrollOperationState.Idle)
+            withTimeout(2_000) {
+                while (gateway.calls().size < 2) delay(5)
+            }
+            assertEquals(listOf(5L, 5L), gateway.calls())
+        } finally {
+            gateway.releaseFirst.complete(Unit)
+            gateway.releaseSubsequent.complete(Unit)
+            manager.disposeViewport()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun latestViewportIsUsedAfterOperationStops() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val gateway = BlockingGateway()
+        val manager = MediaGridThumbnailManager(gateway, scope)
+        try {
+            manager.setScrollOperationState(MediaGridScrollOperationState.Dragging)
+            manager.updateSourceSnapshot(1L, (1L..3L).map(::source))
+            assertTrue(manager.dispatchViewport(viewport(1L, listOf(1L))))
+            assertTrue(manager.dispatchViewport(viewport(1L, listOf(3L))))
+            delay(40)
+            assertTrue(gateway.calls().isEmpty())
+
+            manager.setScrollOperationState(MediaGridScrollOperationState.Idle)
+            withTimeout(2_000) {
+                while (gateway.calls().isEmpty()) delay(5)
+            }
+            assertEquals(listOf(3L), gateway.calls())
+        } finally {
+            gateway.releaseFirst.complete(Unit)
+            gateway.releaseSubsequent.complete(Unit)
+            manager.disposeViewport()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun idleResumeIsCancelledByRedragRevisionChangeAndDispose() = runBlocking {
+        fun newManager(): Triple<MediaGridThumbnailManager, BlockingGateway, CoroutineScope> {
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            val gateway = BlockingGateway()
+            return Triple(MediaGridThumbnailManager(gateway, scope), gateway, scope)
+        }
+
+        run {
+            val (manager, gateway, scope) = newManager()
+            try {
+                manager.setScrollOperationState(MediaGridScrollOperationState.Dragging)
+                manager.updateSourceSnapshot(1L, listOf(source(1L)))
+                assertTrue(manager.dispatchViewport(viewport(1L, listOf(1L))))
+                manager.setScrollOperationState(MediaGridScrollOperationState.Idle)
+                delay(30)
+                manager.setScrollOperationState(MediaGridScrollOperationState.Dragging)
+                delay(130)
+                assertTrue(gateway.calls().isEmpty())
+                manager.setScrollOperationState(MediaGridScrollOperationState.Idle)
+                withTimeout(2_000) { while (gateway.calls().isEmpty()) delay(5) }
+            } finally {
+                gateway.releaseFirst.complete(Unit)
+                gateway.releaseSubsequent.complete(Unit)
+                manager.disposeViewport()
+                scope.cancel()
+            }
+        }
+
+        run {
+            val (manager, gateway, scope) = newManager()
+            try {
+                manager.setScrollOperationState(MediaGridScrollOperationState.Dragging)
+                manager.updateSourceSnapshot(1L, listOf(source(1L)))
+                assertTrue(manager.dispatchViewport(viewport(1L, listOf(1L))))
+                manager.setScrollOperationState(MediaGridScrollOperationState.Idle)
+                delay(30)
+                manager.updateSourceSnapshot(2L, listOf(source(2L)))
+                delay(130)
+                assertTrue(gateway.calls().isEmpty())
+            } finally {
+                gateway.releaseFirst.complete(Unit)
+                gateway.releaseSubsequent.complete(Unit)
+                manager.disposeViewport()
+                scope.cancel()
+            }
+        }
+
+        run {
+            val (manager, gateway, scope) = newManager()
+            try {
+                manager.setScrollOperationState(MediaGridScrollOperationState.Dragging)
+                manager.updateSourceSnapshot(1L, listOf(source(1L)))
+                assertTrue(manager.dispatchViewport(viewport(1L, listOf(1L))))
+                manager.setScrollOperationState(MediaGridScrollOperationState.Idle)
+                delay(30)
+                manager.disposeViewport()
+                delay(130)
+                assertTrue(gateway.calls().isEmpty())
+            } finally {
+                gateway.releaseFirst.complete(Unit)
+                gateway.releaseSubsequent.complete(Unit)
+                scope.cancel()
+            }
+        }
+
+        run {
+            val (manager, gateway, scope) = newManager()
+            try {
+                manager.setScrollOperationState(MediaGridScrollOperationState.Dragging)
+                manager.updateSourceSnapshot(1L, listOf(source(1L)))
+                assertTrue(manager.dispatchViewport(viewport(1L, listOf(1L))))
+                manager.setScrollOperationState(MediaGridScrollOperationState.Idle)
+                delay(30)
+                manager.setForeground(false)
+                delay(130)
+                assertTrue(gateway.calls().isEmpty())
+                manager.setForeground(true)
+                withTimeout(2_000) { while (gateway.calls().isEmpty()) delay(5) }
+            } finally {
+                gateway.releaseFirst.complete(Unit)
+                gateway.releaseSubsequent.complete(Unit)
+                manager.disposeViewport()
+                scope.cancel()
+            }
+        }
+    }
+
+    @Test
+    fun holderObservedAndDisplayErrorDoNotRestartGenerationDuringOperation() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val gateway = ScriptedGateway(listOf(true, true))
+        val manager = MediaGridThumbnailManager(gateway, scope)
+        val source = source(1L, localPath = null, previewUrl = "https://example.test/image.jpg")
+        val state = manager.state(1L, source)
+        try {
+            manager.setScrollOperationState(MediaGridScrollOperationState.Dragging)
+            manager.updateSourceSnapshot(1L, listOf(source))
+            assertTrue(manager.dispatchViewport(viewport(1L, listOf(1L))))
+            delay(50)
+            assertTrue(gateway.calls().isEmpty())
+
+            manager.setScrollOperationState(MediaGridScrollOperationState.Idle)
+            withTimeout(2_000) {
+                while (state.value !is MediaGridThumbnailState.Ready) delay(5)
+            }
+            manager.setScrollOperationState(MediaGridScrollOperationState.Dragging)
+            delay(20)
+            manager.onDisplayError(source, File("/tmp/failed-display.jpg"))
+            delay(150)
+            assertEquals(listOf(1L), gateway.calls())
+
+            manager.setScrollOperationState(MediaGridScrollOperationState.Idle)
+            withTimeout(2_000) {
+                while (gateway.calls().size < 2) delay(5)
+            }
+            assertEquals(listOf(1L, 1L), gateway.calls())
+        } finally {
             manager.disposeViewport()
             scope.cancel()
         }
@@ -247,10 +522,12 @@ class MediaGridViewportDispatchTest {
         val releaseFirst = CompletableDeferred<Unit>()
         val releaseSubsequent = CompletableDeferred<Unit>()
         private val startedCalls = mutableListOf<Long>()
+        private val startedAllowRemote = mutableListOf<Boolean>()
 
         override suspend fun getOrCreate(source: MediaGridThumbnailSource, allowRemote: Boolean): File {
             val callNumber = synchronized(startedCalls) {
                 startedCalls += source.assetId
+                startedAllowRemote += allowRemote
                 startedCalls.size
             }
             if (callNumber == 1) {
@@ -265,6 +542,8 @@ class MediaGridViewportDispatchTest {
         override fun invalidate(file: File) = Unit
 
         fun calls(): List<Long> = synchronized(startedCalls) { startedCalls.toList() }
+
+        fun allowRemoteCalls(): List<Boolean> = synchronized(startedCalls) { startedAllowRemote.toList() }
     }
 
     private class ScriptedGateway(

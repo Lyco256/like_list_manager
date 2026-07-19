@@ -30,10 +30,18 @@ private data class ActiveGeneration(
     val holderGeneration: Long?,
 )
 
+enum class MediaGridScrollOperationState {
+    Idle,
+    Dragging,
+    Flinging,
+}
+
 private sealed interface CoordinatorEvent {
     data class SourceUpdated(val revision: Long, val sources: List<MediaGridThumbnailSource>) : CoordinatorEvent
     data object ViewportAvailable : CoordinatorEvent
     data class ForegroundChanged(val active: Boolean) : CoordinatorEvent
+    data class ScrollOperationChanged(val state: MediaGridScrollOperationState) : CoordinatorEvent
+    data class IdleResumeReady(val token: Long) : CoordinatorEvent
     data class HolderObserved(val assetId: Long, val source: MediaGridThumbnailSource) : CoordinatorEvent
     data class DisplayError(val source: MediaGridThumbnailSource, val file: File) : CoordinatorEvent
     data class DisplaySuccess(val source: MediaGridThumbnailSource) : CoordinatorEvent
@@ -92,6 +100,10 @@ class MediaGridThumbnailManager(
     private var direction = 0
     private var centerIndex = 0f
     private var foreground = true
+    private var scrollOperationState = MediaGridScrollOperationState.Idle
+    private var idleResumePending = false
+    private var idleResumeToken = 0L
+    private var idleResumeJob: Job? = null
     private var activeGeneration: ActiveGeneration? = null
     private var generationJob: Job? = null
     private var nextGenerationToken = 0L
@@ -134,6 +146,10 @@ class MediaGridThumbnailManager(
         events.trySend(CoordinatorEvent.ForegroundChanged(active))
     }
 
+    fun setScrollOperationState(state: MediaGridScrollOperationState) {
+        events.trySend(CoordinatorEvent.ScrollOperationChanged(state))
+    }
+
     /** Returns a stable UI holder without waiting for viewport planning or candidate selection. */
     fun state(assetId: Long, source: MediaGridThumbnailSource): StateFlow<MediaGridThumbnailState> {
         var created = false
@@ -167,8 +183,14 @@ class MediaGridThumbnailManager(
             CoordinatorEvent.ViewportAvailable -> handleViewportAvailable()
             is CoordinatorEvent.ForegroundChanged -> {
                 foreground = event.active
-                if (foreground && activeGeneration == null) selectAndStartNext()
+                if (!foreground) {
+                    cancelIdleResume()
+                } else if (activeGeneration == null) {
+                    selectAndStartNext()
+                }
             }
+            is CoordinatorEvent.ScrollOperationChanged -> handleScrollOperationChanged(event.state)
+            is CoordinatorEvent.IdleResumeReady -> handleIdleResumeReady(event.token)
             is CoordinatorEvent.HolderObserved -> handleHolderObserved(event)
             is CoordinatorEvent.DisplayError -> handleDisplayError(event)
             is CoordinatorEvent.DisplaySuccess -> displayRetries.remove(cacheIdentity(event.source))
@@ -181,6 +203,7 @@ class MediaGridThumbnailManager(
         if (disposedFlag.get() || latestSourceRevision.get() != event.revision) return
         if (sourceRevision == event.revision && sources == event.sources) return
 
+        cancelIdleResume()
         cancelActiveGeneration()
         sourceRevision = event.revision
         sources = event.sources
@@ -251,6 +274,34 @@ class MediaGridThumbnailManager(
         if (startCandidate) selectAndStartNext()
     }
 
+    private fun handleScrollOperationChanged(next: MediaGridScrollOperationState) {
+        if (scrollOperationState == next) return
+        scrollOperationState = next
+        if (next == MediaGridScrollOperationState.Idle) {
+            idleResumeJob?.cancel()
+            idleResumeJob = null
+            idleResumePending = true
+            val token = ++idleResumeToken
+            idleResumeJob = scope.launch {
+                delay(100)
+                events.trySend(CoordinatorEvent.IdleResumeReady(token))
+            }
+        } else {
+            cancelIdleResume()
+            if (activeGeneration?.wide == true) cancelActiveGeneration()
+        }
+    }
+
+    private fun handleIdleResumeReady(token: Long) {
+        if (token != idleResumeToken || scrollOperationState != MediaGridScrollOperationState.Idle ||
+            !foreground || disposedFlag.get()
+        ) return
+        idleResumeJob = null
+        idleResumePending = false
+        takeLatestViewport()?.let { snapshot -> applyViewport(snapshot, startCandidate = false) }
+        selectAndStartNext()
+    }
+
     private fun handleHolderObserved(event: CoordinatorEvent.HolderObserved) {
         if (disposedFlag.get() || !viewportActiveFlag.get()) return
         val holder = holders[event.assetId] ?: return
@@ -276,7 +327,7 @@ class MediaGridThumbnailManager(
         displayRetries[key] = 1
         completedKeys.remove(key)
         holder.value = MediaGridThumbnailState.Waiting
-        if (foreground && activeGeneration == null) selectAndStartNext()
+        if (canStartGeneration()) selectAndStartNext()
     }
 
     private fun handleGenerationFinished(event: CoordinatorEvent.GenerationFinished) {
@@ -308,14 +359,22 @@ class MediaGridThumbnailManager(
         // A viewport that arrived while generation was active is applied once immediately before
         // selecting the next candidate. No per-frame selection occurs during generation.
         takeLatestViewport()?.let { snapshot -> applyViewport(snapshot, startCandidate = false) }
-        selectAndStartNext()
+        if (canStartGeneration()) selectAndStartNext()
     }
 
     private fun handleDispose() {
+        cancelIdleResume()
         cancelActiveGeneration()
         currentViewport = null
         first = 0
         last = -1
+    }
+
+    private fun cancelIdleResume() {
+        idleResumeToken++
+        idleResumePending = false
+        idleResumeJob?.cancel()
+        idleResumeJob = null
     }
 
     private fun cancelActiveGeneration() {
@@ -325,10 +384,15 @@ class MediaGridThumbnailManager(
     }
 
     private fun selectAndStartNext() {
-        if (disposedFlag.get() || !viewportActiveFlag.get() || !foreground || activeGeneration != null) return
+        if (!canStartGeneration()) return
         val candidate = selectNextCandidate() ?: return
         startCandidate(candidate)
     }
+
+    private fun canStartGeneration(): Boolean =
+        !disposedFlag.get() && viewportActiveFlag.get() && foreground &&
+            scrollOperationState == MediaGridScrollOperationState.Idle &&
+            !idleResumePending && activeGeneration == null
 
     private fun selectNextCandidate(): ThumbnailCandidate? {
         val snapshot = currentViewport ?: return null

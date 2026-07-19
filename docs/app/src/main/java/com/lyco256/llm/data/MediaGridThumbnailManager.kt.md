@@ -10,4 +10,12 @@
 - 表示中、前後1行、wide preparationは既存の範囲と優先順を維持し、各範囲を直接走査して候補を選ぶ。生成は常に1件直列。
 - 画像形式、256px JPEG quality 60、placeholder、保存先、display failureの1回再試行、foreground pauseは変更していない。
 
+## 2026-07-19 メディアグリッド スクロール改善 第4実装
+
+- `MediaGridScrollOperationState` は `Idle` / `Dragging` / `Flinging` を持ち、操作状態、source、viewport、foreground、holder、表示結果、生成完了を既存の単一直列coordinatorへeventとして渡す。UIは状態変化時だけ通知し、pixel単位のviewport更新を操作状態eventへ変換しない。
+- `Dragging` / `Flinging` 中は最新viewportだけをmailboxへ保持し、表示中・前後1行・wide preparationの新規生成を開始しない。操作開始時のwide生成だけはキャンセルし、通常生成1件の完了結果は反映するが、次候補へ連鎖しない。
+- `Idle`への遷移では100msのtoken付き再開eventを予約する。再ドラッグ、source revision変更、dispose、foreground離脱はtokenとjobを無効化し、古い再開eventを無視する。再開時は最新viewportを適用してから、既存の表示中→前後1行→wideの優先順で選択する。
+- `updateSourceSnapshot()` と `dispatchViewport()` はsource revisionをatomicに検査し、未登録・古いrevision・dispose後のviewportを拒否する。生成・再開の開始条件は常に`Idle`、foreground、再開待機完了、生成中なしを共通判定する。
+- 画像形式、256px JPEG quality 60、placeholder、保存先、キャッシュidentity、通常時の同時生成数1件、候補範囲・優先順は変更していない。
+
 `app/src/main/java/com/lyco256/llm/data/MediaGridThumbnailManager.kt`
