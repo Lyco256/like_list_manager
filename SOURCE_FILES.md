@@ -18,6 +18,7 @@
 - `TagHierarchyUiV2.kt` now builds the ordered media source list, calls `updateSourceSnapshot()`, and starts the viewport observer in one ordered coroutine path. Empty initial layouts are ignored until the first layout containing a media cell; the UI records a viewport as sent only after `dispatchViewport()` returns `true`.
 - `TagHierarchyUiV2.kt` derives `Dragging` from the grid `interactionSource`, `Flinging` from `isScrollInProgress` when not dragging, and otherwise `Idle`; only state transitions are sent to the manager.
 - `MediaGridThumbnailManager.kt` suppresses new visible/adjacent/wide generation during Dragging and Flinging, cancels active wide preparation at operation start, permits an in-flight normal generation to finish, and resumes from the latest visible viewport after 100ms of token-valid Idle.
+- 第5実装では`MediaGridThumbnailStore.kt`のcanonical cache keyと`findCached()`を追加し、`MediaGridThumbnailManager.kt`がIdle後に表示中・前後1行を単一IO jobで一括確認する。ヒットは一件ずつgenerationへ渡さずReadyへ反映し、missだけを既存の表示中→隣接→wide順へ戻す。確認結果はrevision・viewport token・source identityで検証し、操作開始・revision・foreground離脱・dispose時の古い結果を破棄する。
 - The source list, viewport mailbox, operation state, delayed resume token, holder observations, display results, and generation completion remain serialized through the existing coordinator. Placeholder rendering, thumbnail format/identity, candidate ranges/priority, column changes, and Macrobenchmark code are unchanged.
 
 # Source Files Guide

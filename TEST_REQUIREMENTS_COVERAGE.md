@@ -178,6 +178,18 @@
 | 高速fling、触れ直し、セル操作、選択、列数・filter・sort・詳細表示 | 既存回帰確認対象 | `MainActivityComposeTest`、`UiStateRenderingTest` |
 | Macrobenchmark | 未実行 | 今回の要件で対象外 |
 
+## 2026-07-19 第5実装: viewport cache hydration
+
+| Requirement | Status | Evidence |
+|---|---|---|
+| canonical key shared by generation and lookup; local/preview/remote source paths | Implemented | `MediaGridThumbnailStore.kt`, `MediaGridThumbnailStoreKeyTest.kt` |
+| no generation/network/decode/resize/output creation during cache check | Implemented | `findCached()`, cache hydration unit tests |
+| one IO job/result event; visible and adjacent hits restored together | Implemented | `MediaGridThumbnailManager.kt`, `MediaGridViewportDispatchTest` |
+| miss-only generation and same-revision miss memoization | Implemented | `MediaGridViewportDispatchTest` |
+| Dragging/Flinging/revision/foreground/dispose stale-result cancellation | Implemented | manager cancellation guards and unit coverage |
+| multiple cached cells, mixed cache/non-cache, recreation/filter/sort/fast fling/retouch | Implemented | `MainActivityComposeTest.kt` |
+| Macrobenchmark unchanged and not run | Unchanged | benchmark source set untouched |
+
 ## 2026-07-19 メディアグリッド スクロール改善 第4実装
 
 | 対象 | 状態 | 証跡 |
