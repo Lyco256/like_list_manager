@@ -4,7 +4,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -30,6 +32,24 @@ private data class ActiveGeneration(
     val holderGeneration: Long?,
 )
 
+private data class CacheHydrationCandidate(
+    val source: MediaGridThumbnailSource,
+    val cacheKey: String,
+)
+
+private data class ActiveCacheHydration(
+    val token: Long,
+    val sourceRevision: Long,
+    val viewportToken: Long,
+    val candidates: List<CacheHydrationCandidate>,
+)
+
+private data class CacheHydrationHit(
+    val source: MediaGridThumbnailSource,
+    val cacheKey: String,
+    val file: File,
+)
+
 enum class MediaGridScrollOperationState {
     Idle,
     Dragging,
@@ -52,6 +72,13 @@ private sealed interface CoordinatorEvent {
         val wide: Boolean,
         val holderGeneration: Long?,
         val result: Result<File>,
+    ) : CoordinatorEvent
+    data class CacheHydrationFinished(
+        val token: Long,
+        val sourceRevision: Long,
+        val viewportToken: Long,
+        val hits: List<CacheHydrationHit>,
+        val misses: List<String>,
     ) : CoordinatorEvent
     data object Dispose : CoordinatorEvent
 }
@@ -107,6 +134,11 @@ class MediaGridThumbnailManager(
     private var activeGeneration: ActiveGeneration? = null
     private var generationJob: Job? = null
     private var nextGenerationToken = 0L
+    private val cacheMisses = mutableSetOf<String>()
+    private var viewportToken = 0L
+    private var activeCacheHydration: ActiveCacheHydration? = null
+    private var cacheHydrationJob: Job? = null
+    private var nextCacheHydrationToken = 0L
 
     fun updateSourceSnapshot(revision: Long, ordered: List<MediaGridThumbnailSource>) {
         val previousRevision = latestSourceRevision.getAndSet(revision)
@@ -185,6 +217,7 @@ class MediaGridThumbnailManager(
                 foreground = event.active
                 if (!foreground) {
                     cancelIdleResume()
+                    cancelCacheHydration()
                 } else if (activeGeneration == null) {
                     selectAndStartNext()
                 }
@@ -195,6 +228,7 @@ class MediaGridThumbnailManager(
             is CoordinatorEvent.DisplayError -> handleDisplayError(event)
             is CoordinatorEvent.DisplaySuccess -> displayRetries.remove(cacheIdentity(event.source))
             is CoordinatorEvent.GenerationFinished -> handleGenerationFinished(event)
+            is CoordinatorEvent.CacheHydrationFinished -> handleCacheHydrationFinished(event)
             CoordinatorEvent.Dispose -> handleDispose()
         }
     }
@@ -205,6 +239,10 @@ class MediaGridThumbnailManager(
 
         cancelIdleResume()
         cancelActiveGeneration()
+        cancelCacheHydration()
+        cacheMisses.clear()
+        completedKeys.clear()
+        displayRetries.clear()
         sourceRevision = event.revision
         sources = event.sources
         sourceByAssetId.clear()
@@ -270,6 +308,8 @@ class MediaGridThumbnailManager(
             else -> 0
         }
         currentViewport = snapshot
+        viewportToken++
+        cancelCacheHydration()
         pruneHolders()
         if (startCandidate) selectAndStartNext()
     }
@@ -288,6 +328,7 @@ class MediaGridThumbnailManager(
             }
         } else {
             cancelIdleResume()
+            cancelCacheHydration()
             if (activeGeneration?.wide == true) cancelActiveGeneration()
         }
     }
@@ -326,8 +367,9 @@ class MediaGridThumbnailManager(
         }
         displayRetries[key] = 1
         completedKeys.remove(key)
+        cacheMisses.remove(key)
         holder.value = MediaGridThumbnailState.Waiting
-        if (canStartGeneration()) selectAndStartNext()
+        if (canStartScheduler()) selectAndStartNext()
     }
 
     private fun handleGenerationFinished(event: CoordinatorEvent.GenerationFinished) {
@@ -340,7 +382,7 @@ class MediaGridThumbnailManager(
         generationJob = null
         if (event.wide) {
             // Wide preparation is cache-only. Record failures too to preserve the existing range pacing.
-            completedKeys += cacheIdentity(event.source)
+            completedKeys += cacheIdentity(event.source, allowRemote = false)
         } else {
             val current = sourceByAssetId[event.source.assetId]
             val holderGeneration = holderGenerations[event.source.assetId]
@@ -348,7 +390,8 @@ class MediaGridThumbnailManager(
             if (current == event.source && holderGeneration == event.holderGeneration && holder != null) {
                 event.result.fold(
                     onSuccess = {
-                        completedKeys += cacheIdentity(event.source)
+                        completedKeys += cacheIdentity(event.source, allowRemote = true)
+                        cacheMisses.remove(cacheIdentity(event.source, allowRemote = true))
                         holder.value = MediaGridThumbnailState.Ready(it)
                     },
                     onFailure = { holder.value = MediaGridThumbnailState.Failed },
@@ -359,12 +402,40 @@ class MediaGridThumbnailManager(
         // A viewport that arrived while generation was active is applied once immediately before
         // selecting the next candidate. No per-frame selection occurs during generation.
         takeLatestViewport()?.let { snapshot -> applyViewport(snapshot, startCandidate = false) }
-        if (canStartGeneration()) selectAndStartNext()
+        if (canStartScheduler()) selectAndStartNext()
+    }
+
+    private fun handleCacheHydrationFinished(event: CoordinatorEvent.CacheHydrationFinished) {
+        val active = activeCacheHydration
+        if (active == null || active.token != event.token || active.sourceRevision != event.sourceRevision ||
+            active.viewportToken != event.viewportToken || sourceRevision != event.sourceRevision ||
+            latestSourceRevision.get() != event.sourceRevision || !foreground ||
+            scrollOperationState != MediaGridScrollOperationState.Idle || disposedFlag.get()
+        ) return
+
+        activeCacheHydration = null
+        cacheHydrationJob = null
+        cacheMisses += event.misses
+        val filesByKey = event.hits.associateBy { it.cacheKey }
+        for (candidate in active.candidates) {
+            val hit = filesByKey[candidate.cacheKey] ?: continue
+            if (hit.source != candidate.source) continue
+            val file = hit.file
+            if (!isCurrentSource(candidate.source)) continue
+            val holder = ensureHolder(candidate.source)
+            if (holder.value !is MediaGridThumbnailState.Waiting) continue
+            completedKeys += candidate.cacheKey
+            cacheMisses.remove(candidate.cacheKey)
+            holder.value = MediaGridThumbnailState.Ready(file)
+        }
+        selectAndStartNext()
     }
 
     private fun handleDispose() {
         cancelIdleResume()
         cancelActiveGeneration()
+        cancelCacheHydration()
+        cacheMisses.clear()
         currentViewport = null
         first = 0
         last = -1
@@ -383,16 +454,93 @@ class MediaGridThumbnailManager(
         generationJob = null
     }
 
+    private fun cancelCacheHydration() {
+        activeCacheHydration = null
+        cacheHydrationJob?.cancel()
+        cacheHydrationJob = null
+    }
+
     private fun selectAndStartNext() {
+        if (!canStartScheduler()) return
+        if (startCacheHydrationIfNeeded()) return
         if (!canStartGeneration()) return
         val candidate = selectNextCandidate() ?: return
         startCandidate(candidate)
     }
 
-    private fun canStartGeneration(): Boolean =
+    private fun startCacheHydrationIfNeeded(): Boolean {
+        if (activeCacheHydration != null || cacheHydrationJob != null) return true
+        val revision = sourceRevision ?: return false
+        val candidates = selectCacheHydrationCandidates()
+        if (candidates.isEmpty()) return false
+        val active = ActiveCacheHydration(
+            token = ++nextCacheHydrationToken,
+            sourceRevision = revision,
+            viewportToken = viewportToken,
+            candidates = candidates,
+        )
+        activeCacheHydration = active
+        cacheHydrationJob = scope.launch(Dispatchers.IO) {
+            val hits = mutableListOf<CacheHydrationHit>()
+            val misses = LinkedHashSet<String>()
+            for (candidate in active.candidates) {
+                currentCoroutineContext().ensureActive()
+                val file = store.findCached(candidate.source, allowRemote = true)
+                if (file != null) hits += CacheHydrationHit(candidate.source, candidate.cacheKey, file)
+                else misses += candidate.cacheKey
+            }
+            currentCoroutineContext().ensureActive()
+            events.trySend(
+                CoordinatorEvent.CacheHydrationFinished(
+                    token = active.token,
+                    sourceRevision = active.sourceRevision,
+                    viewportToken = active.viewportToken,
+                    hits = hits,
+                    misses = misses.toList(),
+                ),
+            )
+        }
+        return true
+    }
+
+    private fun selectCacheHydrationCandidates(): List<CacheHydrationCandidate> {
+        val snapshot = currentViewport ?: return emptyList()
+        if (last < first) return emptyList()
+        val candidates = LinkedHashMap<String, MediaGridThumbnailSource>()
+        for (item in snapshot.items) {
+            val source = sourceByAssetId[item.assetId]
+                ?.takeIf { sourceIndex[item.assetId] == item.sourceIndex }
+                ?: continue
+            addCacheHydrationCandidate(candidates, source)
+        }
+        val adjacentStart = maxOf(0, first - columns)
+        val adjacentEnd = minOf(sources.lastIndex, last + columns)
+        val adjacentIndices = (adjacentStart..adjacentEnd)
+            .filter { it !in first..last && !isVisibleIndex(snapshot, it) }
+            .sortedWith(compareBy<Int> { abs(it - centerIndex) }.thenBy {
+                if (direction > 0) -it else it
+            })
+        for (index in adjacentIndices) addCacheHydrationCandidate(candidates, sources[index])
+        return candidates.map { (key, source) -> CacheHydrationCandidate(source, key) }
+    }
+
+    private fun addCacheHydrationCandidate(
+        candidates: LinkedHashMap<String, MediaGridThumbnailSource>,
+        source: MediaGridThumbnailSource,
+    ) {
+        if (!isWaiting(source)) return
+        val key = cacheIdentityOrNull(source, allowRemote = true) ?: return
+        if (key in completedKeys || key in cacheMisses) return
+        candidates.putIfAbsent(key, source)
+    }
+
+    private fun canStartScheduler(): Boolean =
         !disposedFlag.get() && viewportActiveFlag.get() && foreground &&
             scrollOperationState == MediaGridScrollOperationState.Idle &&
-            !idleResumePending && activeGeneration == null
+            !idleResumePending && activeGeneration == null && currentViewport != null
+
+    private fun canStartGeneration(): Boolean = canStartScheduler() &&
+        activeCacheHydration == null && cacheHydrationJob == null
 
     private fun selectNextCandidate(): ThumbnailCandidate? {
         val snapshot = currentViewport ?: return null
@@ -443,7 +591,7 @@ class MediaGridThumbnailManager(
         var wideTie = Int.MAX_VALUE
         for (index in wideStart..wideEnd) {
             val source = sources[index]
-            if (source.localPath == null || completedKeys.contains(cacheIdentity(source)) || isKnownFailure(source)) continue
+            if (source.localPath == null || completedKeys.contains(cacheIdentity(source, allowRemote = false)) || isKnownFailure(source)) continue
             val distance = abs(index - centerIndex)
             val tie = if (direction > 0) -index else index
             if (distance < wideDistance || (distance == wideDistance && tie < wideTie)) {
@@ -456,7 +604,7 @@ class MediaGridThumbnailManager(
     }
 
     private fun isWaiting(source: MediaGridThumbnailSource): Boolean {
-        if (isKnownFailure(source)) return false
+        if (isKnownFailure(source) || cacheIdentity(source) in completedKeys) return false
         return holders[source.assetId]?.value?.let { it is MediaGridThumbnailState.Waiting } ?: true
     }
 
@@ -551,8 +699,13 @@ class MediaGridThumbnailManager(
         }
     }
 
-    private fun cacheIdentity(source: MediaGridThumbnailSource) =
-        listOf(source.assetId, source.mediaKey, source.localPath, source.previewUrl, source.remoteUrl, source.size, source.modified).joinToString("|")
+    private fun cacheIdentity(source: MediaGridThumbnailSource, allowRemote: Boolean = true): String =
+        cacheIdentityOrNull(source, allowRemote)
+            ?: listOf(source.assetId, source.mediaKey, source.localPath, source.previewUrl, source.remoteUrl, source.size, source.modified, allowRemote)
+                .joinToString("|")
+
+    private fun cacheIdentityOrNull(source: MediaGridThumbnailSource, allowRemote: Boolean): String? =
+        store.cacheKey(source, allowRemote)
 
     private fun isKnownFailure(source: MediaGridThumbnailSource) =
         source.downloadState == "failed" || (source.localPath == null && source.previewUrl == null && source.remoteUrl == null)

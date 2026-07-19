@@ -1,5 +1,11 @@
 # `app/src/androidTest/java/com/lyco256/llm/MainActivityComposeTest.kt`
 
+## 2026-07-19 第5実装 integration coverage
+
+- The classified display-toggle fixture pre-generates the photo and video thumbnail files, then opens the media grid and waits for both cells to reach `Ready` without scrolling. The failed asset remains the mixed cache/non-cache error path.
+- The same fixture still covers activity recreation, filter and sort source revisions, column changes, placeholders, display success, cell taps, and the tweet dialog. The large-media test remains the fast-fling, retouch, final-viewport, and immediate-action regression gate.
+- No Macrobenchmark or measurement path is changed or run.
+
 隔離された `com.lyco256.llm.test` 上で主要Compose画面を検証するInstrumentationテストです。各テストの前に隔離DBだけを初期化し、seedデータを投入します。本番 `com.lyco256.llm` のDBや画像には触れません。
 
 主な検証内容:

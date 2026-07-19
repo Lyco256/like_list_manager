@@ -490,6 +490,108 @@ class MediaGridViewportDispatchTest {
         )
     }
 
+    @Test
+    fun cacheHydrationRestoresVisibleAndAdjacentHitsWithoutGeneration() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val gateway = CacheGateway(setOf(1L, 2L, 3L))
+        val manager = MediaGridThumbnailManager(gateway, scope)
+        val sources = (1L..3L).map { source(it, localPath = null, previewUrl = "https://example.test/$it.jpg") }
+        try {
+            val states = sources.map { manager.state(it.assetId, it) }
+            manager.updateSourceSnapshot(1L, sources)
+            assertTrue(manager.dispatchViewport(viewport(1L, listOf(2L))))
+            withTimeout(2_000) {
+                states.take(3).forEach { state ->
+                    while (state.value !is MediaGridThumbnailState.Ready) delay(5)
+                }
+            }
+            assertEquals(listOf(2L, 3L, 1L), gateway.findCalls())
+            assertTrue(gateway.generationCalls().isEmpty())
+        } finally {
+            manager.disposeViewport()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun cacheMissesOnlyEnterGenerationAndKnownMissesAreNotRecheckedInRevision() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val gateway = CacheGateway(setOf(1L))
+        val manager = MediaGridThumbnailManager(gateway, scope)
+        val sources = (1L..3L).map { source(it, localPath = null, previewUrl = "https://example.test/$it.jpg") }
+        try {
+            val visibleState = manager.state(2L, sources[1])
+            manager.updateSourceSnapshot(1L, sources)
+            assertTrue(manager.dispatchViewport(viewport(1L, listOf(2L))))
+            withTimeout(2_000) {
+                while (visibleState.value !is MediaGridThumbnailState.Ready) delay(5)
+            }
+            assertEquals(listOf(2L, 3L, 1L), gateway.findCalls())
+            withTimeout(2_000) {
+                while (gateway.generationCalls().size < 2) delay(5)
+            }
+            assertEquals(listOf(2L, 3L), gateway.generationCalls())
+
+            assertTrue(manager.dispatchViewport(viewport(1L, listOf(3L))))
+            delay(100)
+            assertEquals(listOf(2L, 3L, 1L), gateway.findCalls())
+        } finally {
+            manager.disposeViewport()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun cacheHydrationIsCancelledByDraggingAndStaleHitIsNotApplied() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val gateway = CacheGateway(setOf(1L), firstFindDelayMs = 300)
+        val manager = MediaGridThumbnailManager(gateway, scope)
+        val source = source(1L, localPath = null, previewUrl = "https://example.test/1.jpg")
+        val state = manager.state(1L, source)
+        try {
+            manager.updateSourceSnapshot(1L, listOf(source))
+            assertTrue(manager.dispatchViewport(viewport(1L, listOf(1L))))
+            gateway.firstFindStarted.await()
+            manager.setScrollOperationState(MediaGridScrollOperationState.Dragging)
+            delay(80)
+            assertEquals(MediaGridThumbnailState.Waiting, state.value)
+
+            manager.setScrollOperationState(MediaGridScrollOperationState.Idle)
+            withTimeout(2_000) {
+                while (state.value !is MediaGridThumbnailState.Ready) delay(5)
+            }
+            assertEquals(2, gateway.findCalls().size)
+            assertTrue(gateway.generationCalls().isEmpty())
+        } finally {
+            manager.disposeViewport()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun cacheHydrationDoesNotStartGenerationUntilItsSingleResultCompletes() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val gateway = CacheGateway(emptySet(), firstFindDelayMs = 250)
+        val manager = MediaGridThumbnailManager(gateway, scope)
+        val source = source(1L, localPath = null, previewUrl = "https://example.test/1.jpg")
+        val state = manager.state(1L, source)
+        try {
+            manager.updateSourceSnapshot(1L, listOf(source))
+            assertTrue(manager.dispatchViewport(viewport(1L, listOf(1L))))
+            gateway.firstFindStarted.await()
+            delay(80)
+            assertTrue(gateway.generationCalls().isEmpty())
+            assertEquals(MediaGridThumbnailState.Waiting, state.value)
+            withTimeout(2_000) {
+                while (state.value !is MediaGridThumbnailState.Ready) delay(5)
+            }
+            assertEquals(listOf(1L), gateway.generationCalls())
+        } finally {
+            manager.disposeViewport()
+            scope.cancel()
+        }
+    }
+
     private fun viewport(
         revision: Long,
         assetIds: List<Long>,
@@ -562,5 +664,43 @@ class MediaGridViewportDispatchTest {
         override fun invalidate(file: File) = Unit
 
         fun calls(): List<Long> = synchronized(startedCalls) { startedCalls.toList() }
+    }
+
+    private class CacheGateway(
+        private val hits: Set<Long>,
+        private val firstFindDelayMs: Long = 0L,
+    ) : MediaGridThumbnailStoreGateway {
+        private val checked = mutableListOf<Long>()
+        private val generated = mutableListOf<Long>()
+        val firstFindStarted = CompletableDeferred<Unit>()
+
+        override fun cacheKey(source: MediaGridThumbnailSource, allowRemote: Boolean): String =
+            "cache-${source.assetId}-$allowRemote"
+
+        override fun findCached(source: MediaGridThumbnailSource, allowRemote: Boolean): File? {
+            synchronized(checked) { checked += source.assetId }
+            if (checked.size == 1) {
+                firstFindStarted.complete(Unit)
+                if (firstFindDelayMs > 0) {
+                    try {
+                        Thread.sleep(firstFindDelayMs)
+                    } catch (_: InterruptedException) {
+                        // The coordinator will observe cancellation before publishing a result.
+                    }
+                }
+            }
+            return if (source.assetId in hits) File("/tmp/cached-${source.assetId}.jpg") else null
+        }
+
+        override suspend fun getOrCreate(source: MediaGridThumbnailSource, allowRemote: Boolean): File {
+            synchronized(generated) { generated += source.assetId }
+            return File("/tmp/generated-${source.assetId}.jpg")
+        }
+
+        override fun invalidate(file: File) = Unit
+
+        fun findCalls(): List<Long> = synchronized(checked) { checked.toList() }
+
+        fun generationCalls(): List<Long> = synchronized(generated) { generated.toList() }
     }
 }

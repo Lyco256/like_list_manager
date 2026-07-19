@@ -27,6 +27,7 @@ import androidx.compose.ui.test.performTextReplacement
 import com.lyco256.llm.data.AssetEntity
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipTagEntity
+import com.lyco256.llm.data.MediaGridThumbnailSource
 import com.lyco256.llm.data.PostStorageManager
 import com.lyco256.llm.data.TagEntity
 import com.lyco256.llm.data.TagColorId
@@ -238,6 +239,28 @@ class MainActivityComposeTest {
         val assetIds = clipAndAssetIds.second
         waitUntil { clipTagIds(clipId).isNotEmpty() }
 
+        val thumbnailStore = (composeRule.activity.application as LikeListManagerApp).container.mediaGridThumbnailStore
+        runBlocking {
+            thumbnailStore.getOrCreate(
+                MediaGridThumbnailSource(
+                    assetId = assetIds.getValue("grid-photo"),
+                    mediaKey = "grid-photo",
+                    localPath = photoPath,
+                    previewUrl = null,
+                    remoteUrl = null,
+                ),
+            )
+            thumbnailStore.getOrCreate(
+                MediaGridThumbnailSource(
+                    assetId = assetIds.getValue("grid-video"),
+                    mediaKey = "grid-video",
+                    localPath = videoPath,
+                    previewUrl = null,
+                    remoteUrl = null,
+                ),
+            )
+        }
+
         composeRule.onNodeWithTag("tab_classified").performClick()
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithTag("classified_display_toggle").fetchSemanticsNodes().isNotEmpty()
@@ -265,6 +288,12 @@ class MainActivityComposeTest {
                 composeRule.onAllNodesWithTag(photoPlaceholderTag).fetchSemanticsNodes().isEmpty()
         }
         assertTrue(composeRule.onAllNodesWithTag(photoPlaceholderTag).fetchSemanticsNodes().isEmpty())
+        val videoPlaceholderTag = "media_grid_placeholder_${assetIds.getValue("grid-video")}"
+        composeRule.waitUntil(30_000) {
+            manager.stateIfPresent(assetIds.getValue("grid-video"))?.value is com.lyco256.llm.data.MediaGridThumbnailState.Ready &&
+                composeRule.onAllNodesWithTag(videoPlaceholderTag).fetchSemanticsNodes().isEmpty()
+        }
+        assertTrue(composeRule.onAllNodesWithTag(videoPlaceholderTag).fetchSemanticsNodes().isEmpty())
         waitDisplayed("media_grid_video_badge_${assetIds.getValue("grid-video")}")
         val errorTag = "media_grid_error_${assetIds.getValue("grid-error")}"
         composeRule.onNodeWithTag("classified_media_grid").performScrollToIndex(2)

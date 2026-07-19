@@ -25,7 +25,29 @@ data class MediaGridThumbnailSource(
 
 interface MediaGridThumbnailStoreGateway {
     suspend fun getOrCreate(source: MediaGridThumbnailSource, allowRemote: Boolean = true): File
+
+    /** Returns the identity used by getOrCreate, without opening or creating the output file. */
+    fun cacheKey(source: MediaGridThumbnailSource, allowRemote: Boolean = true): String? =
+        mediaGridThumbnailCacheKey(source, allowRemote)
+
+    /** Checks only the already-generated cache file. It must not generate or fetch media. */
+    fun findCached(source: MediaGridThumbnailSource, allowRemote: Boolean = true): File? = null
+
     fun invalidate(file: File)
+}
+
+internal fun mediaGridThumbnailCacheKey(source: MediaGridThumbnailSource, allowRemote: Boolean): String? {
+    val input = source.localPath?.let(::File)?.takeIf { it.isFile }
+    val inputName = input?.absolutePath ?: if (allowRemote) {
+        source.previewUrl ?: source.remoteUrl
+    } else {
+        null
+    } ?: return null
+    val actualSize = input?.length() ?: source.size
+    val actualModified = input?.lastModified() ?: source.modified
+    return MessageDigest.getInstance("SHA-256")
+        .digest("${source.assetId}|${source.mediaKey}|$inputName|$actualSize|$actualModified".toByteArray())
+        .joinToString("") { "%02x".format(it) }
 }
 
 class MediaGridThumbnailStore(
@@ -33,47 +55,56 @@ class MediaGridThumbnailStore(
 ) : MediaGridThumbnailStoreGateway {
     private val directory = File(context.cacheDir, "media_grid_thumbnails").apply { mkdirs() }
 
+    private data class CacheLocation(
+        val key: String,
+        val output: File,
+        val input: File?,
+        val remoteUrls: List<String>,
+    )
+
     override suspend fun getOrCreate(source: MediaGridThumbnailSource, allowRemote: Boolean): File = withContext(Dispatchers.IO) {
-        val input = source.localPath?.let(::File)?.takeIf { it.isFile }
-        val inputName = input?.absolutePath ?: if (allowRemote) (source.previewUrl ?: source.remoteUrl) else null
-            ?: error("No media source")
-        val actualSize = input?.length() ?: source.size
-        val actualModified = input?.lastModified() ?: source.modified
-        val key = sha256("${source.assetId}|${source.mediaKey}|$inputName|$actualSize|$actualModified")
-        val output = File(directory, "$key.jpg")
-        val cached = output.isFile && output.length() > 0L
-        if (cached) return@withContext output
-        val temporary = File(directory, ".${key}.${Thread.currentThread().id}.tmp")
+        val location = cacheLocation(source, allowRemote) ?: error("No media source")
+        if (location.output.isFile && location.output.length() > 0L) return@withContext location.output
+        val temporary = File(directory, ".${location.key}.${Thread.currentThread().id}.tmp")
         try {
-            val bitmap = decode(input, if (allowRemote) listOfNotNull(source.previewUrl, source.remoteUrl) else emptyList())
+            val bitmap = decode(location.input, location.remoteUrls)
             val square = Bitmap.createBitmap(256, 256, Bitmap.Config.RGB_565)
             Canvas(square).drawColor(Color.BLACK)
             val scale = maxOf(256f / bitmap.width, 256f / bitmap.height)
             val w = bitmap.width * scale; val h = bitmap.height * scale
             Canvas(square).drawBitmap(bitmap, null, RectF((256f - w) / 2f, (256f - h) / 2f, (256f + w) / 2f, (256f + h) / 2f), Paint(Paint.FILTER_BITMAP_FLAG))
             check(square.compress(Bitmap.CompressFormat.JPEG, 60, temporary.outputStream()))
-            if (!temporary.renameTo(output)) {
-                temporary.copyTo(output, overwrite = true); temporary.delete()
+            if (!temporary.renameTo(location.output)) {
+                temporary.copyTo(location.output, overwrite = true); temporary.delete()
             }
             bitmap.recycle(); square.recycle()
-            output
+            location.output
         } catch (t: Throwable) {
             temporary.delete()
-            output.delete()
+            location.output.delete()
             throw t
         }
     }
 
+    override fun cacheKey(source: MediaGridThumbnailSource, allowRemote: Boolean): String? =
+        cacheLocation(source, allowRemote)?.key
+
+    override fun findCached(source: MediaGridThumbnailSource, allowRemote: Boolean): File? =
+        cacheLocation(source, allowRemote)?.output?.takeIf { it.isFile && it.length() > 0L }
+
     override fun invalidate(file: File) { file.delete() }
 
-    fun cached(source: MediaGridThumbnailSource): File? {
-        val input = source.localPath?.let(::File)
-        val inputName = input?.absolutePath ?: source.localPath ?: return null
-        val actualSize = input?.takeIf { it.isFile }?.length() ?: source.size
-        val actualModified = input?.takeIf { it.isFile }?.lastModified() ?: source.modified
-        val key = sha256("${source.assetId}|${source.mediaKey}|$inputName|$actualSize|$actualModified")
-        val output = File(directory, "$key.jpg")
-        return output.takeIf { it.isFile && it.length() > 0L }
+    fun cached(source: MediaGridThumbnailSource): File? = findCached(source, allowRemote = true)
+
+    private fun cacheLocation(source: MediaGridThumbnailSource, allowRemote: Boolean): CacheLocation? {
+        val input = source.localPath?.let(::File)?.takeIf { it.isFile }
+        val key = mediaGridThumbnailCacheKey(source, allowRemote) ?: return null
+        return CacheLocation(
+            key = key,
+            output = File(directory, "$key.jpg"),
+            input = input,
+            remoteUrls = if (input == null && allowRemote) listOfNotNull(source.previewUrl, source.remoteUrl) else emptyList(),
+        )
     }
 
     private fun decode(file: File?, urls: List<String>): Bitmap {
@@ -104,5 +135,4 @@ class MediaGridThumbnailStore(
         while (w / (sample * 2) >= target && h / (sample * 2) >= target) sample *= 2
         return sample
     }
-    private fun sha256(value: String) = MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
 }
