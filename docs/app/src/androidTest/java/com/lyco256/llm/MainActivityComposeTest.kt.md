@@ -79,6 +79,12 @@
 - The production path keeps the normal grid and column-change behavior unchanged; no Macrobenchmark or measurement code is added.
 - The same fixture now performs a normal paced drag, a fast fling followed by an immediate touch-down/up retouch, and opens the current visible cell before waiting for thumbnail completion.
 
+## 2026-07-19 第3実装 placeholder rendering
+
+- `classifiedDisplayToggleSwitchesBetweenCardAndMediaGridAndSurvivesActivityRecreation` waits for a valid local thumbnail to reach `Ready` and verifies that `media_grid_placeholder_<assetId>` is gone after the current image model's display success.
+- The same flow verifies that an Error cell keeps `media_grid_error_<assetId>` and never exposes a placeholder tag.
+- The existing fling/retouch/cell-action test remains unchanged as the integration regression gate for scrolling and immediate interaction.
+
 ## 2026-07 viewport dispatch integration coverage
 
 - `classifiedMediaGridSingleFlingKeepsLatestImageAndImmediateCellActionAfterFilter` seeds 96 local classified media assets, performs one fast fling without waiting between input events, and verifies that the visible range advances and a visible thumbnail reaches `Ready`.

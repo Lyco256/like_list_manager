@@ -109,7 +109,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -3323,15 +3322,6 @@ private fun ClassifiedMediaGridContent(
 ) {
     val appContainer = (LocalContext.current.applicationContext as LikeListManagerApp).container
     val itemByKey = remember(items) { items.associateBy { it.key } }
-    val thumbnailSurfaceVariant = MaterialTheme.colorScheme.surfaceVariant
-    val thumbnailBrush = remember(thumbnailSurfaceVariant) {
-        Brush.linearGradient(
-            listOf(
-                thumbnailSurfaceVariant,
-                thumbnailSurfaceVariant.copy(alpha = 0.72f),
-            ),
-        )
-    }
     LaunchedEffect(sourceRevision) {
         withContext(Dispatchers.Default) {
             appContainer.mediaGridThumbnailManager.updateSourceSnapshot(
@@ -3415,7 +3405,6 @@ private fun ClassifiedMediaGridContent(
                         onToggleSelection = onToggleSelection,
                         thumbnailManager = appContainer.mediaGridThumbnailManager,
                         thumbnailImageLoader = appContainer.mediaGridImageLoader,
-                        thumbnailBrush = thumbnailBrush,
                     )
                 }
             }
@@ -3701,12 +3690,22 @@ private fun ClassifiedMediaGridCell(
     onToggleSelection: (Long) -> Unit,
     thumbnailManager: com.lyco256.llm.data.MediaGridThumbnailManager,
     thumbnailImageLoader: coil.ImageLoader,
-    thumbnailBrush: Brush,
 ) {
     val thumbnailSource = MediaGridThumbnailSource(entry.assetId, entry.mediaKey, entry.localPath, entry.previewUrl ?: entry.remoteUrl ?: entry.displayUrl?.takeUnless { it == entry.localPath }, entry.remoteUrl, downloadState = entry.downloadState)
     val thumbnailState = thumbnailManager.state(entry.assetId, thumbnailSource).collectAsState().value
+    val latestThumbnailState by rememberUpdatedState(thumbnailState)
     val fallbackUrl = entry.previewUrl ?: entry.remoteUrl ?: entry.displayUrl?.takeUnless { it == entry.localPath }
-    val error = thumbnailState is MediaGridThumbnailState.Failed || (entry.localPath == null && fallbackUrl == null) || entry.downloadState == "failed"
+    val hasUsableSource = entry.localPath != null || fallbackUrl != null
+    val currentReady = thumbnailState as? MediaGridThumbnailState.Ready
+    val currentImageModel = currentReady?.let { mediaGridImageModelKey(thumbnailSource, it.file.absolutePath) }
+    var displayedImageModel by remember(thumbnailSource) { mutableStateOf<MediaGridImageModelKey?>(null) }
+    val visualState = mediaGridCellVisualState(
+        thumbnailState = thumbnailState,
+        hasUsableSource = hasUsableSource,
+        downloadFailed = entry.downloadState == "failed",
+        currentImageModel = currentImageModel,
+        displayedImageModel = displayedImageModel,
+    )
     val selectionIndicatorSize = mediaGridSelectionIndicatorSize(columnCount)
     val videoIconSize = mediaGridVideoIconSize(columnCount)
     val cardDialogSize = mediaGridCardDialogSize(columnCount)
@@ -3714,6 +3713,9 @@ private fun ClassifiedMediaGridCell(
     val hapticFeedback = LocalHapticFeedback.current
     val selectionBackground = mediaGridSelectionBackground(MaterialTheme.colorScheme.primary, multiAsset)
     val selectionCheckColor = if (multiAsset) Color.White else Color.Black
+    val cellBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 1f)
+    val placeholderStartColor = cellBackground
+    val placeholderEndColor = MaterialTheme.colorScheme.surface.copy(alpha = 1f)
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -3733,9 +3735,9 @@ private fun ClassifiedMediaGridCell(
                 )
             }
             .testTag("media_grid_item_${entry.assetId}")
-            .background(thumbnailBrush),
+            .background(cellBackground),
     ) {
-        if (error) {
+        if (visualState == MediaGridCellVisualState.Error) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -3750,14 +3752,38 @@ private fun ClassifiedMediaGridCell(
                 )
             }
         } else {
-            if (thumbnailState is MediaGridThumbnailState.Ready) AsyncImage(
-                    model = (thumbnailState as MediaGridThumbnailState.Ready).file,
+            if (visualState == MediaGridCellVisualState.Placeholder) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .mediaGridPlaceholder(
+                            visualState = visualState,
+                            startColor = placeholderStartColor,
+                            endColor = placeholderEndColor,
+                        )
+                        .testTag("media_grid_placeholder_${entry.assetId}"),
+                )
+            }
+            if (currentReady != null) AsyncImage(
+                    model = currentReady.file,
                     contentDescription = null,
                     imageLoader = thumbnailImageLoader,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
-                    onSuccess = { thumbnailManager.onDisplaySuccess(MediaGridThumbnailSource(entry.assetId, entry.mediaKey, entry.localPath, entry.previewUrl ?: entry.remoteUrl ?: entry.displayUrl?.takeUnless { it == entry.localPath }, entry.remoteUrl, downloadState = entry.downloadState)) },
-                    onError = { thumbnailManager.onDisplayError(MediaGridThumbnailSource(entry.assetId, entry.mediaKey, entry.localPath, entry.previewUrl ?: entry.remoteUrl ?: entry.displayUrl?.takeUnless { it == entry.localPath }, entry.remoteUrl, downloadState = entry.downloadState), (thumbnailState as MediaGridThumbnailState.Ready).file) },
+                    onSuccess = {
+                        val latest = latestThumbnailState
+                        if (latest is MediaGridThumbnailState.Ready && latest.file == currentReady.file) {
+                            displayedImageModel = currentImageModel
+                            thumbnailManager.onDisplaySuccess(thumbnailSource)
+                        }
+                    },
+                    onError = {
+                        val latest = latestThumbnailState
+                        if (latest is MediaGridThumbnailState.Ready && latest.file == currentReady.file) {
+                            displayedImageModel = null
+                            thumbnailManager.onDisplayError(thumbnailSource, currentReady.file)
+                        }
+                    },
                 )
         }
         if (!selectionMode && sort.baseOrder == ClassifiedSortBase.LikeCount && entry.likeCount != null) {

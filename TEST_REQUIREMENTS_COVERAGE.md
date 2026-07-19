@@ -166,3 +166,14 @@
 | Macrobenchmark・計測処理 | 今回未実行・未変更 | 要件指定により対象外 |
 
 検証順はwireless実機で隔離統合チェックを先に実行し、続いて本番package安全上書きチェックを実行する。Macrobenchmarkは実行しない。
+
+## 2026-07-19 メディアグリッド スクロール改善 第3実装
+
+| 対象 | 状態 | 証跡 |
+|---|---|---|
+| Waiting / Generating / Ready未成功のPlaceholder判定 | 実装済み | `mediaGridCellVisualState`、`MediaGridPlaceholderRenderingTest` |
+| 現在画像モデルのonSuccess後のPlaceholder消去・モデル変更・onError復帰 | 実装済み | `MediaGridImageModelKey`、`MediaGridPlaceholderRenderingTest`、`media_grid_placeholder_<assetId>` |
+| Failed / 画像元なし / download失敗のError判定 | 実装済み | `MediaGridPlaceholderRenderingTest`、既存 `media_grid_error_<assetId>` |
+| セル単位・静的・テーマ対応グラデーション | 実装済み | `MediaGridPlaceholderRendering.kt`、`drawWithCache`、ライト/ダークCompose確認 |
+| 高速fling、触れ直し、セル操作、選択、列数・filter・sort・詳細表示 | 既存回帰確認対象 | `MainActivityComposeTest`、`UiStateRenderingTest` |
+| Macrobenchmark | 未実行 | 今回の要件で対象外 |

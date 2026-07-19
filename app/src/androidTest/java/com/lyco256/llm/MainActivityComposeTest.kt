@@ -258,10 +258,18 @@ class MainActivityComposeTest {
         waitDisplayed("classified_media_grid")
         val photoTag = "media_grid_item_${assetIds.getValue("grid-photo")}"
         waitDisplayed(photoTag)
+        val manager = (composeRule.activity.application as LikeListManagerApp).container.mediaGridThumbnailManager
+        val photoPlaceholderTag = "media_grid_placeholder_${assetIds.getValue("grid-photo")}"
+        composeRule.waitUntil(30_000) {
+            manager.stateIfPresent(assetIds.getValue("grid-photo"))?.value is com.lyco256.llm.data.MediaGridThumbnailState.Ready &&
+                composeRule.onAllNodesWithTag(photoPlaceholderTag).fetchSemanticsNodes().isEmpty()
+        }
+        assertTrue(composeRule.onAllNodesWithTag(photoPlaceholderTag).fetchSemanticsNodes().isEmpty())
         waitDisplayed("media_grid_video_badge_${assetIds.getValue("grid-video")}")
         val errorTag = "media_grid_error_${assetIds.getValue("grid-error")}"
         composeRule.onNodeWithTag("classified_media_grid").performScrollToIndex(2)
         waitDisplayed(errorTag)
+        assertTrue(composeRule.onAllNodesWithTag("media_grid_placeholder_${assetIds.getValue("grid-error")}").fetchSemanticsNodes().isEmpty())
 
         val beforePinch = gridItemBounds(photoTag)
         pinchOnGrid("classified_media_grid", centerSpan = 260f, endSpan = 180f)
