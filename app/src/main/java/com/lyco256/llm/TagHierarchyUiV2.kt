@@ -14,6 +14,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -131,6 +132,7 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.lyco256.llm.data.MediaGridThumbnailSource
 import com.lyco256.llm.data.MediaGridThumbnailState
+import com.lyco256.llm.data.MediaGridScrollOperationState
 import com.lyco256.llm.data.MediaGridViewportItem
 import com.lyco256.llm.data.MediaGridViewportSnapshot
 import androidx.compose.runtime.collectAsState
@@ -154,6 +156,7 @@ import com.lyco256.llm.data.tagGradient
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -3322,21 +3325,24 @@ private fun ClassifiedMediaGridContent(
 ) {
     val appContainer = (LocalContext.current.applicationContext as LikeListManagerApp).container
     val itemByKey = remember(items) { items.associateBy { it.key } }
-    LaunchedEffect(sourceRevision) {
-        withContext(Dispatchers.Default) {
-            appContainer.mediaGridThumbnailManager.updateSourceSnapshot(
-                revision = sourceRevision,
-                ordered = items.asSequence().filterIsInstance<MediaGridCellItem>().map { e ->
-                    val a = e.entry
-                    MediaGridThumbnailSource(a.assetId, a.mediaKey, a.localPath, a.previewUrl ?: a.remoteUrl ?: a.displayUrl?.takeUnless { it == a.localPath }, a.remoteUrl, downloadState = a.downloadState)
-                }.toList(),
-            )
-        }
-    }
-    DisposableEffect(Unit) {
-        onDispose { appContainer.mediaGridThumbnailManager.disposeViewport() }
-    }
+    val isDragged by state.interactionSource.collectIsDraggedAsState()
     LaunchedEffect(state, items, columnCount, sourceRevision) {
+        val sources = withContext(Dispatchers.Default) {
+            items.asSequence().filterIsInstance<MediaGridCellItem>().map { e ->
+                val a = e.entry
+                MediaGridThumbnailSource(
+                    a.assetId,
+                    a.mediaKey,
+                    a.localPath,
+                    a.previewUrl ?: a.remoteUrl ?: a.displayUrl?.takeUnless { it == a.localPath },
+                    a.remoteUrl,
+                    downloadState = a.downloadState,
+                )
+            }.toList()
+        }
+        appContainer.mediaGridThumbnailManager.updateSourceSnapshot(sourceRevision, sources)
+        if (sources.isEmpty()) return@LaunchedEffect
+
         var lastDispatchedSnapshot: MediaGridViewportSnapshot? = null
         snapshotFlow { state.layoutInfo }.collect { layout ->
             val visibleMediaItems = layout.visibleItemsInfo.mapNotNull { info ->
@@ -3344,24 +3350,39 @@ private fun ClassifiedMediaGridContent(
                 val e = item.entry
                 e.assetId to item.sourceIndex
             }
+            if (visibleMediaItems.isEmpty()) return@collect
             val centerOrdinal = (visibleMediaItems.size - 1) / 2f
-            val snapshotItems = visibleMediaItems.mapIndexed { index, (assetId, sourceIndex) ->
-                MediaGridViewportItem(
-                    assetId = assetId,
-                    sourceIndex = sourceIndex,
-                    // Use stable visible-order distance; pixel movement must not create work.
-                    centerDistance = abs(index - centerOrdinal).toInt(),
-                )
-            }
             val snapshot = MediaGridViewportSnapshot(
                 sourceRevision = sourceRevision,
                 columnCount = columnCount,
-                items = snapshotItems,
+                items = visibleMediaItems.mapIndexed { index, (assetId, sourceIndex) ->
+                    MediaGridViewportItem(
+                        assetId = assetId,
+                        sourceIndex = sourceIndex,
+                        // Use stable visible-order distance; pixel movement must not create work.
+                        centerDistance = abs(index - centerOrdinal).toInt(),
+                    )
+                },
             )
-            if (lastDispatchedSnapshot?.sameStructureAs(snapshot) != true) {
-                lastDispatchedSnapshot = snapshot
+            if (lastDispatchedSnapshot?.sameStructureAs(snapshot) != true &&
                 appContainer.mediaGridThumbnailManager.dispatchViewport(snapshot)
+            ) {
+                lastDispatchedSnapshot = snapshot
             }
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose { appContainer.mediaGridThumbnailManager.disposeViewport() }
+    }
+    LaunchedEffect(state) {
+        snapshotFlow {
+            when {
+                isDragged -> MediaGridScrollOperationState.Dragging
+                state.isScrollInProgress -> MediaGridScrollOperationState.Flinging
+                else -> MediaGridScrollOperationState.Idle
+            }
+        }.distinctUntilChanged().collect { operationState ->
+            appContainer.mediaGridThumbnailManager.setScrollOperationState(operationState)
         }
     }
     Box(Modifier.fillMaxSize()) {

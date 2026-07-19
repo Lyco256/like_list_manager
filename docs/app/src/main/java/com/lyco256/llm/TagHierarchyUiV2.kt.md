@@ -226,3 +226,11 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 # メディアグリッド高速化追補
 
 グリッドのメタデータ処理はカード表示と分離し、ファイル存在確認・画像デコードを枠生成前に行わない。複数選択はCalculating中に解除せず、Ready結果で選択可能Clipとの交差を更新する。
+
+## 2026-07-19 第4実装 viewport監視・操作状態
+
+- `ClassifiedMediaGridContent` はsource一覧構築、`updateSourceSnapshot()`、`state.layoutInfo`の`snapshotFlow`監視を1つの`LaunchedEffect`にまとめる。source一覧の構築だけを`Dispatchers.Default`で行い、登録完了後に監視を開始する。
+- `snapshotFlow`の初回layoutが空、または見出しだけで表示セルがない場合は送信せず、メディアセルを含む最初のlayoutを待つ。メディア項目がない場合だけ監視を終了する。ダミースクロールや強制recomposeは使用しない。
+- UI側の最終送信済みsnapshotは、`dispatchViewport()`が`true`を返した場合だけ更新する。拒否されたsnapshotは保持せず、source revision・items・列数の変更で古い監視をキャンセルして登録からやり直す。
+- `LazyGridState.interactionSource`のdrag状態と`isScrollInProgress`から`Dragging` / `Flinging` / `Idle`を判定し、`distinctUntilChanged()`で状態変化時だけThumbnail Managerへ通知する。操作状態はviewport構造とは独立している。
+- 初回表示・拒否後再送・操作中の生成停止・wide取消・Idle再開は`MediaGridViewportDispatchTest`で検証し、無操作初回表示、カードからの切替、drag/fling、停止後の画像追従は`MainActivityComposeTest`で回帰確認する。

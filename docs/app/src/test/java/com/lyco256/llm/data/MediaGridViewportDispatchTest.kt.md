@@ -9,3 +9,11 @@
 - visible, adjacent, and wide candidates keep their priority and bounded range;
 - source identity changes reset the stable holder, and display failure retries once before final failure;
 - the existing one-adjacent-row preparation range remains unchanged.
+
+2026-07-19 第4実装 coverage:
+
+- rejected viewport resend after source registration and first non-empty viewport after an empty layout;
+- duplicate accepted snapshots are suppressed without starting duplicate generation;
+- Dragging/Flinging suppression, one normal completion without chaining, wide cancellation without completion bookkeeping;
+- latest viewport selection after operation stop, 100ms Idle resume, and invalidation by re-drag, revision, dispose, or foreground loss;
+- HolderObserved and display-error paths remain suppressed during operation.

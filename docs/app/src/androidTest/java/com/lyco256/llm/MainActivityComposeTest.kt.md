@@ -91,3 +91,9 @@
 - The same flow opens a cell immediately after the fling, applies a filter that changes the source revision, verifies that only the target cell remains visible, and opens that cell immediately. This covers image following, no rollback after a screen/filter change, and immediate cell operations.
 
 - The real two-pointer test verifies 4→5→4 changes, a threshold-miss no-op, repeated round trips, stable media-cell position, immediate cell interaction, scroll after the change, and absence of `media_grid_morph_overlay` after every release.
+
+## 2026-07-19 第4実装 integration coverage
+
+- The classified display-toggle flow waits for the first local media cell to reach `Ready` without scrolling or tapping, covering the ordered initial source/viewport path and card-to-grid transition.
+- The large-media flow keeps the normal paced drag, fast fling, immediate retouch, final visible-range selection, and post-filter cell action as the integration regression coverage for operation-state suppression and latest-viewport following.
+- Placeholder tags, existing image success/error behavior, column changes, selection, dialogs, and Macrobenchmark behavior remain covered by their existing tests and are not changed by this implementation.

@@ -324,6 +324,25 @@ class MainActivityComposeTest {
         val afterToggleBack = gridItemBounds(photoTag)
         assertTrue(kotlin.math.abs(afterToggleBack.width - afterRecreate.width) < 1f)
 
+        // A source-revision change from filter and sort must also produce its first viewport
+        // without a compensating scroll or a user tap on the grid.
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_query").performTextReplacement("Classified grid clip")
+        composeRule.onNodeWithTag("filter_apply").performClick()
+        waitDisplayed(photoTag)
+        composeRule.waitUntil(30_000) {
+            manager.stateIfPresent(assetIds.getValue("grid-photo"))?.value is com.lyco256.llm.data.MediaGridThumbnailState.Ready
+        }
+
+        composeRule.onNodeWithTag("sort_open").performClick()
+        composeRule.onNodeWithTag("sort_base_like").performClick()
+        composeRule.onNodeWithTag("sort_like_direction_high").performClick()
+        composeRule.onNodeWithTag("sort_apply").performClick()
+        waitDisplayed(photoTag)
+        composeRule.waitUntil(30_000) {
+            manager.stateIfPresent(assetIds.getValue("grid-photo"))?.value is com.lyco256.llm.data.MediaGridThumbnailState.Ready
+        }
+
         composeRule.onNodeWithTag(photoTag, useUnmergedTree = true).performClick()
         waitDisplayed("media_grid_tweet_dialog")
         waitDisplayed("clip_card_$clipId")
