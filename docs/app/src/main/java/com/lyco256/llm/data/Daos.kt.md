@@ -1,5 +1,7 @@
 # `Daos.kt`
 
+第10実装では、削除済みclipを除外したasset走査用に`getActiveAssets()`を追加しています。これは`assets`と`clips`をJOINしてasset ID昇順で返す読み取り専用queryです。既存のDB schema、asset列、同期queryは変更しません。
+
 ## 2026-07-10 bulk tag transaction
 
 `ClipDao.applyClipTagChanges` is the `@Transaction` boundary covering `pendingRemoveTagIds` deletion and `pendingAddTagIds` insertion for every selected clip. It rejects overlap between add and remove sets.

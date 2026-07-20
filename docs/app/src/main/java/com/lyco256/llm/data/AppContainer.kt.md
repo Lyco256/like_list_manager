@@ -12,6 +12,8 @@
 
 `AppContainer`は本番Repositoryへ`WorkManagerMediaGridPreviewEnqueuer`を注入します。schedulerとworkerは`filesDir/media_grid_previews`だけを使い、既存のImageLoader・Coil cache・グリッド表示経路とは独立しています。
 
+第10実装では同じschedulerインスタンスを`ExistingMediaGridPreviewBackfill`にも渡します。backfillはWorkManagerの専用tagを監視・停止するだけで、Roomへ進捗列を書き込みません。生成処理はdebug非TEST_HARNESSの設定画面から明示操作された場合だけ開始されます。
+
 ## 役割
 
 投稿保存先マネージャー、暗号化設定ストア、OAuthマネージャー、Repositoryを組み立てる簡易DIコンテナです。

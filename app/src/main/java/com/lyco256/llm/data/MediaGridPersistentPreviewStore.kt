@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
@@ -21,6 +22,7 @@ import java.util.UUID
 internal const val MEDIA_GRID_PREVIEW_SIZE = 256
 internal const val MEDIA_GRID_PREVIEW_QUALITY = 80
 internal val mediaGridPreviewPublishSemaphore = Semaphore(1)
+internal val mediaGridPreviewGenerationSemaphore = Semaphore(1)
 
 internal suspend fun <T> withMediaGridPreviewPublishLock(block: suspend () -> T): T {
     mediaGridPreviewPublishSemaphore.acquire()
@@ -68,7 +70,8 @@ class MediaGridPersistentPreviewStore(
         assetId: Long,
         sourceFile: File,
         isCurrentAsset: suspend () -> Boolean,
-    ): MediaGridPreviewGenerationResult = withContext(ioDispatcher) {
+    ): MediaGridPreviewGenerationResult = mediaGridPreviewGenerationSemaphore.withPermit {
+        withContext(ioDispatcher) {
         ensureActive()
         val source = sourceFile.absoluteFile
         if (!source.isFile) return@withContext MediaGridPreviewGenerationResult.SKIPPED_SOURCE
@@ -135,6 +138,18 @@ class MediaGridPersistentPreviewStore(
             temporary?.delete()
             output?.recycle()
             decoded.recycle()
+        }
+        }
+    }
+
+    internal fun inspect(assetId: Long, sourceFile: File): MediaGridPreviewValidity {
+        val target = previewFile(assetId)
+        if (!target.isFile) return MediaGridPreviewValidity.MISSING
+        if (!isValidJpeg(target)) return MediaGridPreviewValidity.INVALID
+        return if (target.lastModified() > sourceFile.lastModified()) {
+            MediaGridPreviewValidity.VALID
+        } else {
+            MediaGridPreviewValidity.STALE
         }
     }
 

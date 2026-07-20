@@ -15,4 +15,13 @@ WorkManagerへ永続JPEG生成要求を登録する接続層です。
 - ネットワーク、充電、アイドル条件は設定しない
 - 再要求はStore側の有効JPEG判定で不要な再生成を抑止する
 
+## 第10実装: 既存画像の一時backfill
+
+`enqueue(assetIds, tag)` の任意tagを使い、通常同期は従来の
+`media-grid-persistent-jpeg-preview`、一時backfillは
+`media-grid-existing-preview-backfill` tagと専用unique workへ登録します。
+どちらも同じ`MediaGridPreviewWorker`、`MediaGridPersistentPreviewStore`、
+非expedited・`requiresStorageNotLow`・最大100件batchを使います。
+一時backfillの停止は専用tagだけをcancelし、通常同期のunique workには触れません。
+
 テストfixtureやseed用の直接DAO挿入はこのschedulerを経由しないため、本番用生成を意図せず開始しません。

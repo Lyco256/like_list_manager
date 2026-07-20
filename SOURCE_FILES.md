@@ -13,6 +13,13 @@ Current media-grid rendering builds keyed `MediaGridFrameData` on `Dispatchers.D
 - `ClipRepository.kt` enqueues only successful inserted assets with a local path after source image persistence; sync does not await JPEG generation. Clip deletion removes preview files best effort after DB deletion, while storage migration leaves previews in `filesDir`.
 - DB schema, original images, existing caches, candidate order, Coil configuration, preload range, grid UI, and Macrobenchmark are unchanged.
 
+## 2026-07 第10実装: existing preview backfill（一時ブランチ限定）
+
+- `ExistingMediaGridPreviewBackfill.kt` はactive local assetをIO走査し、実装8のstoreで有効JPEGを除外した不足分だけをasset ID昇順で返す。
+- `MediaGridPreviewWork.kt` の既存schedulerへ専用tagを渡し、同じworker/storeを専用unique workへ登録する。通常同期workは従来のunique workとtagを維持する。
+- 設定画面のbackfill sectionは`BuildConfig.DEBUG && !BuildConfig.TEST_HARNESS`だけで表示され、開始は確認Dialog後の明示操作に限定する。通常起動・グリッド表示・TEST_HARNESSではenqueueしない。
+- DB schema、進捗列、元画像、実装8/9の生成・表示、通常同期、グリッド、Macrobenchmarkは変更しない。
+
 ## 2026-07 media grid direct preview pipeline
 
 - `TagHierarchyUiV2.kt` owns the classified grid, headers, sorting, selection, pinch column changes, and cell interactions.
@@ -131,6 +138,7 @@ MainActivity / Compose UI
 | 画面、操作、検索、タグUI | `docs/app/src/main/java/com/lyco256/llm/MainActivity.kt.md` | `docs/app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt.md`, `ClipRepository.kt.md`, `Entities.kt.md` |
 | 同期ロジック、月間制限、画像保存 | `docs/app/src/main/java/com/lyco256/llm/data/ClipRepository.kt.md` | `XApiClient.kt.md`, `Daos.kt.md`, `Entities.kt.md` |
 | 新規local assetの永続JPEG preview生成 | `docs/app/src/main/java/com/lyco256/llm/data/MediaGridPersistentPreviewStore.kt.md` | `MediaGridPreviewWork.kt.md`, `MediaGridPreviewWorker.kt.md`, `ClipRepository.kt.md` |
+| 既存画像の一時JPEG backfill | `docs/app/src/main/java/com/lyco256/llm/data/ExistingMediaGridPreviewBackfill.kt.md` と `docs/EXISTING_MEDIA_GRID_PREVIEW_BACKFILL.md` | `MediaGridPreviewWork.kt.md`, `SettingsScreen.kt.md`, `MainActivity.kt.md` |
 | 投稿DB・画像の保存先、SDカード移動 | `docs/app/src/main/java/com/lyco256/llm/data/PostStorageManager.kt.md` | `AppContainer.kt.md`, `ClipRepository.kt.md`, `MainActivity.kt.md` |
 | X APIのendpointやresponse | `docs/app/src/main/java/com/lyco256/llm/data/XApiClient.kt.md` | `ClipRepository.kt.md`, `Entities.kt.md` |
 | Xログイン、scope、callback | `docs/app/src/main/java/com/lyco256/llm/data/XOAuthManager.kt.md` | `AndroidManifest.xml.md`, `ApiSettingsStore.kt.md`, `MainActivity.kt.md` |

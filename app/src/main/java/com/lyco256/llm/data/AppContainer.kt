@@ -54,6 +54,14 @@ class AppContainer(context: Context) {
     } else {
         MlKitOcrTextGateway()
     }
+    private val mediaGridPreviewEnqueuer = WorkManagerMediaGridPreviewEnqueuer(context)
+
+    val existingMediaGridPreviewBackfill = ExistingMediaGridPreviewBackfill(
+        postStorageManager = postStorageManager,
+        previewStore = MediaGridPersistentPreviewStore(context.filesDir),
+        previewEnqueuer = mediaGridPreviewEnqueuer,
+    )
+
     val repository = ClipRepository(
         context = context,
         postStorageManager = postStorageManager,
@@ -62,6 +70,6 @@ class AppContainer(context: Context) {
         xApiClient = xApiClient,
         ocrTextGateway = ocrTextGateway,
         includeSeedMedia = !BuildConfig.TEST_HARNESS,
-        mediaGridPreviewEnqueuer = WorkManagerMediaGridPreviewEnqueuer(context),
+        mediaGridPreviewEnqueuer = mediaGridPreviewEnqueuer,
     )
 }

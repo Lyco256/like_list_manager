@@ -42,6 +42,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,6 +55,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lyco256.llm.data.ApiSettings
+import com.lyco256.llm.data.ExistingMediaGridPreviewWorkStatus
 import com.lyco256.llm.data.LikeCountRefreshEstimate
 import com.lyco256.llm.data.PostStorageEstimate
 import com.lyco256.llm.data.PostStorageLocation
@@ -80,6 +82,8 @@ fun SettingsScreen(
 
     val settings = uiState.settingsSnapshot
     val storageState = uiState.storageState
+    val existingPreviewScanState by viewModel.existingPreviewScan.collectAsState()
+    val existingPreviewWorkStatus by viewModel.existingPreviewWorkStatus.collectAsState()
     var clientIdDraft by remember(uiState.apiSettings.clientId) { mutableStateOf(uiState.apiSettings.clientId) }
     var changeClientIdConfirm by remember { mutableStateOf(false) }
     var likeRefreshEstimate by remember { mutableStateOf<LikeCountRefreshEstimate?>(null) }
@@ -88,7 +92,15 @@ fun SettingsScreen(
     var storageMoveInProgress by remember { mutableStateOf(false) }
     var messageTitle by remember { mutableStateOf<String?>(null) }
     var messageBody by remember { mutableStateOf<String?>(null) }
+    var existingPreviewStartConfirm by remember { mutableStateOf(false) }
     val storageBusy = storageState.isMigrating || storageEstimating || storageMoveInProgress
+
+    if (BuildConfig.DEBUG && !BuildConfig.TEST_HARNESS) {
+        LaunchedEffect(Unit) {
+            viewModel.startExistingPreviewMonitor()
+            viewModel.refreshExistingPreviewScan()
+        }
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize().testTag("settings_screen"),
@@ -231,6 +243,19 @@ fun SettingsScreen(
                 }
             }
 
+            if (BuildConfig.DEBUG && !BuildConfig.TEST_HARNESS) {
+                item {
+                    ExistingMediaGridPreviewBackfillSection(
+                        scanState = existingPreviewScanState,
+                        workStatus = existingPreviewWorkStatus,
+                        onRescan = viewModel::refreshExistingPreviewScan,
+                        onStart = { existingPreviewStartConfirm = true },
+                        onStop = viewModel::stopExistingPreviewBackfill,
+                        onResume = viewModel::resumeExistingPreviewBackfill,
+                    )
+                }
+            }
+
             item {
                 SettingsSection(
                     title = "データ管理",
@@ -293,6 +318,37 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+
+    if (existingPreviewStartConfirm) {
+        AlertDialog(
+            onDismissRequest = { existingPreviewStartConfirm = false },
+            title = { Text("既存画像プレビューを生成しますか？") },
+            text = {
+                Text(
+                    "local asset: ${existingPreviewScanState.summary.localAssetCount}件\n" +
+                        "有効JPEG: ${existingPreviewScanState.summary.validPreviewCount}件\n" +
+                        "生成対象: ${existingPreviewScanState.summary.targetCount}件",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        existingPreviewStartConfirm = false
+                        viewModel.startExistingPreviewBackfill(existingPreviewScanState.summary.targetAssetIds)
+                    },
+                    modifier = Modifier.testTag("existing_preview_start_confirm"),
+                    enabled = !existingPreviewScanState.isScanning && existingPreviewScanState.summary.targetCount > 0 &&
+                        existingPreviewWorkStatus.queuedCount == 0 && existingPreviewWorkStatus.runningCount == 0,
+                ) { Text("開始") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { existingPreviewStartConfirm = false },
+                    modifier = Modifier.testTag("existing_preview_start_cancel"),
+                ) { Text("キャンセル") }
+            },
+        )
     }
 
     if (changeClientIdConfirm) {
@@ -415,6 +471,69 @@ fun SettingsScreen(
                 ) { Text("閉じる") }
             },
         )
+    }
+}
+
+@Composable
+private fun ExistingMediaGridPreviewBackfillSection(
+    scanState: com.lyco256.llm.data.ExistingMediaGridPreviewScanState,
+    workStatus: ExistingMediaGridPreviewWorkStatus,
+    onRescan: () -> Unit,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onResume: () -> Unit,
+) {
+    SettingsSection(title = "既存画像プレビュー生成", testTag = "settings_existing_preview_section") {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (scanState.isScanning) {
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(20.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text("assetとJPEGを確認しています")
+                }
+            }
+            Text("local asset総数: ${scanState.summary.localAssetCount}")
+            Text("有効JPEG数: ${scanState.summary.validPreviewCount}")
+            Text("生成対象数: ${scanState.summary.targetCount}")
+            Text("今回tag queued: ${workStatus.queuedCount}")
+            Text("running: ${workStatus.runningCount}")
+            Text("succeeded: ${workStatus.succeededCount}")
+            Text("failed: ${workStatus.failedCount}")
+            Text("cancelled: ${workStatus.cancelledCount}")
+            if (workStatus.constraintWaiting) {
+                Text("WorkManagerのストレージ容量制約を待機中です")
+            }
+            if (workStatus.isFinished && scanState.summary.targetCount == 0) {
+                Text("変換完了", color = MaterialTheme.colorScheme.primary)
+            }
+            scanState.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onRescan,
+                    enabled = !scanState.isScanning,
+                    modifier = Modifier.testTag("existing_preview_rescan"),
+                ) { Text("再確認") }
+                Button(
+                    onClick = onStart,
+                    enabled = !scanState.isScanning && scanState.summary.targetCount > 0 &&
+                        workStatus.queuedCount == 0 && workStatus.runningCount == 0,
+                    modifier = Modifier.testTag("existing_preview_start"),
+                ) { Text("開始") }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onStop,
+                    enabled = workStatus.queuedCount > 0 || workStatus.runningCount > 0,
+                    modifier = Modifier.testTag("existing_preview_stop"),
+                ) { Text("停止") }
+                Button(
+                    onClick = onResume,
+                    enabled = !scanState.isScanning && scanState.summary.targetCount > 0 &&
+                        workStatus.queuedCount == 0 && workStatus.runningCount == 0,
+                    modifier = Modifier.testTag("existing_preview_resume"),
+                ) { Text("再開") }
+            }
+        }
     }
 }
 

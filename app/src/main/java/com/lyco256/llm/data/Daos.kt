@@ -59,6 +59,12 @@ interface ClipDao {
     @Query("SELECT * FROM assets ORDER BY id")
     suspend fun getAllAssets(): List<AssetEntity>
 
+    @Query(
+        "SELECT assets.* FROM assets INNER JOIN clips ON clips.id = assets.clipId " +
+            "WHERE clips.isDeleted = 0 ORDER BY assets.id",
+    )
+    suspend fun getActiveAssets(): List<AssetEntity>
+
     @Query("SELECT * FROM assets WHERE id = :assetId LIMIT 1")
     suspend fun getAsset(assetId: Long): AssetEntity?
 

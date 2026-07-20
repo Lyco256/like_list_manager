@@ -1,5 +1,18 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 第10実装: existing preview backfill（一時ブランチ限定）
+
+| 要件 | 実装・証跡 |
+|---|---|
+| debug非TEST_HARNESSだけの一時画面、明示開始 | `SettingsScreen.kt` の `BuildConfig.DEBUG && !BuildConfig.TEST_HARNESS`、確認Dialog、`existing_preview_start_confirm` |
+| local asset走査とmissing/stale/invalid選別 | `ExistingMediaGridPreviewBackfill.kt`、`getActiveAssets()`、`ExistingMediaGridPreviewBackfillTest` |
+| 実装8 scheduler/worker/store再利用、最大100件batch | `MediaGridPreviewWork.kt`、`MediaGridPreviewWorker.kt`、`MediaGridPersistentPreviewStore.kt` |
+| 専用tag、stop/resume、通常work非干渉 | `enqueueExistingMediaGridPreviewWork`、`cancelExistingMediaGridPreviewWork`、`ExistingMediaGridPreviewBackfillIntegrationTest` |
+| UI thread非使用、毎秒全件statなし、再作成復元 | `Dispatchers.IO` scan、WorkManager tag監視、controller再生成IntegrationTest |
+| DB schema・実装8/9・通常同期・grid・Macrobenchmark非変更 | `LikeListDatabase.kt`、既存preview worker/store/grid/benchmark差分確認 |
+
+本実装は `temp/media-grid-existing-preview-backfill` 専用で、`devenv`へマージしない。Codexの検証は隔離packageで実行し、本番一括変換は開始しない。
+
 ## 第9実装: persistent preview display and preload
 
 | 要件 | 証跡 |

@@ -178,9 +178,14 @@ DB・画像snapshotは、明示指定したバックアップをホスト上の�
 Failed: <phase>
 Error: <最初に確認すべきエラー情報>
 Log: <詳細ログファイルのパス>
+
 ```
 
 標準出力だけで原因が分からない場合に限り、該当ログの必要範囲だけ読む。関係ないフェーズのログ、成功したフェーズのログ、HTMLレポート、JUnit XML、lintレポートを広く読まない。
+
+## 第10実装の一時変換ブランチ
+
+`temp/media-grid-existing-preview-backfill` の検証では、`run-safe-integration-check.cmd`を先に実行し、続けて`run-safe-debug-check.cmd -InstallToDevice`を実行する。Macrobenchmarkは実行しない。Codexは本番アプリで既存画像変換を開始せず、変換操作の確認は隔離Integration APKだけで行う。変換完了後に最新`devenv`へ戻す手順は`docs/EXISTING_MEDIA_GRID_PREVIEW_BACKFILL.md`に従う。
 
 ## 冗長化防止
 

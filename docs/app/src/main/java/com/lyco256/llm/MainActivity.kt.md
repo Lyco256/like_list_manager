@@ -14,6 +14,7 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 - `MainUiState`: 未分類、分類済み、検索条件、並び替え、投稿者一覧、タグ階層、保存先状態、同期状態、設定画面用スナップショットをまとめる
 - `TweetFilterState`: 分類済み画面の文字列検索、検索モード、検索対象、期間、投稿者条件、タグ条件、タグのみtoggleを表す
 - `SettingsScreen`: X API設定、同期、使用量、データ管理、保存先候補、移動開始入口を全画面で表示する
+- 一時ブランチのdebug非TEST_HARNESSだけ、`ExistingMediaGridPreviewBackfill`のscan/work statusを設定画面へ公開する。通常起動・グリッド表示・テストvariantでは変換を開始しない
 - `StorageMoveEstimateDialog`: 保存先移動の最終確認内容と、移動開始/キャンセル操作を扱う
 - `StorageProgressDialog`: 保存先見積もり中、移動開始準備中、移動中などの待機表示を行う
 

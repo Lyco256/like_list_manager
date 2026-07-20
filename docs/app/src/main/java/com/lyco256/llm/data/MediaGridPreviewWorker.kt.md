@@ -17,3 +17,5 @@ WorkManagerから受け取ったasset IDを1件ずつDBで再取得し、現在�
 削除と保存先移動はStoreの共有公開ロックと同じ順序で直列化され、削除済みassetや変更前`localPath`のJPEGが後から復活しないようにします。
 
 生成が`GENERATED`になった場合だけ、`MediaGridPreviewNotifier`へasset IDをprocess内通知します。通知は永続化せず、worker失敗・retry・既存有効JPEGのskipでは発行しません。
+
+第10実装からも同じworkerを使用します。一時backfill専用tagはscheduler側だけで付与し、workerのasset再確認、store生成、atomic publish、retry処理は変更しません。

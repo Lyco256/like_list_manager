@@ -85,6 +85,8 @@ import com.lyco256.llm.data.ApiSettings
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClassifiedClipItem
 import com.lyco256.llm.data.ClipWithDetails
+import com.lyco256.llm.data.ExistingMediaGridPreviewScanState
+import com.lyco256.llm.data.ExistingMediaGridPreviewWorkStatus
 import com.lyco256.llm.data.LikeCountRefreshEstimate
 import com.lyco256.llm.data.OAuthSession
 import com.lyco256.llm.data.MediaGridClipSource
@@ -109,6 +111,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -311,12 +314,17 @@ private data class RepositoryUiState(
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository = (application as LikeListManagerApp).container.repository
+    private val appContainer = (application as LikeListManagerApp).container
+    private val repository = appContainer.repository
+    private val existingMediaGridPreviewBackfill = appContainer.existingMediaGridPreviewBackfill
     private val filters = MutableStateFlow(TweetFilterState())
     private val sort = MutableStateFlow(ClassifiedSortState())
     private val apiSettings = MutableStateFlow(ApiSettings())
     private val oauthSession = MutableStateFlow<OAuthSession?>(null)
     private val settingsSnapshot = MutableStateFlow(SettingsSnapshot())
+    private val existingPreviewScanState = MutableStateFlow(ExistingMediaGridPreviewScanState())
+    private var existingPreviewScanGeneration = 0L
+    private var existingPreviewMonitorStarted = false
     private val mediaGridSource = repository.mediaGridSource
     private val selectedMediaGridClipId = MutableStateFlow<Long?>(null)
     private val mediaGridCache = MediaGridMetadataCache()
@@ -357,6 +365,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ) { baseState, snapshot ->
         baseState.copy(settingsSnapshot = snapshot)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
+
+    val existingPreviewScan: StateFlow<ExistingMediaGridPreviewScanState> = existingPreviewScanState
+    val existingPreviewWorkStatus: StateFlow<ExistingMediaGridPreviewWorkStatus> =
+        existingMediaGridPreviewBackfill.workStatus.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            ExistingMediaGridPreviewWorkStatus(),
+        )
 
     val classifiedMediaGridState: StateFlow<ClassifiedMediaGridState> = combine(
         mediaGridSource,
@@ -620,6 +636,81 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshSettingsSnapshot() = viewModelScope.launch {
         refreshSettingsSnapshotInternal()
+    }
+
+    fun startExistingPreviewMonitor() {
+        if (existingPreviewMonitorStarted) return
+        existingPreviewMonitorStarted = true
+        viewModelScope.launch {
+            var initialized = false
+            var wasFinished = false
+            existingMediaGridPreviewBackfill.workStatus.collect { status ->
+                if (!initialized || (status.isFinished && !wasFinished)) {
+                    refreshExistingPreviewScan()
+                }
+                initialized = true
+                wasFinished = status.isFinished
+            }
+        }
+    }
+
+    fun refreshExistingPreviewScan() {
+        val generation = ++existingPreviewScanGeneration
+        existingPreviewScanState.value = existingPreviewScanState.value.copy(
+            isScanning = true,
+            errorMessage = null,
+        )
+        viewModelScope.launch {
+            runCatching { existingMediaGridPreviewBackfill.scan() }
+                .onSuccess { summary ->
+                    if (generation == existingPreviewScanGeneration) {
+                        existingPreviewScanState.value = ExistingMediaGridPreviewScanState(summary = summary)
+                    }
+                }
+                .onFailure { error ->
+                    if (generation == existingPreviewScanGeneration) {
+                        existingPreviewScanState.value = existingPreviewScanState.value.copy(
+                            isScanning = false,
+                            errorMessage = error.message ?: "既存画像を確認できませんでした",
+                        )
+                    }
+                }
+        }
+    }
+
+    fun startExistingPreviewBackfill(assetIds: Collection<Long>) {
+        viewModelScope.launch {
+            existingMediaGridPreviewBackfill.enqueue(assetIds)
+        }
+    }
+
+    fun stopExistingPreviewBackfill() {
+        existingMediaGridPreviewBackfill.cancel()
+    }
+
+    fun resumeExistingPreviewBackfill() {
+        val generation = ++existingPreviewScanGeneration
+        existingPreviewScanState.value = existingPreviewScanState.value.copy(
+            isScanning = true,
+            errorMessage = null,
+        )
+        viewModelScope.launch {
+            runCatching { existingMediaGridPreviewBackfill.scan() }
+                .onSuccess { summary ->
+                    if (generation == existingPreviewScanGeneration) {
+                        existingPreviewScanState.value = ExistingMediaGridPreviewScanState(summary = summary)
+                        existingMediaGridPreviewBackfill.enqueue(summary.targetAssetIds)
+                    }
+                }
+                .onFailure { error ->
+                    if (generation == existingPreviewScanGeneration) {
+                        existingPreviewScanState.value = existingPreviewScanState.value.copy(
+                            isScanning = false,
+                            errorMessage = error.message ?: "既存画像を確認できませんでした",
+                        )
+                    }
+                }
+        }
     }
 
     private suspend fun refreshSettingsSnapshotInternal() {

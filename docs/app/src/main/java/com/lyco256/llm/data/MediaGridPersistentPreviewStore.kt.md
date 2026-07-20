@@ -18,6 +18,8 @@
 - 有効な256×256 JPEGが元画像より新しい場合は再生成しない
 - ファイル名はasset IDだけから決定し、保存先外を削除・上書きできないことを検査する
 
+第10実装では、`inspect(assetId, sourceFile)` がpreviewの存在・256×256 JPEG形式・元画像より新しいかをdecode boundsだけで判定します。元画像は走査時にデコードしません。通常同期と一時backfillが異なるunique workで重なっても、storeの生成直列化により同時生成数を1件に保ちます。
+
 ## 変更時の確認
 
 crop、sample size、JPEG形式・寸法・品質、再生成判定、原子的置換、キャンセル時の既存ファイル保護をUnit/AndroidTestで確認します。グリッドの画像候補順、Coil設定、既存cache、Macrobenchmarkは変更しません。
