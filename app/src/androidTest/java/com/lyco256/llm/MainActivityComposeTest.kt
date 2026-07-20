@@ -27,9 +27,15 @@ import androidx.compose.ui.test.performTextReplacement
 import com.lyco256.llm.data.AssetEntity
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipTagEntity
+import com.lyco256.llm.data.MediaGridImageCandidateInput
+import com.lyco256.llm.data.MediaGridImageSourceKind
+import com.lyco256.llm.data.MediaGridPersistentPreviewMetadata
+import com.lyco256.llm.data.MediaGridPersistentPreviewStore
 import com.lyco256.llm.data.PostStorageManager
 import com.lyco256.llm.data.TagEntity
 import com.lyco256.llm.data.TagColorId
+import com.lyco256.llm.data.buildMediaGridImageCandidates
+import com.lyco256.llm.data.mediaGridImageCacheKey
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.first
@@ -236,6 +242,16 @@ class MainActivityComposeTest {
         }
         val clipId = clipAndAssetIds.first
         val assetIds = clipAndAssetIds.second
+        val previewSource = File(storage().imageDirectory(), "classified-grid-persistent-preview-source.jpg").apply {
+            writeBytes(bitmapBytes(4, 4, android.graphics.Color.GREEN))
+        }
+        val previewStore = MediaGridPersistentPreviewStore(composeRule.activity.filesDir)
+        runBlocking {
+            assertEquals(
+                com.lyco256.llm.data.MediaGridPreviewGenerationResult.GENERATED,
+                previewStore.generate(assetIds.getValue("grid-photo"), previewSource) { true },
+            )
+        }
         waitUntil { clipTagIds(clipId).isNotEmpty() }
 
         composeRule.onNodeWithTag("tab_classified").performClick()
@@ -263,6 +279,28 @@ class MainActivityComposeTest {
             composeRule.onAllNodesWithTag(photoPlaceholderTag).fetchSemanticsNodes().isEmpty()
         }
         assertTrue(composeRule.onAllNodesWithTag(photoPlaceholderTag).fetchSemanticsNodes().isEmpty())
+        val persistentPreview = previewStore.previewFile(assetIds.getValue("grid-photo"))
+        val previewCandidate = buildMediaGridImageCandidates(
+            MediaGridImageCandidateInput(
+                assetId = assetIds.getValue("grid-photo"),
+                mediaKey = "grid-photo",
+                localPath = photoPath,
+                previewUrl = null,
+                remoteUrl = null,
+                displayUrl = photoPath,
+                persistentPreview = MediaGridPersistentPreviewMetadata(
+                    filePath = persistentPreview.absolutePath,
+                    length = persistentPreview.length(),
+                    lastModified = persistentPreview.lastModified(),
+                ),
+            ),
+        ).first()
+        assertEquals(MediaGridImageSourceKind.PersistentPreview, previewCandidate.kind)
+        val previewMemoryKey = mediaGridImageCacheKey(previewCandidate, 256, 256)
+        composeRule.waitUntil(30_000) {
+            (composeRule.activity.application as LikeListManagerApp).container.mediaGridImageLoader.memoryCache
+                ?.get(coil.memory.MemoryCache.Key(previewMemoryKey)) != null
+        }
         val videoPlaceholderTag = "media_grid_placeholder_${assetIds.getValue("grid-video")}"
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithTag(videoPlaceholderTag).fetchSemanticsNodes().isEmpty()

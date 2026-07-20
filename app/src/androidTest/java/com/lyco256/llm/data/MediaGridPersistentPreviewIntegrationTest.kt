@@ -16,6 +16,9 @@ import java.io.File
 import java.time.Instant
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -130,6 +133,27 @@ class MediaGridPersistentPreviewIntegrationTest {
         assertEquals(WorkInfo.State.SUCCEEDED, work!!.state)
         assertTrue(store.previewFile(assetId).isFile)
         assertEquals(context.filesDir.canonicalFile, store.previewFile(assetId).parentFile!!.parentFile!!.parentFile!!.canonicalFile)
+    }
+
+    @Test
+    fun workerPublishesOnlyGeneratedAssetCompletionNotification() = runBlocking {
+        val source = createSource("worker-notification.jpg", 512, 300) { canvas -> canvas.drawColor(Color.CYAN) }
+        val assetId = insertLocalAsset(source)
+        val notification = async {
+            withTimeout(10_000L) {
+                MediaGridPreviewNotifier.previewChanged.first { it == assetId }
+            }
+        }
+        val worker = TestListenableWorkerBuilder<MediaGridPreviewWorker>(context)
+            .setInputData(
+                Data.Builder()
+                    .putLongArray(WorkManagerMediaGridPreviewEnqueuer.INPUT_ASSET_IDS, longArrayOf(assetId))
+                    .build(),
+            )
+            .build()
+
+        assertTrue(worker.doWork() is ListenableWorker.Result.Success)
+        assertEquals(assetId, notification.await())
     }
 
     @Test

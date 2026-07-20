@@ -1,5 +1,18 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 第9実装: persistent preview display and preload
+
+| 要件 | 証跡 |
+| --- | --- |
+| 永続JPEGをlocalより前へ追加、古い／空／不正形式を除外、256×256専用key・disk cache無効 | `MediaGridDirectPreview.kt`、`MediaGridDirectPreviewTest.kt` |
+| 初期表示は実表示範囲、layout前は最大`columnCount * 6`、次行は最大列数 | `selectMediaGridInitialPreloadIndices`、`selectMediaGridAdjacentPreloadIndices`、`MediaGridDirectPreviewTest.kt` |
+| preload重複排除、memory cache hit、viewport／方向変更時の取消 | `MediaGridPreviewPreloader`、`MediaGridDirectPreviewTest.kt`、`TagHierarchyUiV2.kt` |
+| worker完成通知と対象assetだけの再準備 | `MediaGridPreviewNotifier`、`MediaGridPersistentPreviewIntegrationTest.kt`、`TagHierarchyUiV2.kt` |
+| 破損JPEGのfallbackと同一identityの一回限り回復予約 | `MediaGridPreviewRecoveryGate`、`MediaGridDirectPreviewTest.kt`、`ClipRepository.recoverMediaGridPreview`、`MainActivityComposeTest.kt` |
+| 初期グリッド表示と共有memory cache | `MainActivityComposeTest.classifiedDisplayToggleSwitchesBetweenCardAndMediaGridAndSurvivesActivityRecreation` |
+
+生成仕様、DB、元画像、既存cache、共有ImageLoader容量／decoder数、Macrobenchmarkは変更していません。検証順は隔離統合チェック後に本番安全上書きチェックとします。Macrobenchmarkは今回実行しません。
+
 ## 2026-07-20 第8実装: persistent JPEG preview
 
 | 要件 | 実装・証跡 |

@@ -940,6 +940,23 @@ class ClipRepository(
         }
     }
 
+    suspend fun recoverMediaGridPreview(
+        assetId: Long,
+        expectedPreviewIdentity: String,
+    ) = withContext(Dispatchers.IO) {
+        val asset = postStorageManager.withDatabase { database -> database.clipDao().getAsset(assetId) }
+            ?: return@withContext
+        val localPath = asset.localPath?.trim()?.takeIf(String::isNotEmpty) ?: return@withContext
+        if (!File(localPath).isFile) return@withContext
+        val preview = mediaGridPreviewStore.previewFile(assetId)
+        if (!preview.isFile || preview.length() <= 0L) return@withContext
+        val currentIdentity = "preview-v1|$assetId|${asset.mediaKey}|${preview.absolutePath}|${preview.length()}|${preview.lastModified()}"
+        if (currentIdentity != expectedPreviewIdentity) return@withContext
+        if (mediaGridPreviewStore.deletePreview(assetId)) {
+            mediaGridPreviewEnqueuer.enqueue(listOf(assetId))
+        }
+    }
+
     private fun cleanNodeName(name: String): String = name.trim().also {
         require(it.isNotEmpty()) { "名前を入力してください" }
     }

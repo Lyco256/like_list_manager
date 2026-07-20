@@ -12,9 +12,16 @@
 ## 2026-07-19 direct preview pipeline (history)
 
 - The current grid no longer publishes a thumbnail-manager viewport or waits for `Waiting`, `Generating`, `Ready`, cache hydration, Idle resume, or wide preparation.
-- Each `ClassifiedMediaGridCell` builds the available local → preview → remote → non-duplicate display candidates and starts `AsyncImage` immediately. Missing local files are omitted; `downloadState == "failed"` does not suppress URL fallback.
+- `MediaGridImagePreparer` builds the available persistent JPEG → local → preview → remote → non-duplicate display candidates off composition, and each `ClassifiedMediaGridCell` starts `AsyncImage` from the prepared candidate list. Missing local files are omitted; `downloadState == "failed"` does not suppress URL fallback.
 - The measured cell constraints supply the request target size while `ContentScale.Crop` remains unchanged. A stable source-identity-and-size key is applied to both memory and disk cache requests.
 - Visible requests continue during drag and fling. Composition disposal cancels requests for cells leaving the viewport. The only separate work is targetless Coil prefetch for at most one adjacent row in the current direction.
+
+## 第9実装: persistent preview display and preload
+
+- The preparer adds a valid `filesDir/media_grid_previews/v1/<assetId>.jpg` before local → preview → remote → display. File stat and 256×256 JPEG metadata checks remain in the background preparer; the Composable and viewport path do not inspect files.
+- The first non-empty layout preloads only visible persistent JPEGs. Before layout is available, the fallback target is limited to `columnCount * 6` media indexes from `firstVisibleItemIndex`. Subsequent viewport updates preload only the next row in the current direction, limited to `columnCount` valid persistent JPEGs.
+- `MediaGridPreviewPreloader` deduplicates keys across preload requests and memory-cache hits, cancels obsolete requests on viewport/direction changes, and uses the same 256×256 memory key as the cell request. Persistent JPEG requests disable Coil disk cache; existing candidates retain their cache policy.
+- Worker publication and preview deletion emit a process-local asset ID. Only a currently visible matching cell invalidates and re-prepares; off-screen notifications are deferred until normal preparation. A persistent-JPEG decode error advances once to the existing fallback candidates and schedules best-effort deletion/re-generation once per preview identity without changing DB state.
 
 ## 2026-07 viewport dispatch (履歴: 第6実装で廃止)
 

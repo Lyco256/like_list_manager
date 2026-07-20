@@ -1,5 +1,12 @@
 package com.lyco256.llm.data
 
+import android.content.Context
+import android.graphics.BitmapFactory
+import coil.ImageLoader
+import coil.memory.MemoryCache
+import coil.request.CachePolicy
+import coil.request.Disposable
+import coil.request.ImageRequest
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
@@ -8,11 +15,18 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 enum class MediaGridImageSourceKind {
+    PersistentPreview,
     Local,
     Preview,
     Remote,
     Display,
 }
+
+data class MediaGridPersistentPreviewMetadata(
+    val filePath: String,
+    val length: Long,
+    val lastModified: Long,
+)
 
 data class MediaGridImageCandidate(
     val kind: MediaGridImageSourceKind,
@@ -27,12 +41,24 @@ data class MediaGridImageCandidateInput(
     val previewUrl: String?,
     val remoteUrl: String?,
     val displayUrl: String?,
+    val persistentPreview: MediaGridPersistentPreviewMetadata? = null,
 )
 
 /** Builds the ordered, available image sources used by both cells and prefetch. */
 fun buildMediaGridImageCandidates(input: MediaGridImageCandidateInput): List<MediaGridImageCandidate> {
-    val result = ArrayList<MediaGridImageCandidate>(4)
-    val seen = HashSet<String>(4)
+    val result = ArrayList<MediaGridImageCandidate>(5)
+    val seen = HashSet<String>(5)
+
+    input.persistentPreview?.takeIf { it.filePath.isNotBlank() && it.length > 0L }?.let { preview ->
+        val file = File(preview.filePath).absoluteFile
+        if (seen.add(file.absolutePath)) {
+            result += MediaGridImageCandidate(
+                kind = MediaGridImageSourceKind.PersistentPreview,
+                data = file.absolutePath,
+                sourceIdentity = persistentPreviewSourceIdentity(input, preview),
+            )
+        }
+    }
 
     input.localPath?.trim()?.takeIf(String::isNotEmpty)?.let { path ->
         val file = File(path)
@@ -84,13 +110,28 @@ fun buildMediaGridImageCandidates(input: MediaGridImageCandidateInput): List<Med
 private fun localSourceIdentity(input: MediaGridImageCandidateInput, file: File): String =
     "local|${input.assetId}|${input.mediaKey}|${file.absolutePath}|${file.length()}|${file.lastModified()}"
 
+internal fun persistentPreviewSourceIdentity(
+    input: MediaGridImageCandidateInput,
+    metadata: MediaGridPersistentPreviewMetadata,
+): String = "preview-v1|${input.assetId}|${input.mediaKey}|${metadata.filePath}|${metadata.length}|${metadata.lastModified}"
+
 private fun String.startsWithAny(vararg prefixes: String): Boolean = prefixes.any(::startsWith)
 
 fun mediaGridImageCacheKey(candidate: MediaGridImageCandidate, width: Int, height: Int): String {
-    val input = "media-grid|${candidate.sourceIdentity}|${width.coerceAtLeast(0)}x${height.coerceAtLeast(0)}"
-    return MessageDigest.getInstance("SHA-256")
+    val namespace = if (candidate.kind == MediaGridImageSourceKind.PersistentPreview) {
+        "media-grid-preview-v1"
+    } else {
+        "media-grid"
+    }
+    val input = "$namespace|${candidate.sourceIdentity}|${width.coerceAtLeast(0)}x${height.coerceAtLeast(0)}"
+    val digest = MessageDigest.getInstance("SHA-256")
         .digest(input.toByteArray())
         .joinToString("") { "%02x".format(it) }
+    return if (candidate.kind == MediaGridImageSourceKind.PersistentPreview) {
+        "media-grid-preview-v1|$digest"
+    } else {
+        digest
+    }
 }
 
 internal data class MediaGridPreparedCandidate(
@@ -100,12 +141,14 @@ internal data class MediaGridPreparedCandidate(
     val cacheKey: String,
     val width: Int,
     val height: Int,
+    val useDiskCache: Boolean = true,
 )
 
 internal data class MediaGridPreparedImage(
     val key: com.lyco256.llm.MediaGridRenderKey,
     val assetId: Long,
     val candidates: List<MediaGridPreparedCandidate>,
+    val itemIndex: Int = -1,
 )
 
 internal fun mediaGridPreparedImageMatches(
@@ -114,7 +157,9 @@ internal fun mediaGridPreparedImageMatches(
 ): Boolean = prepared.key == currentKey
 
 /** Prepares file metadata and Coil request metadata away from composition. */
-internal class MediaGridImagePreparer {
+internal class MediaGridImagePreparer(
+    private val previewStore: MediaGridPersistentPreviewStore,
+) {
     private data class CacheKey(val key: com.lyco256.llm.MediaGridRenderKey, val assetId: Long, val size: Int)
     private val cache = ConcurrentHashMap<CacheKey, MediaGridPreparedImage>()
 
@@ -127,37 +172,207 @@ internal class MediaGridImagePreparer {
     ) {
         if (visibleIndices.isEmpty() || cellSizePx <= 0) return
         val targetIndices = selectMediaGridPreparationIndices(frame.mediaCellIndices, visibleIndices, frame.key.columnCount, direction)
-        for (itemIndex in targetIndices) {
+        prepareIndices(frame, targetIndices, cellSizePx, emit)
+    }
+
+    suspend fun prepareIndices(
+        frame: com.lyco256.llm.MediaGridFrameData,
+        indices: Collection<Int>,
+        cellSizePx: Int,
+        emit: suspend (MediaGridPreparedImage) -> Unit,
+    ) {
+        if (indices.isEmpty() || cellSizePx <= 0) return
+        for (itemIndex in indices.distinct()) {
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
-            val cell = frame.items.getOrNull(itemIndex) as? com.lyco256.llm.MediaGridCellItem ?: continue
-            val cacheKey = CacheKey(frame.key, cell.entry.assetId, cellSizePx)
-            val prepared = cache[cacheKey] ?: withContext(Dispatchers.IO) {
-                val candidates = buildMediaGridImageCandidates(
-                    MediaGridImageCandidateInput(
-                        assetId = cell.entry.assetId,
-                        mediaKey = cell.entry.mediaKey,
-                        localPath = cell.entry.localPath,
-                        previewUrl = cell.entry.previewUrl,
-                        remoteUrl = cell.entry.remoteUrl,
-                        displayUrl = cell.entry.displayUrl,
-                    ),
-                ).map { candidate ->
-                    MediaGridPreparedCandidate(
-                        kind = candidate.kind,
-                        requestData = if (candidate.kind == MediaGridImageSourceKind.Local) File(candidate.data) else candidate.data,
-                        sourceIdentity = candidate.sourceIdentity,
-                        cacheKey = mediaGridImageCacheKey(candidate, cellSizePx, cellSizePx),
-                        width = cellSizePx,
-                        height = cellSizePx,
-                    )
-                }
-                MediaGridPreparedImage(frame.key, cell.entry.assetId, candidates)
-            }.also { cache[cacheKey] = it }
+            frame.items.getOrNull(itemIndex) as? com.lyco256.llm.MediaGridCellItem ?: continue
+            val prepared = prepareCell(frame, itemIndex, cellSizePx)
             if (mediaGridPreparedImageMatches(prepared, frame.key)) emit(prepared)
         }
     }
 
+    suspend fun preparePersistentPreviews(
+        frame: com.lyco256.llm.MediaGridFrameData,
+        indices: Collection<Int>,
+        emit: suspend (MediaGridPreparedCandidate) -> Unit,
+    ) {
+        for (itemIndex in indices.distinct()) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            val cell = frame.items.getOrNull(itemIndex) as? com.lyco256.llm.MediaGridCellItem ?: continue
+            val prepared = prepareCell(frame, itemIndex, MEDIA_GRID_PREVIEW_SIZE)
+            prepared.candidates.firstOrNull { it.kind == MediaGridImageSourceKind.PersistentPreview }?.let { candidate ->
+                emit(candidate)
+            }
+        }
+    }
+
+    fun invalidate(assetId: Long) {
+        cache.keys.removeIf { it.assetId == assetId }
+    }
+
+    private suspend fun prepareCell(
+        frame: com.lyco256.llm.MediaGridFrameData,
+        itemIndex: Int,
+        cellSizePx: Int,
+    ): MediaGridPreparedImage {
+        val cell = frame.items[itemIndex] as com.lyco256.llm.MediaGridCellItem
+        val cacheKey = CacheKey(frame.key, cell.entry.assetId, cellSizePx)
+        return cache[cacheKey] ?: withContext(Dispatchers.IO) {
+            val input = MediaGridImageCandidateInput(
+                assetId = cell.entry.assetId,
+                mediaKey = cell.entry.mediaKey,
+                localPath = cell.entry.localPath,
+                previewUrl = cell.entry.previewUrl,
+                remoteUrl = cell.entry.remoteUrl,
+                displayUrl = cell.entry.displayUrl,
+                persistentPreview = readPersistentPreviewMetadata(
+                    assetId = cell.entry.assetId,
+                    mediaKey = cell.entry.mediaKey,
+                    localPath = cell.entry.localPath,
+                ),
+            )
+            val candidates = buildMediaGridImageCandidates(input).map { candidate ->
+                val isPersistentPreview = candidate.kind == MediaGridImageSourceKind.PersistentPreview
+                val requestSize = if (isPersistentPreview) MEDIA_GRID_PREVIEW_SIZE else cellSizePx
+                MediaGridPreparedCandidate(
+                    kind = candidate.kind,
+                    requestData = if (candidate.kind == MediaGridImageSourceKind.Local || isPersistentPreview) File(candidate.data) else candidate.data,
+                    sourceIdentity = candidate.sourceIdentity,
+                    cacheKey = mediaGridImageCacheKey(candidate, requestSize, requestSize),
+                    width = requestSize,
+                    height = requestSize,
+                    useDiskCache = !isPersistentPreview,
+                )
+            }
+            MediaGridPreparedImage(frame.key, cell.entry.assetId, candidates, itemIndex)
+        }.also { cache[cacheKey] = it }
+    }
+
+    private fun readPersistentPreviewMetadata(
+        assetId: Long,
+        mediaKey: String,
+        localPath: String?,
+    ): MediaGridPersistentPreviewMetadata? {
+        val file = previewStore.previewFile(assetId)
+        if (!file.isFile || file.length() <= 0L) return null
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, options)
+        if (options.outWidth != MEDIA_GRID_PREVIEW_SIZE ||
+            options.outHeight != MEDIA_GRID_PREVIEW_SIZE ||
+            options.outMimeType != "image/jpeg"
+        ) return null
+        val local = localPath?.trim()?.takeIf(String::isNotEmpty)?.let(::File)
+        if (local != null && local.isFile && file.lastModified() < local.lastModified()) return null
+        return MediaGridPersistentPreviewMetadata(file.absolutePath, file.length(), file.lastModified())
+    }
+
     fun dispose() = cache.clear()
+}
+
+internal fun buildMediaGridImageRequest(
+    context: Context,
+    candidate: MediaGridPreparedCandidate,
+): ImageRequest {
+    val builder = ImageRequest.Builder(context)
+        .data(candidate.requestData)
+        .size(candidate.width, candidate.height)
+        .memoryCacheKey(candidate.cacheKey)
+        .crossfade(false)
+    if (candidate.useDiskCache) {
+        builder.diskCacheKey(candidate.cacheKey)
+    } else {
+        builder.diskCachePolicy(CachePolicy.DISABLED)
+    }
+    return builder.build()
+}
+
+internal class MediaGridPreviewPreloader(
+    private val context: Context,
+    private val imageLoader: ImageLoader,
+) {
+    private val active = ConcurrentHashMap<String, Disposable>()
+
+    fun reconcile(candidates: Collection<MediaGridPreparedCandidate>) {
+        val plan = buildMediaGridPreviewPreloadPlan(active.keys, candidates)
+        plan.cancelKeys.forEach { key ->
+            active.remove(key)?.dispose()
+        }
+        candidates.asSequence()
+            .filter { it.kind == MediaGridImageSourceKind.PersistentPreview && it.cacheKey in plan.enqueueKeys }
+            .distinctBy { it.cacheKey }
+            .forEach { candidate ->
+            if (imageLoader.memoryCache?.get(MemoryCache.Key(candidate.cacheKey)) != null) {
+                active.remove(candidate.cacheKey)?.dispose()
+                return@forEach
+            }
+            if (active.containsKey(candidate.cacheKey)) return@forEach
+            active[candidate.cacheKey] = imageLoader.enqueue(buildMediaGridImageRequest(context, candidate))
+            }
+    }
+
+    fun cancelAll() {
+        active.values.forEach(Disposable::dispose)
+        active.clear()
+    }
+}
+
+internal data class MediaGridPreviewPreloadPlan(
+    val enqueueKeys: Set<String>,
+    val cancelKeys: Set<String>,
+)
+
+internal fun buildMediaGridPreviewPreloadPlan(
+    activeKeys: Set<String>,
+    candidates: Collection<MediaGridPreparedCandidate>,
+): MediaGridPreviewPreloadPlan {
+    val desiredKeys = candidates
+        .asSequence()
+        .filter { it.kind == MediaGridImageSourceKind.PersistentPreview }
+        .map { it.cacheKey }
+        .toSet()
+    return MediaGridPreviewPreloadPlan(
+        enqueueKeys = desiredKeys - activeKeys,
+        cancelKeys = activeKeys - desiredKeys,
+    )
+}
+
+internal class MediaGridPreviewRecoveryGate {
+    private val attempted = HashSet<String>()
+
+    fun claim(identity: String): Boolean = synchronized(attempted) { attempted.add(identity) }
+}
+
+internal fun selectMediaGridInitialPreloadIndices(
+    mediaCellIndices: IntArray,
+    visibleMediaIndices: Set<Int>,
+    firstVisibleItemIndex: Int,
+    columnCount: Int,
+    layoutReady: Boolean,
+): List<Int> {
+    if (mediaCellIndices.isEmpty() || columnCount <= 0) return emptyList()
+    if (layoutReady && visibleMediaIndices.isNotEmpty()) return visibleMediaIndices.filter { it >= 0 }.sorted().distinct()
+    val start = lowerBound(mediaCellIndices, firstVisibleItemIndex.coerceAtLeast(0))
+    return mediaCellIndices.copyOfRange(start, minOf(start + columnCount * 6, mediaCellIndices.size)).toList()
+}
+
+internal fun selectMediaGridAdjacentPreloadIndices(
+    mediaCellIndices: IntArray,
+    visibleIndices: Set<Int>,
+    columnCount: Int,
+    direction: Int,
+): List<Int> = selectMediaGridPreparationIndices(mediaCellIndices, visibleIndices, columnCount, direction)
+    .filterNot(visibleIndices::contains)
+
+object MediaGridPreviewNotifier {
+    private val events = kotlinx.coroutines.flow.MutableSharedFlow<Long>(
+        extraBufferCapacity = 64,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
+
+    val previewChanged = events
+
+    fun notifyPreviewChanged(assetId: Long) {
+        events.tryEmit(assetId)
+    }
 }
 
 /** Selects visible cells and one adjacent row using the prebuilt media-cell index column. */
