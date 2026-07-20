@@ -56,7 +56,10 @@ class MediaGridPersistentPreviewStore(
     fun previewFile(assetId: Long): File = safeOutputFile("$assetId.jpg")
 
     suspend fun deletePreview(assetId: Long): Boolean = withMediaGridPreviewPublishLock {
-        deletePreviewUnsafe(assetId)
+        val existed = previewFile(assetId).exists()
+        val deleted = deletePreviewUnsafe(assetId)
+        if (existed && deleted) MediaGridPreviewNotifier.notifyPreviewChanged(assetId)
+        deleted
     }
 
     suspend fun <T> withPublishLock(block: suspend () -> T): T = withMediaGridPreviewPublishLock(block)

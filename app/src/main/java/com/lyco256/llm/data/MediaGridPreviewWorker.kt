@@ -21,7 +21,9 @@ class MediaGridPreviewWorker(
         val assetIds = inputData.getLongArray(WorkManagerMediaGridPreviewEnqueuer.INPUT_ASSET_IDS) ?: LongArray(0)
         for (assetId in assetIds) {
             try {
-                processAsset(app, assetId)
+                if (processAsset(app, assetId) == MediaGridPreviewGenerationResult.GENERATED) {
+                    MediaGridPreviewNotifier.notifyPreviewChanged(assetId)
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: IOException) {
@@ -35,15 +37,15 @@ class MediaGridPreviewWorker(
         Result.success()
     }
 
-    private suspend fun processAsset(app: LikeListManagerApp, assetId: Long) {
+    private suspend fun processAsset(app: LikeListManagerApp, assetId: Long): MediaGridPreviewGenerationResult? {
         val initial = app.container.postStorageManager.withDatabase { database ->
             database.clipDao().getAsset(assetId)
-        } ?: return
-        val sourcePath = initial.localPath?.trim()?.takeIf(String::isNotEmpty) ?: return
+        } ?: return null
+        val sourcePath = initial.localPath?.trim()?.takeIf(String::isNotEmpty) ?: return null
         val source = File(sourcePath).absoluteFile
-        if (!source.isFile) return
+        if (!source.isFile) return null
 
-        store.generate(assetId, source) {
+        return store.generate(assetId, source) {
             app.container.postStorageManager.withDatabase { database ->
                 database.clipDao().getAsset(assetId)?.localPath?.let { File(it).absoluteFile } == source
             }

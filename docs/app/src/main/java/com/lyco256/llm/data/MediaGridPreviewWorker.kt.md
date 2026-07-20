@@ -15,3 +15,5 @@ WorkManagerから受け取ったasset IDを1件ずつDBで再取得し、現在�
 - WorkManagerの通常バックグラウンド実行で動き、UIスレッドを使用しない
 
 削除と保存先移動はStoreの共有公開ロックと同じ順序で直列化され、削除済みassetや変更前`localPath`のJPEGが後から復活しないようにします。
+
+生成が`GENERATED`になった場合だけ、`MediaGridPreviewNotifier`へasset IDをprocess内通知します。通知は永続化せず、worker失敗・retry・既存有効JPEGのskipでは発行しません。
