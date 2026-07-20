@@ -123,17 +123,18 @@ class PostStorageManager(
         estimate
     }
 
-    suspend fun moveTo(targetId: String): Result<Unit> = mutex.withLock {
+    suspend fun moveTo(targetId: String): Result<Unit> = withMediaGridPreviewPublishLock {
+        mutex.withLock databaseLock@{
         val source = selectedPaths()
         val target = availablePaths().firstOrNull { it.id == targetId }
-            ?: return@withLock Result.failure(IllegalStateException("移動先を利用できません"))
-        if (source.id == target.id) return@withLock Result.success(Unit)
+            ?: return@databaseLock Result.failure(IllegalStateException("移動先を利用できません"))
+        if (source.id == target.id) return@databaseLock Result.success(Unit)
         val sourceDatabase = _database.value
         if (!source.available || sourceDatabase == null) {
-            return@withLock Result.failure(IllegalStateException("現在の保存先を読み取れないため移動できません"))
+            return@databaseLock Result.failure(IllegalStateException("現在の保存先を読み取れないため移動できません"))
         }
         if (!target.root.mkdirs() && !target.root.isDirectory) {
-            return@withLock Result.failure(IllegalStateException("移動先フォルダを作成できません"))
+            return@databaseLock Result.failure(IllegalStateException("移動先フォルダを作成できません"))
         }
         val requiredBytes = if (
             pendingEstimateSourceId == source.id &&
@@ -147,7 +148,7 @@ class PostStorageManager(
         pendingEstimateTargetId = null
         pendingEstimateBytes = null
         if (target.root.usableSpace < requiredBytes + MIN_FREE_BYTES) {
-            return@withLock Result.failure(IllegalStateException("移動先の空き容量が不足しています"))
+            return@databaseLock Result.failure(IllegalStateException("移動先の空き容量が不足しています"))
         }
 
         _state.value = _state.value.copy(isMigrating = true, migrationMessage = "投稿データを移動しています")
@@ -226,6 +227,7 @@ class PostStorageManager(
                 currentUsageBytes = sourceDatabase?.let { managedUsage() },
             )
             Result.failure(error)
+        }
         }
     }
 

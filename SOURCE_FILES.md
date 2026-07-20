@@ -6,6 +6,13 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 
 Current media-grid rendering builds keyed `MediaGridFrameData` on `Dispatchers.Default`, shows Progress until the current render key is ready, then renders the frame and cell placeholders without waiting for image metadata. `MediaGridImagePreparer` prepares file metadata, candidates, source identities, and cache keys off composition for visible cells and one adjacent row only. Existing `cacheDir/media_grid_thumbnails` files and application data are intentionally untouched. Current acceptance evidence is tracked in `TEST_REQUIREMENTS_COVERAGE.md`.
 
+## 2026-07-20 第8実装: persistent JPEG preview generation
+
+- `MediaGridPersistentPreviewStore.kt` generates only the new local asset's `filesDir/media_grid_previews/v1/<assetId>.jpg`; it uses bounds/sample decode, center crop, JPEG quality 80, and same-directory atomic replacement.
+- `MediaGridPreviewWork.kt` and `MediaGridPreviewWorker.kt` enqueue fixed-size batches as non-expedited unique WorkManager work with storage-not-low constraint and serial execution. The worker rechecks the asset and current `localPath` before publishing.
+- `ClipRepository.kt` enqueues only successful inserted assets with a local path after source image persistence; sync does not await JPEG generation. Clip deletion removes preview files best effort after DB deletion, while storage migration leaves previews in `filesDir`.
+- DB schema, original images, existing caches, candidate order, Coil configuration, preload range, grid UI, and Macrobenchmark are unchanged.
+
 ## 2026-07 media grid direct preview pipeline
 
 - `TagHierarchyUiV2.kt` owns the classified grid, headers, sorting, selection, pinch column changes, and cell interactions.
@@ -123,6 +130,7 @@ MainActivity / Compose UI
 | --- | --- | --- |
 | 画面、操作、検索、タグUI | `docs/app/src/main/java/com/lyco256/llm/MainActivity.kt.md` | `docs/app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt.md`, `ClipRepository.kt.md`, `Entities.kt.md` |
 | 同期ロジック、月間制限、画像保存 | `docs/app/src/main/java/com/lyco256/llm/data/ClipRepository.kt.md` | `XApiClient.kt.md`, `Daos.kt.md`, `Entities.kt.md` |
+| 新規local assetの永続JPEG preview生成 | `docs/app/src/main/java/com/lyco256/llm/data/MediaGridPersistentPreviewStore.kt.md` | `MediaGridPreviewWork.kt.md`, `MediaGridPreviewWorker.kt.md`, `ClipRepository.kt.md` |
 | 投稿DB・画像の保存先、SDカード移動 | `docs/app/src/main/java/com/lyco256/llm/data/PostStorageManager.kt.md` | `AppContainer.kt.md`, `ClipRepository.kt.md`, `MainActivity.kt.md` |
 | X APIのendpointやresponse | `docs/app/src/main/java/com/lyco256/llm/data/XApiClient.kt.md` | `ClipRepository.kt.md`, `Entities.kt.md` |
 | Xログイン、scope、callback | `docs/app/src/main/java/com/lyco256/llm/data/XOAuthManager.kt.md` | `AndroidManifest.xml.md`, `ApiSettingsStore.kt.md`, `MainActivity.kt.md` |
@@ -175,6 +183,9 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/data/XOAuthManager.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/XApiClient.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/ClipRepository.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/MediaGridPersistentPreviewStore.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/MediaGridPreviewWork.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/MediaGridPreviewWorker.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/OcrTextRecognizer.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/TagColorPalette.kt.md`
 
@@ -189,6 +200,7 @@ MainActivity / Compose UI
 - `MainActivityComposeTest.kt`, `UiStateRenderingTest.kt`, `RepositoryIntegrationTest.kt`, and `LargeDatasetIntegrationTest.kt` cover the classified display toggle, lightweight media-grid flow, 2〜12 column resizing, section headers, selection/Dialog boundaries, and large-data rendering.
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/PostStorageManagerRecoveryTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/OcrTextRecognizerTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/data/MediaGridPersistentPreviewStoreTest.kt.md`
 
 ### Macrobenchmark
 
@@ -289,6 +301,7 @@ MainActivity / Compose UI
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/SettingsStoreIsolationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LargeDatasetIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/PostStorageManagerRecoveryTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/MediaGridPersistentPreviewIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/MainActivityComposeTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/SearchFilterDatabaseIntegrationTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/SnapshotCompatibilityTest.kt.md`

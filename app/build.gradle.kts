@@ -192,6 +192,7 @@ dependencies {
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.mockwebserver)
+    androidTestImplementation(libs.androidx.work.testing)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -213,6 +214,7 @@ dependencies {
 
     implementation(libs.coil.compose)
     implementation(libs.androidx.security.crypto)
+    implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.appauth)
     implementation(libs.mlkit.text.japanese)
 }

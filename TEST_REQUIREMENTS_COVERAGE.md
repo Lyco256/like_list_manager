@@ -1,5 +1,22 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-07-20 第8実装: persistent JPEG preview
+
+| 要件 | 実装・証跡 |
+| --- | --- |
+| 新規local assetだけをasset ID由来の256×256 JPEGへ変換 | `MediaGridPersistentPreviewStore`、`ClipDao.insertAssets`戻り値、`MediaGridPersistentPreviewIntegrationTest` |
+| bounds/sample decode、中央crop、quality 80、UIスレッド非使用 | `MediaGridPersistentPreviewStoreTest`、`MediaGridPersistentPreviewIntegrationTest`、WorkManager CoroutineWorker |
+| 一時ファイル・原子的置換・既存JPEG保護 | `MediaGridPersistentPreviewStore`、stale/invalid output integration test |
+| unique non-expedited WorkManager、batch直列、storage-not-low | `MediaGridPreviewWork`、`MediaGridPersistentPreviewIntegrationTest` |
+| runtime/publication直前のasset再確認、削除・localPath変更競合 | Store共有公開ロック、worker integration test |
+| DB schema、元画像、既存cache、グリッド経路、Coil、Macrobenchmark非変更 | `LikeListDatabase.kt`、既存メディアグリッド差分、指定順検証 |
+
+指定順検証結果:
+
+- `scripts\run-safe-integration-check.cmd -DebugMethod wireless`: `Preflight / Build / UnitTest / Lint / Install / IntegrationTest / Success`
+- `scripts\run-safe-debug-check.cmd -InstallToDevice`: `Preflight / Build / UnitTest / Lint / Install / Success`
+- Macrobenchmarkは実行していない。
+
 `実機レベル統合テスト強化 要件定義.md` に対する、現在の自動テスト・安全実行スクリプト・実機確認の対応状況です。
 
 ## 2026-07-19 第6実装: direct preview pipeline

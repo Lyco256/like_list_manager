@@ -4,6 +4,8 @@
 
 `gradle/libs.versions.toml`
 
+WorkManager `2.10.1`をpersistent JPEG preview workerの実行とテストへ追加しています。
+
 ## 役割
 
 プラグインとライブラリのバージョン、Maven座標、Gradle aliasを一元管理します。

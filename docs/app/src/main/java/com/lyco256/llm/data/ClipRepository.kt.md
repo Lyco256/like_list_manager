@@ -1,5 +1,11 @@
 # `ClipRepository.kt`
 
+## 2026-07 persistent JPEG preview
+
+新規同期で元画像の保存と`AssetEntity`のinsertが完了した後、insert成功かつ`localPath`を持つasset IDだけを`MediaGridPreviewEnqueuer`へ渡します。JPEG生成処理は待たず、生成失敗を`downloadState`や同期結果へ反映しません。seedや直接fixture挿入はschedulerを経由しません。
+
+clip削除ではDB削除成功後に、共有公開ロック下でasset ID由来のpreview JPEGをbest effort削除します。JPEG削除失敗は元画像・DB削除の失敗にはしません。
+
 ## 2026-07-10 bulk tag transaction
 
 `applyClipTagChanges` applies `pendingAddTagIds` and `pendingRemoveTagIds` to all selected clip IDs through a single Room transaction. It is called only when the media-grid bulk editor is applied.

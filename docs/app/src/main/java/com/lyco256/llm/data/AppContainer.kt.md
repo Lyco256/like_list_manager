@@ -8,6 +8,10 @@
 
 `AppContainer` owns the single media-grid `ImageLoader` and `MediaGridPrefetchController`. The loader keeps crossfade disabled, enables `cacheDir/media_grid_coil_cache` with a 128 MiB disk limit, caps memory at `min(totalMem / 8, 64 MiB)`, and uses an IO decoder dispatcher limited to two concurrent decodes. The former thumbnail store and serial generation manager are not created.
 
+## 2026-07 persistent JPEG preview
+
+`AppContainer`は本番Repositoryへ`WorkManagerMediaGridPreviewEnqueuer`を注入します。schedulerとworkerは`filesDir/media_grid_previews`だけを使い、既存のImageLoader・Coil cache・グリッド表示経路とは独立しています。
+
 ## 役割
 
 投稿保存先マネージャー、暗号化設定ストア、OAuthマネージャー、Repositoryを組み立てる簡易DIコンテナです。

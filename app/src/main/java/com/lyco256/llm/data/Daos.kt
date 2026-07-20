@@ -59,6 +59,9 @@ interface ClipDao {
     @Query("SELECT * FROM assets ORDER BY id")
     suspend fun getAllAssets(): List<AssetEntity>
 
+    @Query("SELECT * FROM assets WHERE id = :assetId LIMIT 1")
+    suspend fun getAsset(assetId: Long): AssetEntity?
+
     @Query("SELECT COUNT(*) AS count, COALESCE(SUM(sizeBytes), 0) AS totalBytes FROM assets WHERE localPath IS NOT NULL")
     suspend fun getStoredAssetStats(): AssetStorageStats
 
@@ -78,7 +81,7 @@ interface ClipDao {
     suspend fun insertClip(clip: ClipEntity): Long
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertAssets(assets: List<AssetEntity>)
+    suspend fun insertAssets(assets: List<AssetEntity>): List<Long>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertClipTag(clipTag: ClipTagEntity)
