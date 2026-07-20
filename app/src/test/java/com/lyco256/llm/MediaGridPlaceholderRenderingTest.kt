@@ -45,4 +45,12 @@ class MediaGridPlaceholderRenderingTest {
         assertEquals(MediaGridCellVisualState.Error, mediaGridCellVisualState(0, -1, null, null))
         assertEquals(MediaGridCellVisualState.Error, mediaGridCellVisualState(2, 2, null, null))
     }
+
+    @Test
+    fun unpreparedCandidateMetadataRemainsPlaceholder() {
+        assertEquals(
+            MediaGridCellVisualState.Placeholder,
+            mediaGridCellVisualState(0, -1, null, null, prepared = false),
+        )
+    }
 }

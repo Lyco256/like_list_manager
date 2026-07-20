@@ -1,27 +1,27 @@
-﻿Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る。変更対象が不明な場合は「変更目的別の入口」だけを見て、対象docsと実ソースへ進む。個別文書一覧は、対象ファイル名が分からない場合だけ使う。
+Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る。変更対象が不明な場合は「変更目的別の入口」だけを見て、対象docsと実ソースへ進む。個別文書一覧は、対象ファイル名が分からない場合だけ使う。
 
 この文書は、全体構成、現状の実装、変更目的別入口、個別docs一覧だけを担当する。禁止事項、完了報告、検証手順は置かない。
 
 ## 2026-07-19 第6実装: direct preview pipeline
 
-Current media-grid image loading is direct Coil loading from `MediaGridDirectPreview.kt`; the former thumbnail generation, hydration, serial manager, wide preparation, and viewport-dispatch files are no longer part of the source set. Existing `cacheDir/media_grid_thumbnails` files and application data are intentionally untouched. Current acceptance evidence is tracked in `TEST_REQUIREMENTS_COVERAGE.md`.
+Current media-grid rendering builds keyed `MediaGridFrameData` on `Dispatchers.Default`, shows Progress until the current render key is ready, then renders the frame and cell placeholders without waiting for image metadata. `MediaGridImagePreparer` prepares file metadata, candidates, source identities, and cache keys off composition for visible cells and one adjacent row only. Existing `cacheDir/media_grid_thumbnails` files and application data are intentionally untouched. Current acceptance evidence is tracked in `TEST_REQUIREMENTS_COVERAGE.md`.
 
 ## 2026-07 media grid direct preview pipeline
 
 - `TagHierarchyUiV2.kt` owns the classified grid, headers, sorting, selection, pinch column changes, and cell interactions.
-- `ClassifiedMediaGridCell` builds a stable local → preview → remote → non-duplicate display candidate list and starts `AsyncImage` directly. It measures the cell constraints with `onSizeChanged` and requests that size, with `ContentScale.Crop`, static cell-local placeholder rendering, and one-step fallback on `onError`.
-- `MediaGridDirectPreview.kt` owns candidate availability, source identity/cache-key calculation, and a targetless Coil prefetch controller. Prefetch is limited to the adjacent row in the current direction and is canceled when its target leaves the viewport, the direction changes, or the source/column revision changes.
+- `ClassifiedMediaGridCell` receives a prepared image model and starts `AsyncImage` only from that model. It keeps `ContentScale.Crop`, static cell-local placeholder rendering, and one-step fallback on `onError`.
+- `MediaGridDirectPreview.kt` owns the single `MediaGridImagePreparer`. It performs candidate availability, file stat, source identity, and cache-key calculation off composition, reusing same-key/asset/size results and preparing visible cells plus at most one adjacent row from the prebuilt index column.
 - `AppContainer.kt` owns the one shared media-grid `ImageLoader`: crossfade is disabled, disk cache is `cacheDir/media_grid_coil_cache` at 128 MiB, memory cache is `min(totalMem / 8, 64 MiB)`, and decoder parallelism is limited to two.
 - `MediaGridThumbnailManager`, `MediaGridThumbnailStore`, cache hydration, wide preparation, and the former viewport coordinator are removed from the product and source sets. Existing `cacheDir/media_grid_thumbnails` files are not touched.
 - `MediaGridMorph.kt` remains only for the existing pinch calculation/tests; no morph overlay is part of the product path.
 
 # Source Files Guide
 
-## 2026-07 direct preview viewport path
+## 2026-07 keyed frame and direct preview viewport path
 
-- The grid viewport observer reads stable item indices, visible asset IDs, and cell size; pixel-only movement does not rebuild the prefetch target list.
+- The grid viewport observer reads the frame's stable item indices, visible asset IDs, and cell size; pixel-only movement does not rebuild preparation targets.
 - Dragging and flinging do not stop visible `AsyncImage` requests. Compose disposal cancels requests for cells that leave the composition.
-- The controller cancels targetless prefetch immediately on direction turns and keeps at most `columnCount` candidates in the adjacent row.
+- `collectLatest` cancels old preparation on direction turns and keeps at most `columnCount` cells in the adjacent row.
 
 ## 2026-07-13 card/grid duplicate-work removal
 

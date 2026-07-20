@@ -17,7 +17,9 @@ internal fun mediaGridCellVisualState(
     failedCandidateIndex: Int,
     displayedCandidateIdentity: String?,
     currentCandidateIdentity: String?,
+    prepared: Boolean = true,
 ): MediaGridCellVisualState {
+    if (!prepared) return MediaGridCellVisualState.Placeholder
     if (candidateCount == 0 || failedCandidateIndex >= candidateCount) {
         return MediaGridCellVisualState.Error
     }

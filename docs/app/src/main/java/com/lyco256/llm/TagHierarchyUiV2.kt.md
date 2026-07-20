@@ -2,7 +2,14 @@
 
 2026-07-17: The classified media grid publishes a lightweight viewport snapshot without calling synchronous thumbnail viewport application. Each cell carries its immutable source index for the worker-side source lookup.
 
-## 2026-07-19 direct preview pipeline
+## 第7実装: keyed frame and background image preparation
+
+- The classified media grid creates `MediaGridFrameData` on `Dispatchers.Default`. It contains headers, stable keys, item lookup, source indexes, and the media-cell index column.
+- `MediaGridRenderKey` combines the current data key (source revision, hierarchy/filter, and effective sort) with the column count. A key mismatch clears the previous frame and shows `classified_media_grid_progress`; the old grid is never retained while a new frame is being built.
+- Once frame data is ready, the grid and cell-local Placeholder render immediately. Image metadata is prepared independently by the single `MediaGridImagePreparer`, so frame publication does not wait for file checks or Coil candidates.
+- Viewport collection uses only the visible item set/order and cell size. It reads adjacent cells from the prebuilt media-cell index column; it does not build candidate lists, inspect files, hash sources, or filter/sort all items. Direction reversal uses `collectLatest` cancellation to discard old preparation.
+
+## 2026-07-19 direct preview pipeline (history)
 
 - The current grid no longer publishes a thumbnail-manager viewport or waits for `Waiting`, `Generating`, `Ready`, cache hydration, Idle resume, or wide preparation.
 - Each `ClassifiedMediaGridCell` builds the available local → preview → remote → non-duplicate display candidates and starts `AsyncImage` immediately. Missing local files are omitted; `downloadState == "failed"` does not suppress URL fallback.
