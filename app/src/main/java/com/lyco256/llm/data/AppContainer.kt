@@ -23,7 +23,7 @@ class AppContainer(context: Context) {
         .decoderDispatcher(kotlinx.coroutines.Dispatchers.IO.limitedParallelism(2))
         .fetcherDispatcher(kotlinx.coroutines.Dispatchers.IO)
         .build()
-    val mediaGridPrefetchController = MediaGridPrefetchController(context, mediaGridImageLoader)
+    internal val mediaGridImagePreparer = MediaGridImagePreparer()
     val postStorageManager = PostStorageManager(
         context,
         PostStorageConfig(

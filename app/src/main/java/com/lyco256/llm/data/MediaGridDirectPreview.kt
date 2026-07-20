@@ -1,15 +1,11 @@
 package com.lyco256.llm.data
 
-import android.content.Context
-import coil.ImageLoader
-import coil.memory.MemoryCache
-import coil.request.Disposable
-import coil.request.ErrorResult
-import coil.request.ImageRequest
-import coil.request.SuccessResult
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 
 enum class MediaGridImageSourceKind {
     Local,
@@ -97,104 +93,111 @@ fun mediaGridImageCacheKey(candidate: MediaGridImageCandidate, width: Int, heigh
         .joinToString("") { "%02x".format(it) }
 }
 
-data class MediaGridPrefetchEntry(
-    val itemIndex: Int,
-    val assetId: Long,
-    val candidates: List<MediaGridImageCandidate>,
+internal data class MediaGridPreparedCandidate(
+    val kind: MediaGridImageSourceKind,
+    val requestData: Any,
+    val sourceIdentity: String,
+    val cacheKey: String,
+    val width: Int,
+    val height: Int,
 )
 
-fun mediaGridPrefetchRequestId(sourceRevision: Long, assetId: Long, cacheKey: String): String =
-    "$sourceRevision|$assetId|$cacheKey"
+internal data class MediaGridPreparedImage(
+    val key: com.lyco256.llm.MediaGridRenderKey,
+    val assetId: Long,
+    val candidates: List<MediaGridPreparedCandidate>,
+)
 
-/** Returns only the next/previous media row, never more than columnCount cells. */
-fun selectMediaGridPrefetchEntries(
-    items: List<MediaGridPrefetchEntry>,
-    visibleItemIndices: Set<Int>,
-    columnCount: Int,
-    direction: Int,
-): List<MediaGridPrefetchEntry> {
-    if (items.isEmpty() || visibleItemIndices.isEmpty() || columnCount <= 0 || direction == 0) return emptyList()
-    val ordered = if (direction > 0) {
-        items.asSequence().filter { it.itemIndex > visibleItemIndices.maxOrNull()!! }.sortedBy { it.itemIndex }
-    } else {
-        items.asSequence().filter { it.itemIndex < visibleItemIndices.minOrNull()!! }.sortedByDescending { it.itemIndex }
-    }
-    return ordered.take(columnCount).toList()
-}
+internal fun mediaGridPreparedImageMatches(
+    prepared: MediaGridPreparedImage,
+    currentKey: com.lyco256.llm.MediaGridRenderKey,
+): Boolean = prepared.key == currentKey
 
-/** Owns only targetless Coil prefetch requests for the current adjacent row. */
-class MediaGridPrefetchController(
-    context: Context,
-    private val imageLoader: ImageLoader,
-) {
-    private val requestContext = context.applicationContext
-    private val active = ConcurrentHashMap<String, Disposable>()
+/** Prepares file metadata and Coil request metadata away from composition. */
+internal class MediaGridImagePreparer {
+    private data class CacheKey(val key: com.lyco256.llm.MediaGridRenderKey, val assetId: Long, val size: Int)
+    private val cache = ConcurrentHashMap<CacheKey, MediaGridPreparedImage>()
 
-    fun update(
-        sourceRevision: Long,
-        columnCount: Int,
-        visibleAssetIds: Set<Long>,
-        items: List<MediaGridPrefetchEntry>,
-        visibleItemIndices: Set<Int>,
+    suspend fun prepare(
+        frame: com.lyco256.llm.MediaGridFrameData,
+        visibleIndices: Set<Int>,
         cellSizePx: Int,
         direction: Int,
+        emit: suspend (MediaGridPreparedImage) -> Unit,
     ) {
-        val targets = selectMediaGridPrefetchEntries(items, visibleItemIndices, columnCount, direction)
-            .asSequence()
-            .filter { it.assetId !in visibleAssetIds }
-            .mapNotNull { entry ->
-                val candidate = entry.candidates.firstOrNull() ?: return@mapNotNull null
-                val cacheKey = mediaGridImageCacheKey(candidate, cellSizePx, cellSizePx)
-                PrefetchTarget(
-                    requestId = mediaGridPrefetchRequestId(sourceRevision, entry.assetId, cacheKey),
-                    cacheKey = cacheKey,
-                    candidate = candidate,
-                )
-            }
-            .toList()
-        val keep = targets.mapTo(HashSet(targets.size)) { it.requestId }
-        active.entries.removeIf { (requestId, disposable) ->
-            if (requestId in keep) false else {
-                disposable.dispose()
-                true
-            }
-        }
-        if (cellSizePx <= 0 || direction == 0) return
-
-        targets.forEach { target ->
-            if (active.containsKey(target.requestId) || imageLoader.memoryCache?.get(MemoryCache.Key(target.cacheKey)) != null) return@forEach
-            val request = ImageRequest.Builder(requestContext)
-                .data(target.candidate.data)
-                .size(cellSizePx, cellSizePx)
-                .memoryCacheKey(target.cacheKey)
-                .diskCacheKey(target.cacheKey)
-                .crossfade(false)
-                .listener(object : ImageRequest.Listener {
-                    override fun onSuccess(request: ImageRequest, result: SuccessResult) {
-                        active.remove(target.requestId)
-                    }
-
-                    override fun onError(request: ImageRequest, result: ErrorResult) {
-                        active.remove(target.requestId)
-                    }
-
-                    override fun onCancel(request: ImageRequest) {
-                        active.remove(target.requestId)
-                    }
-                })
-                .build()
-            active[target.requestId] = imageLoader.enqueue(request)
+        if (visibleIndices.isEmpty() || cellSizePx <= 0) return
+        val targetIndices = selectMediaGridPreparationIndices(frame.mediaCellIndices, visibleIndices, frame.key.columnCount, direction)
+        for (itemIndex in targetIndices) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            val cell = frame.items.getOrNull(itemIndex) as? com.lyco256.llm.MediaGridCellItem ?: continue
+            val cacheKey = CacheKey(frame.key, cell.entry.assetId, cellSizePx)
+            val prepared = cache[cacheKey] ?: withContext(Dispatchers.IO) {
+                val candidates = buildMediaGridImageCandidates(
+                    MediaGridImageCandidateInput(
+                        assetId = cell.entry.assetId,
+                        mediaKey = cell.entry.mediaKey,
+                        localPath = cell.entry.localPath,
+                        previewUrl = cell.entry.previewUrl,
+                        remoteUrl = cell.entry.remoteUrl,
+                        displayUrl = cell.entry.displayUrl,
+                    ),
+                ).map { candidate ->
+                    MediaGridPreparedCandidate(
+                        kind = candidate.kind,
+                        requestData = if (candidate.kind == MediaGridImageSourceKind.Local) File(candidate.data) else candidate.data,
+                        sourceIdentity = candidate.sourceIdentity,
+                        cacheKey = mediaGridImageCacheKey(candidate, cellSizePx, cellSizePx),
+                        width = cellSizePx,
+                        height = cellSizePx,
+                    )
+                }
+                MediaGridPreparedImage(frame.key, cell.entry.assetId, candidates)
+            }.also { cache[cacheKey] = it }
+            if (mediaGridPreparedImageMatches(prepared, frame.key)) emit(prepared)
         }
     }
 
-    fun dispose() {
-        active.values.forEach(Disposable::dispose)
-        active.clear()
-    }
+    fun dispose() = cache.clear()
+}
 
-    private data class PrefetchTarget(
-        val requestId: String,
-        val cacheKey: String,
-        val candidate: MediaGridImageCandidate,
-    )
+/** Selects visible cells and one adjacent row using the prebuilt media-cell index column. */
+internal fun selectMediaGridPreparationIndices(
+    mediaCellIndices: IntArray,
+    visibleIndices: Set<Int>,
+    columnCount: Int,
+    direction: Int,
+): List<Int> {
+    if (mediaCellIndices.isEmpty() || visibleIndices.isEmpty() || columnCount <= 0) return emptyList()
+    val visible = visibleIndices.asSequence().filter { it >= 0 }.sorted().toList()
+    if (visible.isEmpty()) return emptyList()
+    val result = ArrayList<Int>(visible.size + columnCount)
+    result += visible
+    if (direction > 0) {
+        val start = upperBound(mediaCellIndices, visible.last())
+        for (index in start until minOf(start + columnCount, mediaCellIndices.size)) result += mediaCellIndices[index]
+    } else if (direction < 0) {
+        var index = lowerBound(mediaCellIndices, visible.first()) - 1
+        repeat(minOf(columnCount, index + 1)) { result += mediaCellIndices[index--] }
+    }
+    return result.distinct()
+}
+
+private fun lowerBound(values: IntArray, target: Int): Int {
+    var low = 0
+    var high = values.size
+    while (low < high) {
+        val mid = (low + high) ushr 1
+        if (values[mid] < target) low = mid + 1 else high = mid
+    }
+    return low
+}
+
+private fun upperBound(values: IntArray, target: Int): Int {
+    var low = 0
+    var high = values.size
+    while (low < high) {
+        val mid = (low + high) ushr 1
+        if (values[mid] <= target) low = mid + 1 else high = mid
+    }
+    return low
 }

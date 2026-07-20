@@ -221,3 +221,14 @@
 | placeholder、形式、範囲、列数変更、Macrobenchmark | 変更なし | `MediaGridPlaceholderRendering.kt`、`MediaGridThumbnailStore.kt`、既存列数テスト、Macrobenchmark source setを変更していない |
 
 検証順は第4実装要件に従い、隔離統合テストを先に実行し、その成功後に本番packageの安全上書きチェックを実行する。Macrobenchmarkは変更・実行しない。
+## 2026-07-20 第7実装: keyed frame and background image preparation
+
+| Requirement | Implementation / evidence | Status |
+|---|---|---|
+| render-key mismatch hides old frame and shows Progress | `MediaGridRenderKey`, `mediaGridFrameMatches`, `MediaGridPreparedRenderTest` | Implemented |
+| frame-first publication before image metadata | `buildMediaGridFrameData`, `MediaGridPreparedRenderTest`, `ClassifiedMediaGridContent` | Implemented |
+| file stat, candidate, source identity, and cache key off composition | `MediaGridImagePreparer`, `MediaGridDirectPreviewTest` | Implemented |
+| visible cells plus one adjacent row from prebuilt index column | `selectMediaGridPreparationIndices`, `MediaGridDirectPreviewTest` | Implemented |
+| stale frame/viewport results are cancelled or rejected | `LaunchedEffect(frame.key)`, `collectLatest`, `mediaGridPreparedImageMatches`, `MediaGridPreparedRenderTest` | Implemented |
+| unprepared cells remain Placeholder | `mediaGridCellVisualState`, `MediaGridPlaceholderRenderingTest` | Implemented |
+| Progress, frame-first display, delayed scroll, and direction reversal on device | `MainActivityComposeTest.kt` scenarios; `run-safe-integration-check.cmd` | 未実機確認: `RFCTA139DMR` did not reconnect during final verification |

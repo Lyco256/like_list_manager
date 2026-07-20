@@ -58,6 +58,7 @@ internal suspend fun prepareMediaGridMetadata(
     val ordered = if (!mediaGridSortIsEffective(sort)) filtered else sortMediaGridClips(filtered, hierarchy, filters, sort)
     val built = buildMediaGridResult(ordered)
     val result = ClassifiedMediaGridState(
+        dataKey = MediaGridDataKey(key.sourceRevision, key.hierarchyRevision, key.filter, key.sort),
         sourceRevision = key.sourceRevision,
         sourceClipCount = source.size,
         sourceMediaAssetCount = source.sumOf { it.mediaAssetCount },

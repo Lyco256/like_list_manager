@@ -2,11 +2,23 @@ package com.lyco256.llm.data
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
 class MediaGridDirectPreviewTest {
+
+    @Test
+    fun preparationUsesVisibleCellsAndOneAdjacentRowFromIndexColumn() {
+        val indices = intArrayOf(1, 2, 4, 5, 7, 8, 10, 11)
+        assertEquals(
+            listOf(4, 5, 7, 8, 10, 11),
+            selectMediaGridPreparationIndices(indices, setOf(4, 5, 7, 8), 2, 1),
+        )
+        assertEquals(
+            listOf(4, 5, 7, 8, 2, 1),
+            selectMediaGridPreparationIndices(indices, setOf(4, 5, 7, 8), 2, -1),
+        )
+    }
     @Test
     fun candidatesUseLocalPreviewRemoteDisplayOrderAndRemoveDuplicates() {
         val local = File.createTempFile("media-grid", ".webp").apply { writeText("local") }
@@ -63,29 +75,4 @@ class MediaGridDirectPreviewTest {
         }
     }
 
-    @Test
-    fun prefetchIsLimitedToOneDirectionAdjacentRowAndColumnCount() {
-        val entries = (0 until 10).map { index ->
-            MediaGridPrefetchEntry(
-                itemIndex = index,
-                assetId = index.toLong(),
-                candidates = listOf(
-                    MediaGridImageCandidate(MediaGridImageSourceKind.Remote, "https://example.test/$index", "url|$index"),
-                ),
-            )
-        }
-        val forward = selectMediaGridPrefetchEntries(entries, setOf(2, 3, 4, 5), 3, 1)
-        assertEquals(listOf(6L, 7L, 8L), forward.map { it.assetId })
-        val backward = selectMediaGridPrefetchEntries(entries, setOf(5, 6, 7, 8), 2, -1)
-        assertEquals(listOf(4L, 3L), backward.map { it.assetId })
-        assertTrue(selectMediaGridPrefetchEntries(entries, setOf(2, 3), 3, 0).isEmpty())
-    }
-
-    @Test
-    fun prefetchRequestIdentityChangesWhenSourceRevisionChanges() {
-        val first = mediaGridPrefetchRequestId(1L, 10L, "cache-key")
-        val refreshed = mediaGridPrefetchRequestId(2L, 10L, "cache-key")
-        assertNotEquals(first, refreshed)
-        assertTrue(selectMediaGridPrefetchEntries(emptyList(), setOf(1), 3, 0).isEmpty())
-    }
 }

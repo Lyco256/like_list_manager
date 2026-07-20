@@ -271,8 +271,16 @@ data class MainUiState(
     val tagFilters: Map<TagNodeRef, TagFilterState> = filters.tagFilters
 }
 
+data class MediaGridDataKey(
+    val sourceRevision: Long,
+    val hierarchyRevision: Long,
+    val filter: TweetFilterState,
+    val sort: ClassifiedSortState,
+)
+
 data class ClassifiedMediaGridState(
     val status: MediaGridLoadStatus = MediaGridLoadStatus.Ready,
+    val dataKey: MediaGridDataKey? = null,
     val sourceRevision: Long = 0,
     val sourceClipCount: Int = 0,
     val sourceMediaAssetCount: Int = 0,
@@ -365,7 +373,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (cached != null) {
                 emit(cached)
             } else {
-                emit(ClassifiedMediaGridState(status = MediaGridLoadStatus.Calculating))
+                emit(ClassifiedMediaGridState(status = MediaGridLoadStatus.Calculating, dataKey = MediaGridDataKey(snapshot.revision, hierarchy.structuralRevision, effectiveFilter, effectiveSort)))
                 emit(prepareMediaGridMetadata(snapshot, hierarchy, effectiveFilter, effectiveSort, mediaGridCache, key))
             }
         }
