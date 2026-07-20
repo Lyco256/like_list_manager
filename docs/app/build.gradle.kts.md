@@ -14,6 +14,7 @@ AndroidアプリモジュールのapplicationId、SDK、Java/Kotlin 21、Compose
 - `androidx.compose.material:material-icons-extended`: タグ種別やナビゲーションのアイコン表示
 - Room/KSP: 投稿、タグ、同期状態のDB
 - Coil: 投稿画像表示
+- WorkManager: 新規local assetの永続JPEG previewを非expedited unique workで直列生成
 - Security Crypto: Client IDとOAuthセッションの暗号化保存
 - AppAuth: OAuth 2.0 Authorization Code + PKCE
 - JUnit 4: 階層・絞り込みロジックのローカル単体テスト

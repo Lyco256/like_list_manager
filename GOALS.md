@@ -33,7 +33,7 @@ MVPの上記機能は実装済みです。OAuth callback、token暗号化保存�
 
 1. 実機でOAuthログイン、callback、初回同期、token refreshを確認する
 2. OAuth/API/JSON変換/Repositoryの自動テストを追加する
-3. WorkManagerによる低頻度バックグラウンド同期を追加する
+3. WorkManagerによる低頻度バックグラウンド同期を追加する（同期そのものは未実装のため継続）
 4. backup/export/importを追加する
 5. 保存先別の容量表示に加えて、画像の手動整理機能を追加する
 6. DB migration testを実機で継続実行できる検証手順へ組み込む
@@ -92,3 +92,9 @@ MVPの上記機能は実装済みです。OAuth callback、token暗号化保存�
 - 選択表示をチェックボックスだけに限定し、単一画像の水色＋黒チェック、複数画像の青色＋白チェック、選択開始時だけのハプティックを実装
 - タグ／グループの色パレットと色設定を実装
 - wireless ADBのmDNS endpoint自動解決を安全な統合テストスクリプトへ追加
+
+## 2026-07-20 達成済み
+
+- 新規local asset向け256×256中央crop JPEG previewを`filesDir/media_grid_previews/v1/<assetId>.jpg`へ非同期生成するWorkManager経路を追加
+- DB schema、元画像、既存cache、グリッド表示経路を変更せず、削除・localPath変更競合と原子的置換を検証
+- wireless隔離統合テストと本番安全上書き検証をSuccessで完了。Macrobenchmarkは対象外として未実行

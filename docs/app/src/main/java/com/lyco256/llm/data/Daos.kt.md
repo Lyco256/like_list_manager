@@ -4,6 +4,11 @@
 
 `ClipDao.applyClipTagChanges` is the `@Transaction` boundary covering `pendingRemoveTagIds` deletion and `pendingAddTagIds` insertion for every selected clip. It rejects overlap between add and remove sets.
 
+## 2026-07 persistent JPEG preview
+
+- `insertAssets`は入力順に対応するRoom insert IDの`List<Long>`を返し、呼び出し側がinsert成功assetだけを後続処理へ渡せる。
+- `getAsset`はworkerの実行時・公開直前のasset再確認に使う。schema列やmigrationは追加していない。
+
 ## 対応ソース
 
 `app/src/main/java/com/lyco256/llm/data/Daos.kt`

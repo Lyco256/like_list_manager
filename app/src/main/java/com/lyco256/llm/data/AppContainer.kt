@@ -60,5 +60,6 @@ class AppContainer(context: Context) {
         xApiClient = xApiClient,
         ocrTextGateway = ocrTextGateway,
         includeSeedMedia = !BuildConfig.TEST_HARNESS,
+        mediaGridPreviewEnqueuer = WorkManagerMediaGridPreviewEnqueuer(context),
     )
 }

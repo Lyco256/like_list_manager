@@ -56,7 +56,9 @@ class ClipRepository(
     private val xApiClient: XApiGateway,
     private val ocrTextGateway: OcrTextGateway = FakeOcrTextGateway(),
     private val includeSeedMedia: Boolean = true,
+    private val mediaGridPreviewEnqueuer: MediaGridPreviewEnqueuer = NoOpMediaGridPreviewEnqueuer,
 ) {
+    private val mediaGridPreviewStore = MediaGridPersistentPreviewStore(context.filesDir)
 
     val apiSettings: ApiSettings
         get() = apiSettingsStore.load()
@@ -422,16 +424,19 @@ class ClipRepository(
                 if (clipId > 0) {
                     inserted += 1
                     existingPostIds += post.id
-                    clipDao.insertAssets(
-                        post.media.mapNotNull { media ->
-                            createAssetForMedia(
-                                clipId = clipId,
-                                postId = post.id,
-                                media = media,
-                                now = now,
-                            )
-                        },
-                    )
+                    val assets = post.media.mapNotNull { media ->
+                        createAssetForMedia(
+                            clipId = clipId,
+                            postId = post.id,
+                            media = media,
+                            now = now,
+                        )
+                    }
+                    val insertedAssetIds = clipDao.insertAssets(assets)
+                        .zip(assets)
+                        .filter { (assetId, asset) -> assetId > 0L && asset.localPath != null }
+                        .map { (assetId, _) -> assetId }
+                    mediaGridPreviewEnqueuer.enqueue(insertedAssetIds)
                 }
             }
             paginationToken = if (pageReachedBoundary) null else result.nextToken
@@ -907,27 +912,30 @@ class ClipRepository(
     }
 
     suspend fun moveClipToTrash(clip: ClipEntity) = withContext(Dispatchers.IO) {
-        postStorageManager.withDatabase { database ->
-            val clipDao = database.clipDao()
-            val assets = clipDao.assetsForClipIds(listOf(clip.id))
-            val imageDir = runCatching { postStorageManager.imageDirectory().canonicalFile }.getOrNull()
-                ?: error("保存先が利用できません")
-            val filesToDelete = assets.mapNotNull { asset ->
-                val localPath = asset.localPath ?: return@mapNotNull null
-                val file = File(localPath)
-                if (!file.exists()) return@mapNotNull null
-                val canonical = runCatching { file.canonicalFile }.getOrNull()
-                    ?: error("ファイルのパスを解決できません")
-                require(canonical.path.startsWith(imageDir.path + File.separator) || canonical == imageDir) {
-                    "管理画像ディレクトリ外のファイルは削除できません"
+        mediaGridPreviewStore.withPublishLock {
+            postStorageManager.withDatabase { database ->
+                val clipDao = database.clipDao()
+                val assets = clipDao.assetsForClipIds(listOf(clip.id))
+                val imageDir = runCatching { postStorageManager.imageDirectory().canonicalFile }.getOrNull()
+                    ?: error("保存先が利用できません")
+                val filesToDelete = assets.mapNotNull { asset ->
+                    val localPath = asset.localPath ?: return@mapNotNull null
+                    val file = File(localPath)
+                    if (!file.exists()) return@mapNotNull null
+                    val canonical = runCatching { file.canonicalFile }.getOrNull()
+                        ?: error("ファイルのパスを解決できません")
+                    require(canonical.path.startsWith(imageDir.path + File.separator) || canonical == imageDir) {
+                        "管理画像ディレクトリ外のファイルは削除できません"
+                    }
+                    canonical
                 }
-                canonical
-            }
-            filesToDelete.forEach { file ->
-                require(file.delete() || !file.exists()) { "ローカル画像の削除に失敗しました" }
-            }
-            database.withTransaction {
-                clipDao.deleteClip(clip.id)
+                filesToDelete.forEach { file ->
+                    require(file.delete() || !file.exists()) { "ローカル画像の削除に失敗しました" }
+                }
+                database.withTransaction {
+                    clipDao.deleteClip(clip.id)
+                }
+                assets.forEach { asset -> runCatching { mediaGridPreviewStore.deletePreviewUnsafe(asset.id) } }
             }
         }
     }
