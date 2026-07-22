@@ -98,3 +98,10 @@ MVPの上記機能は実装済みです。OAuth callback、token暗号化保存�
 - 新規local asset向け256×256中央crop JPEG previewを`filesDir/media_grid_previews/v1/<assetId>.jpg`へ非同期生成するWorkManager経路を追加
 - DB schema、元画像、既存cache、グリッド表示経路を変更せず、削除・localPath変更競合と原子的置換を検証
 - wireless隔離統合テストと本番安全上書き検証をSuccessで完了。Macrobenchmarkは対象外として未実行
+
+## 2026-07-22 steady-load controller 達成済み
+
+- 初期Progress中に表示位置周辺のmetadataと永続JPEG memory warm-upを行い、全terminalまたは3秒でグリッドを公開する経路を追加
+- viewport通知をlatest anchor上書きに限定し、50ms周期・固定予算・同時2requestの単一controllerへ画像処理を集約
+- active bitmap windowを表示中＋前後1行に限定し、範囲外requestとUI load stateを破棄しつつframe内metadataとCoil LRUを再利用
+- wireless隔離統合テストと本番安全上書き検証をSuccessで完了。Macrobenchmarkは要件指定により未実行

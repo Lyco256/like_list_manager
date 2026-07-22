@@ -92,12 +92,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -137,15 +137,9 @@ import com.lyco256.llm.data.AssetEntity
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.MediaGridClipSource
-import com.lyco256.llm.data.MediaGridImageSourceKind
-import com.lyco256.llm.data.MediaGridPreparedImage
-import com.lyco256.llm.data.MediaGridPreparedCandidate
 import com.lyco256.llm.data.MediaGridPreviewNotifier
-import com.lyco256.llm.data.MediaGridPreviewPreloader
 import com.lyco256.llm.data.MediaGridPreviewRecoveryGate
 import com.lyco256.llm.data.buildMediaGridImageRequest
-import com.lyco256.llm.data.selectMediaGridAdjacentPreloadIndices
-import com.lyco256.llm.data.selectMediaGridInitialPreloadIndices
 import com.lyco256.llm.data.TagEntity
 import com.lyco256.llm.data.TagFilterState
 import com.lyco256.llm.data.TagGroupEntity
@@ -3379,112 +3373,51 @@ private fun ClassifiedMediaGridContent(
 ) {
     val context = LocalContext.current
     val appContainer = (context.applicationContext as LikeListManagerApp).container
-    val imagePreparer = remember(appContainer.mediaGridImagePreparer) { appContainer.mediaGridImagePreparer }
-    val previewPreloader = remember(appContainer.mediaGridImageLoader) {
-        MediaGridPreviewPreloader(context, appContainer.mediaGridImageLoader)
-    }
     val recoveryGate = remember(frame.key) { MediaGridPreviewRecoveryGate() }
-    val recoveryScope = rememberCoroutineScope()
-    val preparedImages = remember(frame.key) { mutableStateMapOf<Long, MediaGridPreparedImage>() }
-    LaunchedEffect(state, frame.key) {
-        preparedImages.clear()
-        previewPreloader.cancelAll()
-        var previousFirstMediaIndex: Int? = null
-        var previousDirection = 1
-        var previousViewport: ClassifiedMediaGridViewportRead? = null
-        var initialPreloadConfirmed = false
+    val controller = remember(frame.key, appContainer.mediaGridImageLoader) {
+        MediaGridSteadyLoadController(
+            context = context,
+            frame = frame,
+            preparer = appContainer.mediaGridImagePreparer,
+            imageLoader = appContainer.mediaGridImageLoader,
+        ) { assetId, candidate ->
+            if (recoveryGate.claim(candidate.sourceIdentity)) {
+                appContainer.repository.recoverMediaGridPreview(assetId, candidate.sourceIdentity)
+            }
+        }.also { it.start() }
+    }
+    val controllerState by controller.uiState.collectAsState()
+    LaunchedEffect(state, frame.key, controller) {
         kotlinx.coroutines.coroutineScope {
             launch {
                 snapshotFlow {
                     val layout = state.layoutInfo
                     val visibleItems = layout.visibleItemsInfo
-                    ClassifiedMediaGridViewportRead(
+                    val mediaIndices = visibleItems.mapNotNull { info ->
+                        (frame.itemByKey[info.key] as? MediaGridCellItem)?.let { info.index }
+                    }.toIntArray()
+                    MediaGridViewportAnchor(
+                        renderKey = frame.key,
                         firstVisibleItemIndex = state.firstVisibleItemIndex,
-                        visibleItemIndices = visibleItems.mapTo(HashSet()) { it.index },
-                        visibleMediaItems = visibleItems.mapNotNull { info ->
-                            (frame.itemByKey[info.key] as? MediaGridCellItem)?.let { it.entry.assetId to info.index }
-                        },
+                        lastVisibleItemIndex = visibleItems.maxOfOrNull { it.index } ?: state.firstVisibleItemIndex,
+                        visibleMediaItemIndices = mediaIndices,
+                        viewportWidthPx = layout.viewportSize.width,
+                        viewportHeightPx = (layout.viewportEndOffset - layout.viewportStartOffset).coerceAtLeast(0),
                         cellSizePx = visibleItems.firstOrNull { frame.itemByKey[it.key] is MediaGridCellItem }?.size?.width ?: 0,
+                        columnCount = columnCount,
                     )
-                }.distinctUntilChanged().collectLatest { viewport ->
-                    if (viewport == previousViewport) return@collectLatest
-                    previousViewport = viewport
-                    val visibleIndices = viewport.visibleMediaItems.mapTo(HashSet()) { it.second }
-                    val firstMediaIndex = viewport.visibleMediaItems.minOfOrNull { it.second }
-                    val movement = firstMediaIndex?.let { first ->
-                        previousFirstMediaIndex?.let {
-                            when {
-                                first > it -> 1
-                                first < it -> -1
-                                else -> 0
-                            }
-                        }
-                    } ?: 0
-                    if (movement != 0) previousDirection = movement
-                    if (firstMediaIndex != null) previousFirstMediaIndex = firstMediaIndex
-
-                    val layoutReady = viewport.visibleMediaItems.isNotEmpty() && viewport.cellSizePx > 0
-                    val initialIndices = selectMediaGridInitialPreloadIndices(
-                        mediaCellIndices = frame.mediaCellIndices,
-                        visibleMediaIndices = visibleIndices,
-                        firstVisibleItemIndex = viewport.firstVisibleItemIndex,
-                        columnCount = frame.key.columnCount,
-                        layoutReady = layoutReady,
-                    )
-                    val preloadIndices = if (!initialPreloadConfirmed || !layoutReady) {
-                        initialIndices
-                    } else {
-                        selectMediaGridAdjacentPreloadIndices(
-                            mediaCellIndices = frame.mediaCellIndices,
-                            visibleIndices = visibleIndices,
-                            columnCount = frame.key.columnCount,
-                            direction = previousDirection,
-                        )
-                    }
-                    val preloadCandidates = ArrayList<MediaGridPreparedCandidate>(preloadIndices.size)
-                    imagePreparer.preparePersistentPreviews(frame, preloadIndices) { candidate ->
-                        preloadCandidates += candidate
-                    }
-                    previewPreloader.reconcile(preloadCandidates)
-                    if (layoutReady) initialPreloadConfirmed = true
-
-                    if (visibleIndices.isNotEmpty() && viewport.cellSizePx > 0) {
-                        imagePreparer.prepare(
-                            frame = frame,
-                            visibleIndices = visibleIndices,
-                            cellSizePx = viewport.cellSizePx,
-                            direction = previousDirection,
-                        ) { model ->
-                            if (model.key == frame.key) preparedImages[model.assetId] = model
-                        }
-                    }
+                }.distinctUntilChanged().collect { anchor ->
+                    controller.updateViewport(anchor)
                 }
             }
             launch {
                 MediaGridPreviewNotifier.previewChanged.collect { assetId ->
-                    val layout = state.layoutInfo
-                    val visibleItems = layout.visibleItemsInfo
-                    val visibleIndex = visibleItems.firstNotNullOfOrNull { info ->
-                        (frame.itemByKey[info.key] as? MediaGridCellItem)
-                            ?.takeIf { it.entry.assetId == assetId }
-                            ?.let { info.index }
-                    } ?: return@collect
-                    val cellSize = visibleItems.firstOrNull { frame.itemByKey[it.key] is MediaGridCellItem }?.size?.width ?: 0
-                    if (cellSize <= 0) return@collect
-                    imagePreparer.invalidate(assetId)
-                    imagePreparer.prepareIndices(frame, listOf(visibleIndex), cellSize) { model ->
-                        if (model.key == frame.key) preparedImages[model.assetId] = model
-                    }
+                    controller.invalidate(assetId)
                 }
             }
         }
     }
-    DisposableEffect(imagePreparer) {
-        onDispose {
-            previewPreloader.cancelAll()
-            imagePreparer.dispose()
-        }
-    }
+    DisposableEffect(controller) { onDispose { controller.dispose() } }
     Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(columnCount),
@@ -3525,22 +3458,16 @@ private fun ClassifiedMediaGridContent(
                         onClick = onCellClick,
                         onToggleSelection = onToggleSelection,
                         imageLoader = appContainer.mediaGridImageLoader,
-                        preparedImage = preparedImages[item.entry.assetId],
-                        onPersistentPreviewError = { candidate ->
-                            if (candidate.kind == MediaGridImageSourceKind.PersistentPreview &&
-                                recoveryGate.claim(candidate.sourceIdentity)
-                            ) {
-                                recoveryScope.launch {
-                                    appContainer.repository.recoverMediaGridPreview(
-                                        assetId = item.entry.assetId,
-                                        expectedPreviewIdentity = candidate.sourceIdentity,
-                                    )
-                                }
-                            }
-                        },
+                        loadState = controllerState.cells[item.entry.assetId] ?: MediaGridCellLoadState(),
                     )
                 }
             }
+        }
+        if (controllerState.startup != MediaGridStartupState.Ready) {
+            Box(
+                Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).testTag("classified_media_grid_progress"),
+                contentAlignment = Alignment.Center,
+            ) { androidx.compose.material3.CircularProgressIndicator() }
         }
     }
 }
@@ -3790,13 +3717,6 @@ private fun buildMediaGridMorphSnapshot(
 
 private fun distanceBetween(first: Offset, second: Offset): Float = hypot(first.x - second.x, first.y - second.y)
 
-private data class ClassifiedMediaGridViewportRead(
-    val firstVisibleItemIndex: Int,
-    val visibleItemIndices: Set<Int>,
-    val visibleMediaItems: List<Pair<Long, Int>>,
-    val cellSizePx: Int,
-)
-
 @Composable
 private fun ClassifiedMediaGridHeader(item: MediaGridHeaderItem) {
     Surface(
@@ -3829,27 +3749,20 @@ private fun ClassifiedMediaGridCell(
     onClick: (Long) -> Unit,
     onToggleSelection: (Long) -> Unit,
     imageLoader: coil.ImageLoader,
-    preparedImage: com.lyco256.llm.data.MediaGridPreparedImage?,
-    onPersistentPreviewError: (MediaGridPreparedCandidate) -> Unit,
+    loadState: MediaGridCellLoadState,
 ) {
     val context = LocalContext.current
-    val candidates = preparedImage?.candidates.orEmpty()
-    var failedCandidateIndex by remember(candidates) { mutableIntStateOf(-1) }
-    var displayedCandidateIdentity by remember(candidates) { mutableStateOf<String?>(null) }
-    val currentCandidateIndex = failedCandidateIndex.coerceAtLeast(0)
-    val currentCandidate = candidates.getOrNull(currentCandidateIndex)
-    val imageRequest = remember(currentCandidate) {
-        currentCandidate?.let { candidate ->
+    val readyCandidate = loadState.readyCandidate
+    val imageRequest = remember(readyCandidate) {
+        readyCandidate?.let { candidate ->
             buildMediaGridImageRequest(context, candidate)
         }
     }
-    val visualState = mediaGridCellVisualState(
-        candidateCount = candidates.size,
-        failedCandidateIndex = failedCandidateIndex,
-        displayedCandidateIdentity = displayedCandidateIdentity,
-        currentCandidateIdentity = currentCandidate?.sourceIdentity,
-        prepared = preparedImage != null,
-    )
+    val visualState = when (loadState.status) {
+        MediaGridCellLoadStatus.Ready -> MediaGridCellVisualState.Image
+        MediaGridCellLoadStatus.Failed -> MediaGridCellVisualState.Error
+        else -> MediaGridCellVisualState.Placeholder
+    }
     val selectionIndicatorSize = mediaGridSelectionIndicatorSize(columnCount)
     val videoIconSize = mediaGridVideoIconSize(columnCount)
     val cardDialogSize = mediaGridCardDialogSize(columnCount)
@@ -3914,20 +3827,6 @@ private fun ClassifiedMediaGridCell(
                     imageLoader = imageLoader,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
-                    onSuccess = {
-                        if (candidates.getOrNull(currentCandidateIndex)?.sourceIdentity == currentCandidate?.sourceIdentity) {
-                            displayedCandidateIdentity = currentCandidate?.sourceIdentity
-                        }
-                    },
-                    onError = {
-                        if (candidates.getOrNull(currentCandidateIndex)?.sourceIdentity == currentCandidate?.sourceIdentity) {
-                            if (currentCandidate?.kind == MediaGridImageSourceKind.PersistentPreview) {
-                                onPersistentPreviewError(currentCandidate)
-                            }
-                            displayedCandidateIdentity = null
-                            failedCandidateIndex = currentCandidateIndex + 1
-                        }
-                    },
                 )
         }
         if (!selectionMode && sort.baseOrder == ClassifiedSortBase.LikeCount && entry.likeCount != null) {

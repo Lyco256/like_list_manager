@@ -228,6 +228,13 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 
 ## Current simple column-change path
 
+## 2026-07-22 steady image loading
+
+- The grid owns one `MediaGridSteadyLoadController` for the current render key. Its `snapshotFlow` only overwrites a latest-value viewport anchor containing stable item bounds, visible media indices, measured viewport/cell size, and column count.
+- The grid remains composed behind the full-area `classified_media_grid_progress` overlay while initial metadata and persistent JPEG memory warm-up run. The overlay is removed when the controller publishes `Ready`.
+- Cells render Placeholder for `Pending` and `Loading`, the existing Error design for terminal failure, and an `AsyncImage` only for a controller-published `Ready` candidate already confirmed in the shared memory cache. Candidate fallback and recovery are controller-owned.
+- Selection, tap, long press, badges, tweet dialog, headers, filtering, sorting, and pinch column changes retain their existing paths.
+
 - The production grid keeps one normal `LazyVerticalGrid` visible during the entire two-pointer gesture. It does not render or update a morph overlay, motion progress, settle animation, or grid handoff.
 - `mediaGridColumnCountAfterPinchRelease` uses the final accumulated distance ratio only when the gesture ends. A threshold miss, cancellation, source revision change, or 2/12 boundary leaves the count unchanged; a successful gesture changes exactly one adjacent column.
 - Pinch-in increases columns and pinch-out decreases columns. Direction reversal is resolved from the final cumulative ratio rather than from an early locked direction.
