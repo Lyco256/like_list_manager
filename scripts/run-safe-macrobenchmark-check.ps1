@@ -368,6 +368,9 @@ function Get-ProductionDataFingerprint {
         if (Test-RunAsFile -RelativePath $optionalPath) { $paths += $optionalPath }
     }
     $paths += @(Get-RunAsFiles -FindRoot $script:productionImagesRoot)
+    if (Test-RunAsDirectory -RelativePath $script:productionPreviewRoot) {
+        $paths += @(Get-RunAsFiles -FindRoot $script:productionPreviewRoot)
+    }
     $hashes = foreach ($path in $paths) {
         $lines = Invoke-RunAsText -Arguments @("sha256sum", $path)
         $line = $lines | Select-Object -First 1
@@ -380,7 +383,7 @@ function Get-ProductionDataFingerprint {
 function Resolve-ProductionStoragePaths {
     $script:productionDbRoot = "databases"
     $script:productionImagesRoot = "files/images"
-    $script:productionCacheRoot = "cache/media_grid_thumbnails"
+    $script:productionPreviewRoot = "files/media_grid_previews/v1"
     if (Test-RunAsFile -RelativePath "$($script:productionDbRoot)/like_list_manager.db") { return }
 
     # Read only the storage-location selector to locate the active database. The
@@ -467,7 +470,7 @@ function New-ProductionSnapshot {
     $script:snapshotArchive = $archive
     Remove-Item -LiteralPath $snapshotRoot -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
-    New-Item -ItemType Directory -Force -Path (Join-Path $snapshotRoot "db"), (Join-Path $snapshotRoot "cache\media_grid_thumbnails"), (Join-Path $snapshotRoot "originals") | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $snapshotRoot "db"), (Join-Path $snapshotRoot "previews"), (Join-Path $snapshotRoot "originals") | Out-Null
     Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "am", "force-stop", $script:productionPackage) | Out-Null
     $runAsCheck = Invoke-RunAsText -Arguments @("id")
     if (($runAsCheck -join " ") -notmatch "uid=\d+") { throw "run-as $($script:productionPackage) is unavailable; refusing any fallback." }
@@ -482,15 +485,15 @@ function New-ProductionSnapshot {
         if (Test-RunAsFile -RelativePath $path) { Copy-RunAsBinary -RelativePath $path -Destination (Join-Path $snapshotRoot ("db/" + ([IO.Path]::GetFileName($path)))) }
     }
     if (-not (Test-Path -LiteralPath (Join-Path $snapshotRoot "db/like_list_manager.db") -PathType Leaf)) { throw "Production Room database was not found through run-as." }
-    if (-not (Test-RunAsDirectory -RelativePath $script:productionCacheRoot)) {
-        throw "Production 256px thumbnail cache is missing; CACHED_UI cannot be prepared without copied JPEGs."
+    if (-not (Test-RunAsDirectory -RelativePath $script:productionPreviewRoot)) {
+        throw "Production persistent preview directory is missing; the benchmark snapshot cannot be prepared."
     }
-    $cachePaths = @(Get-RunAsFiles -FindRoot $script:productionCacheRoot | Where-Object { [IO.Path]::GetExtension($_).ToLowerInvariant() -eq ".jpg" })
-    if ($cachePaths.Count -eq 0) {
-        throw "Production 256px thumbnail cache contains no JPEGs; CACHED_UI cannot be prepared."
+    $previewPaths = @(Get-RunAsFiles -FindRoot $script:productionPreviewRoot | Where-Object { [IO.Path]::GetExtension($_).ToLowerInvariant() -eq ".jpg" })
+    if ($previewPaths.Count -eq 0) {
+        throw "Production persistent preview directory contains no JPEGs; the benchmark snapshot cannot be prepared."
     }
-    foreach ($path in $cachePaths) {
-        $destination = Join-Path $snapshotRoot ("cache/media_grid_thumbnails/" + ([IO.Path]::GetFileName($path)))
+    foreach ($path in $previewPaths) {
+        $destination = Join-Path $snapshotRoot ("previews/" + ([IO.Path]::GetFileName($path)))
         Copy-RunAsBinary -RelativePath $path -Destination $destination
     }
     $originals = Select-RepresentativeOriginals -Paths @(Get-RunAsFiles -FindRoot $script:productionImagesRoot)
@@ -540,7 +543,7 @@ function Assert-BenchmarkSnapshotReady {
         throw "Benchmark snapshot marker is not valid JSON: $markerText"
     }
     if ($marker.ready -ne $true) { throw "Benchmark snapshot marker is not ready: $markerText" }
-    foreach ($field in @("activeClips", "activeMediaAssets", "taggedMediaClips", "localMediaAssets", "cachedJpegs")) {
+    foreach ($field in @("activeClips", "activeMediaAssets", "taggedMediaClips", "localMediaAssets", "persistentPreviews")) {
         $value = 0L
         if (-not [long]::TryParse(([string]$marker.$field), [ref]$value) -or $value -le 0) {
             throw "Benchmark snapshot validation count is not positive: $field=$($marker.$field) marker=$markerText"
@@ -559,7 +562,7 @@ function Assert-BenchmarkSnapshotReady {
         $markerInode -ne $expectedInodeValue) {
         throw "Benchmark data inode changed across APK update: setup=$ExpectedDataInode marker=$($marker.dataInode)"
     }
-    Write-SafeLog "Benchmark snapshot ready: activeClips=$($marker.activeClips) activeMediaAssets=$($marker.activeMediaAssets) taggedMediaClips=$($marker.taggedMediaClips) localMediaAssets=$($marker.localMediaAssets) cachedJpegs=$($marker.cachedJpegs) databasePath=$($marker.databasePath) dataInode=$($marker.dataInode)"
+    Write-SafeLog "Benchmark snapshot ready: activeClips=$($marker.activeClips) activeMediaAssets=$($marker.activeMediaAssets) taggedMediaClips=$($marker.taggedMediaClips) localMediaAssets=$($marker.localMediaAssets) persistentPreviews=$($marker.persistentPreviews) databasePath=$($marker.databasePath) dataInode=$($marker.dataInode)"
 }
 
 function Pull-MediaGridBenchmarkMetrics {

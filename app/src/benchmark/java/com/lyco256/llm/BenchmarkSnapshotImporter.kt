@@ -5,7 +5,6 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.system.Os
 import java.io.File
-import java.security.MessageDigest
 import java.util.zip.ZipInputStream
 import org.json.JSONArray
 
@@ -20,7 +19,7 @@ internal object BenchmarkSnapshotImporter {
         val activeMediaAssets: Long,
         val taggedMediaClips: Long,
         val localMediaAssets: Long,
-        val cachedJpegs: Int = 0,
+        val persistentPreviews: Int = 0,
     )
 
     private data class OriginalMetadata(
@@ -86,13 +85,19 @@ internal object BenchmarkSnapshotImporter {
                 require(target.setLastModified(metadata.modified)) { "Could not restore snapshot original timestamp" }
             }
 
-            val thumbnailCache = File(context.cacheDir, "media_grid_thumbnails")
-            thumbnailCache.deleteRecursively()
-            val copiedCache = File(staging, "cache/media_grid_thumbnails")
-            if (copiedCache.isDirectory) copyDirectory(copiedCache, thumbnailCache)
-            val remappedCachedJpegs = rewriteLocalPaths(database, images, thumbnailCache, originalMetadata.associateBy { it.originalPath })
-            require(remappedCachedJpegs > 0) { "No copied thumbnail JPEG matched benchmark media cache keys" }
-            val validation = validateMediaGridInput(database, images).copy(cachedJpegs = remappedCachedJpegs)
+            val copiedPreviews = File(staging, "previews")
+            require(copiedPreviews.isDirectory) { "Persistent preview snapshot is missing" }
+            val previewFiles = copiedPreviews.listFiles()
+                ?.filter { it.isFile && it.extension.equals("jpg", ignoreCase = true) }
+                .orEmpty()
+            require(previewFiles.isNotEmpty()) { "Persistent preview snapshot contains no JPEGs" }
+            val previewDirectory = File(context.filesDir, "media_grid_previews/v1")
+            copyDirectory(copiedPreviews, previewDirectory)
+            require(previewFiles.all { File(previewDirectory, it.name).isFile }) {
+                "Persistent preview snapshot copy is incomplete"
+            }
+            rewriteLocalPaths(database, images, originalMetadata.associateBy { it.originalPath })
+            val validation = validateMediaGridInput(database, images).copy(persistentPreviews = previewFiles.size)
             writeSnapshotValidation(context, database, validation)
         } catch (t: Throwable) {
             deleteBenchmarkData(context)
@@ -145,14 +150,10 @@ internal object BenchmarkSnapshotImporter {
         require(markerText.contains("\"databasePath\":\"${database.absolutePath}\"")) {
             "Required benchmark snapshot DB path does not match Room DB path: ${database.absolutePath}"
         }
-        require(Regex("\"cachedJpegs\":([1-9]\\d*)").containsMatchIn(markerText)) {
-            "Required benchmark snapshot has no mapped cached JPEGs"
+        require(Regex("\"persistentPreviews\":([1-9]\\d*)").containsMatchIn(markerText)) {
+            "Required benchmark snapshot has no persistent previews"
         }
         validateMediaGridInput(database, File(context.filesDir, BuildConfig.STORAGE_IMAGES_DIRECTORY))
-    }
-
-    fun resetGeneratedResults(context: Context) {
-        if (BuildConfig.BUILD_TYPE == "benchmark") File(context.cacheDir, "media_grid_thumbnails_generated").deleteRecursively()
     }
 
     fun writeBenchmarkDatabaseDiagnostics(context: Context) {
@@ -198,28 +199,16 @@ internal object BenchmarkSnapshotImporter {
     private fun rewriteLocalPaths(
         database: File,
         images: File,
-        thumbnailCache: File,
         metadataByOriginalPath: Map<String, OriginalMetadata>,
-    ): Int {
-        var remappedCachedJpegs = 0
+    ) {
         val db = SQLiteDatabase.openDatabase(database.path, null, SQLiteDatabase.OPEN_READWRITE)
         try {
             db.rawQuery("SELECT id, mediaKey, localPath FROM assets", null).use { cursor ->
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(0)
-                    val mediaKey = cursor.getString(1)
                     val oldPath = if (cursor.isNull(2)) null else cursor.getString(2)
                     val metadata = oldPath?.let(metadataByOriginalPath::get)
                     val copied = metadata?.let { File(images, it.snapshotName) }?.takeIf { it.isFile }
-                    if (oldPath != null && metadata != null && copied != null) {
-                        val oldKey = thumbnailKey(id, mediaKey, oldPath, metadata.size, metadata.modified)
-                        val newKey = thumbnailKey(id, mediaKey, copied.absolutePath, copied.length(), copied.lastModified())
-                        val oldCache = File(thumbnailCache, "$oldKey.jpg")
-                        if (oldCache.isFile) {
-                            oldCache.copyTo(File(thumbnailCache, "$newKey.jpg"), overwrite = true)
-                            remappedCachedJpegs += 1
-                        }
-                    }
                     val values = ContentValues().apply {
                         put("localPath", copied?.absolutePath)
                         put("downloadState", if (copied != null) "downloaded" else "failed")
@@ -233,7 +222,6 @@ internal object BenchmarkSnapshotImporter {
         } finally {
             db.close()
         }
-        return remappedCachedJpegs
     }
 
     private fun readOriginalMetadata(file: File): List<OriginalMetadata> {
@@ -254,13 +242,6 @@ internal object BenchmarkSnapshotImporter {
         }
     }
 
-    private fun thumbnailKey(assetId: Long, mediaKey: String, path: String, size: Long, modified: Long): String {
-        val value = "$assetId|$mediaKey|$path|$size|$modified"
-        return MessageDigest.getInstance("SHA-256")
-            .digest(value.toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
-    }
-
     private fun writeSnapshotValidation(context: Context, database: File, validation: SnapshotValidation) {
         val directory = requireNotNull(context.getExternalFilesDir(VALIDATION_DIRECTORY))
         directory.mkdirs()
@@ -270,7 +251,7 @@ internal object BenchmarkSnapshotImporter {
                 "\"activeMediaAssets\":${validation.activeMediaAssets}," +
                 "\"taggedMediaClips\":${validation.taggedMediaClips}," +
                 "\"localMediaAssets\":${validation.localMediaAssets}," +
-                "\"cachedJpegs\":${validation.cachedJpegs}," +
+                "\"persistentPreviews\":${validation.persistentPreviews}," +
                 "\"dataInode\":${Os.stat((context.filesDir.parentFile ?: context.filesDir).absolutePath).st_ino}}",
             Charsets.UTF_8,
         )
@@ -315,7 +296,6 @@ internal object BenchmarkSnapshotImporter {
         val database = context.getDatabasePath(BuildConfig.STORAGE_DATABASE_NAME)
         listOf(database, File("${database.path}-wal"), File("${database.path}-shm")).forEach { it.delete() }
         File(context.filesDir, BuildConfig.STORAGE_IMAGES_DIRECTORY).deleteRecursively()
-        File(context.cacheDir, "media_grid_thumbnails").deleteRecursively()
     }
 
     private fun copyRequired(source: File, target: File) {

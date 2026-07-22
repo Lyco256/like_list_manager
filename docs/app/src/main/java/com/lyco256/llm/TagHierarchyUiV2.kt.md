@@ -7,11 +7,12 @@
 - The classified media grid creates `MediaGridFrameData` on `Dispatchers.Default`. It contains headers, stable keys, item lookup, source indexes, and the media-cell index column.
 - `MediaGridRenderKey` combines the current data key (source revision, hierarchy/filter, and effective sort) with the column count. A key mismatch clears the previous frame and shows `classified_media_grid_progress`; the old grid is never retained while a new frame is being built.
 - Once frame data is ready, the grid and cell-local Placeholder render immediately. Image metadata is prepared independently by the single `MediaGridImagePreparer`, so frame publication does not wait for file checks or Coil candidates.
+- A nullable initial `ClassifiedMediaGridState.dataKey` is resolved to the current UI key for both frame calculation and publication. The completed frame is discarded only when that resolved key is stale.
 - Viewport collection uses only the visible item set/order and cell size. It reads adjacent cells from the prebuilt media-cell index column; it does not build candidate lists, inspect files, hash sources, or filter/sort all items. Direction reversal uses `collectLatest` cancellation to discard old preparation.
 
-## 2026-07-19 direct preview pipeline (history)
+## 2026-07-19 direct preview pipeline
 
-- The current grid no longer publishes a thumbnail-manager viewport or waits for `Waiting`, `Generating`, `Ready`, cache hydration, Idle resume, or wide preparation.
+- The current grid publishes only a lightweight viewport read and never waits for generator state or cache restoration.
 - `MediaGridImagePreparer` builds the available persistent JPEG → local → preview → remote → non-duplicate display candidates off composition, and each `ClassifiedMediaGridCell` starts `AsyncImage` from the prepared candidate list. Missing local files are omitted; `downloadState == "failed"` does not suppress URL fallback.
 - The measured cell constraints supply the request target size while `ContentScale.Crop` remains unchanged. A stable source-identity-and-size key is applied to both memory and disk cache requests.
 - Visible requests continue during drag and fling. Composition disposal cancels requests for cells leaving the viewport. The only separate work is targetless Coil prefetch for at most one adjacent row in the current direction.
@@ -23,9 +24,9 @@
 - `MediaGridPreviewPreloader` deduplicates keys across preload requests and memory-cache hits, cancels obsolete requests on viewport/direction changes, and uses the same 256×256 memory key as the cell request. Persistent JPEG requests disable Coil disk cache; existing candidates retain their cache policy.
 - Worker publication and preview deletion emit a process-local asset ID. Only a currently visible matching cell invalidates and re-prepares; off-screen notifications are deferred until normal preparation. A persistent-JPEG decode error advances once to the existing fallback candidates and schedules best-effort deletion/re-generation once per preview identity without changing DB state.
 
-## 2026-07 viewport dispatch (履歴: 第6実装で廃止)
+## 廃止済みviewport経路
 
-- The former `MediaGridViewportSnapshot` and manager scheduling path have been removed. The current path is documented in the direct preview section above.
+実装6より前の画像生成用viewport経路は削除済みです。現行仕様は冒頭のdirect preview節だけを参照します。
 
 ## 2026-07-10 media-grid bulk tag editing
 
@@ -172,7 +173,7 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 
 ## 2026-07-19 media-grid placeholder rendering
 
-- The former grid-wide thumbnail Brush, viewport dispatcher, coordinator scheduling, generation priority, wide preparation, and thumbnail source model have been removed.
+- The retired grid-wide brush, generator dispatcher, coordinator, and source model have been removed.
 - The current cell-local placeholder behavior and direct candidate state are documented in the direct preview section above and `MediaGridPlaceholderRendering.kt.md`.
 - `Failed`, unavailable media sources, and `downloadState == "failed"` render the theme's opaque single-color cell background and the existing error icon without a gradient. Image and error cells do not compose the placeholder layer. No shimmer, crossfade, infinite animation, border, spacing, or `SubcomposeAsyncImage` is used.
 - Placeholder layers expose `media_grid_placeholder_<assetId>` only while active; existing cell, error, selection, badge, dialog, and pointer-input tags remain unchanged.
@@ -180,8 +181,8 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 ## 2026-07-14 final media-grid morph adjustment（履歴: 現行経路では不使用）
 
 - Morph Header bands use one maximum-height node, clipped while Y and height interpolate from the start layout to the end layout. Changed titles crossfade with `1-progress` and `progress`; identical titles use one layer.
-- The morph overlay draws only bounded Slot/Header backgrounds, uses stable slot/header keys, and reads progress/correction in graphics layers. RenderModel, lists, maps, thumbnail sources, and ImageRequests are session-scoped rather than progress-scoped.
-- Overlay thumbnail observation is deduplicated by Asset ID and only uses already-present manager StateFlows, so starting a morph does not start thumbnail generation, network work, or file checks.
+- The historical morph overlay drew only bounded Slot/Header backgrounds and used stable keys. This overlay and its image-source model are absent from the current product path.
+- The historical overlay observation was deduplicated by Asset ID and did not start image generation, network work, or file checks. The overlay is absent from the current product path.
 - Video, selection, card, and like-count badges use the slot width and the same Asset alpha as their image. `MediaGridMorphUiState` atomically manages the transaction, anchor, and handoff completion so correction is not cleared while the overlay is still visible.
 
 ## 2026-07 media grid pinch / anchor follow-up（履歴: 現行経路では不使用）
@@ -215,12 +216,9 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 
 ## 2026-07 media-grid selection interaction fixes
 
-## 2026-07 media-grid thumbnail cache / viewport priority (履歴: 第6実装で廃止)
+## 廃止済み画像cache経路
 
-- メディアグリッドは列数に依存しない256×256px中央クロップJPEG（quality 60）を`cacheDir/media_grid_thumbnails`へ保存する。
-- 元画像は`inJustDecodeBounds`と`inSampleSize`で縮小デコードし、キャッシュ生成は一時ファイル置換で壊れた完成ファイルを残さない。
-- グリッド専用ImageLoaderはcrossfadeなし、独自ディスクキャッシュなし、メモリ上限32MiBかつヒープ8%以下。
-- `LazyGridState`の最新viewportだけをマネージャーへ通知し、生成は1件直列、完了ごとに最新viewport中央距離で再評価する。セルは自身のStateFlowだけを購読する。
+実装6より前の独自生成cacheとviewport優先処理は、互換APIを残さず削除済みです。現在の256×256 JPEG仕様は`MediaGridPersistentPreviewStore.kt.md`、候補順とpreloadは`MediaGridDirectPreview.kt.md`だけを参照します。端末に残る廃止済みcacheへアクセスまたはcleanupするコードはありません。
 
 - Media-grid selection mode is tracked independently from the selected clip set, so the toolbar remains visible at `0件選択中` until the close button or Android Back is used.
 - The bulk tag button is disabled when no clip is selected. Cell taps in selection mode only toggle the clip; the card-dialog button is available only for 2–6 columns and does not propagate to the cell.
@@ -236,13 +234,13 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - The pinch-start anchor prefers the visible media item below the pinch center and otherwise the nearest visible media item. The stable item key and relative center offset are restored after the normal grid rebuild, with finite layout retries and no retained overlay state.
 - `MediaGridMorphSession` and the former `MediaGridMorphOverlay` path are not part of the current product source path.
 
-## 2026-07-18 第2実装 viewport通知 (履歴: 第6実装で廃止)
+## 2026-07-18 第2実装 viewport通知（廃止済み）
 
-- 旧viewport通知とthumbnail manager経路の記録です。第6実装では、安定した表示index・asset ID・cell sizeを使う直接表示と、隣接1行のtargetless Coil prefetchへ置き換えています。
+旧通知方式の詳細はGit履歴だけに残します。現行は安定した表示index・asset ID・cell sizeを使うprepared imageと、隣接1行のtargetless Coil preloadです。
 # メディアグリッド高速化追補
 
 グリッドのメタデータ処理はカード表示と分離し、ファイル存在確認・画像デコードを枠生成前に行わない。複数選択はCalculating中に解除せず、Ready結果で選択可能Clipとの交差を更新する。
 
-## 2026-07-19 第4実装 viewport監視・操作状態 (履歴: 第6実装で廃止)
+## 2026-07-19 第4実装 viewport監視（廃止済み）
 
-- 旧viewport監視・生成停止・Idle再開の設計記録です。現行の直接表示とプリフェッチの証跡は、冒頭の direct preview pipeline 節と `MediaGridDirectPreviewTest` にあります。
+旧操作状態と生成停止方式の詳細はGit履歴だけに残します。現行の直接表示とpreloadの証跡は、冒頭のdirect preview節と`MediaGridDirectPreviewTest`にあります。

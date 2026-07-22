@@ -26,6 +26,8 @@ class AppContainer(context: Context) {
     internal val mediaGridImagePreparer = MediaGridImagePreparer(
         MediaGridPersistentPreviewStore(context.filesDir),
     )
+    internal val mediaGridPreviewEnqueuer: MediaGridPreviewEnqueuer =
+        WorkManagerMediaGridPreviewEnqueuer(context)
     val postStorageManager = PostStorageManager(
         context,
         PostStorageConfig(
@@ -62,6 +64,6 @@ class AppContainer(context: Context) {
         xApiClient = xApiClient,
         ocrTextGateway = ocrTextGateway,
         includeSeedMedia = !BuildConfig.TEST_HARNESS,
-        mediaGridPreviewEnqueuer = WorkManagerMediaGridPreviewEnqueuer(context),
+        mediaGridPreviewEnqueuer = mediaGridPreviewEnqueuer,
     )
 }

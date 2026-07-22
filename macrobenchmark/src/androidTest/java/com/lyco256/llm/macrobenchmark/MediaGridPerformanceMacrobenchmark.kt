@@ -104,7 +104,7 @@ class MediaGridPerformanceMacrobenchmark {
         val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         val marker = device.executeShellCommand("cat $validationRoot/snapshot.json")
         val error = device.executeShellCommand("cat $validationRoot/setup-error.txt")
-        val requiredCounts = listOf("activeClips", "activeMediaAssets", "taggedMediaClips", "localMediaAssets", "cachedJpegs")
+        val requiredCounts = listOf("activeClips", "activeMediaAssets", "taggedMediaClips", "localMediaAssets", "persistentPreviews")
         val countsReady = requiredCounts.all { field ->
             Regex("\\\"$field\\\":(\\d+)").find(marker)?.groupValues?.get(1)?.toIntOrNull()?.let { it > 0 } == true
         }

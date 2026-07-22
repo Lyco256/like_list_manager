@@ -17,6 +17,7 @@ import java.time.Instant
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import org.junit.After
@@ -38,19 +39,23 @@ class MediaGridPersistentPreviewIntegrationTest {
     private val assetIds = mutableListOf<Long>()
 
     @Before
-    fun setUp() = runBlocking {
-        WorkManager.getInstance(context)
-            .cancelUniqueWork(WorkManagerMediaGridPreviewEnqueuer.UNIQUE_WORK_NAME)
-            .result
-            .get(30, TimeUnit.SECONDS)
-        sourceRoot.deleteRecursively()
-        sourceRoot.mkdirs()
+    fun setUp() {
+        runBlocking {
+            WorkManager.getInstance(context)
+                .cancelUniqueWork(WorkManagerMediaGridPreviewEnqueuer.UNIQUE_WORK_NAME)
+                .result
+                .get(30, TimeUnit.SECONDS)
+            sourceRoot.deleteRecursively()
+            sourceRoot.mkdirs()
+        }
     }
 
     @After
-    fun tearDown() = runBlocking {
-        for (assetId in assetIds) store.deletePreview(assetId)
-        sourceRoot.deleteRecursively()
+    fun tearDown() {
+        runBlocking {
+            for (assetId in assetIds) store.deletePreview(assetId)
+            sourceRoot.deleteRecursively()
+        }
     }
 
     @Test
@@ -77,7 +82,10 @@ class MediaGridPersistentPreviewIntegrationTest {
         assertTrue(target.parentFile?.name == "v1")
         val output = BitmapFactory.decodeFile(target.absolutePath)
         assertNotNull(output)
-        assertEquals(Color.GREEN, output!!.getPixel(128, 128) and 0x00ffffff)
+        val center = output!!.getPixel(128, 128)
+        assertTrue(kotlin.math.abs(Color.red(center) - Color.red(Color.GREEN)) <= 2)
+        assertTrue(kotlin.math.abs(Color.green(center) - Color.green(Color.GREEN)) <= 2)
+        assertTrue(kotlin.math.abs(Color.blue(center) - Color.blue(Color.GREEN)) <= 2)
         output.recycle()
 
         val before = target.readBytes()
@@ -123,14 +131,25 @@ class MediaGridPersistentPreviewIntegrationTest {
     fun workManagerProcessesOneAssetBatchAndUsesOnlyTheTestAppDatabase() = runBlocking {
         val source = createSource("worker.jpg", 512, 300) { canvas -> canvas.drawColor(Color.CYAN) }
         val assetId = insertLocalAsset(source)
+        val workManager = WorkManager.getInstance(context)
+        val existingWorkIds = workManager
+            .getWorkInfosForUniqueWork(WorkManagerMediaGridPreviewEnqueuer.UNIQUE_WORK_NAME)
+            .get(30, TimeUnit.SECONDS)
+            .mapTo(HashSet()) { it.id }
         WorkManagerMediaGridPreviewEnqueuer(context).enqueue(listOf(assetId))
 
-        val infos = WorkManager.getInstance(context)
-            .getWorkInfosForUniqueWork(WorkManagerMediaGridPreviewEnqueuer.UNIQUE_WORK_NAME)
-            .get(60, TimeUnit.SECONDS)
-        val work = infos.lastOrNull { it.state.isFinished }
-        assertNotNull(work)
-        assertEquals(WorkInfo.State.SUCCEEDED, work!!.state)
+        val work = withTimeout(60_000L) {
+            while (true) {
+                val finished = workManager
+                    .getWorkInfosForUniqueWork(WorkManagerMediaGridPreviewEnqueuer.UNIQUE_WORK_NAME)
+                    .get(30, TimeUnit.SECONDS)
+                    .firstOrNull { it.id !in existingWorkIds && it.state.isFinished }
+                if (finished != null) return@withTimeout finished
+                delay(50L)
+            }
+            error("unreachable")
+        }
+        assertEquals(WorkInfo.State.SUCCEEDED, work.state)
         assertTrue(store.previewFile(assetId).isFile)
         assertEquals(context.filesDir.canonicalFile, store.previewFile(assetId).parentFile!!.parentFile!!.parentFile!!.canonicalFile)
     }

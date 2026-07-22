@@ -6,11 +6,11 @@
 
 ## 2026-07 direct preview ImageLoader
 
-`AppContainer` owns the single media-grid `ImageLoader` and `MediaGridPrefetchController`. The loader keeps crossfade disabled, enables `cacheDir/media_grid_coil_cache` with a 128 MiB disk limit, caps memory at `min(totalMem / 8, 64 MiB)`, and uses an IO decoder dispatcher limited to two concurrent decodes. The former thumbnail store and serial generation manager are not created.
+`AppContainer` owns the single media-grid `ImageLoader` and `MediaGridImagePreparer`. The loader keeps crossfade disabled, enables `cacheDir/media_grid_coil_cache` with a 128 MiB disk limit, caps memory at `min(totalMem / 8, 64 MiB)`, and uses an IO decoder dispatcher limited to two concurrent decodes. It constructs no retired image-pipeline dependency.
 
 ## 2026-07 persistent JPEG preview
 
-`AppContainer`は本番Repositoryへ`WorkManagerMediaGridPreviewEnqueuer`を注入します。schedulerとworkerは`filesDir/media_grid_previews`だけを使い、既存のImageLoader・Coil cache・グリッド表示経路とは独立しています。
+`AppContainer`は`WorkManagerMediaGridPreviewEnqueuer`を1つ構築してRepositoryへ注入します。workerは`filesDir/media_grid_previews/v1`の永続JPEGだけを生成し、表示側は`MediaGridImagePreparer`と`MediaGridPreviewPreloader`を使います。
 
 ## 役割
 
@@ -20,7 +20,7 @@
 
 `PostStorageManager` → `ApiSettingsStore` / `XOAuthManager` → `ClipRepository` の順で生成します。Room Databaseは保存先マネージャーが現在の保存先に対して開閉します。
 
-メディアグリッド用の共有ImageLoaderとtargetless prefetch controllerもここで1インスタンスずつ生成します。benchmark settings、metrics、counterなどの計測依存は生成せず、本番引数にも含めません。benchmark専用Activity・importer・frame計測は `app/src/benchmark` 側に隔離されています。
+メディアグリッド用の共有ImageLoader、prepared-image作成器、WorkManager enqueuerをここで1インスタンスずつ生成します。preloaderは画面ライフサイクル単位でUI側が所有します。benchmark settings、metrics、counterなどの計測依存は生成せず、本番引数にも含めません。benchmark専用Activity・importer・frame計測は `app/src/benchmark` 側に隔離されています。
 
 ## 関連ファイル
 

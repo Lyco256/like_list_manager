@@ -354,7 +354,7 @@ fun EnhancedClassifiedScreen(
         val next = withContext(Dispatchers.Default) {
             buildMediaGridFrameData(mediaGridState.entries, dataKey.sort, mediaGridColumnCount, dataKey)
         }
-        if (next.key.dataKey == mediaGridState.dataKey) mediaGridFrame = next
+        if (next.key.dataKey == dataKey) mediaGridFrame = next
     }
     val mediaGridAnchor = rememberClassifiedMediaGridAnchor(mediaGridLazyState)
     val selectableMediaGridClipIds = remember(mediaGridState.entries) {

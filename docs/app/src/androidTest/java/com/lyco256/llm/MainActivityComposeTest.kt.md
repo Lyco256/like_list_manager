@@ -7,7 +7,7 @@
 
 ## 2026-07-19 第5実装 integration coverage
 
-- The classified display-toggle fixture pre-generates the photo and video thumbnail files, then opens the media grid and waits for both cells to reach `Ready` without scrolling. The failed asset remains the mixed cache/non-cache error path.
+- The classified display-toggle fixture pre-generates persistent previews for the photo and video cells, then opens the media grid and waits for both cells to finish their current image requests without scrolling. The failed asset remains the no-candidate error path.
 - The same fixture still covers activity recreation, filter and sort source revisions, column changes, placeholders, display success, cell taps, and the tweet dialog. The large-media test remains the fast-fling, retouch, final-viewport, and immediate-action regression gate.
 - No Macrobenchmark or measurement path is changed or run.
 
@@ -88,23 +88,23 @@
 
 - The existing large local-media fling test remains the integration gate for fast fling image following, immediate cell action, and filter revision changes.
 - The production path keeps the normal grid and column-change behavior unchanged; no Macrobenchmark or measurement code is added.
-- The same fixture now performs a normal paced drag, a fast fling followed by an immediate touch-down/up retouch, and opens the current visible cell before waiting for thumbnail completion.
+- The same fixture performs a normal paced drag, a fast fling followed by an immediate touch-down/up retouch, and opens the current visible cell without waiting for image completion.
 
 ## 2026-07-19 第3実装 placeholder rendering
 
-- `classifiedDisplayToggleSwitchesBetweenCardAndMediaGridAndSurvivesActivityRecreation` waits for a valid local thumbnail to reach `Ready` and verifies that `media_grid_placeholder_<assetId>` is gone after the current image model's display success.
+- `classifiedDisplayToggleSwitchesBetweenCardAndMediaGridAndSurvivesActivityRecreation` waits for a valid persistent preview to display and verifies that `media_grid_placeholder_<assetId>` is gone after the current candidate succeeds.
 - The same flow verifies that an Error cell keeps `media_grid_error_<assetId>` and never exposes a placeholder tag.
 - The existing fling/retouch/cell-action test remains unchanged as the integration regression gate for scrolling and immediate interaction.
 
 ## 2026-07 viewport dispatch integration coverage
 
-- `classifiedMediaGridSingleFlingKeepsLatestImageAndImmediateCellActionAfterFilter` seeds 96 local classified media assets, performs one fast fling without waiting between input events, and verifies that the visible range advances and a visible thumbnail reaches `Ready`.
+- `classifiedMediaGridSingleFlingKeepsLatestImageAndImmediateCellActionAfterFilter` seeds 96 local classified media assets, performs one fast fling without waiting between input events, and verifies that the visible range advances and a visible image request succeeds.
 - The same flow opens a cell immediately after the fling, applies a filter that changes the source revision, verifies that only the target cell remains visible, and opens that cell immediately. This covers image following, no rollback after a screen/filter change, and immediate cell operations.
 
 - The real two-pointer test verifies 4→5→4 changes, a threshold-miss no-op, repeated round trips, stable media-cell position, immediate cell interaction, scroll after the change, and absence of `media_grid_morph_overlay` after every release.
 
 ## 2026-07-19 第4実装 integration coverage
 
-- The classified display-toggle flow waits for the first local media cell to reach `Ready` without scrolling or tapping, covering the ordered initial source/viewport path and card-to-grid transition.
+- The classified display-toggle flow waits for the first local media cell to display without scrolling or tapping, covering the ordered initial prepared-image path and card-to-grid transition.
 - The large-media flow keeps the normal paced drag, fast fling, immediate retouch, final visible-range selection, and post-filter cell action as the integration regression coverage for operation-state suppression and latest-viewport following.
 - Placeholder tags, existing image success/error behavior, column changes, selection, dialogs, and Macrobenchmark behavior remain covered by their existing tests and are not changed by this implementation.

@@ -21,9 +21,6 @@ class BenchmarkMainActivity : MainActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val settings = MediaGridBenchmarkSettings.resolve(intent)
-        if (intent.getBooleanExtra("com.lyco256.llm.benchmark.resetGenerated", false)) {
-            BenchmarkSnapshotImporter.resetGeneratedResults(this)
-        }
         metrics = MediaGridBenchmarkMetrics.forSettings(settings).also { it.reset() }
         frameTiming = MediaGridFrameTimingCollector().also { it.start() }
     }
