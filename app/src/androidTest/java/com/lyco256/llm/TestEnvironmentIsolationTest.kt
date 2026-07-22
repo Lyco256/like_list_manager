@@ -5,6 +5,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.lyco256.llm.data.DisabledOAuthGateway
 import com.lyco256.llm.data.DisabledXApiGateway
 import com.lyco256.llm.data.InMemorySettingsStore
+import com.lyco256.llm.data.MediaGridImagePreparer
+import com.lyco256.llm.data.WorkManagerMediaGridPreviewEnqueuer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -28,6 +30,8 @@ class TestEnvironmentIsolationTest {
         assertTrue(application.container.apiSettingsStore is InMemorySettingsStore)
         assertTrue(application.container.xOAuthManager is DisabledOAuthGateway)
         assertTrue(application.container.xApiClient is DisabledXApiGateway)
+        assertTrue(application.container.mediaGridImagePreparer is MediaGridImagePreparer)
+        assertTrue(application.container.mediaGridPreviewEnqueuer is WorkManagerMediaGridPreviewEnqueuer)
 
         @Suppress("DEPRECATION")
         val productionInfo = application.packageManager.getApplicationInfo("com.lyco256.llm", 0)

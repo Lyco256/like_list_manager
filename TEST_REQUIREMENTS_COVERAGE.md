@@ -1,5 +1,18 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-07-22 第11実装: retired image pipeline removal
+
+| 要件 | 証跡 |
+| --- | --- |
+| 廃止済みgenerator/store/state/coordinatorと専用test/fake/fixtureが全source setに存在しない | repository-wide static search、削除済みファイル履歴 |
+| 永続JPEG → local → preview → remote → displayを唯一の候補順として維持 | `MediaGridDirectPreview.kt`、`MediaGridDirectPreviewTest.kt` |
+| 初期範囲と次1行preload、重複抑止、取消、完成通知、破損回復を維持 | `MediaGridPreviewPreloader`、`MediaGridPreviewNotifier`、unit/integration tests |
+| AppContainerが現行preparerとWorkManager enqueuerだけを構築 | `AppContainer.kt`、`TestEnvironmentIsolationTest.kt` |
+| benchmark snapshotが永続JPEGを読み取り専用コピーし、本番DB・元画像・永続JPEGのhashを前後比較 | `BenchmarkSnapshotImporter.kt`、`run-safe-macrobenchmark-check.ps1` |
+| 廃止済みcacheへアクセス・cleanupせず、Coil cacheとWorkManager設定を変更しない | repository-wide static search、現行設定差分なし |
+
+指定順で `scripts\run-safe-integration-check.cmd` の Build・UnitTest・Lint・Install・IntegrationTest と、続けて `scripts\run-safe-debug-check.cmd -InstallToDevice` の Build・UnitTest・Lint・Install がすべて成功しました。Macrobenchmarkは要件どおり実行していません。
+
 ## 第9実装: persistent preview display and preload
 
 | 要件 | 証跡 |
@@ -42,7 +55,7 @@
 | shared Coil loader, 128 MiB disk, min(totalMem/8, 64 MiB) memory, two decoder slots, no crossfade | Implemented | `AppContainer.kt` |
 | stable source/size cache key and local path/length/mtime identity | Implemented | `MediaGridDirectPreview.kt`, `MediaGridDirectPreviewTest.kt` |
 | one adjacent row, direction/viewport cancellation, no visible/prefetch duplicate | Implemented | `MediaGridDirectPreview.kt`, `MediaGridDirectPreviewTest.kt` |
-| old thumbnail generation, hydration, Idle gate, wide preparation removed from product path | Implemented | deleted thumbnail sources/manager/viewport files; `TagHierarchyUiV2.kt` |
+| retired generator, cache restore, operation gate, and broad scheduler removed from every source set | Implemented | current source tree static search; `TagHierarchyUiV2.kt` |
 | initial multi-cell load, drag/fling, recreation/filter/sort, mixed source/error regression | Implemented | `MainActivityComposeTest.kt`, `UiStateRenderingTest.kt`; wireless safe integration check succeeded |
 | required verification order; Macrobenchmark not run | Implemented | `run-safe-integration-check.cmd -DebugMethod wireless` and `run-safe-debug-check.cmd -InstallToDevice` succeeded; Macrobenchmark was not run |
 
@@ -117,7 +130,7 @@
 | Asset展開とmatchingMediaCount/メディア有無の一括確定、hasLocalFile除去 | 完了 | `TagHierarchyUiV2.kt`、`UiStateRenderingTest` |
 | 通常安全検証 | 完了 | `run-safe-debug-check.cmd` Success |
 
-## 2026-07-13 wide thumbnail preparation
+## 2026-07-13 廃止済み広範囲生成（履歴）
 
 ## 2026-07-13 card/grid duplicate-work removal
 
@@ -125,9 +138,7 @@
 - 実装確認対象: MainUiState遅延評価、カード経路限定scroll key、明示的source revision、タグ構造revision、source更新時前計算、LongArrayタグ保持、グリッドmatchingClipCount表示。
 - 隔離実機: `run-safe-integration-check.cmd -DebugMethod wireless` を本命上書き前に実行する。
 
-- Manager receives the ordered source snapshot once per grid item revision; viewport updates do not rebuild the full source list.
-- Serial priority is visible cells, adjacent UI rows, then the current viewport's 50-row local-file range. Selection is recomputed after each completion, with yield and 50 ms pacing for wide preparation.
-- Wide preparation does not create Compose state, image requests, or per-asset Work objects, and never fetches preview/remote URLs. Application foreground/background callbacks allow the active item to finish, then pause.
+- These generator/scheduler details are retired and kept only as historical context. The current path is covered by the direct-preview and persistent-preview sections at the top of this file.
 - `run-safe-debug-check.cmd` passed Build, UnitTest, and Lint after the change. Isolation-device verification remains required before production overwrite.
 
 隔離実機チェックは`run-safe-integration-check.cmd -DebugMethod wireless`で実施し、Build・UnitTest・Lint・IntegrationTestのSuccessを確認する。本命上書きは隔離チェック成功後に`run-safe-debug-check.cmd -InstallToDevice`で実施する。Paging、低解像度サムネイル、画像処理キューは対象外。
@@ -135,23 +146,23 @@
 
 - Pinch direction recognition changes the column count by exactly one within 2–12 and locks further changes until all fingers are released, including reverse movement.
 - The animation starts after a small direction dead zone and applies only to currently composed media cells without a second grid; the central Asset remains anchored across header changes.
-- Column changes do not regenerate or refetch completed thumbnails or rebuild the ordered source snapshot; the Thumbnail Manager receives the new column count with the latest viewport.
-- Wide preparation advances by cache identity, viewport updates carry direction/index/column count, stale source generations are discarded, and missing local paths fall back from preview URL to remote URL. A decoded JPEG display failure invalidates and retries once.
+- Column changes do not regenerate or refetch completed previews or rebuild the ordered source snapshot.
+- The historical scheduler described here is deleted. Current missing-file and decoded-JPEG failure behavior is covered by `MediaGridDirectPreviewTest` and `MediaGridPersistentPreviewIntegrationTest`.
 
-## 2026-07 media-grid thumbnail cache
+## 2026-07 廃止済み画像cache（履歴）
 
-## 2026-07-13 thumbnail state transitions and pinch lock（履歴: 現行経路では不使用）
+## 2026-07-13 廃止済み画像状態遷移（履歴）
 
-- Revision is `Long` from repository snapshot through UI and Thumbnail Manager; no `Int` conversion remains.
-- One Asset keeps the same StateFlow across source changes. A generation token prevents stale Ready/Failed publication, and the latest source is rescheduled from Waiting or known Failed.
-- Wide preparation only selects sources with `localPath` and calls the store with `allowRemote=false`; missing local files are recorded as completed for that cache identity and remain eligible for URL fallback when visible.
+- Revision is `Long` from repository snapshot through UI; no `Int` conversion remains.
+- 当時のAsset単位StateFlowとgeneration tokenは削除済みです。現行はrender keyとprepared candidate identityでstale結果を拒否します。
+- The retired broad preparation path is deleted; current missing local files remain eligible for URL fallback when visible.
 - Pinch detection uses a stable pointer-input key, reads the latest column count/callback, commits at most one column, and remains locked through recomposition and reverse motion until all pointers are released. Boundary gestures at 2 and 12 columns also lock.
 - The grid creates the static skeleton gradient once and passes the shared Brush to cells.
 
 ## 2026-07 continuous media-grid morph foundation（履歴: 現行経路では不使用）
 
 - `MediaGridMorphTest` covers the 2..12 adjacent-column bound, extreme-scale clamping, reversible progress, the 0.5 release threshold, one-shot target handoff, 4→5 zero-width right-edge slot, Asset correspondence, Header add/remove/title change, and bounded planning for 10,000 items.
-- `MediaGridMorphPlan` keeps only viewport-neighborhood rows and related headers; progress updates reuse the immutable plan and do not touch the item list, thumbnail manager, image requests, files, or DB.
+- `MediaGridMorphPlan` keeps only viewport-neighborhood rows and related headers; progress updates reuse the immutable plan and do not touch the item list, image requests, files, or DB.
 - The Compose path now slices the current viewport plus two rows before creating the target window, and applies the planned Asset anchor during target handoff.
 - `TagHierarchyUiV2` uses a stable `pointerInput(Unit)`, keeps the actual grid column count unchanged during tracking, suppresses two-finger cell actions after morph start, and cancels stale plans when source revision or items change.
 - Required device order was completed: isolated integration check succeeded, then production-package debug overwrite succeeded with package metadata invariance.
@@ -160,7 +171,7 @@
 
 - `MediaGridMorphTest` now covers linear Rect interpolation, bounded crossfade alpha, same-Asset single-layer rendering, and finite zero-width slots.
 - `MediaGridMorphOverlay` remains absent in Idle and is composed only for the four active morph/handoff phases above the same normal grid. The overlay is viewport-plan bounded and does not create a second `LazyVerticalGrid`.
-- The RenderModel and its distinct Asset map are remembered by the immutable session plan and stable Asset keys. Progress does not rebuild item lists, maps, thumbnail sources, or ImageRequests; the overlay observes only existing Thumbnail Manager StateFlows and is withheld until all planned slot visuals/placeholders are available.
+- The historical RenderModel used immutable plans and stable Asset keys. The overlay and its image observation are deleted from the product path.
 - Target handoff dispatches the column callback once, keeps Overlay at progress 1, performs one anchor `scrollToItem` and one necessary `scrollBy`, then completes without a post-handoff anchor restore.
 - `animateItem()` and the former cell `Animatable` resize scale are suppressed/removed for morph and handoff. Header background, height, and Y are interpolated in the overlay; video, like-count, selection, and error visuals are crossfaded with their Asset.
 
@@ -184,7 +195,7 @@
 | run-as-only read-only snapshot | `run-safe-macrobenchmark-check.ps1` | Implemented; unavailable run-as fails without fallback |
 | No credentials/preferences | whitelist of DB/WAL/SHM, JPEG cache, and `files/images` | Implemented |
 | target-only import and localPath rewrite | `BenchmarkSnapshotImporter` | Implemented |
-| no network | benchmark network config, disabled gateways, `allowRemote=false` | Implemented |
+| no network | benchmark network config and disabled gateways | Implemented |
 | Trace/counters and separated paths | `app/src/benchmark/.../MediaGridBenchmark.kt`; no references from main manager/store/UI/Morph | App-side high-frequency Trace/counter hooks removed; benchmark output fields are empty/N/A |
 | identical 5-iteration scroll/pinch scenarios | `MediaGridPerformanceMacrobenchmark` | Implemented in test source; runtime measurement not reached because snapshot precondition failed |
 | report and deltas | safe macrobenchmark summary writer | Report generated; values are N/A because the target did not receive a snapshot/metric export |
@@ -198,14 +209,11 @@
 - Integration: `MainActivityComposeTest.classifiedDisplayToggleSwitchesBetweenCardAndMediaGridAndSurvivesActivityRecreation` uses real two-pointer input to cover 4→5→4, threshold-miss no-op, repeated round trips, anchor position, immediate cell dialog interaction, post-change scroll, and absence of `media_grid_morph_overlay`.
 - The product path no longer creates morph sessions or overlays during pinch. `MediaGridMorph.kt` and `MediaGridMorphOverlay.kt` remain retained components for later animation work.
 
-## 2026-07-18 メディアグリッド スクロール改善 第2実装
+## 2026-07-18 メディアグリッド スクロール改善 第2実装（廃止済み履歴）
 
 | 対象 | 状態 | 証跡 |
 |---|---|---|
-| pixel単位viewport再処理の抑止、安定ID/source index順による重複抑止 | 完了 | `MediaGridViewportSnapshot.sameStructureAs`、`TagHierarchyUiV2.kt`、`MediaGridViewportDispatchTest` |
-| source/viewport/foreground/生成完了/表示結果を単一coordinatorで直列管理 | 完了 | `MediaGridThumbnailManager.kt`、`MediaGridViewportDispatchTest` |
-| 生成中conflate、完了後の最新viewportからの単一候補選択、stale/dispose破棄 | 完了 | `MediaGridViewportDispatchTest` |
-| 非待機holder状態取得、source map/work stateコピー抑止、直接候補走査 | 完了 | `MediaGridThumbnailManager.kt` |
+| 当時のviewport/coordinator/scheduler | 削除済み | 実装6でsource、fake、fixture、専用テストを削除。現行証跡は冒頭のdirect preview節 |
 | 高速fling、画像追従、filter revision、即時セル操作、既存列数変更 | 完了 | `MainActivityComposeTest.kt`、wireless `run-safe-integration-check.cmd` |
 | Macrobenchmark・計測処理 | 今回未実行・未変更 | 要件指定により対象外 |
 
@@ -215,40 +223,27 @@
 
 | 対象 | 状態 | 証跡 |
 |---|---|---|
-| Waiting / Generating / Ready未成功のPlaceholder判定 | 実装済み | `mediaGridCellVisualState`、`MediaGridPlaceholderRenderingTest` |
+| prepared前・現在candidate未成功のPlaceholder判定 | 実装済み | `mediaGridCellVisualState`、`MediaGridPlaceholderRenderingTest` |
 | 現在画像モデルのonSuccess後のPlaceholder消去・モデル変更・onError復帰 | 実装済み | `MediaGridImageModelKey`、`MediaGridPlaceholderRenderingTest`、`media_grid_placeholder_<assetId>` |
 | Failed / 画像元なし / download失敗のError判定 | 実装済み | `MediaGridPlaceholderRenderingTest`、既存 `media_grid_error_<assetId>` |
 | セル単位・静的・テーマ対応グラデーション | 実装済み | `MediaGridPlaceholderRendering.kt`、`drawWithCache`、ライト/ダークCompose確認 |
 | 高速fling、触れ直し、セル操作、選択、列数・filter・sort・詳細表示 | 既存回帰確認対象 | `MainActivityComposeTest`、`UiStateRenderingTest` |
 | Macrobenchmark | 未実行 | 今回の要件で対象外 |
 
-## 2026-07-19 第5実装: viewport cache hydration
+## 2026-07-19 第5実装: 廃止済みcache復元（履歴）
 
 | Requirement | Status | Evidence |
 |---|---|---|
-| canonical key shared by generation and lookup; local/preview/remote source paths | Implemented | `MediaGridThumbnailStore.kt`, `MediaGridThumbnailStoreKeyTest.kt` |
-| no generation/network/decode/resize/output creation during cache check | Implemented | `findCached()`, cache hydration unit tests |
-| zero-length, corrupt, and temporary files are not cache hits | Implemented | `mediaGridThumbnailCacheFileIsValid()`, `MediaGridThumbnailStoreKeyTest` |
-| zero-length, corrupt, and temporary files are not cache hits | Implemented | `mediaGridThumbnailCacheFileIsValid()`, `MediaGridThumbnailStoreKeyTest` |
-| one IO job/result event; visible and adjacent hits restored together | Implemented | `MediaGridThumbnailManager.kt`, `MediaGridViewportDispatchTest` |
-| miss-only generation and same-revision miss memoization | Implemented | `MediaGridViewportDispatchTest` |
-| Dragging/Flinging/revision/foreground/dispose stale-result cancellation | Implemented | manager cancellation guards and unit coverage |
-| multiple cached cells, mixed cache/non-cache, recreation/filter/sort/fast fling/retouch | Implemented | `MainActivityComposeTest.kt` |
-| Macrobenchmark unchanged and not run | Unchanged | benchmark source set untouched |
+| 当時の独自cache検索・復元・miss memoization | 削除済み | 実装6でsource、fake、fixture、専用テストを削除 |
+| 現行の永続JPEG、候補順、key、破損回復 | 維持 | `MediaGridDirectPreviewTest`、`MediaGridPersistentPreviewIntegrationTest` |
 
-## 2026-07-19 メディアグリッド スクロール改善 第4実装
+## 2026-07-19 メディアグリッド スクロール改善 第4実装（廃止済み履歴）
 
 | 対象 | 状態 | 証跡 |
 |---|---|---|
-| source登録前viewportの拒否後再送、空layout後の初回非空viewport | 実装・単体確認 | `MediaGridViewportDispatchTest.viewportRejectedBeforeSourceRegistrationCanBeResent`、`emptyInitialViewportDoesNotPreventFirstNonEmptyGeneration`、`TagHierarchyUiV2.kt` |
-| dispatch成功時だけのUI送信済み記録 | 実装 | `ClassifiedMediaGridContent` の`dispatchViewport()`成功条件付き更新 |
-| Idle / Dragging / Flingingの状態判定と変化時通知 | 実装 | `LazyGridState.interactionSource`、`isScrollInProgress`、`distinctUntilChanged()`、`MediaGridScrollOperationState` |
-| 操作中の表示中・隣接・wide新規生成抑制 | 実装・単体確認 | `draggingAndFlingingAllowOneNormalCompletionButDoNotStartTheNextCandidate`、`operationStartCancelsWideWithoutRecordingCompletion` |
-| 最新viewport保持、100ms Idle再開、候補優先順維持 | 実装・単体確認 | `latestViewportIsUsedAfterOperationStops`、managerの`IdleResumeReady`、既存優先順テスト |
-| 再ドラッグ、revision、dispose、foreground離脱による古い再開無効化 | 実装・単体確認 | `idleResumeIsCancelledByRedragRevisionChangeAndDispose`、coordinator token/job |
-| HolderObserved、表示エラー、生成完了経路の操作中抑制 | 実装・単体確認 | `holderObservedAndDisplayErrorDoNotRestartGenerationDuringOperation`、生成完了分岐 |
+| 当時の操作状態、待機再開、生成停止、holder経路 | 削除済み | 実装6でsource、fake、fixture、専用テストを削除 |
 | 無操作初回表示、カード→グリッド、drag/fling、停止後追従 | 既存Compose/実機回帰対象 | `MainActivityComposeTest.classifiedDisplayToggleSwitchesBetweenCardAndMediaGridAndSurvivesActivityRecreation`、`classifiedMediaGridSingleFlingKeepsLatestImageAndImmediateCellActionAfterFilter` |
-| placeholder、形式、範囲、列数変更、Macrobenchmark | 変更なし | `MediaGridPlaceholderRendering.kt`、`MediaGridThumbnailStore.kt`、既存列数テスト、Macrobenchmark source setを変更していない |
+| 現行placeholder、候補順、preload、列数変更 | 維持 | `MediaGridPlaceholderRenderingTest`、`MediaGridDirectPreviewTest`、既存列数テスト |
 
 検証順は第4実装要件に従い、隔離統合テストを先に実行し、その成功後に本番packageの安全上書きチェックを実行する。Macrobenchmarkは変更・実行しない。
 ## 2026-07-20 第7実装: keyed frame and background image preparation

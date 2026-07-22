@@ -21,6 +21,8 @@
 - `classifiedMediaGridShowsDateHeadersVideoBadgeAndErrorCells` now verifies the PostTime header row plus the existing video badge and error cells.
 - `classifiedMediaGridShowsLikeHeadersAndLikeOverlaysWithoutBreakingBadgesOrErrors` covers LikeCount headers, top-left like overlays, and the null-likeCount no-overlay case.
 - The existing 4-column layout regression still checks the grid geometry and the empty-state path remains unchanged.
+- Directly composed grid tests cover the nullable initial data key as well as keyed production state, so a completed frame cannot remain hidden behind Progress.
+- The large-dataset column-change checks wait for the replacement keyed frame, because Compose idleness does not include its `Dispatchers.Default` build.
 
 ## 2026-07-19 第3実装 placeholder rendering
 

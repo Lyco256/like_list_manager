@@ -667,8 +667,11 @@ class UiStateRenderingTest {
         composeRule.runOnIdle {
             columnCount = 2
         }
-        composeRule.waitForIdle()
-        composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
+        composeRule.waitUntil(30_000) {
+            runCatching {
+                composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
+            }.isSuccess
+        }
         composeRule.onNodeWithTag("classified_media_grid").performScrollToIndex(targetIndex - 1)
         composeRule.onNodeWithTag("media_grid_header_post_time_day_2026-01-20").assertIsDisplayed()
         val gridBounds = composeRule.onNodeWithTag("classified_media_grid").fetchSemanticsNode().boundsInRoot
@@ -678,8 +681,11 @@ class UiStateRenderingTest {
         composeRule.runOnIdle {
             columnCount = 9
         }
-        composeRule.waitForIdle()
-        composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
+        composeRule.waitUntil(30_000) {
+            runCatching {
+                composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
+            }.isSuccess
+        }
         composeRule.onNodeWithTag("classified_media_grid").performScrollToIndex(0)
         composeRule.onNodeWithTag("media_grid_header_post_time_month_2026-01").assertIsDisplayed()
         val monthHeaderBounds = composeRule.onNodeWithTag("media_grid_header_post_time_month_2026-01").fetchSemanticsNode().boundsInRoot

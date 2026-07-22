@@ -2,9 +2,16 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 
 この文書は、全体構成、現状の実装、変更目的別入口、個別docs一覧だけを担当する。禁止事項、完了報告、検証手順は置かない。
 
+## 2026-07-22 第11実装: retired image pipeline removal
+
+- 現行のメディアグリッド画像経路は`MediaGridDirectPreview.kt`、`MediaGridPersistentPreviewStore.kt`、`MediaGridPreviewWork.kt`、`MediaGridPreviewWorker.kt`、`TagHierarchyUiV2.kt`だけで構成する。
+- `AppContainer.kt`は共有ImageLoader、`MediaGridImagePreparer`、`WorkManagerMediaGridPreviewEnqueuer`を構築し、画面は`MediaGridPreviewPreloader`を所有する。
+- 廃止済みgenerator/store/state/coordinatorのsource、互換wrapper、fake、fixture、専用testは存在しない。端末に残る廃止済みcacheは参照もcleanupもせず、Androidの通常管理に任せる。
+- benchmark snapshotは`filesDir/media_grid_previews/v1`の永続JPEGを読み取り専用で取得し、benchmark targetの同じ相対位置へコピーする。local path由来のcache key変換やJPEG生成は行わない。
+
 ## 2026-07-19 第6実装: direct preview pipeline
 
-Current media-grid rendering builds keyed `MediaGridFrameData` on `Dispatchers.Default`, shows Progress until the current render key is ready, then renders the frame and cell placeholders without waiting for image metadata. `MediaGridImagePreparer` prepares file metadata, candidates, source identities, and cache keys off composition for visible cells and one adjacent row only. Existing `cacheDir/media_grid_thumbnails` files and application data are intentionally untouched. Current acceptance evidence is tracked in `TEST_REQUIREMENTS_COVERAGE.md`.
+Current media-grid rendering builds keyed `MediaGridFrameData` on `Dispatchers.Default`, shows Progress until the current render key is ready, then renders the frame and cell placeholders without waiting for image metadata. `MediaGridImagePreparer` prepares file metadata, candidates, source identities, and cache keys off composition for visible cells and one adjacent row only. Retired cache data and application data remain untouched. Current acceptance evidence is tracked in `TEST_REQUIREMENTS_COVERAGE.md`.
 
 ## 2026-07-20 第8実装: persistent JPEG preview generation
 
@@ -19,7 +26,7 @@ Current media-grid rendering builds keyed `MediaGridFrameData` on `Dispatchers.D
 - `ClassifiedMediaGridCell` receives a prepared image model and starts `AsyncImage` only from that model. It keeps `ContentScale.Crop`, static cell-local placeholder rendering, and one-step fallback on `onError`.
 - `MediaGridDirectPreview.kt` owns the single `MediaGridImagePreparer`. It performs candidate availability, file stat, source identity, and cache-key calculation off composition, reusing same-key/asset/size results and preparing visible cells plus at most one adjacent row from the prebuilt index column.
 - `AppContainer.kt` owns the one shared media-grid `ImageLoader`: crossfade is disabled, disk cache is `cacheDir/media_grid_coil_cache` at 128 MiB, memory cache is `min(totalMem / 8, 64 MiB)`, and decoder parallelism is limited to two.
-- `MediaGridThumbnailManager`, `MediaGridThumbnailStore`, cache hydration, wide preparation, and the former viewport coordinator are removed from the product and source sets. Existing `cacheDir/media_grid_thumbnails` files are not touched.
+- The retired generator, store, scheduling state, cache restore, and viewport coordinator have no source, wrapper, test, or runtime reference. Existing retired cache files are left to Android's normal cache management.
 - `MediaGridMorph.kt` remains only for the existing pinch calculation/tests; no morph overlay is part of the product path.
 
 # Source Files Guide
@@ -260,12 +267,9 @@ MainActivity / Compose UI
 - `MIXED` は全件削除予定と全件追加予定を交互に切り替え、適用確認後も複数選択状態を維持する。
 - いいね数見出しは2〜4列/5〜8列/9〜12列で200/500/1000単位、週見出しは月曜〜日曜の期間表示。
 
-## 2026-07-13 サムネイル状態遷移・ピンチロック残存修正（履歴: 現行経路では不使用）
+## 廃止済み画像経路の履歴
 
-- `MediaGridSourceSnapshot`、`ClassifiedMediaGridState`、UI、Thumbnail Managerのrevisionは全経路で`Long`を使い、変換・切り詰めを行わない。
-- Thumbnail ManagerはAsset IDからsourceをMapで参照し、AssetごとのStateFlowをsource変更後も維持する。source変更時はgeneration tokenで旧生成結果を破棄し、最新sourceをWaitingまたは既知のFailedへ戻す。
-- 初回セルは現在sourceをManagerへ渡すため空sourceのWorkを作らない。広範囲準備はlocalPathのみ・`allowRemote=false`で、欠落localPathのcache identityも完了扱いにして再試行ループを防ぐ。
-- ピンチ検出は安定したpointerInput keyと`rememberUpdatedState`を使い、閾値確定後は全指が離れるまでロックする。静的グラデーションBrushはグリッドで共有する。
+実装6より前の生成・状態管理・viewportスケジューリング・独自cache復元は削除済みです。詳細はGit履歴だけに残し、この現行構造ガイドには旧APIや旧動作を再掲しません。
 
 ## 2026-07 media-grid continuous morph foundation（履歴: 現行経路では不使用）
 
@@ -281,7 +285,7 @@ MainActivity / Compose UI
 
 - `MediaGridMorphOverlay.kt` draws a viewport-bounded overlay over the single normal `LazyVerticalGrid` during all non-Idle morph phases; no second grid or `AnimatedContent` is constructed.
 - `MediaGridMorphRenderModel` is created once per session plan, resolves Assets by stable key, and retains slot Assets, metadata, selection, header bands, and placeholder data through handoff. Progress updates only change interpolated Rects, layer alpha, and GPU transforms.
-- Ready thumbnail state is read without creating Thumbnail Manager work. Overlay rendering does not generate thumbnails, resolve URLs, inspect files, or decode images; Idle releases the model and overlay composition.
+- Retained image state was read without starting image work. This overlay is not part of the current product path.
 - Target handoff keeps progress 1 visible through callback and new-grid layout, performs one anchor correction, then completes without a second post-handoff correction.
 - The old resize scale animation and normal `animateItem()` placement are removed; the retained morph documentation is historical and the current normal grid uses cell-local placeholder rendering from `MediaGridPlaceholderRendering.kt`.
 
@@ -316,13 +320,13 @@ MainActivity / Compose UI
 - `app/src/benchmark/java/com/lyco256/llm/data/MediaGridBenchmark.kt` owns benchmark-only settings, frame timing, and result export. It is not part of debug, release, or integrationTest source sets.
 - `app/src/benchmark/java/com/lyco256/llm/BenchmarkSnapshotImporter.kt` imports only the benchmark target handoff, rewrites absolute local paths, and never copies Preferences or credentials.
 - `app/src/benchmark/java/com/lyco256/llm/BenchmarkMainActivity.kt` selects the classified media-grid startup state only for the benchmark variant; production `MainActivity` has no benchmark state or result handling.
-- `MediaGridThumbnailManager.kt`, `MediaGridThumbnailStore.kt`, and the normal portions of `TagHierarchyUiV2.kt` contain the production grid path. `MediaGridMorphOverlay.kt` remains retained morph code and is not called by the current product path. None of these call benchmark metrics, counters, or Trace sections.
+- The production image path is `MediaGridDirectPreview.kt` plus `MediaGridPersistentPreviewStore.kt`, `MediaGridPreviewWork.kt`, and `MediaGridPreviewWorker.kt`. `TagHierarchyUiV2.kt` consumes prepared images without benchmark metrics, counters, or Trace sections.
 - `MediaGridPerformanceMacrobenchmark.kt` runs identical five-iteration scroll and real two-pointer pinch scenarios.
 - `run-safe-macrobenchmark-check.cmd` is the only snapshot entry and generates `build/reports/media-grid-benchmark/latest-summary.md` after cleanup and production invariance checks.
 
 ## 2026-07-19 第3実装 placeholder描画
 
 - グリッド共有Brushを廃止し、`MediaGridPlaceholderRendering.kt`の`MediaGridCellVisualState`でセルごとに`Placeholder` / `Image` / `Error`を判定する。
-- `Waiting` / `Generating` / 現在モデルの`onSuccess`前だけ、セル内の左上から右下までを覆う静的グラデーションを`drawWithCache`で描画する。Brushと色Listはセルサイズまたはテーマ色の変更時だけ作り直す。
+- prepared candidateが未到着、または現在candidateの`onSuccess`前だけ、セル内の左上から右下までを覆う静的グラデーションを`drawWithCache`で描画する。Brushと色Listはセルサイズまたはテーマ色の変更時だけ作り直す。
 - 現在モデルの`onSuccess`後はPlaceholderレイヤーを完全に外し、モデル変更または`onError`ではPlaceholderへ戻す。Failed、画像元なし、download失敗は単色背景と既存エラーアイコンのみ。
-- viewport、coordinator、生成優先度、先読み、キャッシュ、依存関係、列数変更、Macrobenchmarkは変更しない。
+- 現行viewport、preload、候補順、依存関係、列数変更、Macrobenchmarkは変更しない。

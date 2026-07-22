@@ -13,8 +13,8 @@
 
 ## 表示状態 (旧サムネイル経路の履歴)
 
-- `Placeholder`: `Waiting` / `Generating`、`Ready`だが現在の画像モデルで`onSuccess`前、または再生成・再読込中。
-- `Image`: 現在の`MediaGridThumbnailSource`と`Ready`ファイルモデルに対する`AsyncImage.onSuccess`済み。
+- `Placeholder`: candidate metadataの準備前、現在candidateの`onSuccess`前、またはフォールバックcandidateの再読込中。
+- `Image`: 現在のprepared candidate identityに対する`AsyncImage.onSuccess`済み。
 - `Error`: `Failed`、利用可能な画像元なし、`downloadState == "failed"`。
 
 旧サムネイル経路の説明です。現行の候補 identity と `AsyncImage` 成功状態は、上記 direct preview pipeline の実装に従います。
