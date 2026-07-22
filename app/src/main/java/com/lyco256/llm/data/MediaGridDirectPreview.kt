@@ -9,7 +9,6 @@ import coil.request.Disposable
 import coil.request.ImageRequest
 import java.io.File
 import java.security.MessageDigest
-import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -160,9 +159,6 @@ internal fun mediaGridPreparedImageMatches(
 internal class MediaGridImagePreparer(
     private val previewStore: MediaGridPersistentPreviewStore,
 ) {
-    private data class CacheKey(val key: com.lyco256.llm.MediaGridRenderKey, val assetId: Long, val size: Int)
-    private val cache = ConcurrentHashMap<CacheKey, MediaGridPreparedImage>()
-
     suspend fun prepare(
         frame: com.lyco256.llm.MediaGridFrameData,
         visibleIndices: Set<Int>,
@@ -205,18 +201,13 @@ internal class MediaGridImagePreparer(
         }
     }
 
-    fun invalidate(assetId: Long) {
-        cache.keys.removeIf { it.assetId == assetId }
-    }
-
-    private suspend fun prepareCell(
+    internal suspend fun prepareCell(
         frame: com.lyco256.llm.MediaGridFrameData,
         itemIndex: Int,
         cellSizePx: Int,
     ): MediaGridPreparedImage {
         val cell = frame.items[itemIndex] as com.lyco256.llm.MediaGridCellItem
-        val cacheKey = CacheKey(frame.key, cell.entry.assetId, cellSizePx)
-        return cache[cacheKey] ?: withContext(Dispatchers.IO) {
+        return withContext(Dispatchers.IO) {
             val input = MediaGridImageCandidateInput(
                 assetId = cell.entry.assetId,
                 mediaKey = cell.entry.mediaKey,
@@ -244,7 +235,7 @@ internal class MediaGridImagePreparer(
                 )
             }
             MediaGridPreparedImage(frame.key, cell.entry.assetId, candidates, itemIndex)
-        }.also { cache[cacheKey] = it }
+        }
     }
 
     private fun readPersistentPreviewMetadata(
@@ -265,7 +256,7 @@ internal class MediaGridImagePreparer(
         return MediaGridPersistentPreviewMetadata(file.absolutePath, file.length(), file.lastModified())
     }
 
-    fun dispose() = cache.clear()
+    fun dispose() = Unit
 }
 
 internal fun buildMediaGridImageRequest(
@@ -289,7 +280,7 @@ internal class MediaGridPreviewPreloader(
     private val context: Context,
     private val imageLoader: ImageLoader,
 ) {
-    private val active = ConcurrentHashMap<String, Disposable>()
+    private val active = java.util.concurrent.ConcurrentHashMap<String, Disposable>()
 
     fun reconcile(candidates: Collection<MediaGridPreparedCandidate>) {
         val plan = buildMediaGridPreviewPreloadPlan(active.keys, candidates)

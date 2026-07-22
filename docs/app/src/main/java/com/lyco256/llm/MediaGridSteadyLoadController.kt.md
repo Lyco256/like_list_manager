@@ -1,0 +1,11 @@
+# `MediaGridSteadyLoadController.kt`
+
+分類済みメディアグリッド1画面につき1つ生成される、画像metadata準備と共有Coil `ImageLoader`への要求を時間方向に平準化するcontrollerです。
+
+初期表示では `PreparingFrame`、`PreparingInitialWindow`、`WarmingInitialWindow`、`Ready` の順で進みます。実測viewportから推定した表示範囲に前後6行を加え、最大96件かつ256×256 ARGB換算24MiBまでのmetadataをProgress中に準備します。有効な永続JPEGだけを同時2件までmemory warm-upし、全件terminalまたは3秒でグリッドを公開します。未完了要求は通常loopへ引き継ぎます。
+
+Ready後は50ms周期の単一loopだけが最新viewport anchorを参照します。1tickの上限はmetadata 2件、要求開始1件、completion反映4件で、進行中要求は最大2件です。viewport監視はconflatedな最新値の上書きだけを行い、速度・方向・drag状態は扱いません。
+
+active bitmap windowは表示中と前後1行です。範囲外の未完了要求はcancelし、UI用load stateも破棄します。戻り表示ではframe内metadataからPendingを再作成し、memory cacheが残っていればReady、missなら固定loopで再読み込みします。セルはPending/Loading中にPlaceholderを描画し、controllerがmemory cacheへの格納を確認したReady候補だけを同一request data/cache keyで表示します。controllerはBitmap、Drawable、Imageを保持しません。
+
+metadataとload stateは現在の`MediaGridFrameData`だけに属します。render key変更またはdisposeでcontrollerごと破棄され、preview通知では該当assetだけをPendingへ戻します。永続JPEGの失敗は既存recovery gateを通じてRepositoryへ通知します。

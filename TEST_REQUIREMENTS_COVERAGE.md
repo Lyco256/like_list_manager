@@ -1,5 +1,20 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-07-22 第12実装: steady-load controller
+
+| 対象 | 実装・証跡 |
+| --- | --- |
+| Progress中の初期範囲＋前後6行、96件・24MiB上限、永続JPEG warm-up | `MediaGridSteadyLoadController`、`MediaGridSteadyLoadControllerTest` |
+| 同時2件、全terminalまたは3秒でReady、未完了引き継ぎ | controller startup state machine、共有`ImageLoader` |
+| viewportはlatest anchor上書きのみ | `TagHierarchyUiV2.snapshotFlow`→`updateViewport`、anchor equality Unit Test |
+| 50ms単一loop、metadata 2・request 1・completion 4・同時2 | controller constants/tick、Unit Test |
+| 表示中＋前後1行、距離cursor、範囲外cancel | `selectMediaGridActiveWindow`、controller cursor/tick、Unit Test |
+| Pending/Loading Placeholder、controller候補fallback、memory cache確認後Ready | `MediaGridCellLoadState`、`ClassifiedMediaGridCell`、既存Compose/Integration Test |
+| frame専用metadata、dispose/stale破棄、asset単位preview無効化 | controller generation/frame lifecycle、`MediaGridPreviewNotifier` |
+| DB・元画像・JPEG生成・Coil容量/並列・UI操作・Macrobenchmark | 変更なし。Macrobenchmarkは要件により未実行 |
+
+2026-07-22の最終実装に対し、`run-safe-integration-check.cmd -DebugMethod wireless`はBuild・UnitTest・Lint・Install・IntegrationTestの全フェーズSuccess。続けて`run-safe-debug-check.cmd -InstallToDevice`はBuild・UnitTest・Lint・Installの全フェーズSuccess。本番packageのDB・元画像・生成済みJPEG・設定・認証情報は初期化していない。Macrobenchmarkは要件どおり未実行。
+
 ## 2026-07-22 第11実装: retired image pipeline removal
 
 | 要件 | 証跡 |

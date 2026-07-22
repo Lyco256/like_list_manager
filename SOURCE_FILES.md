@@ -33,6 +33,13 @@ Current media-grid rendering builds keyed `MediaGridFrameData` on `Dispatchers.D
 
 ## 2026-07 keyed frame and direct preview viewport path
 
+## 2026-07-22 steady-load controller
+
+- `MediaGridSteadyLoadController.kt` owns startup warm-up, current-frame metadata, active-window load state, cancellation, completion batching, and the single 50ms loop.
+- `TagHierarchyUiV2.kt` only overwrites the latest conflated viewport anchor and renders controller-published cell states. Pending/Loading cells do not start image work.
+- `MediaGridDirectPreview.kt` remains the stateless candidate/identity/cache-key builder and does not retain metadata across render keys.
+- The shared Coil capacity and decoder concurrency, persistent JPEG generation, DB, original images, UI interactions, and Macrobenchmark remain unchanged.
+
 - The grid viewport observer reads the frame's stable item indices, visible asset IDs, and cell size; pixel-only movement does not rebuild preparation targets.
 - Dragging and flinging do not stop visible `AsyncImage` requests. Compose disposal cancels requests for cells that leave the composition.
 - `collectLatest` cancels old preparation on direction turns and keeps at most `columnCount` cells in the adjacent row.
