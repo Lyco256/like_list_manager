@@ -340,3 +340,10 @@ MainActivity / Compose UI
 - prepared candidateが未到着、または現在candidateの`onSuccess`前だけ、セル内の左上から右下までを覆う静的グラデーションを`drawWithCache`で描画する。Brushと色Listはセルサイズまたはテーマ色の変更時だけ作り直す。
 - 現在モデルの`onSuccess`後はPlaceholderレイヤーを完全に外し、モデル変更または`onError`ではPlaceholderへ戻す。Failed、画像元なし、download失敗は単色背景と既存エラーアイコンのみ。
 - 現行viewport、preload、候補順、依存関係、列数変更、Macrobenchmarkは変更しない。
+## 2026-07-23 第14実装: RGB_565 fixed-slot pack
+
+- `MediaGridRgb565PackStore.kt`が128asset固定slot、二重bank＋generation、crash-safe publish、最大4packのread-only mapping LRUを所有する。
+- `MediaGridRgb565Coil.kt`がraw専用data/Keyer/Fetcherを提供し、Decoderを経由せず256×256 `RGB_565` Bitmapを返す。
+- `MediaGridRgb565RepairWork.kt`がJPEG優先・local WebP fallbackのrepairを最大2並列、同一pack直列で実行する。
+- 新規画像は`ClipRepository`でsource Bitmapからpayloadを作り、WebP保存とAsset insert後にraw publish完了を確認する。既存JPEG enqueueは維持する。
+- 表示候補はraw→JPEG→local→preview URL→remote URL→display。phase13の初回4、通常2、session/scroll/atomic frame swapを維持する。

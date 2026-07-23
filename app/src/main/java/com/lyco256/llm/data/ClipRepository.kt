@@ -25,6 +25,7 @@ import java.time.YearMonth
 import java.time.ZoneId
 
 private const val WEBP_QUALITY = 85
+private const val RGB565_SAVE_PUBLISH_ATTEMPTS = 3
 private const val LIKE_COUNT_FINAL_AFTER_DAYS = 7L
 
 data class LikeCountRefreshEstimate(
@@ -48,7 +49,7 @@ data class MediaGridClipSource(
 data class MediaGridSourceSnapshot(val revision: Long, val clips: List<MediaGridClipSource>)
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class ClipRepository(
+class ClipRepository internal constructor(
     private val context: Context,
     private val postStorageManager: PostStorageManager,
     private val apiSettingsStore: SettingsStore,
@@ -57,6 +58,10 @@ class ClipRepository(
     private val ocrTextGateway: OcrTextGateway = FakeOcrTextGateway(),
     private val includeSeedMedia: Boolean = true,
     private val mediaGridPreviewEnqueuer: MediaGridPreviewEnqueuer = NoOpMediaGridPreviewEnqueuer,
+    private val mediaGridRgb565RepairEnqueuer: MediaGridRgb565RepairEnqueuer =
+        NoOpMediaGridRgb565RepairEnqueuer,
+    private val mediaGridRgb565PackStore: MediaGridRgb565Publisher =
+        MediaGridRgb565PackStore(context.filesDir),
 ) {
     private val mediaGridPreviewStore = MediaGridPersistentPreviewStore(context.filesDir)
 
@@ -424,19 +429,23 @@ class ClipRepository(
                 if (clipId > 0) {
                     inserted += 1
                     existingPostIds += post.id
-                    val assets = post.media.mapNotNull { media ->
-                        createAssetForMedia(
+                    post.media.forEach { media ->
+                        val prepared = createAssetForMedia(
                             clipId = clipId,
                             postId = post.id,
                             media = media,
                             now = now,
-                        )
+                        ) ?: return@forEach
+                        val assetId = clipDao.insertAssets(listOf(prepared.asset)).singleOrNull() ?: -1L
+                        if (assetId <= 0L || prepared.asset.localPath == null) return@forEach
+                        val rawPublished = prepared.rawPayload?.let { pending ->
+                            publishMediaGridRgb565(assetId, pending)
+                        } ?: false
+                        if (!rawPublished) {
+                            mediaGridRgb565RepairEnqueuer.enqueue(listOf(assetId))
+                        }
+                        mediaGridPreviewEnqueuer.enqueue(listOf(assetId))
                     }
-                    val insertedAssetIds = clipDao.insertAssets(assets)
-                        .zip(assets)
-                        .filter { (assetId, asset) -> assetId > 0L && asset.localPath != null }
-                        .map { (assetId, _) -> assetId }
-                    mediaGridPreviewEnqueuer.enqueue(insertedAssetIds)
                 }
             }
             paginationToken = if (pageReachedBoundary) null else result.nextToken
@@ -600,12 +609,27 @@ class ClipRepository(
         ).also(apiSettingsStore::saveSession)
     }
 
+    private data class PendingRgb565Publish(
+        val payload: MediaGridRgb565Payload,
+        val source: MediaGridRgb565SourceSignature,
+    )
+
+    private data class DownloadedImage(
+        val path: String,
+        val rawPayload: PendingRgb565Publish,
+    )
+
+    private data class PreparedAsset(
+        val asset: AssetEntity,
+        val rawPayload: PendingRgb565Publish?,
+    )
+
     private suspend fun createAssetForMedia(
         clipId: Long,
         postId: String,
         media: XMedia,
         now: String,
-    ): AssetEntity? {
+    ): PreparedAsset? {
         val isPhoto = media.type == "photo"
         val isVideoLike = media.type == "video" || media.type == "animated_gif"
         val remote = when {
@@ -614,7 +638,7 @@ class ClipRepository(
             else -> null
         } ?: return null
         val shouldDownload = isPhoto || isVideoLike
-        val localPath = if (shouldDownload) {
+        val downloaded = if (shouldDownload) {
             runCatching {
                 if (isPhoto) {
                     downloadPhotoAsWebp(postId, media.mediaKey, remote)
@@ -625,28 +649,31 @@ class ClipRepository(
         } else {
             null
         }
-        return AssetEntity(
-            clipId = clipId,
-            mediaKey = media.mediaKey,
-            type = if (isPhoto) "photo" else "video_thumbnail",
-            remoteUrl = remote,
-            previewUrl = media.previewImageUrl,
-            localPath = localPath,
-            width = media.width,
-            height = media.height,
-            downloadState = if (localPath != null) "downloaded" else "failed",
-            sizeBytes = localPath?.let { File(it).length() },
-            createdAt = now,
+        return PreparedAsset(
+            asset = AssetEntity(
+                clipId = clipId,
+                mediaKey = media.mediaKey,
+                type = if (isPhoto) "photo" else "video_thumbnail",
+                remoteUrl = remote,
+                previewUrl = media.previewImageUrl,
+                localPath = downloaded?.path,
+                width = media.width,
+                height = media.height,
+                downloadState = if (downloaded != null) "downloaded" else "failed",
+                sizeBytes = downloaded?.path?.let { File(it).length() },
+                createdAt = now,
+            ),
+            rawPayload = downloaded?.rawPayload,
         )
     }
 
-    private fun downloadPhotoAsWebp(postId: String, mediaKey: String, url: String): String =
+    private fun downloadPhotoAsWebp(postId: String, mediaKey: String, url: String): DownloadedImage =
         downloadImageAsWebp(postId, mediaKey, url)
 
-    private fun downloadMedia(postId: String, mediaKey: String, url: String): String =
+    private fun downloadMedia(postId: String, mediaKey: String, url: String): DownloadedImage =
         downloadImageAsWebp(postId, mediaKey, url)
 
-    private fun downloadImageAsWebp(postId: String, mediaKey: String, url: String): String {
+    private fun downloadImageAsWebp(postId: String, mediaKey: String, url: String): DownloadedImage {
         val imageDir = postStorageManager.imageDirectory()
         val target = File(imageDir, "${postId}_${mediaKey}.webp")
         val sourceBytes = openConnection(url).inputStream.use { input -> input.readBytes() }
@@ -654,9 +681,22 @@ class ClipRepository(
             ?: error("画像を読み込めませんでした")
         val bitmap = decoded.withBlackBackgroundIfTransparent()
         try {
+            val rawPayload = createMediaGridRgb565Payload(bitmap)
             target.outputStream().use { output ->
                 check(bitmap.compress(webpCompressFormat(), WEBP_QUALITY, output)) { "WebP変換に失敗しました" }
             }
+            val source = MediaGridRgb565SourceSignature(
+                kind = MediaGridRgb565SourceKind.LOCAL_WEBP,
+                length = target.length(),
+                lastModified = target.lastModified(),
+            )
+            check(source.length > 0L && source.lastModified > 0L) {
+                "保存画像のsource signatureを取得できませんでした"
+            }
+            return DownloadedImage(
+                path = target.absolutePath,
+                rawPayload = PendingRgb565Publish(rawPayload, source),
+            )
         } catch (error: Exception) {
             target.delete()
             throw error
@@ -664,7 +704,29 @@ class ClipRepository(
             if (bitmap !== decoded) bitmap.recycle()
             decoded.recycle()
         }
-        return target.absolutePath
+    }
+
+    private fun publishMediaGridRgb565(
+        assetId: Long,
+        pending: PendingRgb565Publish,
+    ): Boolean {
+        repeat(RGB565_SAVE_PUBLISH_ATTEMPTS) { attempt ->
+            try {
+                val published = mediaGridRgb565PackStore.publish(
+                    assetId = assetId,
+                    payload = pending.payload,
+                    source = pending.source,
+                )
+                check(mediaGridRgb565PackStore.validatePayloadCrc(published))
+                MediaGridPreviewNotifier.notifyPreviewChanged(assetId)
+                return true
+            } catch (_: java.io.IOException) {
+                if (attempt == RGB565_SAVE_PUBLISH_ATTEMPTS - 1) return false
+            } catch (_: RuntimeException) {
+                return false
+            }
+        }
+        return false
     }
 
     private fun openConnection(url: String): HttpURLConnection =
@@ -954,6 +1016,19 @@ class ClipRepository(
         if (currentIdentity != expectedPreviewIdentity) return@withContext
         if (mediaGridPreviewStore.deletePreview(assetId)) {
             mediaGridPreviewEnqueuer.enqueue(listOf(assetId))
+        }
+    }
+
+    internal suspend fun recoverMediaGridCandidate(
+        assetId: Long,
+        candidate: MediaGridPreparedCandidate,
+    ) {
+        when (candidate.kind) {
+            MediaGridImageSourceKind.Rgb565Pack ->
+                mediaGridRgb565RepairEnqueuer.enqueue(listOf(assetId))
+            MediaGridImageSourceKind.PersistentPreview ->
+                recoverMediaGridPreview(assetId, candidate.sourceIdentity)
+            else -> Unit
         }
     }
 

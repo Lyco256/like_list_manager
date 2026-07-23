@@ -105,3 +105,10 @@ MVPの上記機能は実装済みです。OAuth callback、token暗号化保存�
 - viewport通知をlatest anchor上書きに限定し、50ms周期・固定予算・同時2requestの単一controllerへ画像処理を集約
 - active bitmap windowを表示中＋前後1行に限定し、範囲外requestとUI load stateを破棄しつつframe内metadataとCoil LRUを再利用
 - wireless隔離統合テストと本番安全上書き検証をSuccessで完了。Macrobenchmarkは要件指定により未実行
+
+## 2026-07-23 第14 RGB_565 pack 達成済み
+
+- 256×256 `RGB_565`を128asset固定slot、二重bank＋generationのpackへ保存する通常経路を追加
+- source Bitmapからraw payloadを作り、WebP・Asset・既存JPEG生成を維持
+- Decoderを通さないCoil Fetcherとraw→JPEG→local→URL fallbackを追加
+- wireless隔離統合テストと本番安全上書き検証をSuccessで完了。Macrobenchmarkは要件指定により未実行

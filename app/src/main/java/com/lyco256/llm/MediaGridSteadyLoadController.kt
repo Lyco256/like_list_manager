@@ -119,7 +119,7 @@ internal class MediaGridSteadyLoadController(
     private var frame: MediaGridFrameData,
     private val preparer: MediaGridImagePreparer,
     private val imageLoader: ImageLoader,
-    private val onPersistentPreviewError: suspend (Long, MediaGridPreparedCandidate) -> Unit,
+    private val onPreviewCandidateError: suspend (Long, MediaGridPreparedCandidate) -> Unit,
 ) {
     private data class Completion(val generation: Long, val assetId: Long, val candidateIndex: Int, val success: Boolean)
     private data class ActiveRequest(val disposable: Disposable, val itemIndex: Int)
@@ -175,7 +175,14 @@ internal class MediaGridSteadyLoadController(
         if (preserveMetadata) metadata.keys.retainAll(valid) else metadata.keys.retainAll(retainedReady)
         states.replaceAll { assetId, state ->
             val candidate = state.readyCandidate
-            if (state.status == MediaGridCellLoadStatus.Ready && candidate != null && candidate.kind == MediaGridImageSourceKind.PersistentPreview && isCached(candidate)) state
+            if (state.status == MediaGridCellLoadStatus.Ready &&
+                candidate != null &&
+                candidate.kind in setOf(
+                    MediaGridImageSourceKind.Rgb565Pack,
+                    MediaGridImageSourceKind.PersistentPreview,
+                ) &&
+                isCached(candidate)
+            ) state
             else MediaGridCellLoadState(prepared = if (preserveMetadata) metadata[assetId] else null)
         }
     }
@@ -213,7 +220,9 @@ internal class MediaGridSteadyLoadController(
         val warmCandidates = initial.asSequence().mapNotNull { index ->
             val cell = frame.items[index] as? MediaGridCellItem ?: return@mapNotNull null
             metadata[cell.entry.assetId]?.candidates?.firstOrNull {
-                cell.entry.assetId in visibleAssets || it.kind == MediaGridImageSourceKind.PersistentPreview
+                cell.entry.assetId in visibleAssets ||
+                    it.kind == MediaGridImageSourceKind.Rgb565Pack ||
+                    it.kind == MediaGridImageSourceKind.PersistentPreview
             }
                 ?.let { cell.entry.assetId to it }
         }.distinctBy { it.second.cacheKey }.toList()
@@ -348,7 +357,11 @@ internal class MediaGridSteadyLoadController(
             val candidate = old.prepared?.candidates?.getOrNull(event.candidateIndex)
             if (event.success && candidate != null && isCached(candidate)) states[assetId] = old.copy(status = MediaGridCellLoadStatus.Ready)
             else {
-                if (candidate?.kind == MediaGridImageSourceKind.PersistentPreview) scope.launch { onPersistentPreviewError(assetId, candidate) }
+                if (candidate?.kind == MediaGridImageSourceKind.Rgb565Pack ||
+                    candidate?.kind == MediaGridImageSourceKind.PersistentPreview
+                ) {
+                    scope.launch { onPreviewCandidateError(assetId, candidate) }
+                }
                 val next = event.candidateIndex + 1
                 states[assetId] = if (old.prepared?.candidates?.getOrNull(next) != null) old.copy(status = MediaGridCellLoadStatus.Pending, candidateIndex = next)
                 else old.copy(status = MediaGridCellLoadStatus.Failed)

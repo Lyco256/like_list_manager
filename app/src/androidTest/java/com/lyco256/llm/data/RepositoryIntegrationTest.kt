@@ -52,6 +52,7 @@ class RepositoryIntegrationTest {
         context = ApplicationProvider.getApplicationContext()
         context.deleteDatabase(storageConfig.databaseName)
         File(context.filesDir, storageConfig.imagesDirectory).deleteRecursively()
+        File(context.filesDir, "media_grid_rgb565_packs").deleteRecursively()
         context.getSharedPreferences(storageConfig.preferencesName, Context.MODE_PRIVATE).edit().clear().commit()
         storage = PostStorageManager(context, storageConfig)
         settings = InMemorySettingsStore(
@@ -71,7 +72,11 @@ class RepositoryIntegrationTest {
         repository = newRepository()
     }
 
-    private fun newRepository() = ClipRepository(
+    private fun newRepository(
+        previewEnqueuer: MediaGridPreviewEnqueuer = NoOpMediaGridPreviewEnqueuer,
+        repairEnqueuer: MediaGridRgb565RepairEnqueuer = NoOpMediaGridRgb565RepairEnqueuer,
+        rgb565Publisher: MediaGridRgb565Publisher = MediaGridRgb565PackStore(context.filesDir),
+    ) = ClipRepository(
         context = context,
         postStorageManager = storage,
         apiSettingsStore = settings,
@@ -85,6 +90,9 @@ class RepositoryIntegrationTest {
                 else -> "Portrait OCR"
             }
         },
+        mediaGridPreviewEnqueuer = previewEnqueuer,
+        mediaGridRgb565RepairEnqueuer = repairEnqueuer,
+        mediaGridRgb565PackStore = rgb565Publisher,
     )
 
     @Test
@@ -682,6 +690,14 @@ class RepositoryIntegrationTest {
         val server = MockWebServer()
         server.start()
         try {
+            val jpegEnqueued = mutableListOf<Long>()
+            repository = newRepository(
+                previewEnqueuer = object : MediaGridPreviewEnqueuer {
+                    override fun enqueue(assetIds: Collection<Long>) {
+                        jpegEnqueued += assetIds
+                    }
+                },
+            )
             val png = pngBytes(android.graphics.Color.RED)
             server.enqueue(MockResponse().setResponseCode(200).setBody(okio.Buffer().write(png)))
             val media = XMedia("media-1", "photo", server.url("/photo.png").toString(), null, 2, 2)
@@ -698,8 +714,94 @@ class RepositoryIntegrationTest {
                 assertTrue(local.exists())
                 assertTrue(local.extension.equals("webp", ignoreCase = true))
                 assertNotNull(BitmapFactory.decodeFile(local.absolutePath))
+                val store = MediaGridRgb565PackStore(context.filesDir)
+                val source = MediaGridRgb565SourceSignature(
+                    MediaGridRgb565SourceKind.LOCAL_WEBP,
+                    local.length(),
+                    local.lastModified(),
+                )
+                val slot = requireNotNull(store.readSlot(assets.single().id, listOf(source)))
+                val rawBitmap = store.readBitmap(slot)
+                try {
+                    assertEquals(Bitmap.Config.RGB_565, rawBitmap.config)
+                    assertEquals(256, rawBitmap.width)
+                    assertEquals(256, rawBitmap.height)
+                } finally {
+                    rawBitmap.recycle()
+                }
+                assertEquals(listOf(assets.single().id), jpegEnqueued)
             }
             assertEquals(1, server.requestCount)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun rawPublishFailureKeepsWebpAndDatabaseAndEnqueuesOnlyRawRepair() = runBlocking {
+        val server = MockWebServer()
+        server.start()
+        try {
+            val repairIds = mutableListOf<Long>()
+            val jpegIds = mutableListOf<Long>()
+            var publishAttempts = 0
+            repository = newRepository(
+                previewEnqueuer = object : MediaGridPreviewEnqueuer {
+                    override fun enqueue(assetIds: Collection<Long>) {
+                        jpegIds += assetIds
+                    }
+                },
+                repairEnqueuer = object : MediaGridRgb565RepairEnqueuer {
+                    override fun enqueue(assetIds: Collection<Long>) {
+                        repairIds += assetIds
+                    }
+                },
+                rgb565Publisher = object : MediaGridRgb565Publisher {
+                    override fun publish(
+                        assetId: Long,
+                        payload: MediaGridRgb565Payload,
+                        source: MediaGridRgb565SourceSignature,
+                        afterStage: ((MediaGridRgb565PublishStage) -> Unit)?,
+                    ): MediaGridRgb565Slot {
+                        publishAttempts += 1
+                        throw java.io.IOException("simulated raw I/O failure")
+                    }
+
+                    override fun validatePayloadCrc(slot: MediaGridRgb565Slot): Boolean = false
+                },
+            )
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setBody(okio.Buffer().write(pngBytes(android.graphics.Color.GREEN))),
+            )
+            val media = XMedia(
+                "raw-failure",
+                "photo",
+                server.url("/raw-failure.png").toString(),
+                null,
+                2,
+                2,
+            )
+            api.likedResponses += XApiResult(
+                listOf(post("raw-failure", media = listOf(media))),
+                null,
+                null,
+                null,
+                null,
+            )
+
+            repository.syncNow()
+
+            storage.withDatabase { database ->
+                val asset = database.clipDao().getAllAssets().single()
+                val local = File(requireNotNull(asset.localPath))
+                assertTrue(local.isFile)
+                assertEquals("downloaded", asset.downloadState)
+                assertEquals(listOf(asset.id), repairIds)
+                assertEquals(listOf(asset.id), jpegIds)
+            }
+            assertEquals(3, publishAttempts)
         } finally {
             server.shutdown()
         }

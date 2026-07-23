@@ -1,5 +1,24 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-07-23 第14実装: RGB_565 fixed-slot pack
+
+| 対象 | 実装・証跡 |
+| --- | --- |
+| asset IDのみで128slot pack addressを決定 | `MediaGridRgb565PackStore`、`MediaGridRgb565PackStoreTest` |
+| 二重bank、generation、payload→metadata順の永続化 | pack store fault-injection Unit Test、片bank破損/旧bank保持テスト |
+| source Bitmap→raw、WebP・Asset・JPEG維持 | `ClipRepository`、`RepositoryIntegrationTest` |
+| DecoderなしRGB_565 Coil表示、raw→JPEG fallback | `MediaGridRgb565Coil`、`MediaGridRgb565IntegrationTest`、candidate order Unit Test |
+| 最大4pack mapping、同pack直列、固定Delayなし | pack store Unit/Integration Test、source contract test |
+| 初回raw 4、通常2、repair 2、phase13維持 | controller既存定数・session tests、Fetcher/repair実装 |
+| TEST_HARNESS分離 | `MediaGridRgb565IntegrationTest`、`RepositoryIntegrationTest` |
+
+検証結果:
+
+- `scripts\run-safe-integration-check.cmd -DebugMethod wireless`: `Preflight / Build / UnitTest / Lint / Install / IntegrationTest / Success`
+- `scripts\run-safe-debug-check.cmd -InstallToDevice`: `Preflight / Build / UnitTest / Lint / Install / Success`
+- production DB、元WebP、既存JPEG、設定、認証情報の初期化は行っていない
+- Macrobenchmarkは要件どおり未実行
+
 ## 2026-07-23 第13実装: session persistence（検証済み）
 
 - `MainViewModel`配下の`MediaGridSessionCoordinator`がfilter/sortだけのsession keyで最大2件をLRU保持し、frame・controller・anchorをComposable離脱後も保持する。

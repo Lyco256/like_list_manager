@@ -140,7 +140,7 @@ class MediaGridDirectPreviewTest {
         assertNotEquals(mediaGridImageCacheKey(first, 256, 256), mediaGridImageCacheKey(replaced, 256, 256))
         val prepared = MediaGridPreparedCandidate(
             kind = first.kind,
-            requestData = File(first.data),
+            requestData = File(first.data as String),
             sourceIdentity = first.sourceIdentity,
             cacheKey = mediaGridImageCacheKey(first, 256, 256),
             width = 256,

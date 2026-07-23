@@ -1,5 +1,9 @@
 # `AppContainer.kt`
 
+## 第14実装
+
+共有`MediaGridRgb565PackStore`、最大4件のraw Fetcher、repair enqueuerを構築します。専用Keyer/Fetcherを既存ImageLoaderへ登録し、JPEG/local/URL向けDecoder設定、disk/memory容量、phase13 controller上限は変更しません。
+
 ## 対応ソース
 
 `app/src/main/java/com/lyco256/llm/data/AppContainer.kt`

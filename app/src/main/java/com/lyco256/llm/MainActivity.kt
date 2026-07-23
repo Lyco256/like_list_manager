@@ -327,7 +327,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         context = application.applicationContext,
         preparer = appContainer.mediaGridImagePreparer,
         imageLoader = appContainer.mediaGridImageLoader,
-    ) { assetId, candidate -> repository.recoverMediaGridPreview(assetId, candidate.sourceIdentity) }
+    ) { assetId, candidate -> repository.recoverMediaGridCandidate(assetId, candidate) }
     internal val mediaGridSessionState: StateFlow<MediaGridSessionUiState> = mediaGridSessionCoordinator.state
 
     private val repositoryState = combine(

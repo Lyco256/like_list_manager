@@ -4,8 +4,16 @@ import android.content.Context
 import com.lyco256.llm.BuildConfig
 
 class AppContainer(context: Context) {
+    internal val mediaGridRgb565PackStore = MediaGridRgb565PackStore(context.filesDir)
+    internal val mediaGridRgb565RepairEnqueuer: MediaGridRgb565RepairEnqueuer =
+        WorkManagerMediaGridRgb565RepairEnqueuer(context)
     val mediaGridImageLoader = coil.ImageLoader.Builder(context)
         .crossfade(false)
+        .allowRgb565(true)
+        .components {
+            add(MediaGridRgb565Keyer())
+            add(MediaGridRgb565FetcherFactory(mediaGridRgb565PackStore))
+        }
         .diskCache {
             coil.disk.DiskCache.Builder()
                 .directory(java.io.File(context.cacheDir, "media_grid_coil_cache"))
@@ -24,7 +32,9 @@ class AppContainer(context: Context) {
         .fetcherDispatcher(kotlinx.coroutines.Dispatchers.IO)
         .build()
     internal val mediaGridImagePreparer = MediaGridImagePreparer(
-        MediaGridPersistentPreviewStore(context.filesDir),
+        previewStore = MediaGridPersistentPreviewStore(context.filesDir),
+        rgb565PackStore = mediaGridRgb565PackStore,
+        rgb565RepairEnqueuer = mediaGridRgb565RepairEnqueuer,
     )
     internal val mediaGridPreviewEnqueuer: MediaGridPreviewEnqueuer =
         WorkManagerMediaGridPreviewEnqueuer(context)
@@ -65,5 +75,7 @@ class AppContainer(context: Context) {
         ocrTextGateway = ocrTextGateway,
         includeSeedMedia = !BuildConfig.TEST_HARNESS,
         mediaGridPreviewEnqueuer = mediaGridPreviewEnqueuer,
+        mediaGridRgb565RepairEnqueuer = mediaGridRgb565RepairEnqueuer,
+        mediaGridRgb565PackStore = mediaGridRgb565PackStore,
     )
 }

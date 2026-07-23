@@ -1,5 +1,9 @@
 # `app/src/androidTest/java/com/lyco256/llm/data/RepositoryIntegrationTest.kt`
 
+## 第14実装
+
+新規画像同期がWebPと有効raw slotの両方を同期完了前に生成し、既存JPEG enqueueも維持することを確認します。raw publishを3回ともIO失敗させた場合も、DB record・WebP・`downloadState=downloaded`を維持し、raw repairだけを追加予約することを隔離test DB/filesDirで検証します。
+
 ## 2026-07-10 bulk tag coverage
 
 The repository integration suite verifies that `applyClipTagChanges` applies pending additions/removals to every selected clip in one operation while leaving an unselected clip unchanged, and rejects overlapping add/remove sets without changing the database.

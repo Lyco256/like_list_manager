@@ -1,5 +1,11 @@
 # `MediaGridDirectPreview.kt`
 
+## 第14実装
+
+候補順は有効raw slot→永続JPEG→local WebP→preview URL→remote URL→重複しないdisplayです。raw metadata検査とsource freshness確認はIO上のprepared metadata作成時に行い、Composableではpackを開きません。
+
+raw requestは256×256固定、専用data型、generation/source signature入りmemory key、Coil disk cache無効です。missing/invalid slotは表示を待たせずrepairへ収束させ、JPEG以降へfallbackします。
+
 `app/src/main/java/com/lyco256/llm/data/MediaGridDirectPreview.kt`
 
 The file contains the background `MediaGridImagePreparer`. Candidate construction preserves persistent JPEG → local → preview → remote → display order, removes invalid local files and duplicate sources, and calculates file metadata, identities, and cache keys away from composition.

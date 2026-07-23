@@ -1,5 +1,11 @@
 # `ClipRepository.kt`
 
+## 第14実装
+
+新規画像を1件ずつ処理し、source Bitmapからraw payloadを作ってからWebP品質85を保存し、単一Asset insertでIDを確定してraw slotのpublish・CRC再読込確認まで待ちます。asset ID未確定のpayloadは常に最大1枚分です。
+
+一時IO失敗はDelayなしで2回再試行します。raw失敗でもWebPとAssetをrollbackせず、`downloadState`を変更せずrepairだけをenqueueします。既存JPEG生成enqueueはraw成否と独立して維持します。
+
 ## 2026-07 persistent JPEG preview
 
 新規同期で元画像の保存と`AssetEntity`のinsertが完了した後、insert成功かつ`localPath`を持つasset IDだけを`MediaGridPreviewEnqueuer`へ渡します。JPEG生成処理は待たず、生成失敗を`downloadState`や同期結果へ反映しません。seedや直接fixture挿入はschedulerを経由しません。

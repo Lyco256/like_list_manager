@@ -3446,25 +3446,15 @@ private fun ClassifiedMediaGridContent(
                 imageLoader = appContainer.mediaGridImageLoader,
             ) { assetId, candidate ->
                 if (recoveryGate.claim(candidate.sourceIdentity)) {
-                    appContainer.repository.recoverMediaGridPreview(assetId, candidate.sourceIdentity)
+                    appContainer.repository.recoverMediaGridCandidate(assetId, candidate)
                 }
             }.also { it.start() }
         }
     } else null
     val effectiveController = controller ?: fallbackController
     val fallbackControllerState by (fallbackController?.uiState ?: kotlinx.coroutines.flow.flowOf(controllerState)).collectAsState(initial = controllerState)
-    val fallbackInitialCells = if (controller == null) {
-        remember(frame.key) {
-            frame.items.filterIsInstance<MediaGridCellItem>().mapNotNull { item ->
-                val entry = item.entry
-                if (entry.downloadState == "failed" || (entry.localPath != null && !File(entry.localPath).isFile)) {
-                    entry.assetId to MediaGridCellLoadState(MediaGridCellLoadStatus.Failed)
-                } else null
-            }.toMap()
-        }
-    } else emptyMap()
     val effectiveControllerState = if (controller == null) {
-        fallbackControllerState.copy(cells = fallbackControllerState.cells + fallbackInitialCells)
+        fallbackControllerState
     } else controllerState
     if (fallbackController != null) DisposableEffect(fallbackController) { onDispose { fallbackController.dispose() } }
     LaunchedEffect(state, frame.key, effectiveController) {

@@ -14,6 +14,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 enum class MediaGridImageSourceKind {
+    Rgb565Pack,
     PersistentPreview,
     Local,
     Preview,
@@ -29,24 +30,35 @@ data class MediaGridPersistentPreviewMetadata(
 
 data class MediaGridImageCandidate(
     val kind: MediaGridImageSourceKind,
-    val data: String,
+    val data: Any,
     val sourceIdentity: String,
 )
 
-data class MediaGridImageCandidateInput(
+internal data class MediaGridImageCandidateInput(
     val assetId: Long,
     val mediaKey: String,
     val localPath: String?,
     val previewUrl: String?,
     val remoteUrl: String?,
     val displayUrl: String?,
+    val rgb565Slot: MediaGridRgb565Slot? = null,
     val persistentPreview: MediaGridPersistentPreviewMetadata? = null,
 )
 
 /** Builds the ordered, available image sources used by both cells and prefetch. */
-fun buildMediaGridImageCandidates(input: MediaGridImageCandidateInput): List<MediaGridImageCandidate> {
-    val result = ArrayList<MediaGridImageCandidate>(5)
-    val seen = HashSet<String>(5)
+internal fun buildMediaGridImageCandidates(input: MediaGridImageCandidateInput): List<MediaGridImageCandidate> {
+    val result = ArrayList<MediaGridImageCandidate>(6)
+    val seen = HashSet<String>(6)
+
+    input.rgb565Slot?.let { slot ->
+        if (seen.add(slot.cacheKey)) {
+            result += MediaGridImageCandidate(
+                kind = MediaGridImageSourceKind.Rgb565Pack,
+                data = slot,
+                sourceIdentity = slot.cacheKey,
+            )
+        }
+    }
 
     input.persistentPreview?.takeIf { it.filePath.isNotBlank() && it.length > 0L }?.let { preview ->
         val file = File(preview.filePath).absoluteFile
@@ -117,6 +129,9 @@ internal fun persistentPreviewSourceIdentity(
 private fun String.startsWithAny(vararg prefixes: String): Boolean = prefixes.any(::startsWith)
 
 fun mediaGridImageCacheKey(candidate: MediaGridImageCandidate, width: Int, height: Int): String {
+    if (candidate.kind == MediaGridImageSourceKind.Rgb565Pack) {
+        return (candidate.data as MediaGridRgb565Slot).cacheKey
+    }
     val namespace = if (candidate.kind == MediaGridImageSourceKind.PersistentPreview) {
         "media-grid-preview-v1"
     } else {
@@ -158,6 +173,8 @@ internal fun mediaGridPreparedImageMatches(
 /** Prepares file metadata and Coil request metadata away from composition. */
 internal class MediaGridImagePreparer(
     private val previewStore: MediaGridPersistentPreviewStore,
+    private val rgb565PackStore: MediaGridRgb565PackStore,
+    private val rgb565RepairEnqueuer: MediaGridRgb565RepairEnqueuer,
 ) {
     suspend fun prepare(
         frame: com.lyco256.llm.MediaGridFrameData,
@@ -215,6 +232,10 @@ internal class MediaGridImagePreparer(
                 previewUrl = cell.entry.previewUrl,
                 remoteUrl = cell.entry.remoteUrl,
                 displayUrl = cell.entry.displayUrl,
+                rgb565Slot = readRgb565Slot(
+                    assetId = cell.entry.assetId,
+                    localPath = cell.entry.localPath,
+                ),
                 persistentPreview = readPersistentPreviewMetadata(
                     assetId = cell.entry.assetId,
                     mediaKey = cell.entry.mediaKey,
@@ -222,20 +243,40 @@ internal class MediaGridImagePreparer(
                 ),
             )
             val candidates = buildMediaGridImageCandidates(input).map { candidate ->
-                val isPersistentPreview = candidate.kind == MediaGridImageSourceKind.PersistentPreview
-                val requestSize = if (isPersistentPreview) MEDIA_GRID_PREVIEW_SIZE else cellSizePx
+                val isFixedPreview = candidate.kind == MediaGridImageSourceKind.Rgb565Pack ||
+                    candidate.kind == MediaGridImageSourceKind.PersistentPreview
+                val requestSize = if (isFixedPreview) MEDIA_GRID_PREVIEW_SIZE else cellSizePx
                 MediaGridPreparedCandidate(
                     kind = candidate.kind,
-                    requestData = if (candidate.kind == MediaGridImageSourceKind.Local || isPersistentPreview) File(candidate.data) else candidate.data,
+                    requestData = when (candidate.kind) {
+                        MediaGridImageSourceKind.Rgb565Pack -> candidate.data
+                        MediaGridImageSourceKind.Local,
+                        MediaGridImageSourceKind.PersistentPreview,
+                        -> File(candidate.data as String)
+                        else -> candidate.data
+                    },
                     sourceIdentity = candidate.sourceIdentity,
                     cacheKey = mediaGridImageCacheKey(candidate, requestSize, requestSize),
                     width = requestSize,
                     height = requestSize,
-                    useDiskCache = !isPersistentPreview,
+                    useDiskCache = !isFixedPreview,
                 )
             }
             MediaGridPreparedImage(frame.key, cell.entry.assetId, candidates, itemIndex)
         }
+    }
+
+    private fun readRgb565Slot(
+        assetId: Long,
+        localPath: String?,
+    ): MediaGridRgb565Slot? {
+        val local = localPath?.trim()?.takeIf(String::isNotEmpty)?.let(::File)
+        val sources = mediaGridRgb565CurrentSources(assetId, local, previewStore)
+        val slot = rgb565PackStore.readSlot(assetId, sources.map { it.signature })
+        if (slot == null && sources.isNotEmpty()) {
+            rgb565RepairEnqueuer.enqueue(listOf(assetId))
+        }
+        return slot
     }
 
     private fun readPersistentPreviewMetadata(
@@ -268,6 +309,9 @@ internal fun buildMediaGridImageRequest(
         .size(candidate.width, candidate.height)
         .memoryCacheKey(candidate.cacheKey)
         .crossfade(false)
+    if (candidate.kind == MediaGridImageSourceKind.Rgb565Pack) {
+        builder.allowRgb565(true)
+    }
     if (candidate.useDiskCache) {
         builder.diskCacheKey(candidate.cacheKey)
     } else {

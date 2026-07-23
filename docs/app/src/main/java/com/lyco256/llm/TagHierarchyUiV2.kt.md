@@ -1,5 +1,9 @@
 # `TagHierarchyUiV2.kt`
 
+## 第14実装
+
+セルはcontrollerが選んだraw→JPEG→local→URL候補を使います。`downloadState == "failed"`でも利用可能候補を抑止しません。pack open、mapping、metadata検査、raw生成はComposableで行いません。
+
 2026-07-17: The classified media grid publishes a lightweight viewport snapshot without calling synchronous thumbnail viewport application. Each cell carries its immutable source index for the worker-side source lookup.
 
 ## 第7実装: keyed frame and background image preparation

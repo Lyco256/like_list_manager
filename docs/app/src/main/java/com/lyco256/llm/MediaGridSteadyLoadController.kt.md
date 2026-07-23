@@ -1,5 +1,9 @@
 # `MediaGridSteadyLoadController.kt`
 
+## 第14実装
+
+初回Progressのraw/JPEG requestは既存上限4、通常controllerは既存上限2です。rawもReady memory entryとして列数変更・画面復帰・background frame refresh時に保持します。raw/JPEG失敗はasset単位のrepair callbackへ渡して次候補へ進みます。2.5秒Progress条件、50ms UI反映loop、scroll/session保持は変更しません。
+
 分類済みメディアグリッドのsessionに所有され、画面Composableより長く存続するcontrollerです。画面離脱ではdisposeせず、pause/resumeだけを行います。
 
 初期表示では `PreparingFrame`、`PreparingInitialWindow`、`WarmingInitialWindow`、`Ready` の順で進みます。現在viewport、下方向1画面、下方向2画面を優先し、必要な場合だけ上方向1行を含め、最大128件かつ256×256 ARGB換算32MiBまでを対象にします。prepared metadataとstartup requestは最大4件並列、全件terminalまたは2.5秒でグリッドを公開し、未完了要求は通常loopへ引き継ぎます。
