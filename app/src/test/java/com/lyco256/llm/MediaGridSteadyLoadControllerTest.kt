@@ -37,16 +37,24 @@ class MediaGridSteadyLoadControllerTest {
     }
 
     @Test
-    fun initialWarmupUsesEstimatedRowsPlusSixEachSideAndCapsCountAndBytes() {
+    fun initialWarmupUsesViewportThenTwoForwardScreensAndCapsCountAndBytes() {
         val frame = frame()
         val indices = selectMediaGridInitialWarmupIndices(frame, anchor(frame, 80, 103, intArrayOf(80, 81, 82, 83)))
-        assertEquals((kotlin.math.ceil(600.0 / 100).toInt() + 1 + 12) * 4, indices.size)
-        assertTrue(indices.size <= 96)
+        assertEquals(56, indices.size)
+        assertTrue(indices.size <= 128)
         assertTrue(indices.size * 256L * 256L * 4L <= MEDIA_GRID_WARMUP_MAX_BYTES)
-        assertTrue(kotlin.math.abs(indices[0] - 91) <= 2)
-        assertTrue(kotlin.math.abs(indices[1] - indices[0]) <= 2)
+        assertEquals(80, indices[0])
+        assertEquals(81, indices[1])
         val capped = selectMediaGridInitialWarmupIndices(frame, anchor(frame, 80, 103, intArrayOf(80), height = 10_000))
-        assertEquals(96, capped.size)
+        assertEquals(128, capped.size)
+    }
+
+    @Test
+    fun initialWarmupDoesNotIncludePreviousRowsAtTheListHead() {
+        val frame = frame()
+        val indices = selectMediaGridInitialWarmupIndices(frame, anchor(frame, 0, 3, intArrayOf(0, 1, 2, 3)))
+        assertEquals(52, indices.size)
+        assertTrue(indices.all { it >= 0 })
     }
 
     @Test

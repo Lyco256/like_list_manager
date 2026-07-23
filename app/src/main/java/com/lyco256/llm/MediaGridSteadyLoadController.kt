@@ -26,15 +26,22 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 internal const val MEDIA_GRID_CONTROLLER_TICK_MS = 50L
 internal const val MEDIA_GRID_METADATA_PER_TICK = 2
 internal const val MEDIA_GRID_REQUESTS_PER_TICK = 1
 internal const val MEDIA_GRID_COMPLETIONS_PER_TICK = 4
 internal const val MEDIA_GRID_MAX_REQUESTS = 2
-internal const val MEDIA_GRID_WARMUP_ROWS = 6
-internal const val MEDIA_GRID_WARMUP_MAX_ASSETS = 96
-internal const val MEDIA_GRID_WARMUP_MAX_BYTES = 24L * 1024L * 1024L
+internal const val MEDIA_GRID_WARMUP_ROWS = 2
+internal const val MEDIA_GRID_WARMUP_MAX_ASSETS = 128
+internal const val MEDIA_GRID_WARMUP_MAX_BYTES = 32L * 1024L * 1024L
+internal const val MEDIA_GRID_STARTUP_REQUESTS = 4
+internal const val MEDIA_GRID_STARTUP_TIMEOUT_MS = 2_500L
 
 internal enum class MediaGridStartupState { PreparingFrame, PreparingInitialWindow, WarmingInitialWindow, Ready }
 internal enum class MediaGridCellLoadStatus { Pending, Loading, Ready, Failed }
@@ -73,31 +80,23 @@ internal data class MediaGridControllerUiState(
 
 internal fun selectMediaGridInitialWarmupIndices(frame: MediaGridFrameData, anchor: MediaGridViewportAnchor): IntArray {
     if (anchor.cellSizePx <= 0 || anchor.columnCount <= 0 || frame.mediaCellIndices.isEmpty()) return intArrayOf()
-    val visibleRows = kotlin.math.ceil(anchor.viewportHeightPx.toDouble() / anchor.cellSizePx).toInt() + 1
-    val wanted = minOf(
-        MEDIA_GRID_WARMUP_MAX_ASSETS,
-        (MEDIA_GRID_WARMUP_MAX_BYTES / (256L * 256L * 4L)).toInt(),
-        (visibleRows + MEDIA_GRID_WARMUP_ROWS * 2) * anchor.columnCount,
-    )
-    val centerItem = (anchor.firstVisibleItemIndex + anchor.lastVisibleItemIndex) / 2
-    val center = lowerBoundMedia(frame.mediaCellIndices, centerItem)
-    var left = (center - wanted / 2).coerceAtLeast(0)
-    val end = (left + wanted).coerceAtMost(frame.mediaCellIndices.size)
-    left = (end - wanted).coerceAtLeast(0)
-    val result = IntArray(end - left)
-    val middle = lowerBoundMedia(frame.mediaCellIndices, centerItem).coerceIn(left, (end - 1).coerceAtLeast(left))
-    var output = 0
-    var distance = 0
-    while (output < result.size) {
-        val right = middle + distance
-        if (right in left until end) result[output++] = frame.mediaCellIndices[right]
-        if (distance > 0) {
-            val leftIndex = middle - distance
-            if (leftIndex in left until end && output < result.size) result[output++] = frame.mediaCellIndices[leftIndex]
-        }
-        distance++
+    val visible = anchor.visibleMediaItemIndices.toList().sorted()
+    val first = visible.firstOrNull()?.let { lowerBoundMedia(frame.mediaCellIndices, it) } ?: lowerBoundMedia(frame.mediaCellIndices, anchor.firstVisibleItemIndex)
+    val last = visible.lastOrNull()?.let { upperBoundMedia(frame.mediaCellIndices, it) } ?: first
+    val perScreen = (kotlin.math.ceil(anchor.viewportHeightPx.toDouble() / anchor.cellSizePx).toInt().coerceAtLeast(1) * anchor.columnCount)
+    val ordered = ArrayList<Int>()
+    fun append(from: Int, to: Int) {
+        val start = from.coerceIn(0, frame.mediaCellIndices.size)
+        val end = to.coerceIn(start, frame.mediaCellIndices.size)
+        if (start >= end) return
+        frame.mediaCellIndices.copyOfRange(start, end).forEach { if (it !in ordered) ordered += it }
     }
-    return result
+    append(first, last)
+    append(last, last + perScreen)
+    append(last + perScreen, last + perScreen * 2)
+    if (anchor.firstVisibleItemIndex > 0) append(first - anchor.columnCount, first)
+    val maxAssets = minOf(MEDIA_GRID_WARMUP_MAX_ASSETS, (MEDIA_GRID_WARMUP_MAX_BYTES / (256L * 256L * 4L)).toInt())
+    return ordered.take(maxAssets).toIntArray()
 }
 
 internal fun selectMediaGridActiveWindow(frame: MediaGridFrameData, anchor: MediaGridViewportAnchor): Set<Int> {
@@ -117,7 +116,7 @@ private fun upperBoundMedia(values: IntArray, target: Int): Int { var l=0; var h
 
 internal class MediaGridSteadyLoadController(
     private val context: Context,
-    private val frame: MediaGridFrameData,
+    private var frame: MediaGridFrameData,
     private val preparer: MediaGridImagePreparer,
     private val imageLoader: ImageLoader,
     private val onPersistentPreviewError: suspend (Long, MediaGridPreparedCandidate) -> Unit,
@@ -131,7 +130,7 @@ internal class MediaGridSteadyLoadController(
     private val completions = ConcurrentHashMap<Long, Completion>()
     private val requests = HashMap<Long, ActiveRequest>()
     private val invalidated = ConcurrentHashMap.newKeySet<Long>()
-    private val itemIndexByAsset = frame.mediaCellIndices.associateBy(
+    private var itemIndexByAsset = frame.mediaCellIndices.associateBy(
         keySelector = { (frame.items[it] as MediaGridCellItem).entry.assetId },
         valueTransform = { it },
     )
@@ -142,30 +141,87 @@ internal class MediaGridSteadyLoadController(
     private var cursorCenter = 0
     private var cursorDistance = 0
     private var cursorRight = true
+    @Volatile private var paused = false
     @Volatile private var disposed = false
+    @Volatile var hasCompletedInitialWarmup: Boolean = false
+        private set
 
     fun updateViewport(anchor: MediaGridViewportAnchor) { if (!disposed && anchor.renderKey == frame.key) latestAnchor.set(anchor) }
 
     fun start() { if (loopJob == null) loopJob = scope.launch { awaitInitialAnchorAndWarm(); runLoop() } }
+    fun pause() { paused = true }
+    fun resume() { paused = false; if (loopJob == null && !disposed) start() }
+
+    @Synchronized fun updateFrame(nextFrame: MediaGridFrameData) {
+        if (disposed || nextFrame.key.dataKey.filter != frame.key.dataKey.filter || nextFrame.key.dataKey.sort != frame.key.dataKey.sort) return
+        val preserveMetadata = nextFrame.key.dataKey == frame.key.dataKey
+        frame = nextFrame
+        generation++
+        requests.values.forEach { it.disposable.dispose() }
+        requests.clear()
+        completions.clear()
+        latestAnchor.set(null)
+        itemIndexByAsset = frame.mediaCellIndices.associateBy(
+            keySelector = { (frame.items[it] as MediaGridCellItem).entry.assetId },
+            valueTransform = { it },
+        )
+        val valid = itemIndexByAsset.keys
+        states.keys.retainAll(valid)
+        val retainedReady = states.filterValues { state ->
+            val candidate = state.readyCandidate
+            state.status == MediaGridCellLoadStatus.Ready && candidate != null &&
+                candidate.kind == MediaGridImageSourceKind.PersistentPreview && isCached(candidate)
+        }.keys
+        if (preserveMetadata) metadata.keys.retainAll(valid) else metadata.keys.retainAll(retainedReady)
+        states.replaceAll { assetId, state ->
+            val candidate = state.readyCandidate
+            if (state.status == MediaGridCellLoadStatus.Ready && candidate != null && candidate.kind == MediaGridImageSourceKind.PersistentPreview && isCached(candidate)) state
+            else MediaGridCellLoadState(prepared = if (preserveMetadata) metadata[assetId] else null)
+        }
+    }
 
     fun invalidate(assetId: Long) { if (!disposed && assetId in itemIndexByAsset) invalidated += assetId }
 
     private suspend fun awaitInitialAnchorAndWarm() {
         _uiState.value = MediaGridControllerUiState(MediaGridStartupState.PreparingInitialWindow)
         var anchor: MediaGridViewportAnchor?
-        do { delay(10); anchor = latestAnchor.get() } while (anchor == null || anchor!!.cellSizePx <= 0)
+        do {
+            while (paused) delay(25)
+            delay(10)
+            anchor = latestAnchor.get()
+        } while (anchor == null || anchor!!.cellSizePx <= 0)
+        while (paused) delay(25)
         val initial = selectMediaGridInitialWarmupIndices(frame, anchor!!)
-        for (index in initial) prepareIndex(index, anchor!!.cellSizePx)
+        val preparedInitial = coroutineScope {
+            val gate = Semaphore(MEDIA_GRID_STARTUP_REQUESTS)
+            initial.map { index ->
+                async { gate.withPermit { preparer.prepareCell(frame, index, anchor!!.cellSizePx) } }
+            }.awaitAll()
+        }
+        preparedInitial.forEach { prepared ->
+            metadata[prepared.assetId] = prepared
+            states[prepared.assetId] = if (prepared.candidates.isEmpty()) {
+                MediaGridCellLoadState(MediaGridCellLoadStatus.Failed, prepared)
+            } else {
+                MediaGridCellLoadState(prepared = prepared)
+            }
+        }
         _uiState.value = MediaGridControllerUiState(MediaGridStartupState.WarmingInitialWindow)
+        val visibleAssets = anchor!!.visibleMediaItemIndices.asSequence().mapNotNull { index ->
+            (frame.items.getOrNull(index) as? MediaGridCellItem)?.entry?.assetId
+        }.toSet()
         val warmCandidates = initial.asSequence().mapNotNull { index ->
             val cell = frame.items[index] as? MediaGridCellItem ?: return@mapNotNull null
-            metadata[cell.entry.assetId]?.candidates?.firstOrNull { it.kind == MediaGridImageSourceKind.PersistentPreview }
+            metadata[cell.entry.assetId]?.candidates?.firstOrNull {
+                cell.entry.assetId in visibleAssets || it.kind == MediaGridImageSourceKind.PersistentPreview
+            }
                 ?.let { cell.entry.assetId to it }
         }.distinctBy { it.second.cacheKey }.toList()
-        withTimeoutOrNull(3_000L) {
+        withTimeoutOrNull(MEDIA_GRID_STARTUP_TIMEOUT_MS) {
             val pending = ArrayDeque(warmCandidates)
             while (pending.isNotEmpty() || requests.isNotEmpty()) {
-                while (requests.size < MEDIA_GRID_MAX_REQUESTS && pending.isNotEmpty()) {
+                while (paused) delay(25)
+                while (requests.size < MEDIA_GRID_STARTUP_REQUESTS && pending.isNotEmpty()) {
                     val (assetId, candidate) = pending.removeFirst()
                     if (isCached(candidate)) states[assetId] = MediaGridCellLoadState(MediaGridCellLoadStatus.Ready, metadata[assetId], 0)
                     else startRequest(assetId, metadata[assetId]!!, 0)
@@ -175,13 +231,14 @@ internal class MediaGridSteadyLoadController(
             }
         }
         applyCompletions(Int.MAX_VALUE)
+        hasCompletedInitialWarmup = true
         _uiState.value = MediaGridControllerUiState(MediaGridStartupState.Ready, states.toMap())
     }
 
     private suspend fun runLoop() {
         while (true) {
             val anchor = latestAnchor.get()
-            if (anchor != null) tick(anchor)
+            if (!paused && anchor != null) tick(anchor)
             delay(MEDIA_GRID_CONTROLLER_TICK_MS)
         }
     }
@@ -202,7 +259,7 @@ internal class MediaGridSteadyLoadController(
         val orderedActive = active.sortedBy { kotlin.math.abs(it - (anchor.firstVisibleItemIndex + anchor.lastVisibleItemIndex) / 2) }
         val activeMissing = ArrayDeque(orderedActive.filter { index ->
             val assetId = (frame.items[index] as MediaGridCellItem).entry.assetId
-            assetId !in metadata
+            assetId !in metadata || metadata[assetId]?.key != frame.key
         })
         repeat(MEDIA_GRID_METADATA_PER_TICK) {
             val index = if (activeMissing.isNotEmpty()) activeMissing.removeFirst() else nextUnpreparedIndex()
