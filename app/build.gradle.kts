@@ -70,6 +70,9 @@ android {
     }
 
     sourceSets {
+        getByName("androidTest") {
+            java.srcDir("../rgb565backfill/src/shared/java")
+        }
         getByName("benchmarkSetup") {
             java.srcDir("src/benchmark/java")
             res.srcDir("src/benchmark/res")

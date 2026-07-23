@@ -170,6 +170,18 @@ DB・画像snapshotは、明示指定したバックアップをホスト上の�
 
 この入口だけを使う。元DB・画像を直接開いたり、端末へ送ったりしない。OAuth設定やtokenは対象に含めない。
 
+## RGB565 pack一時バックフィル
+
+第15実装の一時branchに限り、次の専用入口を使う。
+
+```powershell
+.\scripts\run-media-grid-rgb565-backfill.cmd -DebugMethod wireless
+```
+
+この入口は、production debug package、UID・初回install時刻、feat install証跡、exact temp branch/clean/pushed、専用instrumentation packageとtarget、read-only DB、raw保存先、空き容量を確認してから処理する。本番packageのuninstall/clearやDB copy/restoreは行わず、専用instrumentation APKだけをinstall/uninstallする。
+
+`-ValidationOnly` は端末へ接続せず専用APKをbuild・manifest検証する。`-VerifyOnly` はfeat再install後に既存rawのCRCとfeat readerのRGB_565読取だけを確認する。
+
 ## 失敗時
 
 失敗時は、まず標準出力の `Failed:`、`Error:`、`Log:` だけを見る。

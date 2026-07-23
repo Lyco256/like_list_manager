@@ -248,13 +248,16 @@ class MediaGridRgb565PackStoreTest {
         val repairSource = File(
             "src/main/java/com/lyco256/llm/data/MediaGridRgb565RepairWork.kt",
         ).readText()
+        val backfillSource = File(
+            "../rgb565backfill/src/shared/java/com/lyco256/llm/rgb565backfill/Rgb565BackfillEngine.kt",
+        ).readText()
 
         assertTrue(storeSource.contains("copyPixelsToBuffer"))
         assertTrue(storeSource.contains("copyPixelsFromBuffer"))
         assertTrue(storeSource.contains("Paint.DITHER_FLAG"))
         assertFalse(storeSource.contains(".getPixels("))
         assertFalse(coilSource.contains("Decoder"))
-        listOf(storeSource, coilSource, repairSource).forEach { source ->
+        listOf(storeSource, coilSource, repairSource, backfillSource).forEach { source ->
             assertFalse(source.contains("Thread.sleep"))
             assertFalse(source.contains("delay("))
         }

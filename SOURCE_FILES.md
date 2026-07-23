@@ -2,6 +2,14 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 
 この文書は、全体構成、現状の実装、変更目的別入口、個別docs一覧だけを担当する。禁止事項、完了報告、検証手順は置かない。
 
+## 2026-07-23 第15実装: RGB565 pack backfill（一時branchのみ）
+
+- `rgb565backfill/src/shared/.../Rgb565BackfillEngine.kt` がread-only DB走査、JPEG優先/WebP fallback、最大4 pack並列、2 retry round、resume、CRC再検証、限定reportを所有する。
+- `ProductionRgb565BackfillInstrumentation.kt` と `Rgb565BackfillRunner.kt` は通常Applicationを起動しない専用instrumentation入口である。
+- `scripts/run-media-grid-rgb565-backfill.cmd` がproduction preflight、専用APK install、backfill/verify、専用APK uninstall、UID・初回install時刻不変を一括管理する。
+- `MediaGridRgb565BackfillIntegrationTest.kt` がread-only DB、resume、bank破損修復、最大4並列、report制限を隔離packageで検証する。
+- 詳細は `docs/RGB565_BACKFILL.md`。この一時moduleと入口はfeat/devenvへmergeしない。
+
 ## 2026-07-22 第11実装: retired image pipeline removal
 
 - 現行のメディアグリッド画像経路は`MediaGridDirectPreview.kt`、`MediaGridPersistentPreviewStore.kt`、`MediaGridPreviewWork.kt`、`MediaGridPreviewWorker.kt`、`TagHierarchyUiV2.kt`だけで構成する。

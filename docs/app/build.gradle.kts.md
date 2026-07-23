@@ -42,6 +42,8 @@ AndroidアプリモジュールのapplicationId、SDK、Java/Kotlin 21、Compose
 - Instrumentation Testは `scripts/run-safe-integration-check.cmd` から、メインと `.test` を別package・別UIDで共存させる許可済み実機だけで実行します。
 - `verifyTestEnvironmentIsolation` はdebug/testの生成BuildConfigとtest merged manifestを検査し、本番identity・保存名・API・OAuth receiverの混入を端末接続なしで失敗させます。
 
+- 第15実装の一時branchでは `rgb565backfill/src/shared/java` を `androidTest` にだけ追加し、production backfillと同じengineを隔離integration testで検証します。main source setには追加しません。
+
 ## 2026-07 OCR update
 
 - Added the ML Kit Japanese text recognition dependency used by the OCR gateway.

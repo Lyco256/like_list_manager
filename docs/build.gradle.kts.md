@@ -17,3 +17,5 @@
 ## 変更時の確認
 
 プラグイン追加時はVersion Catalogにもaliasを追加し、Gradle Syncと `assembleDebug` を確認します。
+
+第15実装の一時branchでは `com.android.test` plugin aliasをrootで `apply false` 宣言し、専用 `rgb565backfill` moduleだけへ適用します。

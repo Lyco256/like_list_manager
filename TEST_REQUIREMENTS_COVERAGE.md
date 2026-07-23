@@ -1,5 +1,21 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-07-23 第15実装: RGB565 pack backfill
+
+| 要件 | 実装・証跡 |
+| --- | --- |
+| DB read-only、id/localPathだけを読む | `Rgb565BackfillEngine.readAssets`、`MediaGridRgb565BackfillIntegrationTest` |
+| 有効slot skip、resume、破損bank修復、全slot CRC | shared engine、`readOnlyBackfillResumesRepairsCorruptBankAndPublishesRestrictedReport` |
+| JPEG優先、WebP fallback、delayなし2 retry round | shared engine、source contract Unit Test |
+| pack最大4並列・pack内直列 | `fivePacksUseAtMostFourWorkersAndStartFifthAfterPermitWithoutDelay` |
+| reportに件数・時刻・complete以外を残さない | report key/path exclusion integration assertion |
+| production package・UID・初回install時刻・容量・branch・専用APKをpreflight | `run-media-grid-rgb565-backfill.cmd` |
+| 通常UI・Application経路なし | `com.android.test` module、plain `Application` runner |
+
+実機変換前に `run-safe-integration-check.cmd -DebugMethod wireless` を実行する。変換と最終raw読取確認は `run-media-grid-rgb565-backfill.cmd` のみから実行する。
+
+隔離実機検証は `Preflight / Build / UnitTest / Lint / Install / IntegrationTest / Success` の全フェーズに成功した。
+
 ## 2026-07-23 第14実装: RGB_565 fixed-slot pack
 
 | 対象 | 実装・証跡 |

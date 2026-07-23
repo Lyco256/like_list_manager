@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 rootProject.name = "like-list-manager"
 include(":app")
 include(":macrobenchmark")
+include(":rgb565backfill")
