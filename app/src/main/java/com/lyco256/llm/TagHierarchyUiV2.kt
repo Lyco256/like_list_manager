@@ -39,8 +39,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -92,8 +92,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -158,7 +158,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.DayOfWeek
@@ -297,10 +297,77 @@ fun EnhancedClipListScreen(
 }
 
 @Composable
-fun EnhancedClassifiedScreen(
+internal fun EnhancedClassifiedScreen(
     uiState: MainUiState,
     mediaGridState: ClassifiedMediaGridState,
     listState: LazyListState,
+    displayMode: ClassifiedDisplayMode,
+    mediaGridColumnCount: Int,
+    onMediaGridColumnCountChange: (Int) -> Unit,
+    onMediaGridCellClick: (Long) -> Unit = {},
+    onMediaGridBulkTagsChange: (Set<Long>, Set<Long>, Set<Long>, (String?) -> Unit) -> Unit = { _, _, _, _ -> },
+    onToggleDisplayMode: () -> Unit,
+    modifier: Modifier = Modifier,
+    onApplyFilters: (TweetFilterState) -> Unit,
+    onApplySort: (ClassifiedSortState) -> Unit,
+    onClearAllFilters: () -> Unit,
+    onTagsChange: (ClipEntity, Set<Long>) -> Unit,
+    onSummaryChange: (ClipEntity, String) -> Unit,
+    onOcrSave: (ClipEntity, String) -> Unit,
+    onOcrDetect: (ClipWithDetails, (String) -> Unit, (String) -> Unit) -> Unit,
+    onDelete: (ClipEntity) -> Unit,
+    onAuthorClick: (ClipEntity) -> Unit,
+) {
+    val state = rememberLazyGridState()
+    val dataKey = mediaGridState.dataKey ?: MediaGridDataKey(
+        mediaGridState.sourceRevision,
+        uiState.tagHierarchy.structuralRevision,
+        effectiveMediaGridFilter(uiState.filters),
+        effectiveMediaGridSort(uiState.sort),
+    )
+    val frame = remember(mediaGridState.entries, dataKey, mediaGridColumnCount) {
+        buildMediaGridFrameData(mediaGridState.entries, dataKey.sort, mediaGridColumnCount, dataKey)
+    }
+    EnhancedClassifiedScreen(
+        uiState = uiState,
+        mediaGridState = mediaGridState.copy(status = MediaGridLoadStatus.Ready),
+        mediaGridSessionState = MediaGridSessionUiState(
+            sessionKey = mediaGridSessionKey(dataKey),
+            frame = frame,
+            columnCount = mediaGridColumnCount,
+            requestedColumnCount = mediaGridColumnCount,
+            controllerState = MediaGridControllerUiState(MediaGridStartupState.Ready),
+            showInitialProgress = false,
+        ),
+        listState = listState,
+        mediaGridLazyState = state,
+        displayMode = displayMode,
+        mediaGridColumnCount = mediaGridColumnCount,
+        onMediaGridColumnCountChange = onMediaGridColumnCountChange,
+        onMediaGridCellClick = onMediaGridCellClick,
+        onMediaGridBulkTagsChange = onMediaGridBulkTagsChange,
+        onToggleDisplayMode = onToggleDisplayMode,
+        modifier = modifier,
+        onApplyFilters = onApplyFilters,
+        onApplySort = onApplySort,
+        onClearAllFilters = onClearAllFilters,
+        onTagsChange = onTagsChange,
+        onSummaryChange = onSummaryChange,
+        onOcrSave = onOcrSave,
+        onOcrDetect = onOcrDetect,
+        onDelete = onDelete,
+        onAuthorClick = onAuthorClick,
+    )
+}
+
+@Composable
+internal fun EnhancedClassifiedScreen(
+    uiState: MainUiState,
+    mediaGridState: ClassifiedMediaGridState,
+    mediaGridSessionState: MediaGridSessionUiState,
+    listState: LazyListState,
+    mediaGridLazyState: androidx.compose.foundation.lazy.grid.LazyGridState,
+    onMediaGridAnchorChange: (ClassifiedMediaGridScrollAnchor) -> Unit = {},
     displayMode: ClassifiedDisplayMode,
     mediaGridColumnCount: Int,
     onMediaGridColumnCountChange: (Int) -> Unit,
@@ -329,28 +396,20 @@ fun EnhancedClassifiedScreen(
     val itemKeys = remember(displayMode, uiState.clips, uiState.filters, uiState.sort, uiState.tagHierarchy) {
         if (displayMode == ClassifiedDisplayMode.Card) uiState.classified.map { it.clip.id } else emptyList()
     }
-    val mediaGridLazyState = rememberLazyGridState()
-    var mediaGridFrame by remember { mutableStateOf<MediaGridFrameData?>(null) }
     var pendingPinchAnchor by remember { mutableStateOf<ClassifiedMediaGridScrollAnchor?>(null) }
-    val currentMediaGridDataKey = MediaGridDataKey(
-        sourceRevision = mediaGridState.sourceRevision,
-        hierarchyRevision = uiState.tagHierarchy.structuralRevision,
-        filter = effectiveMediaGridFilter(uiState.filters),
-        sort = effectiveMediaGridSort(uiState.sort),
-    )
-    LaunchedEffect(mediaGridState.entries, mediaGridState.dataKey, currentMediaGridDataKey, mediaGridColumnCount) {
-        val dataKey = mediaGridState.dataKey ?: currentMediaGridDataKey
-        if (mediaGridState.dataKey != null && dataKey != currentMediaGridDataKey) {
-            mediaGridFrame = null
-            return@LaunchedEffect
-        }
-        mediaGridFrame = null
-        val next = withContext(Dispatchers.Default) {
-            buildMediaGridFrameData(mediaGridState.entries, dataKey.sort, mediaGridColumnCount, dataKey)
-        }
-        if (next.key.dataKey == dataKey) mediaGridFrame = next
-    }
     val mediaGridAnchor = rememberClassifiedMediaGridAnchor(mediaGridLazyState)
+    LaunchedEffect(mediaGridAnchor) {
+        mediaGridAnchor?.let(onMediaGridAnchorChange)
+    }
+    var previousMediaGridSessionKey by remember { mutableStateOf<MediaGridSessionKey?>(null) }
+    LaunchedEffect(mediaGridSessionState.sessionKey) {
+        val key = mediaGridSessionState.sessionKey ?: return@LaunchedEffect
+        if (key == previousMediaGridSessionKey) return@LaunchedEffect
+        val saved = mediaGridSessionState.anchor
+        if (saved == null) mediaGridLazyState.scrollToItem(0)
+        else mediaGridLazyState.scrollToItem(saved.index.coerceAtLeast(0), saved.offset)
+        previousMediaGridSessionKey = key
+    }
     val selectableMediaGridClipIds = remember(mediaGridState.entries) {
         mediaGridState.entries.map { it.clipId }.toSet()
     }
@@ -367,9 +426,9 @@ fun EnhancedClassifiedScreen(
         pendingPinchAnchor = null
     }
     if (displayMode == ClassifiedDisplayMode.Card) PreserveScrollAnchor(listState, "classified", itemKeys)
-    LaunchedEffect(mediaGridColumnCount, mediaGridFrame) {
-        val anchor = pendingPinchAnchor ?: mediaGridAnchor ?: return@LaunchedEffect
-        val frame = mediaGridFrame ?: return@LaunchedEffect
+    LaunchedEffect(mediaGridSessionState.sessionKey, mediaGridSessionState.columnCount, mediaGridSessionState.frame) {
+        val anchor = pendingPinchAnchor ?: mediaGridSessionState.anchor ?: mediaGridAnchor ?: return@LaunchedEffect
+        val frame = mediaGridSessionState.frame ?: return@LaunchedEffect
         if (frame.items.isEmpty()) return@LaunchedEffect
         val targetIndex = frame.items.indexOfFirst { it.key == anchor.key }
             .takeIf { it >= 0 }
@@ -430,19 +489,20 @@ fun EnhancedClassifiedScreen(
         Spacer(Modifier.height(10.dp))
         if (displayMode == ClassifiedDisplayMode.MediaGrid) {
             when {
-                mediaGridState.status == MediaGridLoadStatus.Calculating ||
-                    (mediaGridState.dataKey != null && mediaGridState.dataKey != currentMediaGridDataKey) ||
-                    !mediaGridFrameMatches(mediaGridFrame?.key, MediaGridRenderKey(currentMediaGridDataKey, mediaGridColumnCount)) -> Box(
+                mediaGridSessionState.frame?.items?.isEmpty() == true && mediaGridState.status == MediaGridLoadStatus.Ready && mediaGridState.isEmptyByFilter -> HierarchyEmptyState("条件に合うツイートはありません")
+                mediaGridSessionState.frame?.items?.isEmpty() == true && mediaGridState.status == MediaGridLoadStatus.Ready && mediaGridState.hasMatchingClipButNoMedia -> HierarchyEmptyState("この条件に一致する画像・動画サムネイルはありません")
+                mediaGridSessionState.frame == null -> Box(
                     Modifier.fillMaxSize().testTag("classified_media_grid_progress"),
                     contentAlignment = Alignment.Center,
                 ) { androidx.compose.material3.CircularProgressIndicator() }
-                mediaGridState.isEmptyByFilter -> HierarchyEmptyState("条件に合うツイートはありません")
-                mediaGridState.hasMatchingClipButNoMedia -> HierarchyEmptyState("この条件に一致する画像・動画サムネイルはありません")
                 else -> ClassifiedMediaGridContent(
-                    frame = mediaGridFrame!!,
+                    frame = mediaGridSessionState.frame!!,
                     sort = uiState.sort,
-                    columnCount = mediaGridColumnCount,
+                    columnCount = mediaGridSessionState.columnCount,
                     state = mediaGridLazyState,
+                    controller = mediaGridSessionState.controller,
+                    controllerState = mediaGridSessionState.controllerState,
+                    showProgress = mediaGridSessionState.showInitialProgress,
                     onPinchFinished = { anchor, nextColumnCount ->
                         val changed = nextColumnCount != mediaGridColumnCount
                         pendingPinchAnchor = anchor.takeIf { changed }
@@ -3021,7 +3081,7 @@ private data class MediaGridBucketSpec(
     val safeKey: String,
 )
 
-private data class ClassifiedMediaGridScrollAnchor(
+internal data class ClassifiedMediaGridScrollAnchor(
     val key: String,
     val index: Int,
     val offset: Int,
@@ -3364,6 +3424,9 @@ private fun ClassifiedMediaGridContent(
     sort: ClassifiedSortState,
     columnCount: Int,
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
+    controller: MediaGridSteadyLoadController?,
+    controllerState: MediaGridControllerUiState,
+    showProgress: Boolean,
     onPinchFinished: (ClassifiedMediaGridScrollAnchor?, Int) -> Unit,
     selectionMode: Boolean,
     multiAssetClipIds: Set<Long>,
@@ -3373,21 +3436,38 @@ private fun ClassifiedMediaGridContent(
 ) {
     val context = LocalContext.current
     val appContainer = (context.applicationContext as LikeListManagerApp).container
-    val recoveryGate = remember(frame.key) { MediaGridPreviewRecoveryGate() }
-    val controller = remember(frame.key, appContainer.mediaGridImageLoader) {
-        MediaGridSteadyLoadController(
-            context = context,
-            frame = frame,
-            preparer = appContainer.mediaGridImagePreparer,
-            imageLoader = appContainer.mediaGridImageLoader,
-        ) { assetId, candidate ->
-            if (recoveryGate.claim(candidate.sourceIdentity)) {
-                appContainer.repository.recoverMediaGridPreview(assetId, candidate.sourceIdentity)
-            }
-        }.also { it.start() }
-    }
-    val controllerState by controller.uiState.collectAsState()
-    LaunchedEffect(state, frame.key, controller) {
+    val fallbackController = if (controller == null) {
+        val recoveryGate = remember(frame.key) { MediaGridPreviewRecoveryGate() }
+        remember(frame.key, appContainer.mediaGridImageLoader) {
+            MediaGridSteadyLoadController(
+                context = context,
+                frame = frame,
+                preparer = appContainer.mediaGridImagePreparer,
+                imageLoader = appContainer.mediaGridImageLoader,
+            ) { assetId, candidate ->
+                if (recoveryGate.claim(candidate.sourceIdentity)) {
+                    appContainer.repository.recoverMediaGridPreview(assetId, candidate.sourceIdentity)
+                }
+            }.also { it.start() }
+        }
+    } else null
+    val effectiveController = controller ?: fallbackController
+    val fallbackControllerState by (fallbackController?.uiState ?: kotlinx.coroutines.flow.flowOf(controllerState)).collectAsState(initial = controllerState)
+    val fallbackInitialCells = if (controller == null) {
+        remember(frame.key) {
+            frame.items.filterIsInstance<MediaGridCellItem>().mapNotNull { item ->
+                val entry = item.entry
+                if (entry.downloadState == "failed" || (entry.localPath != null && !File(entry.localPath).isFile)) {
+                    entry.assetId to MediaGridCellLoadState(MediaGridCellLoadStatus.Failed)
+                } else null
+            }.toMap()
+        }
+    } else emptyMap()
+    val effectiveControllerState = if (controller == null) {
+        fallbackControllerState.copy(cells = fallbackControllerState.cells + fallbackInitialCells)
+    } else controllerState
+    if (fallbackController != null) DisposableEffect(fallbackController) { onDispose { fallbackController.dispose() } }
+    LaunchedEffect(state, frame.key, effectiveController) {
         kotlinx.coroutines.coroutineScope {
             launch {
                 snapshotFlow {
@@ -3407,17 +3487,16 @@ private fun ClassifiedMediaGridContent(
                         columnCount = columnCount,
                     )
                 }.distinctUntilChanged().collect { anchor ->
-                    controller.updateViewport(anchor)
+                    effectiveController?.updateViewport(anchor)
                 }
             }
             launch {
                 MediaGridPreviewNotifier.previewChanged.collect { assetId ->
-                    controller.invalidate(assetId)
+                    effectiveController?.invalidate(assetId)
                 }
             }
         }
     }
-    DisposableEffect(controller) { onDispose { controller.dispose() } }
     Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(columnCount),
@@ -3458,12 +3537,12 @@ private fun ClassifiedMediaGridContent(
                         onClick = onCellClick,
                         onToggleSelection = onToggleSelection,
                         imageLoader = appContainer.mediaGridImageLoader,
-                        loadState = controllerState.cells[item.entry.assetId] ?: MediaGridCellLoadState(),
+                        loadState = effectiveControllerState.cells[item.entry.assetId] ?: MediaGridCellLoadState(),
                     )
                 }
             }
         }
-        if (controllerState.startup != MediaGridStartupState.Ready) {
+        if (showProgress) {
             Box(
                 Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).testTag("classified_media_grid_progress"),
                 contentAlignment = Alignment.Center,

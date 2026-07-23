@@ -20,7 +20,7 @@ class AppContainer(context: Context) {
             cache.maxSizeBytes(minOf(memoryInfo.totalMem / 8L, 64L * 1024L * 1024L).toInt())
             cache.build()
         }
-        .decoderDispatcher(kotlinx.coroutines.Dispatchers.IO.limitedParallelism(2))
+        .decoderDispatcher(kotlinx.coroutines.Dispatchers.IO.limitedParallelism(4))
         .fetcherDispatcher(kotlinx.coroutines.Dispatchers.IO)
         .build()
     internal val mediaGridImagePreparer = MediaGridImagePreparer(

@@ -11,6 +11,7 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 
 - `MainActivity`: 通常Compose起動とAppAuthのActivity Result受信。benchmark Intent、snapshot import、計測State、frame/result出力は扱いません。
 - `MainViewModel`: RepositoryのFlowをUI stateへ合成し、ユーザー操作をRepositoryへ渡す
+- `MainViewModel`: `MediaGridSessionCoordinator`を所有し、分類済みメディアグリッドのframe/controller/anchorをComposableより長く保持する。session keyはfilter/sortだけで、列数・revision変更は同一sessionの更新として扱う。
 - `MainUiState`: 未分類、分類済み、検索条件、並び替え、投稿者一覧、タグ階層、保存先状態、同期状態、設定画面用スナップショットをまとめる
 - `TweetFilterState`: 分類済み画面の文字列検索、検索モード、検索対象、期間、投稿者条件、タグ条件、タグのみtoggleを表す
 - `SettingsScreen`: X API設定、同期、使用量、データ管理、保存先候補、移動開始入口を全画面で表示する
@@ -42,6 +43,8 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 `RenameNodeDialog` は入力欄、保存、閉じる操作に `rename_node_*` のtest tagを付け、名称変更の保存とキャンセルをE2Eで安定して検証できます。
 
 `ClassifiedSortState` のUIは `sort_open`、`sort_dialog`、`sort_options_list`、`sort_clear_all_open`、`sort_apply` などの test tag で操作します。分類済み画面の概要行には `filterConditionSummary` と並んで現在の並び替え条件も表示します。
+
+メディアグリッドの`LazyGridState`は`MainScreen`でsaveableに保持し、タブ・設定・カード表示でComposableが破棄されてもsession anchorとともに復元します。
 
 ## 変更時の確認
 

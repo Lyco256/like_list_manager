@@ -11,7 +11,7 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 
 ## 2026-07-19 第6実装: direct preview pipeline
 
-Current media-grid rendering builds keyed `MediaGridFrameData` on `Dispatchers.Default`, shows Progress until the current render key is ready, then renders the frame and cell placeholders without waiting for image metadata. `MediaGridImagePreparer` prepares file metadata, candidates, source identities, and cache keys off composition for visible cells and one adjacent row only. Retired cache data and application data remain untouched. Current acceptance evidence is tracked in `TEST_REQUIREMENTS_COVERAGE.md`.
+Current media-grid rendering is owned by `MediaGridSessionCoordinator` under `MainViewModel`. It keeps the session's frame, controller, prepared metadata/load states, anchor, and long-lived `LazyGridState` behavior across tabs, settings, card mode, column changes, and source revisions. New sessions show Progress only during the first warm-up; column/source updates keep the old frame visible and atomically publish the replacement. `MediaGridImagePreparer` prepares file metadata, candidates, source identities, and cache keys off composition. Retired cache data and application data remain untouched. Current acceptance evidence is tracked in `TEST_REQUIREMENTS_COVERAGE.md`.
 
 ## 2026-07-20 第8実装: persistent JPEG preview generation
 
@@ -25,7 +25,7 @@ Current media-grid rendering builds keyed `MediaGridFrameData` on `Dispatchers.D
 - `TagHierarchyUiV2.kt` owns the classified grid, headers, sorting, selection, pinch column changes, and cell interactions.
 - `ClassifiedMediaGridCell` receives a prepared image model and starts `AsyncImage` only from that model. It keeps `ContentScale.Crop`, static cell-local placeholder rendering, and one-step fallback on `onError`.
 - `MediaGridDirectPreview.kt` owns the single `MediaGridImagePreparer`. It performs candidate availability, file stat, source identity, and cache-key calculation off composition, reusing same-key/asset/size results and preparing visible cells plus at most one adjacent row from the prebuilt index column.
-- `AppContainer.kt` owns the one shared media-grid `ImageLoader`: crossfade is disabled, disk cache is `cacheDir/media_grid_coil_cache` at 128 MiB, memory cache is `min(totalMem / 8, 64 MiB)`, and decoder parallelism is limited to two.
+- `AppContainer.kt` owns the one shared media-grid `ImageLoader`: crossfade is disabled, disk cache is `cacheDir/media_grid_coil_cache` at 128 MiB, memory cache is `min(totalMem / 8, 64 MiB)`, and decoder parallelism is limited to four; the normal controller still limits active requests to two.
 - The retired generator, store, scheduling state, cache restore, and viewport coordinator have no source, wrapper, test, or runtime reference. Existing retired cache files are left to Android's normal cache management.
 - `MediaGridMorph.kt` remains only for the existing pinch calculation/tests; no morph overlay is part of the product path.
 
@@ -36,6 +36,7 @@ Current media-grid rendering builds keyed `MediaGridFrameData` on `Dispatchers.D
 ## 2026-07-22 steady-load controller
 
 - `MediaGridSteadyLoadController.kt` owns startup warm-up, current-frame metadata, active-window load state, cancellation, completion batching, and the single 50ms loop.
+- `MediaGridSessionCoordinator.kt` owns the session LRU, frame/controller lifetime, pause/resume, atomic frame replacement, and background refresh boundary. The controller is disposed only by ViewModel clear or session eviction.
 - `TagHierarchyUiV2.kt` only overwrites the latest conflated viewport anchor and renders controller-published cell states. Pending/Loading cells do not start image work.
 - `MediaGridDirectPreview.kt` remains the stateless candidate/identity/cache-key builder and does not retain metadata across render keys.
 - The shared Coil capacity and decoder concurrency, persistent JPEG generation, DB, original images, UI interactions, and Macrobenchmark remain unchanged.
@@ -184,6 +185,7 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/TagColorUi.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/MediaGridPlaceholderRendering.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/MediaGridSessionCoordinator.kt.md`
 - Classified tab card/grid switching is handled in `MainActivity.kt` and `TagHierarchyUiV2.kt`; the grid path is built from `ClassifiedMediaGridState` over the lightweight repository source, while the card path continues to use `uiState.classified`.
 
 ### Data・API
@@ -215,6 +217,7 @@ MainActivity / Compose UI
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/PostStorageManagerRecoveryTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/OcrTextRecognizerTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/MediaGridPersistentPreviewStoreTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/MediaGridSessionCoordinatorTest.kt.md`
 
 ### Macrobenchmark
 

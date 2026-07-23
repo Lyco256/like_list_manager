@@ -43,7 +43,7 @@
 - Selection indicators and video badges scale from 2 through 12 columns. Like-count overlays are hidden during selection.
 - A per-cell card button is available during selection only at 2 through 6 columns. Normal cell taps continue to open the tweet dialog at every column count.
 - Bulk tag editing starts from the union of tags on selected tweets. Draft changes remain local until Apply; cancelling a changed draft requires discard confirmation.
-- Grid column count, lazy-grid state, headers, and anchor restoration remain owned by `EnhancedClassifiedScreen` while dialogs open and close.
+- `MainScreen` owns the saveable media-grid `LazyGridState`; `MediaGridSessionCoordinator` owns frame/controller/load-state/anchor lifetime. `EnhancedClassifiedScreen` receives these objects and does not dispose the controller when the screen leaves composition.
 - Selection indicators use 28/24/18/14dp at 2–3/4–6/7–9/10–12 columns; video icons use 24/20/14/10dp. The card-dialog button uses 28dp at 2–3 columns and 24dp at 4–6 columns, with testTag `media_grid_selection_open_<assetId>`.
 - A failed bulk apply keeps the editor, selected clips, and pending draft open and displays `media_grid_bulk_tag_error`; only a successful completion closes the editor.
 Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いいね数`, `取得日時`, `取得エラー`, `タグを付ける`.
@@ -230,8 +230,8 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 
 ## 2026-07-22 steady image loading
 
-- The grid owns one `MediaGridSteadyLoadController` for the current render key. Its `snapshotFlow` only overwrites a latest-value viewport anchor containing stable item bounds, visible media indices, measured viewport/cell size, and column count.
-- The grid remains composed behind the full-area `classified_media_grid_progress` overlay while initial metadata and persistent JPEG memory warm-up run. The overlay is removed when the controller publishes `Ready`.
+- The session owns one `MediaGridSteadyLoadController` for the filter/sort session. Its `snapshotFlow` only overwrites a latest-value viewport anchor containing stable item bounds, visible media indices, measured viewport/cell size, and column count. The controller pauses while the session is hidden and resumes without startup Progress.
+- A new session remains composed behind the full-area `classified_media_grid_progress` overlay while initial metadata and warm-up run. Column changes, source refreshes, and session reattach keep the published frame visible and never restore the overlay.
 - Cells render Placeholder for `Pending` and `Loading`, the existing Error design for terminal failure, and an `AsyncImage` only for a controller-published `Ready` candidate already confirmed in the shared memory cache. Candidate fallback and recovery are controller-owned.
 - Selection, tap, long press, badges, tweet dialog, headers, filtering, sorting, and pinch column changes retain their existing paths.
 

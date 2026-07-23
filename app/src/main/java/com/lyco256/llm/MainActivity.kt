@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -53,6 +54,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -311,7 +313,8 @@ private data class RepositoryUiState(
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository = (application as LikeListManagerApp).container.repository
+    private val appContainer = (application as LikeListManagerApp).container
+    private val repository = appContainer.repository
     private val filters = MutableStateFlow(TweetFilterState())
     private val sort = MutableStateFlow(ClassifiedSortState())
     private val apiSettings = MutableStateFlow(ApiSettings())
@@ -320,6 +323,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val mediaGridSource = repository.mediaGridSource
     private val selectedMediaGridClipId = MutableStateFlow<Long?>(null)
     private val mediaGridCache = MediaGridMetadataCache()
+    internal val mediaGridSessionCoordinator = MediaGridSessionCoordinator(
+        context = application.applicationContext,
+        preparer = appContainer.mediaGridImagePreparer,
+        imageLoader = appContainer.mediaGridImageLoader,
+    ) { assetId, candidate -> repository.recoverMediaGridPreview(assetId, candidate.sourceIdentity) }
+    internal val mediaGridSessionState: StateFlow<MediaGridSessionUiState> = mediaGridSessionCoordinator.state
 
     private val repositoryState = combine(
         repository.clipsWithDetails,
@@ -627,6 +636,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         settingsSnapshot.value = repository.loadSettingsSnapshot()
     }
 
+    override fun onCleared() {
+        mediaGridSessionCoordinator.dispose()
+        super.onCleared()
+    }
+
     companion object {
         fun factory(application: Application): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
@@ -719,6 +733,20 @@ fun MainScreen(
         "classified-card-inactive"
     }
     val mediaGridState by viewModel.classifiedMediaGridState.collectAsState()
+    val mediaGridSessionState by viewModel.mediaGridSessionState.collectAsState()
+    val mediaGridLazyState = rememberSaveable(saver = LazyGridState.Saver) { LazyGridState() }
+    LaunchedEffect(mediaGridState, classifiedMediaGridColumnCount, tab, settingsOpen, classifiedDisplayMode) {
+        viewModel.mediaGridSessionCoordinator.update(
+            mediaGridState,
+            classifiedMediaGridColumnCount,
+            tab == AppTab.Classified && classifiedDisplayMode == ClassifiedDisplayMode.MediaGrid && !settingsOpen,
+        )
+    }
+    LaunchedEffect(tab, settingsOpen, classifiedDisplayMode) {
+        viewModel.mediaGridSessionCoordinator.setVisible(
+            tab == AppTab.Classified && classifiedDisplayMode == ClassifiedDisplayMode.MediaGrid && !settingsOpen,
+        )
+    }
     val classifiedListState = remember(classifiedScrollKey) {
         classifiedListStates.getOrPut(classifiedScrollKey) { LazyListState() }
     }
@@ -840,7 +868,10 @@ fun MainScreen(
             AppTab.Classified -> EnhancedClassifiedScreen(
                 uiState = uiState,
                 mediaGridState = mediaGridState,
+                mediaGridSessionState = mediaGridSessionState,
                 listState = classifiedListState,
+                mediaGridLazyState = mediaGridLazyState,
+                onMediaGridAnchorChange = viewModel.mediaGridSessionCoordinator::saveAnchor,
                 displayMode = classifiedDisplayMode,
                 mediaGridColumnCount = classifiedMediaGridColumnCount,
                 onMediaGridColumnCountChange = { classifiedMediaGridColumnCount = it },

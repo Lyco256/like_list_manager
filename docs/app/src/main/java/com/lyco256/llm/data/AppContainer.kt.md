@@ -6,7 +6,7 @@
 
 ## 2026-07 direct preview ImageLoader
 
-`AppContainer` owns the single media-grid `ImageLoader` and stateless `MediaGridImagePreparer`. The screen-scoped `MediaGridSteadyLoadController` uses them without changing configuration. The loader keeps crossfade disabled, enables `cacheDir/media_grid_coil_cache` with a 128 MiB disk limit, caps memory at `min(totalMem / 8, 64 MiB)`, and uses an IO decoder dispatcher limited to two concurrent decodes. It constructs no retired image-pipeline dependency.
+`AppContainer` owns the single shared media-grid `ImageLoader` and stateless `MediaGridImagePreparer`. The ViewModel-scoped session controller uses them without changing cache configuration. The loader keeps crossfade disabled, enables `cacheDir/media_grid_coil_cache` with a 128 MiB disk limit, caps memory at `min(totalMem / 8, 64 MiB)`, and uses an IO decoder dispatcher limited to four concurrent decodes; normal controller requests remain limited to two. It constructs no retired image-pipeline dependency.
 
 ## 2026-07 persistent JPEG preview
 

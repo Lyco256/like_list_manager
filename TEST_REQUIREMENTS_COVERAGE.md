@@ -1,11 +1,19 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-07-23 第13実装: session persistence（検証済み）
+
+- `MainViewModel`配下の`MediaGridSessionCoordinator`がfilter/sortだけのsession keyで最大2件をLRU保持し、frame・controller・anchorをComposable離脱後も保持する。
+- `MainScreen`上位のsaveable `LazyGridState`を分類済みメディアグリッドへ渡し、タブ・設定・カード表示から戻る際にsession anchorを復元する。
+- 初回warm-upはviewport→下方向1画面→下方向2画面、最大128asset/32MiB、metadata・startup request最大4、2.5秒で通常controllerへ引き継ぐ。通常loopは50ms・request最大2を維持する。
+- 列数変更とsource revision更新はframeをnullにせず、既存frame表示中に新frameを構築してcontrollerを更新する。persistent previewのmemory-cache Ready stateを保持する。
+- Unit Test: `MediaGridSessionCoordinatorTest`、`MediaGridSteadyLoadControllerTest`。安全Integration TestはBuild・UnitTest・Lint・Install・IntegrationTestの全フェーズSuccess。
+
 ## 2026-07-22 第12実装: steady-load controller
 
 | 対象 | 実装・証跡 |
 | --- | --- |
-| Progress中の初期範囲＋前後6行、96件・24MiB上限、永続JPEG warm-up | `MediaGridSteadyLoadController`、`MediaGridSteadyLoadControllerTest` |
-| 同時2件、全terminalまたは3秒でReady、未完了引き継ぎ | controller startup state machine、共有`ImageLoader` |
+| Progress中のviewport＋下方向2画面、128件・32MiB上限、永続JPEG/local warm-up | `MediaGridSteadyLoadController`、`MediaGridSteadyLoadControllerTest` |
+| metadata・startup request最大4件、全terminalまたは2.5秒でReady、未完了引き継ぎ | controller startup state machine、共有`ImageLoader` |
 | viewportはlatest anchor上書きのみ | `TagHierarchyUiV2.snapshotFlow`→`updateViewport`、anchor equality Unit Test |
 | 50ms単一loop、metadata 2・request 1・completion 4・同時2 | controller constants/tick、Unit Test |
 | 表示中＋前後1行、距離cursor、範囲外cancel | `selectMediaGridActiveWindow`、controller cursor/tick、Unit Test |
