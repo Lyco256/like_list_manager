@@ -36,6 +36,11 @@ Current media-grid rendering is owned by `MediaGridSessionCoordinator` under `Ma
 
 # Source Files Guide
 
+## 2026-07-24 cache-hit starvation fix
+
+- `MediaGridSteadyLoadController.kt` owns the unified cache-hit transition, asset-local work reconciliation, bounded metadata retry/failure state, conflated UI publication, and deterministic controller snapshots.
+- `MediaGridSteadyLoadControllerIntegrationTest.kt` is the isolated TEST_HARNESS entry for cache-hit regression, mixed cache/miss, 1,000 assets, metadata failure, and fixed-seed state-machine coverage.
+
 ## 2026-07-24 第16実装: decoupled load pipeline
 
 - `MediaGridSteadyLoadController.kt`は、metadata準備、Bitmap load、Compose publicationを別Channel consumerで処理する。通常loadに50ms tick、固定Delay、sleep、周期pollingはない。

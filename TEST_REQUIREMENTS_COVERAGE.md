@@ -4,6 +4,11 @@
 
 ## 2026-07-24 viewport hot path改善
 
+## 2026-07-24 cache-hit starvation fix coverage
+
+- Isolated controller integration tests use fake metadata and bitmap gateways, state snapshots, and `assertConsistentState()`; they cover cache-hit request suppression, mixed cache/miss, metadata terminal failure, 1,000 cache-hit assets, and a fixed-seed 1,000-operation state machine.
+- The controller keeps distance priority, BitSet pending representation, worker limits, urgent reservation, watermark, candidate order, RGB_565 pack, progress, column changes, and scroll/session retention unchanged.
+
 ## 2026-07-24 ordinal background queues
 
 | 対象 | 実装・証跡 |

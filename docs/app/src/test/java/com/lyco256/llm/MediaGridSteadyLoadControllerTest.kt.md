@@ -1,5 +1,10 @@
 # `MediaGridSteadyLoadControllerTest.kt`
 
+## 2026-07-24 starvation regression coverage
+
+- The isolated controller integration harness uses fake metadata and bitmap boundaries, including cache-hit request counting, metadata retry/failure, controller snapshots, and invariant checks.
+- It covers a 1,000-asset cache-hit run and a fixed-seed 1,000-operation state-machine sequence across viewport changes, pause/resume, invalidation, and completion races.
+
 `MediaGridSteadyLoadController`とsession keyの固定契約をローカルUnit Testで検証します。
 
 - startup状態の順序

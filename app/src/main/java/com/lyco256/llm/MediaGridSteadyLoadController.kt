@@ -23,7 +23,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.channels.ChannelResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -148,6 +147,13 @@ internal class MediaGridOrdinalPendingSet(private val mediaCellCount: Int) {
     fun remove(ordinal: Int) { if (ordinal >= 0) bits.clear(ordinal) }
     fun contains(ordinal: Int): Boolean = ordinal >= 0 && bits.get(ordinal)
     fun clear() { bits.clear() }
+    fun snapshot(): Set<Int> = buildSet {
+        var ordinal = bits.nextSetBit(0)
+        while (ordinal >= 0) {
+            add(ordinal)
+            ordinal = bits.nextSetBit(ordinal + 1)
+        }
+    }
     fun isEmpty(): Boolean = bits.isEmpty
 
     fun peekNearest(centerOrdinal: Int): Int {
@@ -221,7 +227,49 @@ private fun lowerBoundMedia(values: IntArray, target: Int): Int { var l = 0; var
 private fun upperBoundMedia(values: IntArray, target: Int): Int { var l = 0; var h = values.size; while (l < h) { val m = (l + h) ushr 1; if (values[m] <= target) l = m + 1 else h = m }; return l }
 
 private enum class LoadLane { Urgent, Background }
-internal enum class QueueTaskStatus { Unregistered, BackgroundQueued, UrgentQueued, Running, Complete }
+internal enum class QueueTaskStatus { Unregistered, BackgroundQueued, UrgentQueued, Running, Complete, Failed }
+internal interface MediaGridMetadataPreparer {
+    suspend fun prepareCellOrNull(frame: MediaGridFrameData, itemIndex: Int, cellSizePx: Int): MediaGridPreparedImage?
+}
+
+internal interface MediaGridBitmapGateway {
+    fun isCached(candidate: MediaGridPreparedCandidate): Boolean
+    suspend fun load(candidate: MediaGridPreparedCandidate): Boolean
+}
+
+private class CoilMediaGridBitmapGateway(
+    private val context: Context,
+    private val imageLoader: ImageLoader,
+) : MediaGridBitmapGateway {
+    override fun isCached(candidate: MediaGridPreparedCandidate): Boolean =
+        imageLoader.memoryCache?.get(MemoryCache.Key(candidate.cacheKey)) != null
+
+    override suspend fun load(candidate: MediaGridPreparedCandidate): Boolean = suspendCancellableCoroutine { continuation ->
+        val request = buildMediaGridImageRequest(context, candidate).newBuilder().listener(object : ImageRequest.Listener {
+            override fun onSuccess(request: ImageRequest, result: SuccessResult) { if (continuation.isActive) continuation.resume(true) }
+            override fun onError(request: ImageRequest, result: ErrorResult) { if (continuation.isActive) continuation.resume(false) }
+            override fun onCancel(request: ImageRequest) { if (continuation.isActive) continuation.resume(false) }
+        }).build()
+        val disposable: Disposable = imageLoader.enqueue(request)
+        continuation.invokeOnCancellation { disposable.dispose() }
+    }
+}
+
+internal data class MediaGridControllerStateSnapshot(
+    val cells: Map<Long, MediaGridCellLoadState>,
+    val metadata: Map<Long, MediaGridPreparedImage>,
+    val records: Map<Long, AssetQueueRecord>,
+    val metadataPendingOrdinals: Set<Int>,
+    val bitmapPendingOrdinals: Set<Int>,
+    val urgentMetadataAssetIds: List<Long>,
+    val urgentBitmapAssetIds: List<Long>,
+    val metadataRunningAssetIds: Set<Long>,
+    val bitmapRunningAssetIds: Set<Long>,
+    val metadataRunning: Int,
+    val bitmapRunning: Int,
+    val generation: Long,
+    val visibleAssetIds: Set<Long>,
+)
 internal data class AssetQueueRecord(
     var metadataStatus: QueueTaskStatus = QueueTaskStatus.Unregistered,
     var bitmapStatus: QueueTaskStatus = QueueTaskStatus.Unregistered,
@@ -231,7 +279,48 @@ internal data class AssetQueueRecord(
     var sourceIdentity: String? = null,
     var candidateIndex: Int = 0,
     var lastUrgentEpoch: Long = Long.MIN_VALUE,
+    var metadataAttempts: Int = 0,
 )
+
+internal fun mediaGridControllerStateViolations(
+    snapshot: MediaGridControllerStateSnapshot,
+    ordinalByAssetId: Map<Long, Int>,
+): List<String> = buildList {
+    snapshot.records.forEach { (assetId, record) ->
+        val ordinal = ordinalByAssetId[assetId]
+        when (record.metadataStatus) {
+            QueueTaskStatus.BackgroundQueued -> if (ordinal == null || ordinal !in snapshot.metadataPendingOrdinals) add("metadata pending missing: $assetId")
+            QueueTaskStatus.UrgentQueued -> if (snapshot.urgentMetadataAssetIds.count { it == assetId } != 1) add("metadata urgent missing: $assetId")
+            QueueTaskStatus.Running -> if (assetId !in snapshot.metadataRunningAssetIds) add("metadata running missing: $assetId")
+            QueueTaskStatus.Complete -> if (assetId !in snapshot.metadata) add("metadata complete without prepared: $assetId")
+            QueueTaskStatus.Unregistered, QueueTaskStatus.Failed -> Unit
+        }
+        when (record.bitmapStatus) {
+            QueueTaskStatus.BackgroundQueued -> if (ordinal == null || ordinal !in snapshot.bitmapPendingOrdinals) add("bitmap pending missing: $assetId")
+            QueueTaskStatus.UrgentQueued -> if (snapshot.urgentBitmapAssetIds.count { it == assetId } != 1) add("bitmap urgent missing: $assetId")
+            QueueTaskStatus.Running -> if (assetId !in snapshot.bitmapRunningAssetIds) add("bitmap running missing: $assetId")
+            QueueTaskStatus.Complete, QueueTaskStatus.Unregistered, QueueTaskStatus.Failed -> Unit
+        }
+        if (assetId in snapshot.visibleAssetIds && snapshot.cells[assetId]?.status == MediaGridCellLoadStatus.Pending) {
+            val metadataWork = record.metadataStatus in setOf(QueueTaskStatus.BackgroundQueued, QueueTaskStatus.UrgentQueued, QueueTaskStatus.Running)
+            val bitmapWork = record.bitmapStatus in setOf(QueueTaskStatus.BackgroundQueued, QueueTaskStatus.UrgentQueued, QueueTaskStatus.Running)
+            if (assetId !in snapshot.metadata && !metadataWork) add("visible pending without metadata work: $assetId")
+            if (assetId in snapshot.metadata && !bitmapWork) add("visible pending without bitmap work: $assetId")
+        }
+    }
+    if (snapshot.metadataRunning != snapshot.metadataRunningAssetIds.size) add("metadata running count mismatch")
+    if (snapshot.bitmapRunning != snapshot.bitmapRunningAssetIds.size) add("bitmap running count mismatch")
+    if (snapshot.urgentMetadataAssetIds.size != snapshot.urgentMetadataAssetIds.distinct().size) add("duplicate metadata urgent entry")
+    if (snapshot.urgentBitmapAssetIds.size != snapshot.urgentBitmapAssetIds.distinct().size) add("duplicate bitmap urgent entry")
+}
+
+internal fun assertConsistentState(
+    snapshot: MediaGridControllerStateSnapshot,
+    ordinalByAssetId: Map<Long, Int>,
+) {
+    val violations = mediaGridControllerStateViolations(snapshot, ordinalByAssetId)
+    check(violations.isEmpty()) { violations.joinToString("; ") }
+}
 
 internal fun mediaGridQueueTokenIsCurrent(recordToken: Long, taskToken: Long, recordGeneration: Long, taskGeneration: Long): Boolean =
     recordToken == taskToken && recordGeneration == taskGeneration
@@ -257,10 +346,22 @@ private sealed interface LoadEvent {
 internal class MediaGridSteadyLoadController(
     private val context: Context,
     private var frame: MediaGridFrameData,
-    private val preparer: MediaGridImagePreparer,
+    private val preparer: MediaGridMetadataPreparer,
     private val imageLoader: ImageLoader,
     private val onPreviewCandidateError: suspend (Long, MediaGridPreparedCandidate) -> Unit,
+    private val bitmapGateway: MediaGridBitmapGateway = CoilMediaGridBitmapGateway(context, imageLoader),
 ) {
+    constructor(
+        context: Context,
+        frame: MediaGridFrameData,
+        preparer: MediaGridImagePreparer,
+        imageLoader: ImageLoader,
+        onPreviewCandidateError: suspend (Long, MediaGridPreparedCandidate) -> Unit,
+    ) : this(context, frame, object : MediaGridMetadataPreparer {
+        override suspend fun prepareCellOrNull(frame: MediaGridFrameData, itemIndex: Int, cellSizePx: Int): MediaGridPreparedImage =
+            preparer.prepareCell(frame, itemIndex, cellSizePx)
+    }, imageLoader, onPreviewCandidateError)
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val lock = Any()
     private val latestAnchor = AtomicReference<MediaGridViewportAnchor?>()
@@ -273,7 +374,7 @@ internal class MediaGridSteadyLoadController(
     private val bitmapWake = Channel<Unit>(Channel.CONFLATED)
     private val memorySignal = Channel<Unit>(Channel.CONFLATED)
     private val startupSignal = Channel<Unit>(Channel.CONFLATED)
-    private val events = Channel<LoadEvent>(capacity = 256)
+    private val events = Channel<LoadEvent>(capacity = Channel.CONFLATED)
     private val metadata = HashMap<Long, MediaGridPreparedImage>()
     private val states = HashMap<Long, MediaGridCellLoadState>()
     private val queueRecords = HashMap<Long, AssetQueueRecord>()
@@ -282,6 +383,8 @@ internal class MediaGridSteadyLoadController(
     private var metadataBackgroundRunning = 0
     private var bitmapRunning = 0
     private var bitmapBackgroundRunning = 0
+    private val metadataRunningAssets = HashSet<Long>()
+    private val bitmapRunningAssets = HashSet<Long>()
     private var generation = 1L
     private var started = false
     private var paused = false
@@ -329,7 +432,13 @@ internal class MediaGridSteadyLoadController(
     }
 
     fun pause() { paused = true; publicationPaused = true; signalAll() }
-    fun resume() { paused = false; publicationPaused = false; signalAll(); emitEvent(LoadEvent.CacheSignal(0L, generation)) }
+    fun resume() {
+        paused = false
+        publicationPaused = false
+        synchronized(lock) { activeSnapshot?.activeAssetIds?.forEach { reconcileAssetWorkLocked(it, LoadLane.Urgent) } }
+        signalAll()
+        emitEvent(LoadEvent.CacheSignal(0L, generation))
+    }
 
     @Synchronized fun updateFrame(nextFrame: MediaGridFrameData) {
         if (disposed || nextFrame.key.dataKey.filter != frame.key.dataKey.filter || nextFrame.key.dataKey.sort != frame.key.dataKey.sort) return
@@ -350,13 +459,11 @@ internal class MediaGridSteadyLoadController(
                 record.generation = generation
                 record.metadataToken++
                 record.bitmapToken++
+                record.metadataAttempts = 0
                 record.metadataStatus = if (metadata.containsKey(assetId)) QueueTaskStatus.Complete else QueueTaskStatus.Unregistered
                 record.bitmapStatus = QueueTaskStatus.Unregistered
                 if (assetId !in metadata) enqueueMetadataLocked(assetId, ordinalIndex.itemIndexByAssetId.getValue(assetId), LoadLane.Background)
-                else states[assetId]?.let { state ->
-                    val prepared = state.prepared ?: metadata[assetId]
-                    if (prepared != null && state.status == MediaGridCellLoadStatus.Pending) addBitmapTaskLocked(assetId, prepared, state.candidateIndex, LoadLane.Background)
-                }
+                else if (assetId in states || assetId in metadata) reconcileAssetWorkLocked(assetId, LoadLane.Background)
             }
             startupPending = 0
             startupReady = false
@@ -370,7 +477,10 @@ internal class MediaGridSteadyLoadController(
 
     fun invalidate(assetId: Long) {
         if (disposed || assetId !in ordinalIndex.mediaOrdinalByAssetId) return
-        synchronized(lock) { invalidated += assetId }
+        synchronized(lock) {
+            invalidated += assetId
+            applyInvalidationsLocked()
+        }
         signalAll()
     }
 
@@ -439,20 +549,36 @@ internal class MediaGridSteadyLoadController(
                 if (metadataWake.receiveCatching().isClosed) return
                 continue
             }
-            val prepared = runCatching { preparer.prepareCell(frame, task.itemIndex, latestAnchor.get()?.cellSizePx ?: 256) }.getOrNull()
+            val prepared = try {
+                preparer.prepareCellOrNull(frame, task.itemIndex, latestAnchor.get()?.cellSizePx ?: 256)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                null
+            }
             synchronized(lock) {
                 metadataRunning--
                 if (task.lane == LoadLane.Background) metadataBackgroundRunning--
+                metadataRunningAssets.remove(task.assetId)
                 val record = queueRecords[task.assetId]
-                if (record?.metadataToken == task.token && record.generation == task.generation) {
+                if (prepared == null) {
+                    if (record != null && record.metadataToken == task.token && record.generation == task.generation) {
+                        if (record.metadataAttempts < 3) {
+                            record.metadataStatus = QueueTaskStatus.Unregistered
+                            enqueueMetadataLocked(task.assetId, task.itemIndex, task.lane)
+                        } else {
+                            record.metadataStatus = QueueTaskStatus.Failed
+                            states[task.assetId] = MediaGridCellLoadState(MediaGridCellLoadStatus.Failed)
+                        }
+                    }
+                } else if (prepared.key == frame.key && task.generation == generation && task.assetId in ordinalIndex.mediaOrdinalByAssetId && record?.metadataToken == task.token) {
                     record.metadataStatus = QueueTaskStatus.Complete
-                }
-                    if (prepared != null && prepared.key == frame.key && task.generation == generation && task.assetId in ordinalIndex.mediaOrdinalByAssetId && record?.metadataToken == task.token) {
+                    record.metadataAttempts = 0
                     metadata[task.assetId] = prepared
                     states[task.assetId] = if (prepared.candidates.isEmpty()) MediaGridCellLoadState(MediaGridCellLoadStatus.Failed, prepared) else MediaGridCellLoadState(prepared = prepared)
                     if (startupAssets.remove(task.assetId)) startupPending--
                     if (startupPending == 0) { startupReady = true; startupSignal.trySend(Unit) }
-                    queueFirstBitmapLocked(task.assetId, prepared, task.lane)
+                    reconcileAssetWorkLocked(task.assetId, task.lane)
                 }
             }
             emitEvent(LoadEvent.State(task.assetId, task.generation)); signalAll()
@@ -471,16 +597,16 @@ internal class MediaGridSteadyLoadController(
             synchronized(lock) {
                 bitmapRunning--
                 if (task.lane == LoadLane.Background) bitmapBackgroundRunning--
+                bitmapRunningAssets.remove(task.assetId)
                 val record = queueRecords[task.assetId]
                 if (record?.bitmapToken == task.token && record.generation == task.generation) {
                     record.bitmapStatus = QueueTaskStatus.Complete
                 }
                 if (task.generation == generation && task.assetId in ordinalIndex.mediaOrdinalByAssetId && record?.bitmapToken == task.token) {
-                    val old = states[task.assetId]
-                    if (success && candidate != null && isCached(candidate)) {
-                        states[task.assetId] = old?.copy(status = MediaGridCellLoadStatus.Ready, prepared = task.prepared, candidateIndex = task.candidateIndex)
-                            ?: MediaGridCellLoadState(MediaGridCellLoadStatus.Ready, task.prepared, task.candidateIndex)
-                    } else {
+                    val cacheReady = success && candidate != null && markCachedReadyLocked(
+                        task.assetId, task.prepared, task.candidateIndex, task.token, task.generation,
+                    )
+                    if (!cacheReady) {
                         if (candidate != null && candidate.kind in setOf(MediaGridImageSourceKind.Rgb565Pack, MediaGridImageSourceKind.PersistentPreview)) {
                             scope.launch { onPreviewCandidateError(task.assetId, candidate) }
                         }
@@ -502,13 +628,6 @@ internal class MediaGridSteadyLoadController(
 
     private suspend fun uiPublicationConsumer() {
         for (event in events) {
-            val batch = ArrayList<LoadEvent>(4)
-            batch += event
-            while (true) {
-                val next: ChannelResult<LoadEvent> = events.tryReceive()
-                if (next.isFailure) break
-                next.getOrNull()?.let(batch::add)
-            }
             if (!publicationPaused && !disposed) {
                 val visible = activeSnapshot?.takeIf { it.generation == generation }?.visibleAssetIds ?: longArrayOf()
                 val cells: Map<Long, MediaGridCellLoadState> = synchronized(lock) {
@@ -530,22 +649,39 @@ internal class MediaGridSteadyLoadController(
         val urgentAvailable = urgentMetadataQueue.isNotEmpty()
         val canUseUrgent = urgentAvailable && metadataRunning - metadataBackgroundRunning < MEDIA_GRID_URGENT_RESERVED_CONCURRENCY
         if (canUseUrgent) {
-            val task = urgentMetadataQueue.removeFirst()
-            queueRecords[task.assetId]?.metadataStatus = QueueTaskStatus.Running
+            val task = urgentMetadataQueue.first
+            val record = queueRecords[task.assetId]
+            if (task.assetId in metadataRunningAssets) return@synchronized null
+            if (record == null || !mediaGridQueueTokenIsCurrent(record.metadataToken, task.token, record.generation, task.generation) || record.metadataStatus != QueueTaskStatus.UrgentQueued) {
+                urgentMetadataQueue.removeFirst()
+                if (record?.metadataStatus == QueueTaskStatus.UrgentQueued && record.generation == generation) enqueueMetadataLocked(task.assetId, task.itemIndex, LoadLane.Urgent)
+                return@synchronized null
+            }
+            urgentMetadataQueue.removeFirst()
+            record.metadataStatus = QueueTaskStatus.Running
+            record.metadataAttempts++
+            metadataRunningAssets += task.assetId
             metadataRunning++
             return@synchronized task
         }
         if (metadataBackgroundRunning >= MEDIA_GRID_BACKGROUND_MAX_CONCURRENCY && urgentAvailable) return@synchronized null
         val center = activeSnapshot?.centerMediaOrdinal ?: 0
         while (!metadataPending.isEmpty()) {
-            val ordinal = metadataPending.pollNearest(center)
+            val ordinal = metadataPending.peekNearest(center)
             if (ordinal < 0) break
-            val assetId = ordinalIndex.assetIdByMediaOrdinal.getOrNull(ordinal) ?: continue
-            val itemIndex = ordinalIndex.itemIndexByMediaOrdinal.getOrNull(ordinal) ?: continue
-            val record = queueRecords[assetId] ?: continue
-            if (record.metadataStatus != QueueTaskStatus.BackgroundQueued) continue
+            val assetId = ordinalIndex.assetIdByMediaOrdinal.getOrNull(ordinal)
+            if (assetId == null) { metadataPending.remove(ordinal); continue }
+            val itemIndex = ordinalIndex.itemIndexByMediaOrdinal.getOrNull(ordinal)
+            if (itemIndex == null) { metadataPending.remove(ordinal); continue }
+            val record = queueRecords[assetId]
+            if (record == null) { metadataPending.remove(ordinal); continue }
+            if (assetId in metadataRunningAssets) { metadataPending.remove(ordinal); return@synchronized null }
+            if (record.metadataStatus != QueueTaskStatus.BackgroundQueued) { metadataPending.remove(ordinal); continue }
             val task = LoadTask(assetId, itemIndex, LoadLane.Background, generation, record.metadataToken)
+            metadataPending.remove(ordinal)
+            record.metadataAttempts++
             record.metadataStatus = QueueTaskStatus.Running
+            metadataRunningAssets += assetId
             metadataRunning++; metadataBackgroundRunning++
             return@synchronized task
         }
@@ -557,18 +693,26 @@ internal class MediaGridSteadyLoadController(
         discardStaleUrgentBitmapLocked()
         val urgentAvailable = urgentBitmapQueue.isNotEmpty()
         if (urgentAvailable && bitmapRunning - bitmapBackgroundRunning < MEDIA_GRID_URGENT_RESERVED_CONCURRENCY) {
-            val task = urgentBitmapQueue.removeFirst()
+            val task = urgentBitmapQueue.first
             val record = queueRecords[task.assetId]
             val candidate = task.prepared.candidates.getOrNull(task.candidateIndex)
-            if (record != null && candidate != null && isCached(candidate)) {
-                record.bitmapStatus = QueueTaskStatus.Complete
-                states[task.assetId] = MediaGridCellLoadState(MediaGridCellLoadStatus.Ready, task.prepared, task.candidateIndex)
-                emitEvent(LoadEvent.State(task.assetId, generation))
+            if (task.assetId in bitmapRunningAssets) return@synchronized null
+            if (record == null || candidate == null || !mediaGridQueueTokenIsCurrent(record.bitmapToken, task.token, record.generation, task.generation) || record.bitmapStatus != QueueTaskStatus.UrgentQueued) {
+                urgentBitmapQueue.removeFirst()
+                if (record?.bitmapStatus == QueueTaskStatus.UrgentQueued && record.generation == generation) reconcileAssetWorkLocked(task.assetId, LoadLane.Urgent)
                 bitmapWake.trySend(Unit)
                 return@synchronized null
             }
+            if (isCached(candidate)) {
+                urgentBitmapQueue.removeFirst()
+                markCachedReadyLocked(task.assetId, task.prepared, task.candidateIndex, task.token, task.generation)
+                bitmapWake.trySend(Unit)
+                return@synchronized null
+            }
+            urgentBitmapQueue.removeFirst()
             record?.bitmapStatus = QueueTaskStatus.Running
             bitmapRunning++
+            bitmapRunningAssets += task.assetId
             return@synchronized task
         }
         val maxBackground = if (paused) MEDIA_GRID_HIDDEN_BITMAP_MAX_CONCURRENCY else MEDIA_GRID_BACKGROUND_MAX_CONCURRENCY
@@ -581,24 +725,24 @@ internal class MediaGridSteadyLoadController(
             if (assetId == null) { bitmapPending.remove(ordinal); continue }
             val record = queueRecords[assetId]
             if (record == null) { bitmapPending.remove(ordinal); continue }
+            if (assetId in bitmapRunningAssets) return@synchronized null
             val prepared = metadata[assetId]
             if (prepared == null) { bitmapPending.remove(ordinal); continue }
             val candidate = prepared.candidates.getOrNull(record.candidateIndex)
             if (record.bitmapStatus != QueueTaskStatus.BackgroundQueued || candidate == null || candidate.sourceIdentity != record.sourceIdentity) {
                 bitmapPending.remove(ordinal)
+                if (record.bitmapStatus == QueueTaskStatus.BackgroundQueued) bitmapPending.add(ordinal)
                 continue
             }
             if (isCached(candidate)) {
-                bitmapPending.remove(ordinal)
-                record.bitmapStatus = QueueTaskStatus.Complete
-                states[assetId] = MediaGridCellLoadState(MediaGridCellLoadStatus.Ready, prepared, record.candidateIndex)
-                emitEvent(LoadEvent.State(assetId, generation))
+                markCachedReadyLocked(assetId, prepared, record.candidateIndex, record.bitmapToken, generation)
                 continue
             }
             if (!mediaGridBackgroundBitmapAllowed(memoryUsed(), memoryMax(), mediaGridEstimatedBitmapBytes(candidate))) return@synchronized null
-            bitmapPending.pollNearest(center)
+            bitmapPending.remove(ordinal)
             record.bitmapStatus = QueueTaskStatus.Running
             bitmapRunning++; bitmapBackgroundRunning++
+            bitmapRunningAssets += assetId
             return@synchronized BitmapTask(assetId, prepared, record.candidateIndex, LoadLane.Background, generation, record.bitmapToken)
         }
         null
@@ -619,29 +763,92 @@ internal class MediaGridSteadyLoadController(
             val record = queueRecords[task.assetId]
             if (record != null && mediaGridQueueTokenIsCurrent(record.bitmapToken, task.token, record.generation, task.generation) && record.bitmapStatus == QueueTaskStatus.UrgentQueued) return
             urgentBitmapQueue.removeFirst()
+            if (record?.bitmapStatus == QueueTaskStatus.UrgentQueued && record.generation == generation) {
+                reconcileAssetWorkLocked(task.assetId, LoadLane.Urgent)
+            }
         }
     }
 
     private fun queueFirstBitmapLocked(assetId: Long, prepared: MediaGridPreparedImage, originalLane: LoadLane) {
-        val candidateIndex = prepared.candidates.indexOfFirst { it.kind in setOf(MediaGridImageSourceKind.Rgb565Pack, MediaGridImageSourceKind.PersistentPreview, MediaGridImageSourceKind.Local) }
-        if (candidateIndex >= 0 && states[assetId]?.status != MediaGridCellLoadStatus.Failed && !isCached(prepared.candidates[candidateIndex])) {
-            val urgent = activeSnapshot?.isActive(assetId) == true
-            addBitmapTaskLocked(assetId, prepared, candidateIndex, if (urgent) LoadLane.Urgent else originalLane)
-        }
+        reconcileAssetWorkLocked(assetId, originalLane)
     }
 
     private fun enqueueVisiblePreparedLocked(snapshot: MediaGridActiveWindowSnapshot) {
         snapshot.activeAssetIds.forEach { assetId ->
             val state = states[assetId] ?: return@forEach
             val prepared = state.prepared ?: metadata[assetId] ?: return@forEach
-            if (state.status == MediaGridCellLoadStatus.Ready) {
-                val candidate = prepared.candidates.getOrNull(state.candidateIndex)
-                if (candidate != null && !isCached(candidate)) states[assetId] = state.copy(status = MediaGridCellLoadStatus.Pending)
+            reconcileAssetWorkLocked(assetId, LoadLane.Urgent)
+        }
+    }
+
+    /** Completes a bitmap without starting an ImageRequest. Caller must hold lock. */
+    private fun markCachedReadyLocked(
+        assetId: Long,
+        prepared: MediaGridPreparedImage,
+        candidateIndex: Int,
+        token: Long,
+        taskGeneration: Long,
+    ): Boolean {
+        val record = queueRecords[assetId] ?: return false
+        val candidate = prepared.candidates.getOrNull(candidateIndex) ?: return false
+        if (taskGeneration != generation || record.generation != taskGeneration || record.bitmapToken != token || !isCached(candidate)) return false
+        record.candidateIndex = candidateIndex
+        record.sourceIdentity = candidate.sourceIdentity
+        record.bitmapStatus = QueueTaskStatus.Complete
+        ordinalIndex.mediaOrdinalByAssetId[assetId]?.let { bitmapPending.remove(it) }
+        states[assetId] = MediaGridCellLoadState(MediaGridCellLoadStatus.Ready, prepared, candidateIndex)
+        emitEvent(LoadEvent.CacheSignal(assetId, taskGeneration))
+        return true
+    }
+
+    /** Restores exactly the work required by one asset without scanning all assets. Caller must hold lock. */
+    private fun reconcileAssetWorkLocked(assetId: Long, preferredLane: LoadLane = LoadLane.Background) {
+        val record = queueRecords[assetId] ?: return
+        if (record.generation != generation) return
+        if (record.metadataStatus == QueueTaskStatus.UrgentQueued && urgentMetadataQueue.none { it.assetId == assetId && it.token == record.metadataToken && it.generation == generation }) {
+            record.metadataStatus = QueueTaskStatus.Unregistered
+        }
+        if (record.bitmapStatus == QueueTaskStatus.UrgentQueued && urgentBitmapQueue.none { it.assetId == assetId && it.token == record.bitmapToken && it.generation == generation }) {
+            record.bitmapStatus = QueueTaskStatus.Unregistered
+        }
+        val prepared = metadata[assetId]
+        if (prepared == null) {
+            if (record.metadataStatus == QueueTaskStatus.Failed) {
+                states[assetId] = MediaGridCellLoadState(MediaGridCellLoadStatus.Failed)
+                return
             }
-            if (states[assetId]?.status != MediaGridCellLoadStatus.Pending) return@forEach
-            val candidateIndex = states[assetId]?.candidateIndex ?: 0
-            if (prepared.candidates.getOrNull(candidateIndex) == null) return@forEach
-            if (!isCached(prepared.candidates[candidateIndex])) addBitmapTaskLocked(assetId, prepared, candidateIndex, LoadLane.Urgent)
+            val itemIndex = ordinalIndex.itemIndexByAssetId[assetId] ?: return
+            if (record.metadataStatus !in setOf(QueueTaskStatus.Running, QueueTaskStatus.BackgroundQueued, QueueTaskStatus.UrgentQueued)) {
+                enqueueMetadataLocked(assetId, itemIndex, if (activeSnapshot?.isActive(assetId) == true) LoadLane.Urgent else preferredLane)
+            }
+            return
+        }
+        if (prepared.candidates.isEmpty()) {
+            record.bitmapStatus = QueueTaskStatus.Complete
+            states[assetId] = MediaGridCellLoadState(MediaGridCellLoadStatus.Failed, prepared)
+            return
+        }
+        val firstLocalIndex = prepared.candidates.indexOfFirst(::isLocalCandidate)
+        val currentIndex = states[assetId]?.candidateIndex ?: if (record.bitmapStatus == QueueTaskStatus.Unregistered) firstLocalIndex else record.candidateIndex
+        val candidateIndex = currentIndex.coerceIn(0, prepared.candidates.lastIndex)
+        val candidate = prepared.candidates[candidateIndex]
+        record.candidateIndex = candidateIndex
+        record.sourceIdentity = candidate.sourceIdentity
+        if (isCached(candidate)) {
+            record.bitmapToken++
+            markCachedReadyLocked(assetId, prepared, candidateIndex, record.bitmapToken, generation)
+            return
+        }
+        if (states[assetId]?.status == MediaGridCellLoadStatus.Ready) {
+            states[assetId] = states[assetId]!!.copy(status = MediaGridCellLoadStatus.Pending, prepared = prepared, candidateIndex = candidateIndex)
+        } else if (states[assetId] == null || states[assetId]?.prepared == null) {
+            states[assetId] = MediaGridCellLoadState(MediaGridCellLoadStatus.Pending, prepared, candidateIndex)
+        }
+        val active = activeSnapshot?.isActive(assetId) == true
+        val lane = if (active) LoadLane.Urgent else preferredLane
+        if (!isLocalCandidate(candidate) && !active) return
+        if (!mediaGridBitmapQueueEntryMatches(record.bitmapStatus, record.candidateIndex, record.sourceIdentity, candidateIndex, candidate.sourceIdentity)) {
+            addBitmapTaskLocked(assetId, prepared, candidateIndex, lane)
         }
     }
 
@@ -694,6 +901,7 @@ internal class MediaGridSteadyLoadController(
             val record = queueRecords.getOrPut(assetId) { AssetQueueRecord(generation = generation) }
             record.metadataToken++
             record.bitmapToken++
+            record.metadataAttempts = 0
             record.metadataStatus = QueueTaskStatus.Unregistered
             record.bitmapStatus = QueueTaskStatus.Unregistered
             ordinalIndex.itemIndexByAssetId[assetId]?.let { itemIndex ->
@@ -733,20 +941,30 @@ internal class MediaGridSteadyLoadController(
     }
 
     private fun isLocalCandidate(candidate: MediaGridPreparedCandidate): Boolean = candidate.kind in setOf(MediaGridImageSourceKind.Rgb565Pack, MediaGridImageSourceKind.PersistentPreview, MediaGridImageSourceKind.Local)
-    private fun isCached(candidate: MediaGridPreparedCandidate): Boolean = imageLoader.memoryCache?.get(MemoryCache.Key(candidate.cacheKey)) != null
+    private fun isCached(candidate: MediaGridPreparedCandidate): Boolean = bitmapGateway.isCached(candidate)
     private fun estimatedBytes(task: BitmapTask): Long = task.prepared.candidates.getOrNull(task.candidateIndex)?.let { mediaGridEstimatedBitmapBytes(it) } ?: 0L
     private fun memoryUsed(): Int = imageLoader.memoryCache?.size ?: 0
     private fun memoryMax(): Int = imageLoader.memoryCache?.maxSize ?: 0
     private fun memoryWatermarkOpen(): Boolean = mediaGridMemoryWatermarkAllowsResume(memoryUsed(), memoryMax())
 
-    private suspend fun loadCandidate(candidate: MediaGridPreparedCandidate): Boolean = suspendCancellableCoroutine { continuation ->
-        val request = buildMediaGridImageRequest(context, candidate).newBuilder().listener(object : ImageRequest.Listener {
-            override fun onSuccess(request: ImageRequest, result: SuccessResult) { if (continuation.isActive) continuation.resume(true) }
-            override fun onError(request: ImageRequest, result: ErrorResult) { if (continuation.isActive) continuation.resume(false) }
-            override fun onCancel(request: ImageRequest) { if (continuation.isActive) continuation.resume(false) }
-        }).build()
-        val disposable: Disposable = imageLoader.enqueue(request)
-        continuation.invokeOnCancellation { disposable.dispose() }
+    private suspend fun loadCandidate(candidate: MediaGridPreparedCandidate): Boolean = bitmapGateway.load(candidate)
+
+    internal fun stateSnapshot(): MediaGridControllerStateSnapshot = synchronized(lock) {
+        MediaGridControllerStateSnapshot(
+            cells = states.toMap(),
+            metadata = metadata.toMap(),
+            records = queueRecords.mapValues { (_, value) -> value.copy() },
+            metadataPendingOrdinals = metadataPending.snapshot(),
+            bitmapPendingOrdinals = bitmapPending.snapshot(),
+            urgentMetadataAssetIds = urgentMetadataQueue.map { it.assetId },
+            urgentBitmapAssetIds = urgentBitmapQueue.map { it.assetId },
+            metadataRunningAssetIds = metadataRunningAssets.toSet(),
+            bitmapRunningAssetIds = bitmapRunningAssets.toSet(),
+            metadataRunning = metadataRunning,
+            bitmapRunning = bitmapRunning,
+            generation = generation,
+            visibleAssetIds = activeSnapshot?.visibleAssetIds?.toSet() ?: emptySet(),
+        )
     }
 
     private fun emitEvent(event: LoadEvent) { if (!disposed) events.trySend(event) }
