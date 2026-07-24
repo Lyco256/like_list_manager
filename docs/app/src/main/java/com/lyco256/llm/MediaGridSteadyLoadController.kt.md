@@ -15,6 +15,15 @@ active bitmap windowは表示中と前後1行です。範囲外の未完了要�
 通常表示後は50ms周期・同時request最大2件を維持します。列数変更やsource refreshではcontrollerを再生成せずframeを更新し、asset単位のload stateを引き継ぎます。persistent previewがmemory cacheでReadyの場合はReadyを維持し、それ以外だけPendingへ戻します。preview通知では該当assetだけをPendingへ戻します。永続JPEGの失敗は既存recovery gateを通じてRepositoryへ通知します。
 ## 2026-07-24 第16実装: decoupled load and UI publication pipelines
 
+## 2026-07-24 viewport hot path改善
+
+- `updateViewport()`はrender keyとanchor内容の比較、最新anchorのCAS上書き、epoch増加、conflated signal通知だけを行う。lock、queue走査、active window生成、request開始、event/UI公開は行わない。
+- 専用anchor consumerが最新epochだけを読み、lock外で`MediaGridActiveWindowSnapshot`をepochごとに一度生成する。snapshotはvisible順序、visible＋前後1行のactive順序、O(1) membership、frame generation、render keyを保持する。
+- urgent判定・visible task登録・UI publicationは同じsnapshotを参照し、viewportやframe全体を再走査しない。anchor更新だけではCompose stateを更新せず、snapshot公開後にworkerをwakeする。
+- assetごとのqueue recordがmetadata/Bitmapの状態、token、generation、source identity、candidate indexを保持する。重複登録はrecordで抑止し、古いqueue entryはtoken不一致でO(1) skipする。urgent昇格はactive snapshotのassetだけを確認し、background queueを走査・削除しない。
+- RGB_565 pack候補は`width * height * 2`、その他候補は`width * height * 4`をLongで見積もる。worker並列上限、background選択方式、候補順、画面外処理、UI batch、Progress、session保持は変更しない。
+- `MediaGridSteadyLoadControllerTest`でsnapshot順序・membership・容量見積もりを確認し、既存のCompose/隔離実機テストで高速viewport、画面外完了、cache再表示、fallback、Progress、列数変更、画面復帰、scroll保持を回帰確認する。
+
 - `MediaGridSteadyLoadController`は、metadata queue/worker、Bitmap queue/worker、UI publication consumerを別consumerとして所有する。event producerはCompose stateを直接変更しない。
 - throughput用の50ms tick、固定delay、sleep、通常loadの周期pollingは使用しない。queueが空のworkerだけがChannel receiveでsuspendし、permitが空くと次taskを開始する。
 - metadataとBitmapは総数4、background最大2、urgent予約最大2。urgent不在時だけbackgroundが予約枠を借りられ、開始済みtaskはanchor変更でcancelしない。
