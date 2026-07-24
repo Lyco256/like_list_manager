@@ -4,6 +4,11 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 
 ## 2026-07-22 第11実装: retired image pipeline removal
 
+## 2026-07-24 ordinal background queues
+
+- `MediaGridSteadyLoadController.kt`はframeごとの`MediaGridOrdinalIndex`と、metadata／Bitmapを分離したordinal BitSet pendingを使用する。background選択は最新snapshotの`centerMediaOrdinal`からnearest ordinalを取得し、urgent queueはFIFO `ArrayDeque`で保持する。
+- task objectはbackground pending全件には保持せず、ordinalをworkerへ渡す時だけ構築する。watermark判定前のBitmap pending保持、memory cache hitのrequest省略、anchor変更時の未開始task保持、frame/invalidationのgeneration・token無効化を行う。
+
 - 現行のメディアグリッド画像経路は`MediaGridDirectPreview.kt`、`MediaGridPersistentPreviewStore.kt`、`MediaGridPreviewWork.kt`、`MediaGridPreviewWorker.kt`、`TagHierarchyUiV2.kt`だけで構成する。
 - `AppContainer.kt`は共有ImageLoader、`MediaGridImagePreparer`、`WorkManagerMediaGridPreviewEnqueuer`を構築し、画面は`MediaGridPreviewPreloader`を所有する。
 - 廃止済みgenerator/store/state/coordinatorのsource、互換wrapper、fake、fixture、専用testは存在しない。端末に残る廃止済みcacheは参照もcleanupもせず、Androidの通常管理に任せる。

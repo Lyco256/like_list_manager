@@ -14,6 +14,12 @@
 実request、Compose表示、スクロール、pause/resume、候補fallback、preview回復は既存の隔離Integration Test群とともに安全スクリプトから検証します。
 ## 2026-07-24 第16実装
 
+## 2026-07-24 ordinal background queues
+
+- media ordinal indexのmedia-cell対応、asset／ordinal／item indexの双方向参照、anchor snapshotのcenter ordinalを確認する。
+- BitSet pending setのadd/remove/clear、nearest順、同距離の下方向優先、watermark前のpending保持を確認する。
+- controllerの既存固定契約に加え、urgent FIFO、invalidation、frame更新、cache hit、fallback、画面外task継続は隔離Integration Test群と静的確認で回帰検証する。
+
 - 固定tick/request-per-tick前提を削除し、metadata/Bitmapの総並列数、background上限、urgent予約、hidden時Bitmap上限を固定契約として確認する。
 - memory cache 75% high watermarkと65%未満の再開境界を純粋関数で確認する。
 - 既存の初回warmup範囲、前後1行active window、frame key、scroll anchor、load state retentionの回帰確認を維持する。
