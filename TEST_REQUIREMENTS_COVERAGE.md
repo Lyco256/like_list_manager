@@ -1,5 +1,22 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-07-24 第16実装: decoupled load and UI publication pipeline
+
+| 対象 | 実装・証跡 |
+| --- | --- |
+| metadata/Bitmap/UI publicationのqueue・consumer分離 | `MediaGridSteadyLoadController`、controller unit test、既存Compose grid tests |
+| tick・固定Delay・sleep・polling除去、空きworker即時開始 | Channel wake、worker pool、`run-safe-debug-check.cmd` Build/UnitTest/Lint Success |
+| 総数4、background2、urgent予約2、hidden Bitmap1 | controller constants、`MediaGridSteadyLoadControllerTest` |
+| viewport priority、開始済みlocal task継続、frame全体metadata | latest anchor、active-window/scroll integration regression、controller source contract |
+| 75%停止・65%signal再開 | `mediaGridBackgroundBitmapAllowed`、`mediaGridMemoryWatermarkAllowsResume` unit test |
+| visible/前後1行urgent、background network禁止、offscreen completion非公開 | controller lane selection、existing grid placeholder/error and scroll integration tests |
+| session/frame/Progress/列数/scroll/RGB565/JPEG/DB維持 | existing session, Compose, RGB565, repository integration tests; no changes to those paths |
+
+検証結果:
+
+- `scripts\\run-safe-debug-check.cmd`: `Preflight / Build / UnitTest / Lint / Success`
+- 隔離実機統合テストと本番安全上書きは、コード・文書更新後に実行する。
+
 ## 2026-07-23 第14実装: RGB_565 fixed-slot pack
 
 | 対象 | 実装・証跡 |

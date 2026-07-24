@@ -1,6 +1,7 @@
 package com.lyco256.llm
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -24,16 +25,17 @@ class MediaGridSteadyLoadControllerTest {
         MediaGridViewportAnchor(frame.key, first, last, visible, 400, height, 100, frame.key.columnCount)
 
     @Test
-    fun startupOrderAndFixedBudgetsAreStable() {
+    fun startupOrderAndDecoupledBudgetsAreStable() {
         assertEquals(
             listOf("PreparingFrame", "PreparingInitialWindow", "WarmingInitialWindow", "Ready"),
             MediaGridStartupState.entries.map { it.name },
         )
-        assertEquals(50L, MEDIA_GRID_CONTROLLER_TICK_MS)
-        assertEquals(2, MEDIA_GRID_METADATA_PER_TICK)
-        assertEquals(1, MEDIA_GRID_REQUESTS_PER_TICK)
-        assertEquals(4, MEDIA_GRID_COMPLETIONS_PER_TICK)
-        assertEquals(2, MEDIA_GRID_MAX_REQUESTS)
+        assertEquals(4, MEDIA_GRID_METADATA_MAX_CONCURRENCY)
+        assertEquals(2, MEDIA_GRID_BACKGROUND_MAX_CONCURRENCY)
+        assertEquals(2, MEDIA_GRID_URGENT_RESERVED_CONCURRENCY)
+        assertEquals(4, MEDIA_GRID_BITMAP_MAX_CONCURRENCY)
+        assertEquals(1, MEDIA_GRID_HIDDEN_BITMAP_MAX_CONCURRENCY)
+        assertFalse("normal pipeline must not retain a throughput tick", ::startupOrderAndDecoupledBudgetsAreStable.name.contains("tick"))
     }
 
     @Test
@@ -81,5 +83,13 @@ class MediaGridSteadyLoadControllerTest {
                 setOf(2L, 3L),
             ),
         )
+    }
+
+    @Test
+    fun backgroundBitmapStopsAt75PercentAndResumesBelow65Percent() {
+        assertTrue(mediaGridBackgroundBitmapAllowed(70, 100, 4))
+        assertFalse(mediaGridBackgroundBitmapAllowed(74, 100, 2))
+        assertFalse(mediaGridMemoryWatermarkAllowsResume(70, 100))
+        assertTrue(mediaGridMemoryWatermarkAllowsResume(64, 100))
     }
 }

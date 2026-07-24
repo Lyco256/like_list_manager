@@ -31,6 +31,14 @@ Current media-grid rendering is owned by `MediaGridSessionCoordinator` under `Ma
 
 # Source Files Guide
 
+## 2026-07-24 第16実装: decoupled load pipeline
+
+- `MediaGridSteadyLoadController.kt`は、metadata準備、Bitmap load、Compose publicationを別Channel consumerで処理する。通常loadに50ms tick、固定Delay、sleep、周期pollingはない。
+- metadata/Bitmapは総数4、background最大2、urgent予約最大2。viewportは最新anchorと未開始taskの優先順位だけを更新し、開始済みlocal taskを画面外移動でcancelしない。
+- backgroundはframe全体metadataとlocal候補のBitmap preloadを継続し、Coil memory cache 75%で停止、65%未満signalで再開する。visible/前後1行はurgent、backgroundではnetwork候補を開始しない。
+- UI publication consumerはevent到着までsuspendし、到着済みeventを1 batchでMainへ公開する。offscreen completionはCompose stateへ追加しない。
+- 第16実装のunit契約は`MediaGridSteadyLoadControllerTest.kt`、既存の高速スクロール・画面復帰・列数変更・Progress・RGB565/JPEG回帰は`MainActivityComposeTest.kt`、`UiStateRenderingTest.kt`、`MediaGridRgb565IntegrationTest.kt`で確認する。
+
 ## 2026-07 keyed frame and direct preview viewport path
 
 ## 2026-07-22 steady-load controller

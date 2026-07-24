@@ -13,3 +13,12 @@ Ready後は50ms周期の単一loopだけが最新viewport anchorを参照しま�
 active bitmap windowは表示中と前後1行です。範囲外の未完了要求はcancelし、UI用load stateも破棄します。戻り表示ではframe内metadataからPendingを再作成し、memory cacheが残っていればReady、missなら固定loopで再読み込みします。セルはPending/Loading中にPlaceholderを描画し、controllerがmemory cacheへの格納を確認したReady候補だけを同一request data/cache keyで表示します。controllerはBitmap、Drawable、Imageを保持しません。
 
 通常表示後は50ms周期・同時request最大2件を維持します。列数変更やsource refreshではcontrollerを再生成せずframeを更新し、asset単位のload stateを引き継ぎます。persistent previewがmemory cacheでReadyの場合はReadyを維持し、それ以外だけPendingへ戻します。preview通知では該当assetだけをPendingへ戻します。永続JPEGの失敗は既存recovery gateを通じてRepositoryへ通知します。
+## 2026-07-24 第16実装: decoupled load and UI publication pipelines
+
+- `MediaGridSteadyLoadController`は、metadata queue/worker、Bitmap queue/worker、UI publication consumerを別consumerとして所有する。event producerはCompose stateを直接変更しない。
+- throughput用の50ms tick、固定delay、sleep、通常loadの周期pollingは使用しない。queueが空のworkerだけがChannel receiveでsuspendし、permitが空くと次taskを開始する。
+- metadataとBitmapは総数4、background最大2、urgent予約最大2。urgent不在時だけbackgroundが予約枠を借りられ、開始済みtaskはanchor変更でcancelしない。
+- viewportは最新anchorとpriority epochを更新し、表示/前後1行の未開始taskをurgentとして選ぶ。backgroundではRGB565/JPEG/localのみを開始し、URL候補は表示対象へ入った時に進める。
+- frame全体のmetadata queueを空きworkerで継続し、画面非表示中はmetadata最大2、Bitmap background最大1、UI publicationはpauseする。session coordinatorのframe・controller・scroll保持は変更しない。
+- Coil memory cacheの75%をbackground preload high watermark、65%未満を再開signalとする。Bitmap本体をcontrollerへ保持せず、cache missはPreparedへ戻す。
+- 初回Progressの2.5秒表示上限、RGB565 pack、JPEG fallback、DB、元画像、列数変更、Macrobenchmarkは変更しない。

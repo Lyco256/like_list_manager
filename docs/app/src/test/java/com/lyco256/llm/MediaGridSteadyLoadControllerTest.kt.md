@@ -12,3 +12,8 @@
 - active window外のUI load state破棄
 
 実request、Compose表示、スクロール、pause/resume、候補fallback、preview回復は既存の隔離Integration Test群とともに安全スクリプトから検証します。
+## 2026-07-24 第16実装
+
+- 固定tick/request-per-tick前提を削除し、metadata/Bitmapの総並列数、background上限、urgent予約、hidden時Bitmap上限を固定契約として確認する。
+- memory cache 75% high watermarkと65%未満の再開境界を純粋関数で確認する。
+- 既存の初回warmup範囲、前後1行active window、frame key、scroll anchor、load state retentionの回帰確認を維持する。
