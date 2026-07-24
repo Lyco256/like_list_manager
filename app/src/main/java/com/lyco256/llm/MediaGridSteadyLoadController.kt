@@ -447,7 +447,7 @@ internal class MediaGridSteadyLoadController(
         ordinalIndex = buildMediaGridOrdinalIndex(frame)
         synchronized(lock) {
             val valid = ordinalIndex.mediaOrdinalByAssetId.keys
-            metadata.keys.retainAll(valid)
+            metadata.entries.removeIf { (assetId, prepared) -> assetId !in valid || prepared.key != frame.key }
             states.keys.retainAll(valid)
             queueRecords.keys.retainAll(valid)
             metadataPending = MediaGridOrdinalPendingSet(ordinalIndex.assetIdByMediaOrdinal.size)
@@ -462,7 +462,10 @@ internal class MediaGridSteadyLoadController(
                 record.metadataAttempts = 0
                 record.metadataStatus = if (metadata.containsKey(assetId)) QueueTaskStatus.Complete else QueueTaskStatus.Unregistered
                 record.bitmapStatus = QueueTaskStatus.Unregistered
-                if (assetId !in metadata) enqueueMetadataLocked(assetId, ordinalIndex.itemIndexByAssetId.getValue(assetId), LoadLane.Background)
+                if (assetId !in metadata) {
+                    states[assetId]?.let { states[assetId] = it.copy(status = MediaGridCellLoadStatus.Pending, prepared = null, candidateIndex = 0) }
+                    enqueueMetadataLocked(assetId, ordinalIndex.itemIndexByAssetId.getValue(assetId), LoadLane.Background)
+                }
                 else if (assetId in states || assetId in metadata) reconcileAssetWorkLocked(assetId, LoadLane.Background)
             }
             startupPending = 0
@@ -550,7 +553,11 @@ internal class MediaGridSteadyLoadController(
                 continue
             }
             val prepared = try {
-                preparer.prepareCellOrNull(frame, task.itemIndex, latestAnchor.get()?.cellSizePx ?: 256)
+                preparer.prepareCellOrNull(
+                    frame,
+                    task.itemIndex,
+                    latestAnchor.get()?.cellSizePx?.takeIf { it > 0 } ?: 256,
+                )
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Throwable) {
@@ -675,7 +682,7 @@ internal class MediaGridSteadyLoadController(
             if (itemIndex == null) { metadataPending.remove(ordinal); continue }
             val record = queueRecords[assetId]
             if (record == null) { metadataPending.remove(ordinal); continue }
-            if (assetId in metadataRunningAssets) { metadataPending.remove(ordinal); return@synchronized null }
+            if (assetId in metadataRunningAssets) return@synchronized null
             if (record.metadataStatus != QueueTaskStatus.BackgroundQueued) { metadataPending.remove(ordinal); continue }
             val task = LoadTask(assetId, itemIndex, LoadLane.Background, generation, record.metadataToken)
             metadataPending.remove(ordinal)
@@ -796,6 +803,7 @@ internal class MediaGridSteadyLoadController(
         record.sourceIdentity = candidate.sourceIdentity
         record.bitmapStatus = QueueTaskStatus.Complete
         ordinalIndex.mediaOrdinalByAssetId[assetId]?.let { bitmapPending.remove(it) }
+        urgentBitmapQueue.removeAll { it.assetId == assetId }
         states[assetId] = MediaGridCellLoadState(MediaGridCellLoadStatus.Ready, prepared, candidateIndex)
         emitEvent(LoadEvent.CacheSignal(assetId, taskGeneration))
         return true

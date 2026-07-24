@@ -5,6 +5,7 @@
 - Cache hits are completed by one locked transition that sets the cell to `Ready`, completes the bitmap record, clears pending work, invalidates matching urgent entries, and publishes a conflated state signal without starting an image request.
 - Metadata preparation uses a small injected boundary for deterministic tests. Null or exception results retry twice in the same lane and then become terminal metadata failure; `Complete` always has prepared metadata.
 - Pending-bit and urgent-entry consumption validates the record before committing `Running`. Asset-local reconciliation restores missing work after stale removal, frame changes, invalidation, resume, cache checks, and completion.
+- Frame updates discard prepared metadata whose render key belongs to the previous frame, reset its visible state to metadata work, and reconcile the current frame before publication.
 - The controller exposes a test snapshot and invariant checker. Production image loading remains Coil-backed; candidate ordering, RGB_565 pack, watermarks, concurrency limits, distance priority, progress, and UI batch size are unchanged.
 
 ## 第14実装

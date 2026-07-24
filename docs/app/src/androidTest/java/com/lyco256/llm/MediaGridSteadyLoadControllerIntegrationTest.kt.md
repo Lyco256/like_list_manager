@@ -4,8 +4,10 @@
 
 - fake metadata preparer and bitmap gateway
 - cache-hit request suppression and mixed cache/miss completion
+- exactly 100 and 1,000 cache-hit assets without bitmap requests
 - visible cache eviction requeue, next-candidate fallback, and frame/invalidation token races
-- metadata null retry and terminal failure
+- metadata null/exception retry limits, all-candidate failure, and paused 300-signal final publication
+- 300-asset full-range viewport revisits, resume, and column/frame-key changes
 - 1,000 cache-hit assets without persistent `Pending`
 - fixed-seed 1,000-operation state-machine checks with `assertConsistentState()`
 

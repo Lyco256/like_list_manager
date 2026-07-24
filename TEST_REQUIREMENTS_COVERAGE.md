@@ -7,6 +7,8 @@
 ## 2026-07-24 cache-hit starvation fix coverage
 
 - Isolated controller integration tests use fake metadata and bitmap gateways, state snapshots, and `assertConsistentState()`; they cover cache-hit request suppression, mixed cache/miss, metadata terminal failure, 1,000 cache-hit assets, and a fixed-seed 1,000-operation state machine.
+- The harness also covers metadata exceptions, all-candidate failure, 300-signal publication while paused, cache-hit runs of exactly 100 assets, full-range viewport revisits, cache eviction, and frame-key/invalidation races across column counts.
+- The pre-fix controller worktree reproduction used the same viewport cell size as the real request path and failed at `MediaGridSteadyLoadControllerPreFixReproductionIntegrationTest.cacheHitPreparedAssetMustBecomeReady` with `expected:<Ready> but was:<Pending>`; the fixed controller integration test now passes the corresponding Ready/no-request assertion.
 - The controller keeps distance priority, BitSet pending representation, worker limits, urgent reservation, watermark, candidate order, RGB_565 pack, progress, column changes, and scroll/session retention unchanged.
 
 ## 2026-07-24 ordinal background queues
