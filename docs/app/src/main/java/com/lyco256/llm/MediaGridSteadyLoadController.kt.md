@@ -1,5 +1,12 @@
 # `MediaGridSteadyLoadController.kt`
 
+## 2026-07-24 cache-hit starvation fix
+
+- Cache hits are completed by one locked transition that sets the cell to `Ready`, completes the bitmap record, clears pending work, invalidates matching urgent entries, and publishes a conflated state signal without starting an image request.
+- Metadata preparation uses a small injected boundary for deterministic tests. Null or exception results retry twice in the same lane and then become terminal metadata failure; `Complete` always has prepared metadata.
+- Pending-bit and urgent-entry consumption validates the record before committing `Running`. Asset-local reconciliation restores missing work after stale removal, frame changes, invalidation, resume, cache checks, and completion.
+- The controller exposes a test snapshot and invariant checker. Production image loading remains Coil-backed; candidate ordering, RGB_565 pack, watermarks, concurrency limits, distance priority, progress, and UI batch size are unchanged.
+
 ## 第14実装
 
 初回Progressのraw/JPEG requestは既存上限4、通常controllerは既存上限2です。rawもReady memory entryとして列数変更・画面復帰・background frame refresh時に保持します。raw/JPEG失敗はasset単位のrepair callbackへ渡して次候補へ進みます。2.5秒Progress条件、50ms UI反映loop、scroll/session保持は変更しません。
