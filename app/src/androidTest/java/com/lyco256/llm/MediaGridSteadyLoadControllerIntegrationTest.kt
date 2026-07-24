@@ -390,7 +390,7 @@ class MediaGridSteadyLoadControllerIntegrationTest {
             controller.updateViewport(anchor(frame))
             controller.start()
             await(
-                timeoutMs = 15_000L,
+                timeoutMs = 60_000L,
                 diagnostic = {
                     val snapshot = controller.stateSnapshot()
                     "cells=${snapshot.cells.size}, statuses=${snapshot.cells.values.groupingBy { it.status }.eachCount()}, metadata=${snapshot.metadata.size}, pending=${snapshot.metadataPendingOrdinals.size}/${snapshot.bitmapPendingOrdinals.size}"

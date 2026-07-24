@@ -185,6 +185,18 @@ function Invoke-SafeNativeCommand {
             Write-SafeLog $line
         }
 
+        if ($displayCommand -match "\bam instrument\b") {
+            $instrumentationFailure = $lines |
+                Where-Object {
+                    $_ -match "Error in |FAILURES!!!|There (?:was|were) \d+ failure|shortMsg=Process crashed|INSTRUMENTATION_CODE:\s*-1"
+                } |
+                Select-Object -First 1
+            if ($instrumentationFailure) {
+                $script:SafeLastErrorSummary = $instrumentationFailure.Trim()
+                throw "instrumentation test failure"
+            }
+        }
+
         if ($process.ExitCode -ne 0) {
             if ($FailureMessage) {
                 $script:SafeLastErrorSummary = $FailureMessage

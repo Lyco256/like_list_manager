@@ -1,5 +1,7 @@
 # `SafeScriptCommon.ps1`
 
+Instrumentation commands are treated as failed when their output contains a JUnit failure marker or `INSTRUMENTATION_CODE: -1`, even if `adb shell am instrument` exits with code 0.
+
 ## 対応ソース
 
 `scripts/SafeScriptCommon.ps1`
