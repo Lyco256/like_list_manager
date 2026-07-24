@@ -3,6 +3,7 @@ package com.lyco256.llm
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertArrayEquals
 import org.junit.Test
 import com.lyco256.llm.data.MediaGridImageSourceKind
 import com.lyco256.llm.data.MediaGridPreparedCandidate
@@ -83,6 +84,7 @@ class MediaGridSteadyLoadControllerTest {
         assertFalse(snapshot.isActive(24L))
         assertEquals(7L, snapshot.epoch)
         assertEquals(3L, snapshot.generation)
+        assertEquals(15, snapshot.centerMediaOrdinal)
     }
 
     @Test
@@ -153,5 +155,37 @@ class MediaGridSteadyLoadControllerTest {
                 QueueTaskStatus.Complete, 2, "source-2", 2, "source-2",
             ),
         )
+    }
+
+    @Test
+    fun mediaOrdinalIndexMatchesMediaCellsAndProvidesBothDirections() {
+        val frame = frame(12)
+        val index = buildMediaGridOrdinalIndex(frame)
+        assertArrayEquals(frame.mediaCellIndices, index.itemIndexByMediaOrdinal)
+        assertArrayEquals(LongArray(12) { it.toLong() }, index.assetIdByMediaOrdinal)
+        assertEquals(7, index.mediaOrdinalByAssetId[7L])
+        assertEquals(frame.mediaCellIndices[7], index.itemIndexByAssetId[7L])
+    }
+
+    @Test
+    fun ordinalPendingSetUsesNearestOrdinalAndPrefersLowerScreenDirectionOnTie() {
+        val pending = MediaGridOrdinalPendingSet(10)
+        pending.add(2); pending.add(6); pending.add(8)
+        assertEquals(6, pending.peekNearest(6))
+        assertEquals(6, pending.pollNearest(5))
+        assertEquals(8, pending.peekNearest(5))
+        pending.remove(8)
+        assertEquals(2, pending.pollNearest(5))
+        assertTrue(pending.isEmpty())
+        pending.add(3); pending.clear()
+        assertFalse(pending.contains(3))
+    }
+
+    @Test
+    fun ordinalPendingSetKeepsPendingWhenWatermarkDoesNotPermitPolling() {
+        val pending = MediaGridOrdinalPendingSet(4)
+        pending.add(2)
+        assertFalse(mediaGridBackgroundBitmapAllowed(74, 100, 2))
+        assertTrue(pending.contains(2))
     }
 }

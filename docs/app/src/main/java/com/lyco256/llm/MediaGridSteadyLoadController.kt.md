@@ -15,6 +15,14 @@ active bitmap windowは表示中と前後1行です。範囲外の未完了要�
 通常表示後は50ms周期・同時request最大2件を維持します。列数変更やsource refreshではcontrollerを再生成せずframeを更新し、asset単位のload stateを引き継ぎます。persistent previewがmemory cacheでReadyの場合はReadyを維持し、それ以外だけPendingへ戻します。preview通知では該当assetだけをPendingへ戻します。永続JPEGの失敗は既存recovery gateを通じてRepositoryへ通知します。
 ## 2026-07-24 第16実装: decoupled load and UI publication pipelines
 
+## 2026-07-24 ordinal background queues
+
+- frameの`mediaCellIndices`から、media cellだけの連続ordinalと`assetId`／item indexの双方向O(1) indexをframe更新時に一度だけ構築する。anchor snapshotは中央の`centerMediaOrdinal`を一度だけ計算し、workerは最新値だけを読む。
+- background metadataとBitmapはtask objectの配列を保持せず、分離した`BitSet` pending setでordinalだけを管理する。nearest選択は`nextSetBit`／`previousSetBit`で行い、同距離は下方向を優先する。
+- Bitmapはwatermark判定前にpending bitを消さず、開始可能な場合だけpollする。memory cache hitはrequestを開始せずReadyへ進める。urgent queueはFIFOの`ArrayDeque`で、lane決定前の取り出し・再挿入は行わない。
+- anchor変更ではbackground pendingを並べ替えず、未開始taskを保持したまま次のpoll時だけ最新centerを使用する。frame更新とinvalidationではgeneration/tokenと対象ordinalを同じlock内で更新する。
+- 並列上限、urgent予約、画面外task継続、memory watermark、fallback、UI batch、Progress、列数変更、画面復帰、scroll保持、RGB_565 packは変更しない。
+
 ## 2026-07-24 viewport hot path改善
 
 - `updateViewport()`はrender keyとanchor内容の比較、最新anchorのCAS上書き、epoch増加、conflated signal通知だけを行う。lock、queue走査、active window生成、request開始、event/UI公開は行わない。
