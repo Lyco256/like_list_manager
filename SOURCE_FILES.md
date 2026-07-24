@@ -39,6 +39,13 @@ Current media-grid rendering is owned by `MediaGridSessionCoordinator` under `Ma
 - UI publication consumerはevent到着までsuspendし、到着済みeventを1 batchでMainへ公開する。offscreen completionはCompose stateへ追加しない。
 - 第16実装のunit契約は`MediaGridSteadyLoadControllerTest.kt`、既存の高速スクロール・画面復帰・列数変更・Progress・RGB565/JPEG回帰は`MainActivityComposeTest.kt`、`UiStateRenderingTest.kt`、`MediaGridRgb565IntegrationTest.kt`で確認する。
 
+## 2026-07-24 viewport hot path改善
+
+- `updateViewport()`は最新anchor、epoch、conflated signalだけを更新し、anchor consumerがlock外でepoch単位の`MediaGridActiveWindowSnapshot`を一度だけ生成する。
+- snapshotはvisible順序、active順序、membershipを保持し、urgent判定・visible task登録・UI publicationは同じsnapshotを使う。active window再生成、queue全体のurgent昇格、viewport側のlock取得を行わない。
+- `AssetQueueRecord`がmetadata/Bitmapのqueue状態、token、generation、source identity、candidate indexをasset ID単位で保持し、古いentryはtoken不一致でskipする。background queueの選択方式、候補順、worker上限、UI batch、Progressとsession保持は維持する。
+- RGB_565候補は2byte/pixel、その他候補は4byte/pixelをLongで見積もる。要件のUnit証跡は`MediaGridSteadyLoadControllerTest.kt`、既存の高速viewport・画面外完了・cache再表示・fallback回帰はCompose/隔離Integration Testで確認する。
+
 ## 2026-07 keyed frame and direct preview viewport path
 
 ## 2026-07-22 steady-load controller

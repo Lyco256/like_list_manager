@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.lyco256.llm.data.MediaGridImageSourceKind
+import com.lyco256.llm.data.MediaGridPreparedCandidate
 
 class MediaGridSteadyLoadControllerTest {
     private fun frame(count: Int = 240, columns: Int = 4): MediaGridFrameData {
@@ -67,6 +69,23 @@ class MediaGridSteadyLoadControllerTest {
     }
 
     @Test
+    fun activeSnapshotKeepsVisibleAndActiveOrderAndMembership() {
+        val frame = frame(40)
+        val snapshot = buildMediaGridActiveWindowSnapshot(
+            frame,
+            anchor(frame, 12, 19, intArrayOf(12, 13, 14, 15, 16, 17, 18, 19)),
+            epoch = 7L,
+            generation = 3L,
+        )
+        assertEquals(longArrayOf(12, 13, 14, 15, 16, 17, 18, 19).toList(), snapshot.visibleAssetIds.toList())
+        assertEquals((8L..23L).toList(), snapshot.activeAssetIds.toList())
+        assertTrue(snapshot.isActive(8L))
+        assertFalse(snapshot.isActive(24L))
+        assertEquals(7L, snapshot.epoch)
+        assertEquals(3L, snapshot.generation)
+    }
+
+    @Test
     fun viewportAnchorEqualityIgnoresNoFieldsAndUsesContentForVisibleIndices() {
         val frame = frame(20)
         val first = anchor(frame, 4, 11, intArrayOf(4, 5, 6, 7))
@@ -91,5 +110,48 @@ class MediaGridSteadyLoadControllerTest {
         assertFalse(mediaGridBackgroundBitmapAllowed(74, 100, 2))
         assertFalse(mediaGridMemoryWatermarkAllowsResume(70, 100))
         assertTrue(mediaGridMemoryWatermarkAllowsResume(64, 100))
+    }
+
+    @Test
+    fun bitmapMemoryEstimateUsesOutputConfigAndLongArithmetic() {
+        val rgb565 = MediaGridPreparedCandidate(
+            kind = MediaGridImageSourceKind.Rgb565Pack,
+            requestData = Unit,
+            sourceIdentity = "rgb",
+            cacheKey = "rgb",
+            width = 256,
+            height = 256,
+        )
+        val argb = rgb565.copy(kind = MediaGridImageSourceKind.Local, sourceIdentity = "local")
+        assertEquals(131_072L, mediaGridEstimatedBitmapBytes(rgb565))
+        assertEquals(262_144L, mediaGridEstimatedBitmapBytes(argb))
+        assertEquals(0L, mediaGridEstimatedBitmapBytes(rgb565.copy(width = 0)))
+    }
+
+    @Test
+    fun queueTokenAndRecordRejectStaleAndDuplicateEntriesWithoutQueueSearch() {
+        assertTrue(mediaGridQueueTokenIsCurrent(8L, 8L, 4L, 4L))
+        assertFalse(mediaGridQueueTokenIsCurrent(8L, 7L, 4L, 4L))
+        assertFalse(mediaGridQueueTokenIsCurrent(8L, 8L, 4L, 5L))
+        assertTrue(
+            mediaGridBitmapQueueEntryMatches(
+                QueueTaskStatus.BackgroundQueued, 2, "source-2", 2, "source-2",
+            ),
+        )
+        assertTrue(
+            mediaGridBitmapQueueEntryMatches(
+                QueueTaskStatus.UrgentQueued, 2, "source-2", 2, "source-2",
+            ),
+        )
+        assertFalse(
+            mediaGridBitmapQueueEntryMatches(
+                QueueTaskStatus.BackgroundQueued, 2, "source-2", 3, "source-3",
+            ),
+        )
+        assertFalse(
+            mediaGridBitmapQueueEntryMatches(
+                QueueTaskStatus.Complete, 2, "source-2", 2, "source-2",
+            ),
+        )
     }
 }

@@ -2,6 +2,22 @@
 
 ## 2026-07-24 第16実装: decoupled load and UI publication pipeline
 
+## 2026-07-24 viewport hot path改善
+
+| 対象 | 実装・証跡 |
+| --- | --- |
+| updateViewportのlatest anchor/epoch/conflated signal限定 | `MediaGridSteadyLoadController.updateViewport`、静的確認、UnitTest |
+| epoch単位のactive snapshotとO(1) membership | `MediaGridActiveWindowSnapshot`、`buildMediaGridActiveWindowSnapshot`、`MediaGridSteadyLoadControllerTest.activeSnapshotKeepsVisibleAndActiveOrderAndMembership` |
+| asset record/tokenによる重複抑止・stale skip・urgent昇格 | `AssetQueueRecord`、controller worker/anchor consumer、既存controller UnitTest契約 |
+| RGB_565/4byte容量見積もり | `mediaGridEstimatedBitmapBytes`、`bitmapMemoryEstimateUsesOutputConfigAndLongArithmetic` |
+| 高速viewport、画面外完了、cache再表示、fallback、Progress、列数変更、画面復帰、scroll保持 | `MainActivityComposeTest`、`UiStateRenderingTest`、`MediaGridRgb565IntegrationTest`、隔離Integration Test（指定検証で確認） |
+
+検証結果:
+
+- `scripts\run-safe-integration-check.cmd -DebugMethod wireless`: `Preflight / Build / UnitTest / Lint / Install / IntegrationTest / Success`
+- `scripts\run-safe-debug-check.cmd -InstallToDevice`: `Preflight / Build / UnitTest / Lint / Install / Success`
+- 本番DB、元WebP、JPEG、RGB_565 pack、設定、認証情報の初期化・変更は行っていない。
+
 | 対象 | 実装・証跡 |
 | --- | --- |
 | metadata/Bitmap/UI publicationのqueue・consumer分離 | `MediaGridSteadyLoadController`、controller unit test、既存Compose grid tests |
