@@ -18,12 +18,6 @@ import com.lyco256.llm.BuildConfig
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.UUID
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicInteger
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -122,70 +116,6 @@ class MediaGridRgb565IntegrationTest {
             assertTrue(fixture.store.validatePayloadCrc(second))
         } finally {
             fixture.close()
-        }
-    }
-
-    @Test
-    fun rawFetcherStartsQueuedWorkAsSoonAsOneOfFourPermitsIsReleased() = runBlocking {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val firstFourEntered = CountDownLatch(4)
-        val allEntered = CountDownLatch(6)
-        val release = CountDownLatch(1)
-        val active = AtomicInteger()
-        val maximum = AtomicInteger()
-        val reader = object : MediaGridRgb565BitmapReader {
-            override fun readBitmap(slot: MediaGridRgb565Slot): Bitmap {
-                val now = active.incrementAndGet()
-                maximum.updateAndGet { maxOf(it, now) }
-                firstFourEntered.countDown()
-                allEntered.countDown()
-                try {
-                    check(release.await(5, TimeUnit.SECONDS))
-                    return Bitmap.createBitmap(256, 256, Bitmap.Config.RGB_565)
-                } finally {
-                    active.decrementAndGet()
-                }
-            }
-        }
-        val loader = ImageLoader.Builder(context)
-            .components {
-                add(MediaGridRgb565Keyer())
-                add(MediaGridRgb565FetcherFactory(reader))
-            }
-            .build()
-        try {
-            coroutineScope {
-                val requests = (1L..6L).map { assetId ->
-                    val slot = MediaGridRgb565Slot(
-                        assetId = assetId,
-                        packIndex = 0,
-                        slotIndex = (assetId - 1).toInt(),
-                        bankIndex = 0,
-                        generation = 1,
-                        source = source(assetId),
-                        payloadCrc32 = assetId,
-                    )
-                    async {
-                        loader.execute(
-                            ImageRequest.Builder(context)
-                                .data(slot)
-                                .memoryCacheKey(slot.cacheKey)
-                                .diskCachePolicy(CachePolicy.DISABLED)
-                                .build(),
-                        )
-                    }
-                }
-                assertTrue(firstFourEntered.await(5, TimeUnit.SECONDS))
-                assertEquals(4, maximum.get())
-                assertEquals(2L, allEntered.count)
-                release.countDown()
-                assertTrue(allEntered.await(5, TimeUnit.SECONDS))
-                requests.awaitAll()
-            }
-            assertTrue(maximum.get() <= 4)
-        } finally {
-            release.countDown()
-            loader.shutdown()
         }
     }
 

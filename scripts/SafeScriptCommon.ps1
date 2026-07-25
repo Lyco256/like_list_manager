@@ -188,7 +188,7 @@ function Invoke-SafeNativeCommand {
         if ($displayCommand -match "\bam instrument\b") {
             $instrumentationFailure = $lines |
                 Where-Object {
-                    $_ -match "Error in |FAILURES!!!|There (?:was|were) \d+ failure|shortMsg=Process crashed|INSTRUMENTATION_CODE:\s*-1"
+                    $_ -match "Error in |FAILURES!!!|There (?:was|were) \d+ failure|shortMsg=Process crashed"
                 } |
                 Select-Object -First 1
             if ($instrumentationFailure) {

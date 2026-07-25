@@ -1,6 +1,6 @@
 # `SafeScriptCommon.ps1`
 
-Instrumentation commands are treated as failed when their output contains a JUnit failure marker or `INSTRUMENTATION_CODE: -1`, even if `adb shell am instrument` exits with code 0.
+Instrumentation commands are treated as failed when their output contains a JUnit failure or process-crash marker, even if `adb shell am instrument` exits with code 0. Android's normal successful result can use `INSTRUMENTATION_CODE: -1`, so that code is not itself treated as failure.
 
 ## 対応ソース
 

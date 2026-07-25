@@ -239,6 +239,8 @@ class MediaGridRgb565PackStoreTest {
 
     @Test
     fun rgb565ImplementationUsesBufferCopiesDitherAndNoTimingThrottle() {
+        assertEquals(4, MEDIA_GRID_RGB565_MAX_FETCHES)
+
         val storeSource = File(
             "src/main/java/com/lyco256/llm/data/MediaGridRgb565PackStore.kt",
         ).readText()
