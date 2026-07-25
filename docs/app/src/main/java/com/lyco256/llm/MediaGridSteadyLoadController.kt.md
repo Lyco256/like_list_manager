@@ -1,5 +1,13 @@
 # `MediaGridSteadyLoadController.kt`
 
+## 2026-07-25 frame-paced image publication
+
+- `states` is the worker-owned internal state; `publishedCells` is the last visible state exposed to Compose. Workers never publish a Ready image directly.
+- `framePublicationDemand` is true only for visible internal Ready candidates that are not the same cache key/source identity in `publishedCells`. Pending, Failed, deletion, cache miss, and offscreen changes are reconciled immediately.
+- After startup, `publishOneReadyImageForFrame()` selects at most one visible Ready attachment by viewport-center ordinal, preferring the downward side on ties. It performs no IO, cache read, Bitmap load, or ImageRequest start.
+- `MediaGridFramePublicationRunner` is the single Compose runner per effective controller. It waits for demand, awaits `withFrameNanos`, and invokes one publication per frame. Startup retains the existing batch behavior; column changes and screen return preserve existing published candidates.
+- `MediaGridControllerStateSnapshot` exposes internal cells, published cells, and demand for separate test assertions. The frame-paced tests cover ordering, same-candidate skip, fake-frame progression, 12 visible assets, and one attachment per frame.
+
 ## 2026-07-24 cache-hit starvation fix
 
 - Cache hits are completed by one locked transition that sets the cell to `Ready`, completes the bitmap record, clears pending work, invalidates matching urgent entries, and publishes a conflated state signal without starting an image request.

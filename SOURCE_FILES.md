@@ -6,6 +6,12 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 
 ## 2026-07-24 ordinal background queues
 
+## 2026-07-25 frame-paced image publication
+
+- `MediaGridSteadyLoadController.kt` separates worker `states` from Compose-facing `publishedCells`. Only non-image state changes are reconciled immediately after startup; new visible Ready candidates set `framePublicationDemand` and wait for the Compose runner.
+- `TagHierarchyUiV2.kt` owns one `MediaGridFramePublicationRunner` per effective controller. It waits on demand, uses `withFrameNanos`, and calls `publishOneReadyImageForFrame()` once per frame. The runner performs no image IO.
+- `MediaGridControllerStateSnapshot` is the test boundary for comparing internal Ready state and published Ready state independently.
+
 - `MediaGridSteadyLoadController.kt`はframeごとの`MediaGridOrdinalIndex`と、metadata／Bitmapを分離したordinal BitSet pendingを使用する。background選択は最新snapshotの`centerMediaOrdinal`からnearest ordinalを取得し、urgent queueはFIFO `ArrayDeque`で保持する。
 - task objectはbackground pending全件には保持せず、ordinalをworkerへ渡す時だけ構築する。watermark判定前のBitmap pending保持、memory cache hitのrequest省略、anchor変更時の未開始task保持、frame/invalidationのgeneration・token無効化を行う。
 

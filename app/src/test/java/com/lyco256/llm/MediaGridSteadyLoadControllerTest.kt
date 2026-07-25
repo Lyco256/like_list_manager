@@ -7,6 +7,7 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Test
 import com.lyco256.llm.data.MediaGridImageSourceKind
 import com.lyco256.llm.data.MediaGridPreparedCandidate
+import com.lyco256.llm.data.MediaGridPreparedImage
 
 class MediaGridSteadyLoadControllerTest {
     private fun frame(count: Int = 240, columns: Int = 4): MediaGridFrameData {
@@ -187,5 +188,82 @@ class MediaGridSteadyLoadControllerTest {
         pending.add(2)
         assertFalse(mediaGridBackgroundBitmapAllowed(74, 100, 2))
         assertTrue(pending.contains(2))
+    }
+
+    @Test
+    fun readyAttachmentOrderUsesVisibleCenterThenDownwardTieBreakAndSkipsPublished() {
+        val candidate = { assetId: Long ->
+            MediaGridPreparedCandidate(
+                kind = MediaGridImageSourceKind.Local,
+                requestData = assetId,
+                sourceIdentity = "source-$assetId",
+                cacheKey = "cache-$assetId",
+                width = 256,
+                height = 256,
+            )
+        }
+        val cells = (0L..6L).associateWith { assetId ->
+            MediaGridCellLoadState(
+                status = MediaGridCellLoadStatus.Ready,
+                prepared = MediaGridPreparedImage(
+                    key = frame(7).key,
+                    assetId = assetId,
+                    candidates = listOf(candidate(assetId)),
+                ),
+            )
+        }
+        val published = mapOf(3L to cells.getValue(3L))
+        assertEquals(
+            listOf(4L, 2L, 5L, 1L, 6L, 0L),
+            mediaGridReadyAttachmentOrder(
+                visibleAssetIds = longArrayOf(0L, 1L, 2L, 3L, 4L, 5L, 6L),
+                internalCells = cells,
+                publishedCells = published,
+                mediaOrdinalByAssetId = (0L..6L).associateWith { it.toInt() },
+                centerMediaOrdinal = 3,
+            ),
+        )
+    }
+
+    @Test
+    fun fakeFrameClockPublishesAtMostOneNewAttachmentPerFrameAndFinishesInTwelveFrames() {
+        val frame = frame(12)
+        val cells = (0L until 12L).associateWith { assetId ->
+            MediaGridCellLoadState(
+                status = MediaGridCellLoadStatus.Ready,
+                prepared = MediaGridPreparedImage(
+                    key = frame.key,
+                    assetId = assetId,
+                    candidates = listOf(
+                        MediaGridPreparedCandidate(
+                            kind = MediaGridImageSourceKind.Local,
+                            requestData = assetId,
+                            sourceIdentity = "source-$assetId",
+                            cacheKey = "cache-$assetId",
+                            width = 256,
+                            height = 256,
+                        ),
+                    ),
+                ),
+            )
+        }
+        var published = emptyMap<Long, MediaGridCellLoadState>()
+        repeat(12) { frameNumber ->
+            val before = published.size
+            val next = mediaGridReadyAttachmentOrder(
+                LongArray(12) { it.toLong() }, cells, published,
+                (0L until 12L).associateWith { it.toInt() }, centerMediaOrdinal = 5,
+            ).firstOrNull()
+            assertTrue("frame $frameNumber attached more than one asset", next != null)
+            published = published + (next!! to cells.getValue(next))
+            assertEquals(before + 1, published.size)
+        }
+        assertEquals(12, published.size)
+        assertTrue(
+            mediaGridReadyAttachmentOrder(
+                LongArray(12) { it.toLong() }, cells, published,
+                (0L until 12L).associateWith { it.toInt() }, centerMediaOrdinal = 5,
+            ).isEmpty(),
+        )
     }
 }

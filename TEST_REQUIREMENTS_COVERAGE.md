@@ -1,5 +1,15 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-07-25 frame-paced image publication
+
+| 要件 | 証跡 |
+|---|---|
+| internal/published state分離、公開待ちdemand、中央優先・下方向tie-break・同candidate/画面外skip | `MediaGridSteadyLoadController.kt`、`MediaGridSteadyLoadControllerTest.readyAttachmentOrderUsesVisibleCenterThenDownwardTieBreakAndSkipsPublished` |
+| fake frame clock、1frame最大1件、12件を12frame以内に公開 | `MediaGridSteadyLoadControllerTest.fakeFrameClockPublishesAtMostOneNewAttachmentPerFrameAndFinishesInTwelveFrames`、`MediaGridFramePublicationComposeTest`、`MediaGridSteadyLoadControllerIntegrationTest.postStartupTwelveVisibleReadyAssetsUseAtMostOneAttachmentPerFrame` |
+| frame callback内のIO・Bitmap loadなし、画像test tag | `MediaGridFramePublicationRunner`、`MediaGridSteadyLoadController.publishOneReadyImageForFrame`、`media_grid_image_<assetId>` |
+
+- Wireless隔離検証は `scripts\run-safe-integration-check.cmd -DebugMethod wireless` のPreflight / Build / UnitTest / Lint / Install / IntegrationTestをSuccessで完了した。Macrobenchmarkは要件どおり未実行。
+
 ## 2026-07-24 第16実装: decoupled load and UI publication pipeline
 
 ## 2026-07-24 viewport hot path改善

@@ -318,6 +318,7 @@ class MediaGridSteadyLoadControllerIntegrationTest {
             controller.pause()
             repeat(300) { controller.invalidate(it.toLong()) }
             controller.resume()
+            repeat(8) { controller.publishOneReadyImageForFrame() }
             await {
                 val visible = controller.stateSnapshot().visibleAssetIds
                 visible.isNotEmpty() && controller.uiState.value.cells.keys.containsAll(visible) &&
@@ -420,6 +421,44 @@ class MediaGridSteadyLoadControllerIntegrationTest {
             assertEquals(0, gateway.requests)
             assertTrue(controller.stateSnapshot().cells.values.none { it.status == MediaGridCellLoadStatus.Pending })
             assertConsistentState(controller.stateSnapshot(), buildMediaGridOrdinalIndex(frame).mediaOrdinalByAssetId)
+        } finally {
+            controller.dispose()
+            loader.shutdown()
+        }
+    }
+
+    @Test
+    fun postStartupTwelveVisibleReadyAssetsUseAtMostOneAttachmentPerFrame() = runBlocking {
+        val frame = frame(300)
+        val prepared = (0L until 300L).associateWith { prepared(frame, it) }
+        val gateway = FakeBitmapGateway(prepared.values.flatMap { image -> image.candidates.map { it.cacheKey } }.toSet())
+        val loader = ImageLoader.Builder(context).build()
+        val controller = MediaGridSteadyLoadController(context, frame, FakePreparer(prepared), loader, { _, _ -> }, gateway)
+        try {
+            controller.updateViewport(anchor(frame))
+            controller.start()
+            await(30_000L) {
+                controller.hasCompletedInitialWarmup &&
+                    controller.stateSnapshot().cells.size == 300 &&
+                    controller.stateSnapshot().cells.values.all { it.status == MediaGridCellLoadStatus.Ready }
+            }
+            controller.publishOneReadyImageForFrame()
+            val visible = (100..111).toList().toIntArray()
+            controller.updateViewport(
+                MediaGridViewportAnchor(frame.key, 100, 111, visible, 400, 600, 100, 4),
+            )
+            await { controller.stateSnapshot().framePublicationDemand }
+            await { controller.stateSnapshot().publishedCells.keys.none { it in visible.map(Int::toLong) } }
+            var publishedCount = controller.stateSnapshot().publishedCells.values.count { it.status == MediaGridCellLoadStatus.Ready }
+            repeat(12) { frameNumber ->
+                controller.publishOneReadyImageForFrame()
+                val nextCount = controller.stateSnapshot().publishedCells.values.count { it.status == MediaGridCellLoadStatus.Ready }
+                assertTrue("frame $frameNumber published more than one image", nextCount - publishedCount <= 1)
+                publishedCount = nextCount
+            }
+            val published = controller.stateSnapshot()
+            assertTrue(published.publishedCells.keys.containsAll(visible.map(Int::toLong)))
+            assertTrue(!published.framePublicationDemand)
         } finally {
             controller.dispose()
             loader.shutdown()

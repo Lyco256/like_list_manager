@@ -28,7 +28,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 
@@ -77,7 +76,33 @@ internal data class MediaGridCellLoadState(
 internal data class MediaGridControllerUiState(
     val startup: MediaGridStartupState = MediaGridStartupState.PreparingFrame,
     val cells: Map<Long, MediaGridCellLoadState> = emptyMap(),
+    val framePublicationDemand: Boolean = false,
 )
+
+internal fun mediaGridSameReadyCandidate(left: MediaGridCellLoadState?, right: MediaGridCellLoadState?): Boolean {
+    val leftCandidate = left?.readyCandidate ?: return false
+    val rightCandidate = right?.readyCandidate ?: return false
+    return leftCandidate.cacheKey == rightCandidate.cacheKey &&
+        leftCandidate.sourceIdentity == rightCandidate.sourceIdentity
+}
+
+/** Returns only visible new Ready attachments, ordered around the latest viewport center. */
+internal fun mediaGridReadyAttachmentOrder(
+    visibleAssetIds: LongArray,
+    internalCells: Map<Long, MediaGridCellLoadState>,
+    publishedCells: Map<Long, MediaGridCellLoadState>,
+    mediaOrdinalByAssetId: Map<Long, Int>,
+    centerMediaOrdinal: Int,
+): List<Long> = visibleAssetIds.asSequence().mapIndexedNotNull { visibleIndex, assetId ->
+    val internal = internalCells[assetId]
+    if (internal?.status != MediaGridCellLoadStatus.Ready || mediaGridSameReadyCandidate(internal, publishedCells[assetId])) return@mapIndexedNotNull null
+    val ordinal = mediaOrdinalByAssetId[assetId] ?: return@mapIndexedNotNull null
+    Triple(assetId, ordinal, visibleIndex)
+}.sortedWith(
+    compareBy<Triple<Long, Int, Int>> { kotlin.math.abs(it.second - centerMediaOrdinal) }
+        .thenBy { if (it.second >= centerMediaOrdinal) 0 else 1 }
+        .thenBy { it.third },
+).map { it.first }.toList()
 
 internal fun selectMediaGridInitialWarmupIndices(frame: MediaGridFrameData, anchor: MediaGridViewportAnchor): IntArray {
     if (anchor.cellSizePx <= 0 || anchor.columnCount <= 0 || frame.mediaCellIndices.isEmpty()) return intArrayOf()
@@ -237,6 +262,11 @@ internal interface MediaGridBitmapGateway {
     suspend fun load(candidate: MediaGridPreparedCandidate): Boolean
 }
 
+internal interface MediaGridFramePublicationTarget {
+    val framePublicationDemand: StateFlow<Boolean>
+    fun publishOneReadyImageForFrame()
+}
+
 private class CoilMediaGridBitmapGateway(
     private val context: Context,
     private val imageLoader: ImageLoader,
@@ -257,6 +287,8 @@ private class CoilMediaGridBitmapGateway(
 
 internal data class MediaGridControllerStateSnapshot(
     val cells: Map<Long, MediaGridCellLoadState>,
+    val publishedCells: Map<Long, MediaGridCellLoadState> = emptyMap(),
+    val framePublicationDemand: Boolean = false,
     val metadata: Map<Long, MediaGridPreparedImage>,
     val records: Map<Long, AssetQueueRecord>,
     val metadataPendingOrdinals: Set<Int>,
@@ -350,7 +382,7 @@ internal class MediaGridSteadyLoadController(
     private val imageLoader: ImageLoader,
     private val onPreviewCandidateError: suspend (Long, MediaGridPreparedCandidate) -> Unit,
     private val bitmapGateway: MediaGridBitmapGateway = CoilMediaGridBitmapGateway(context, imageLoader),
-) {
+) : MediaGridFramePublicationTarget {
     constructor(
         context: Context,
         frame: MediaGridFrameData,
@@ -377,6 +409,8 @@ internal class MediaGridSteadyLoadController(
     private val events = Channel<LoadEvent>(capacity = Channel.CONFLATED)
     private val metadata = HashMap<Long, MediaGridPreparedImage>()
     private val states = HashMap<Long, MediaGridCellLoadState>()
+    private val publishedCells = LinkedHashMap<Long, MediaGridCellLoadState>()
+    private val frameTransitionPreserved = HashSet<Long>()
     private val queueRecords = HashMap<Long, AssetQueueRecord>()
     private val invalidated = HashSet<Long>()
     private var metadataRunning = 0
@@ -393,6 +427,8 @@ internal class MediaGridSteadyLoadController(
     private var startupPending = 0
     private val startupAssets = HashSet<Long>()
     private var startupReady = false
+    private var startupPublicationBatchPending = false
+    private var startupState = MediaGridStartupState.PreparingFrame
     private var workerJobs = emptyList<Job>()
     private var ordinalIndex = buildMediaGridOrdinalIndex(frame)
     private var metadataPending = MediaGridOrdinalPendingSet(ordinalIndex.assetIdByMediaOrdinal.size)
@@ -400,6 +436,8 @@ internal class MediaGridSteadyLoadController(
     @Volatile private var activeSnapshot: MediaGridActiveWindowSnapshot? = null
     private val _uiState = MutableStateFlow(MediaGridControllerUiState())
     val uiState: StateFlow<MediaGridControllerUiState> = _uiState.asStateFlow()
+    private val _framePublicationDemand = MutableStateFlow(false)
+    override val framePublicationDemand: StateFlow<Boolean> = _framePublicationDemand.asStateFlow()
     @Volatile var hasCompletedInitialWarmup: Boolean = false
         private set
 
@@ -431,11 +469,17 @@ internal class MediaGridSteadyLoadController(
         }
     }
 
-    fun pause() { paused = true; publicationPaused = true; signalAll() }
+    fun pause() {
+        paused = true
+        publicationPaused = true
+        reconcilePublishedState(maxNewReady = 0)
+        signalAll()
+    }
     fun resume() {
         paused = false
         publicationPaused = false
         synchronized(lock) { activeSnapshot?.activeAssetIds?.forEach { reconcileAssetWorkLocked(it, LoadLane.Urgent) } }
+        reconcilePublishedState(maxNewReady = 0)
         signalAll()
         emitEvent(LoadEvent.CacheSignal(0L, generation))
     }
@@ -447,9 +491,16 @@ internal class MediaGridSteadyLoadController(
         ordinalIndex = buildMediaGridOrdinalIndex(frame)
         synchronized(lock) {
             val valid = ordinalIndex.mediaOrdinalByAssetId.keys
+            frameTransitionPreserved.retainAll(valid)
+            publishedCells.keys.forEach { assetId ->
+                if (assetId in valid && publishedCells[assetId]?.status == MediaGridCellLoadStatus.Ready) {
+                    frameTransitionPreserved += assetId
+                }
+            }
             metadata.entries.removeIf { (assetId, prepared) -> assetId !in valid || prepared.key != frame.key }
             states.keys.retainAll(valid)
             queueRecords.keys.retainAll(valid)
+            publishedCells.keys.retainAll(valid)
             metadataPending = MediaGridOrdinalPendingSet(ordinalIndex.assetIdByMediaOrdinal.size)
             bitmapPending = MediaGridOrdinalPendingSet(ordinalIndex.assetIdByMediaOrdinal.size)
             urgentMetadataQueue.clear(); urgentBitmapQueue.clear()
@@ -482,13 +533,16 @@ internal class MediaGridSteadyLoadController(
         if (disposed || assetId !in ordinalIndex.mediaOrdinalByAssetId) return
         synchronized(lock) {
             invalidated += assetId
+            frameTransitionPreserved.remove(assetId)
             applyInvalidationsLocked()
         }
+        reconcilePublishedState(maxNewReady = 0)
         signalAll()
     }
 
     private suspend fun startupCoordinator() {
-        _uiState.value = MediaGridControllerUiState(MediaGridStartupState.PreparingInitialWindow)
+        synchronized(lock) { startupState = MediaGridStartupState.PreparingInitialWindow }
+        emitEvent(LoadEvent.State(0L, generation))
         val anchor = awaitAnchor()
         if (anchor == null || disposed) return
         val initial = selectMediaGridInitialWarmupIndices(frame, anchor)
@@ -501,7 +555,8 @@ internal class MediaGridSteadyLoadController(
             startupPending = startupAssets.size
             if (startupPending == 0) { startupReady = true; startupSignal.trySend(Unit) }
         }
-        _uiState.value = MediaGridControllerUiState(MediaGridStartupState.WarmingInitialWindow)
+        synchronized(lock) { startupState = MediaGridStartupState.WarmingInitialWindow }
+        emitEvent(LoadEvent.State(0L, generation))
         signalAll()
         withTimeoutOrNull(MEDIA_GRID_STARTUP_TIMEOUT_MS) {
             while (!disposed && !startupReady) {
@@ -509,7 +564,10 @@ internal class MediaGridSteadyLoadController(
             }
         }
         hasCompletedInitialWarmup = true
-        _uiState.value = MediaGridControllerUiState(MediaGridStartupState.Ready)
+        synchronized(lock) {
+            startupPublicationBatchPending = true
+            startupState = MediaGridStartupState.Ready
+        }
         emitEvent(LoadEvent.State(0L, generation))
     }
 
@@ -635,17 +693,74 @@ internal class MediaGridSteadyLoadController(
 
     private suspend fun uiPublicationConsumer() {
         for (event in events) {
-            if (!publicationPaused && !disposed) {
-                val visible = activeSnapshot?.takeIf { it.generation == generation }?.visibleAssetIds ?: longArrayOf()
-                val cells: Map<Long, MediaGridCellLoadState> = synchronized(lock) {
-                    visible.asSequence().mapNotNull { assetId -> states[assetId]?.let { assetId to it } }.toMap()
+            if (!disposed) reconcilePublishedState(maxNewReady = 0)
+        }
+    }
+
+    /**
+     * Publishes non-image state changes immediately and leaves new Ready attachments pending.
+     * The only exception is the initial startup batch, which intentionally retains the old
+     * warm-up behavior. This method never starts image work or reads the image cache.
+     */
+    private fun reconcilePublishedState(maxNewReady: Int) {
+        val nextState: MediaGridControllerUiState
+        synchronized(lock) {
+            if (disposed) return
+            val snapshot = activeSnapshot?.takeIf { it.generation == generation }
+            val visible = snapshot?.visibleAssetIds ?: longArrayOf()
+            val startupBatch = startupState != MediaGridStartupState.Ready || startupPublicationBatchPending
+            val next = LinkedHashMap<Long, MediaGridCellLoadState>(visible.size)
+            visible.forEachIndexed { _, assetId ->
+                val internal = states[assetId] ?: return@forEachIndexed
+                val published = publishedCells[assetId]
+                if (internal.status != MediaGridCellLoadStatus.Ready) {
+                    if (internal.status == MediaGridCellLoadStatus.Pending && assetId in frameTransitionPreserved && published?.status == MediaGridCellLoadStatus.Ready) {
+                        next[assetId] = published
+                    } else {
+                        next[assetId] = internal
+                        frameTransitionPreserved.remove(assetId)
+                    }
+                    return@forEachIndexed
                 }
-                withContext(Dispatchers.Main.immediate) {
-                    val old = _uiState.value
-                    if (old.cells != cells) _uiState.value = MediaGridControllerUiState(if (hasCompletedInitialWarmup) MediaGridStartupState.Ready else old.startup, cells)
+                frameTransitionPreserved.remove(assetId)
+                if (mediaGridSameReadyCandidate(internal, published)) {
+                    next[assetId] = published!!
+                } else {
+                    published?.let { next[assetId] = it }
                 }
             }
+
+            if (!startupBatch && maxNewReady > 0) {
+                val center = snapshot?.centerMediaOrdinal ?: 0
+                mediaGridReadyAttachmentOrder(
+                    visible, states, publishedCells, ordinalIndex.mediaOrdinalByAssetId, center,
+                ).firstOrNull()?.let { assetId ->
+                    states[assetId]?.let { next[assetId] = it }
+                }
+            }
+
+            publishedCells.clear()
+            publishedCells.putAll(next)
+            if (startupBatch) startupPublicationBatchPending = false
+            val demand = !publicationPaused && !disposed && visible.any { assetId ->
+                val internal = states[assetId]
+                internal?.status == MediaGridCellLoadStatus.Ready && !mediaGridSameReadyCandidate(internal, publishedCells[assetId])
+            }
+            val old = _uiState.value
+            nextState = old.copy(
+                startup = startupState,
+                cells = publishedCells.toMap(),
+                framePublicationDemand = demand,
+            )
         }
+        if (_uiState.value != nextState) _uiState.value = nextState
+        _framePublicationDemand.value = nextState.framePublicationDemand
+    }
+
+    /** Called once by the Compose frame runner. It performs no IO or image loading. */
+    override fun publishOneReadyImageForFrame() {
+        if (publicationPaused || disposed) return
+        reconcilePublishedState(maxNewReady = 1)
     }
 
     private fun nextMetadataTask(): LoadTask? = synchronized(lock) {
@@ -960,6 +1075,8 @@ internal class MediaGridSteadyLoadController(
     internal fun stateSnapshot(): MediaGridControllerStateSnapshot = synchronized(lock) {
         MediaGridControllerStateSnapshot(
             cells = states.toMap(),
+            publishedCells = publishedCells.toMap(),
+            framePublicationDemand = framePublicationDemandLocked(),
             metadata = metadata.toMap(),
             records = queueRecords.mapValues { (_, value) -> value.copy() },
             metadataPendingOrdinals = metadataPending.snapshot(),
@@ -975,6 +1092,15 @@ internal class MediaGridSteadyLoadController(
         )
     }
 
+    private fun framePublicationDemandLocked(): Boolean {
+        val visible = activeSnapshot?.takeIf { it.generation == generation }?.visibleAssetIds ?: return false
+        if (publicationPaused || disposed) return false
+        return visible.any { assetId ->
+            val internal = states[assetId]
+            internal?.status == MediaGridCellLoadStatus.Ready && !mediaGridSameReadyCandidate(internal, publishedCells[assetId])
+        }
+    }
+
     private fun emitEvent(event: LoadEvent) { if (!disposed) events.trySend(event) }
     private fun signalAll() { metadataWake.trySend(Unit); bitmapWake.trySend(Unit); memorySignal.trySend(Unit) }
     fun dispose() {
@@ -982,6 +1108,8 @@ internal class MediaGridSteadyLoadController(
         workerJobs.forEach(Job::cancel)
         scope.cancel()
         anchorSignal.close(); initialAnchorSignal.close(); metadataWake.close(); bitmapWake.close(); memorySignal.close(); startupSignal.close(); events.close()
-        synchronized(lock) { urgentMetadataQueue.clear(); urgentBitmapQueue.clear(); metadataPending.clear(); bitmapPending.clear(); metadata.clear(); states.clear(); queueRecords.clear() }
+        synchronized(lock) { urgentMetadataQueue.clear(); urgentBitmapQueue.clear(); metadataPending.clear(); bitmapPending.clear(); metadata.clear(); states.clear(); publishedCells.clear(); frameTransitionPreserved.clear(); queueRecords.clear() }
+        _uiState.value = _uiState.value.copy(cells = emptyMap(), framePublicationDemand = false)
+        _framePublicationDemand.value = false
     }
 }

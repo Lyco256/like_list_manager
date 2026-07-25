@@ -157,6 +157,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.File
 import java.time.Instant
@@ -3419,6 +3420,17 @@ private fun MediaGridBulkTagDialog(
 }
 
 @Composable
+internal fun MediaGridFramePublicationRunner(target: MediaGridFramePublicationTarget) {
+    LaunchedEffect(target) {
+        while (true) {
+            target.framePublicationDemand.first { it }
+            withFrameNanos { }
+            target.publishOneReadyImageForFrame()
+        }
+    }
+}
+
+@Composable
 private fun ClassifiedMediaGridContent(
     frame: MediaGridFrameData,
     sort: ClassifiedSortState,
@@ -3487,6 +3499,7 @@ private fun ClassifiedMediaGridContent(
             }
         }
     }
+    effectiveController?.let { MediaGridFramePublicationRunner(it) }
     Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(columnCount),
@@ -3895,7 +3908,7 @@ private fun ClassifiedMediaGridCell(
                     contentDescription = null,
                     imageLoader = imageLoader,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().testTag("media_grid_image_${entry.assetId}"),
                 )
         }
         if (!selectionMode && sort.baseOrder == ClassifiedSortBase.LikeCount && entry.likeCount != null) {
