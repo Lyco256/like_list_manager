@@ -66,7 +66,6 @@ class MediaGridSteadyLoadControllerIntegrationTest {
         private val failedKeys: Set<String> = emptySet(),
     ) : MediaGridBitmapGateway {
         private val cached = initialCached.toMutableSet()
-        val fastEligibleKeys = Collections.synchronizedSet(mutableSetOf<String>())
         val requestedKeys = Collections.synchronizedList(mutableListOf<String>())
         private val requestCount = AtomicInteger()
         val requests: Int
@@ -79,11 +78,6 @@ class MediaGridSteadyLoadControllerIntegrationTest {
             cached += candidate.cacheKey
             return true
         }
-        override fun retain(assetId: Long, candidate: MediaGridPreparedCandidate, fastDisplayEligible: Boolean) {
-            if (fastDisplayEligible) fastEligibleKeys += candidate.cacheKey
-        }
-        override fun isFastDisplayEligible(assetId: Long, candidate: MediaGridPreparedCandidate): Boolean =
-            candidate.cacheKey in fastEligibleKeys
         fun evict(cacheKey: String) { cached.remove(cacheKey) }
     }
 
@@ -149,36 +143,6 @@ class MediaGridSteadyLoadControllerIntegrationTest {
             assertEquals(MediaGridCellLoadStatus.Ready, snapshot.cells[0L]?.status)
             assertEquals(0, gateway.requests)
             assertTrue(mediaGridControllerStateViolations(snapshot, buildMediaGridOrdinalIndex(frame).mediaOrdinalByAssetId).isEmpty())
-        } finally {
-            controller.dispose()
-            loader.shutdown()
-        }
-    }
-
-    @Test
-    fun activeOffscreenPrefetchCompletesMetadataAndBitmapLoad() = runBlocking {
-        val frame = frame(64)
-        val prepared = (0L until 64L).associateWith { prepared(frame, it) }
-        val gateway = FakeBitmapGateway(emptySet())
-        val loader = ImageLoader.Builder(context).build()
-        val controller = MediaGridSteadyLoadController(
-            context, frame, FakePreparer(prepared), loader, { _, _ -> }, gateway,
-        )
-        try {
-            controller.updateViewport(anchor(frame, 20))
-            controller.start()
-            await {
-                val snapshot = controller.stateSnapshot()
-                28L !in snapshot.visibleAssetIds &&
-                    28L in snapshot.metadata &&
-                    snapshot.cells[28L]?.status == MediaGridCellLoadStatus.Ready &&
-                    "cache-28" in gateway.requestedKeys
-            }
-            val snapshot = controller.stateSnapshot()
-            assertTrue(snapshot.metadata.containsKey(28L))
-            assertEquals(MediaGridCellLoadStatus.Ready, snapshot.cells[28L]?.status)
-            assertTrue(gateway.requestedKeys.contains("cache-28"))
-            assertTrue(gateway.fastEligibleKeys.contains("cache-28"))
         } finally {
             controller.dispose()
             loader.shutdown()
@@ -291,13 +255,7 @@ class MediaGridSteadyLoadControllerIntegrationTest {
             await { gateway.requests >= 2 }
             assertEquals(listOf("fallback-first-0", "fallback-local-0"), gateway.requestedKeys)
             assertEquals(2, gateway.requests)
-            await(
-                timeoutMs = 15_000L,
-                diagnostic = {
-                    val snapshot = controller.stateSnapshot()
-                    "status=${snapshot.cells[0L]?.status}, candidate=${snapshot.cells[0L]?.candidateIndex}, requests=${gateway.requestedKeys}, record=${snapshot.records[0L]}"
-                },
-            ) { controller.stateSnapshot().cells[0L]?.status == MediaGridCellLoadStatus.Failed }
+            await { controller.stateSnapshot().cells[0L]?.status == MediaGridCellLoadStatus.Failed }
             val snapshot = controller.stateSnapshot()
             assertTrue(snapshot.cells.values.none { it.status == MediaGridCellLoadStatus.Pending })
             assertConsistentState(snapshot, buildMediaGridOrdinalIndex(frame).mediaOrdinalByAssetId)
@@ -484,9 +442,6 @@ class MediaGridSteadyLoadControllerIntegrationTest {
                     controller.stateSnapshot().cells.size == 300 &&
                     controller.stateSnapshot().cells.values.all { it.status == MediaGridCellLoadStatus.Ready }
             }
-            // Keep this legacy frame-pacing scenario focused on newly visible completion;
-            // resident reuse is covered by the dedicated resident tests below.
-            gateway.fastEligibleKeys.clear()
             controller.publishOneReadyImageForFrame()
             val visible = (100..111).toList().toIntArray()
             controller.updateViewport(
@@ -494,9 +449,8 @@ class MediaGridSteadyLoadControllerIntegrationTest {
             )
             await { controller.stateSnapshot().framePublicationDemand }
             await { controller.stateSnapshot().publishedCells.keys.none { it in visible.map(Int::toLong) } }
-            assertTrue(visible.all { "cache-$it" !in gateway.fastEligibleKeys })
             var publishedCount = controller.stateSnapshot().publishedCells.values.count { it.status == MediaGridCellLoadStatus.Ready }
-            repeat(24) { frameNumber ->
+            repeat(12) { frameNumber ->
                 controller.publishOneReadyImageForFrame()
                 val nextCount = controller.stateSnapshot().publishedCells.values.count { it.status == MediaGridCellLoadStatus.Ready }
                 assertTrue("frame $frameNumber published more than one image", nextCount - publishedCount <= 1)

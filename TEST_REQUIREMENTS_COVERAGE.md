@@ -1,12 +1,5 @@
 # 実機レベル統合テスト強化 カバレッジ
 
-## 2026-07-26 resident image display revision
-
-- Implemented candidate-aware retained entries with fast-display eligibility, 300-entry / 80 MiB bounds, visible-first eviction protection, and direct Compose drawing from the retained Coil Bitmap handle.
-- Active prefetch rows, worker concurrency, queue ordering, candidate order, RGB_565 pack, Progress, and scroll/session retention remain unchanged.
-- Added unit coverage for resident candidate identity, isolated integration coverage for offscreen active metadata+Bitmap completion and eligibility timing, retained-store eviction/eligibility coverage, and Compose coverage asserting the first resident observation has image semantics and no Placeholder.
-- Wireless isolated integration verification and production-package safe overwrite verification both completed with `Success` after the implementation and test updates. Macrobenchmark was not run, as required.
-
 ## 2026-07-25 frame-paced image publication
 
 | 要件 | 証跡 |

@@ -277,20 +277,4 @@ class MediaGridSteadyLoadControllerTest {
             ).isEmpty(),
         )
     }
-
-    @Test
-    fun residentCandidateIdentityRejectsStaleSourceAndAcceptsSameCandidate() {
-        val current = MediaGridPreparedCandidate(
-            kind = MediaGridImageSourceKind.Local,
-            requestData = "current",
-            sourceIdentity = "source-current",
-            cacheKey = "cache-current",
-            width = 256,
-            height = 256,
-        )
-        assertTrue(mediaGridResidentCandidateMatches(null, current))
-        assertTrue(mediaGridResidentCandidateMatches(current, current))
-        assertFalse(mediaGridResidentCandidateMatches(current, current.copy(sourceIdentity = "source-old")))
-        assertFalse(mediaGridResidentCandidateMatches(current, current.copy(cacheKey = "cache-old")))
-    }
 }

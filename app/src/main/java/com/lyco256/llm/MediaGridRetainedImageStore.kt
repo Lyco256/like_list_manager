@@ -20,25 +20,19 @@ internal data class MediaGridRetainedImageStats(
     val restores: Long,
 )
 
-internal data class MediaGridResidentImage(
-    val assetId: Long,
-    val candidate: MediaGridPreparedCandidate,
-    val value: MemoryCache.Value,
-    val estimatedBytes: Long,
-)
-
 /** Shared, image-only retention for all classified media-grid sessions. */
 internal class MediaGridRetainedImageStore(
     private val memoryCache: MemoryCache?,
     private val targetEntryCount: Int = MEDIA_GRID_RETAINED_IMAGE_TARGET_ENTRIES,
-    private val byteLimit: Long = MEDIA_GRID_RETAINED_IMAGE_MAX_BYTES,
+    private val byteLimit: Long = minOf(
+        MEDIA_GRID_RETAINED_IMAGE_MAX_BYTES,
+        ((memoryCache?.maxSize ?: 0).toDouble() * MEDIA_GRID_RETAINED_IMAGE_MEMORY_FRACTION).toLong(),
+    ),
 ) : ComponentCallbacks2 {
     private data class Entry(
         val key: MediaGridRetainedImageKey,
         val value: MemoryCache.Value,
-        val candidate: MediaGridPreparedCandidate,
         val estimatedBytes: Long,
-        var fastDisplayEligible: Boolean,
     )
 
     private val lock = Any()
@@ -67,38 +61,15 @@ internal class MediaGridRetainedImageStore(
         }
     }
 
-    fun retain(
-        assetId: Long,
-        candidate: MediaGridPreparedCandidate,
-        value: MemoryCache.Value,
-        fastDisplayEligible: Boolean = false,
-    ) {
+    fun retain(assetId: Long, candidate: MediaGridPreparedCandidate, value: MemoryCache.Value) {
         val key = MediaGridRetainedImageKey(assetId, candidate.cacheKey, candidate.sourceIdentity)
-        val entry = Entry(key, value, candidate, mediaGridEstimatedBitmapBytes(candidate), fastDisplayEligible)
+        val entry = Entry(key, value, mediaGridEstimatedBitmapBytes(candidate))
         synchronized(lock) {
             entries.keys.filter { it.assetId == assetId && it != key }.toList().forEach(::removeLocked)
             entries.remove(key)?.let { estimatedBytes -= it.estimatedBytes }
             entries[key] = entry
             estimatedBytes += entry.estimatedBytes
             trimLocked()
-        }
-    }
-
-    fun markFastDisplayEligible(assetId: Long, candidate: MediaGridPreparedCandidate): Boolean {
-        val key = MediaGridRetainedImageKey(assetId, candidate.cacheKey, candidate.sourceIdentity)
-        synchronized(lock) {
-            val entry = entries[key] ?: return false
-            entry.fastDisplayEligible = true
-            return true
-        }
-    }
-
-    fun fastDisplay(assetId: Long, candidate: MediaGridPreparedCandidate): MediaGridResidentImage? {
-        val key = MediaGridRetainedImageKey(assetId, candidate.cacheKey, candidate.sourceIdentity)
-        synchronized(lock) {
-            val entry = entries[key] ?: return null
-            if (!entry.fastDisplayEligible) return null
-            return MediaGridResidentImage(assetId, entry.candidate, entry.value, entry.estimatedBytes)
         }
     }
 
@@ -176,4 +147,5 @@ internal class MediaGridRetainedImageStore(
 }
 
 internal const val MEDIA_GRID_RETAINED_IMAGE_TARGET_ENTRIES = 300
-internal const val MEDIA_GRID_RETAINED_IMAGE_MAX_BYTES = 80L * 1024L * 1024L
+internal const val MEDIA_GRID_RETAINED_IMAGE_MAX_BYTES = 48L * 1024L * 1024L
+internal const val MEDIA_GRID_RETAINED_IMAGE_MEMORY_FRACTION = 0.75
