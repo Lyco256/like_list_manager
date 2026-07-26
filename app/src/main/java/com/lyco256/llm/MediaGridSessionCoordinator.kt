@@ -25,6 +25,7 @@ internal class MediaGridSessionCoordinator(
     private val imageLoader: ImageLoader,
     private val onPersistentPreviewError: suspend (Long, com.lyco256.llm.data.MediaGridPreparedCandidate) -> Unit,
 ) {
+    private val retainedImageStore = MediaGridRetainedImageStore(imageLoader.memoryCache)
     private val recoveredPreviewIdentities = ConcurrentHashMap.newKeySet<String>()
     private data class Session(
         val key: MediaGridSessionKey,
@@ -50,6 +51,7 @@ internal class MediaGridSessionCoordinator(
     val state: StateFlow<MediaGridSessionUiState> = _state.asStateFlow()
 
     init {
+        context.applicationContext.registerComponentCallbacks(retainedImageStore)
         scope.launch {
             MediaGridPreviewNotifier.previewChanged.collect { assetId ->
                 synchronized(this@MediaGridSessionCoordinator) {
@@ -96,6 +98,8 @@ internal class MediaGridSessionCoordinator(
     @Synchronized fun dispose() {
         sessions.values.forEach { disposeSession(it) }
         sessions.clear()
+        context.applicationContext.unregisterComponentCallbacks(retainedImageStore)
+        retainedImageStore.clear()
         scope.coroutineContext.cancel()
     }
 
@@ -112,11 +116,19 @@ internal class MediaGridSessionCoordinator(
             if (session.refreshGeneration != generation || sessions[session.key] !== session) return@launch
             val controller = session.controller
             if (controller == null) {
-                val created = MediaGridSteadyLoadController(context, next, preparer, imageLoader) { assetId, candidate ->
-                    if (recoveredPreviewIdentities.add(candidate.sourceIdentity)) {
-                        onPersistentPreviewError(assetId, candidate)
-                    }
-                }
+                val created = MediaGridSteadyLoadController(
+                    context = context,
+                    frame = next,
+                    preparer = preparer,
+                    imageLoader = imageLoader,
+                    onPreviewCandidateError = { assetId, candidate ->
+                        if (recoveredPreviewIdentities.add(candidate.sourceIdentity)) {
+                            onPersistentPreviewError(assetId, candidate)
+                        }
+                    },
+                    retainedImageStore = retainedImageStore,
+                    ownerToken = retainedImageStore.newOwnerToken(),
+                )
                 session.controller = created
                 session.collectJob = scope.launch {
                     created.uiState.collect { value ->
@@ -155,6 +167,7 @@ internal class MediaGridSessionCoordinator(
             anchor = session.anchor,
             visible = session.visible,
             refreshGeneration = session.refreshGeneration,
+            retainedImageStore = retainedImageStore,
         )
     }
 
@@ -191,4 +204,5 @@ internal data class MediaGridSessionUiState(
     val anchor: ClassifiedMediaGridScrollAnchor? = null,
     val visible: Boolean = false,
     val refreshGeneration: Long = 0L,
+    val retainedImageStore: MediaGridRetainedImageStore? = null,
 )

@@ -2,6 +2,8 @@
 
 `MainViewModel`が所有する、分類済みメディアグリッドの長寿命session管理です。
 
+2026-07-26時点では、coordinatorが`MediaGridRetainedImageStore`を一つだけ所有し、複数session/controllerへ共有します。session eviction、列数変更、カード画面遷移ではstore全体をclearせず、controller owner tokenのvisible／active保護だけを更新します。coordinator dispose時のみcallback解除とstore全entry解放を行います。
+
 - session keyは有効なfilter/sortだけで構成し、列数・source revision・hierarchy revisionを含めません。
 - sessionは現在と直前の最大2件をLRU保持し、明示条件変更時だけ新sessionを開始します。
 - sessionはframe、確定列数、変更要求列数、controller、controller state、anchor、visible状態、refresh generationを保持します。
