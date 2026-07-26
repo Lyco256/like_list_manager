@@ -7,6 +7,8 @@
 
 `MediaGridSteadyLoadController`とsession keyの固定契約をローカルUnit Testで検証します。
 
+2026-07-26時点では、active範囲の上下3行を列数2／4／8／12で検証し、frame先頭・末尾のclampを既存契約として維持します。retained storeの300／301件、visible／active保護、Coil value restore、memory trim、candidate置換・invalidationは隔離Integration Testで検証します。
+
 - startup状態の順序
 - 50ms tick、metadata 2件、request 1件、completion 4件、同時request 2件の固定値
 - viewport、下方向1画面、下方向2画面のwarm-up順序

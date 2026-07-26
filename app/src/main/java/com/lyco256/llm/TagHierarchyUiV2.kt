@@ -502,6 +502,7 @@ internal fun EnhancedClassifiedScreen(
                     columnCount = mediaGridSessionState.columnCount,
                     state = mediaGridLazyState,
                     controller = mediaGridSessionState.controller,
+                    retainedImageStore = mediaGridSessionState.retainedImageStore,
                     controllerState = mediaGridSessionState.controllerState,
                     showProgress = mediaGridSessionState.showInitialProgress,
                     onPinchFinished = { anchor, nextColumnCount ->
@@ -3437,6 +3438,7 @@ private fun ClassifiedMediaGridContent(
     columnCount: Int,
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
     controller: MediaGridSteadyLoadController?,
+    retainedImageStore: MediaGridRetainedImageStore?,
     controllerState: MediaGridControllerUiState,
     showProgress: Boolean,
     onPinchFinished: (ClassifiedMediaGridScrollAnchor?, Int) -> Unit,
@@ -3456,11 +3458,14 @@ private fun ClassifiedMediaGridContent(
                 frame = frame,
                 preparer = appContainer.mediaGridImagePreparer,
                 imageLoader = appContainer.mediaGridImageLoader,
-            ) { assetId, candidate ->
-                if (recoveryGate.claim(candidate.sourceIdentity)) {
-                    appContainer.repository.recoverMediaGridCandidate(assetId, candidate)
-                }
-            }.also { it.start() }
+                onPreviewCandidateError = { assetId, candidate ->
+                    if (recoveryGate.claim(candidate.sourceIdentity)) {
+                        appContainer.repository.recoverMediaGridCandidate(assetId, candidate)
+                    }
+                },
+                retainedImageStore = retainedImageStore,
+                ownerToken = retainedImageStore?.newOwnerToken() ?: 0L,
+            ).also { it.start() }
         }
     } else null
     val effectiveController = controller ?: fallbackController

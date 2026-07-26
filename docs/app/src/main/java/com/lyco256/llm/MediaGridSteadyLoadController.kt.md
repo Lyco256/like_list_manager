@@ -1,5 +1,12 @@
 # `MediaGridSteadyLoadController.kt`
 
+## 2026-07-26 retained image and active prefetch
+
+- `MEDIA_GRID_ACTIVE_PREFETCH_ROWS = 3`を`selectMediaGridActiveWindow()`と`buildMediaGridActiveWindowSnapshot()`で共用し、headerを含まないmedia ordinal単位で列数2〜12の上下3行をactiveにする。
+- 初回warm-up、metadata／Bitmap worker並列数、queue優先順位、候補順、1 frame 1枚公開、Progress、scroll保持は変更しない。
+- `MediaGridSessionCoordinator`共有の`MediaGridRetainedImageStore`へ、Coil cache hit／load成功／visible化を反映する。Coil miss時は同一candidateのretained valueをCoilへrestoreして通常loadを省略する。
+- source／candidate変更、asset削除、明示invalidationでは対象assetのretained entryだけを破棄する。
+
 ## 2026-07-25 frame-paced image publication
 
 - `states` is the worker-owned internal state; `publishedCells` is the last visible state exposed to Compose. Workers never publish a Ready image directly.

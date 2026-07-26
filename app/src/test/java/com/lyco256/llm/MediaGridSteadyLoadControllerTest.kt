@@ -64,10 +64,21 @@ class MediaGridSteadyLoadControllerTest {
     }
 
     @Test
-    fun activeBitmapWindowIsVisibleRowsPlusExactlyOneRowOnEachSide() {
+    fun activeBitmapWindowIsVisibleRowsPlusExactlyThreeRowsOnEachSide() {
         val frame = frame(80)
         val active = selectMediaGridActiveWindow(frame, anchor(frame, 20, 27, (20..27).toList().toIntArray()))
-        assertEquals((16..31).toSet(), active)
+        assertEquals((8..39).toSet(), active)
+    }
+
+    @Test
+    fun activeWindowUsesThreeMediaRowsForEverySupportedColumnCount() {
+        listOf(2, 4, 8, 12).forEach { columns ->
+            val frame = frame(160, columns)
+            val first = columns * 5
+            val visible = (first until first + columns * 2).toList().toIntArray()
+            val active = selectMediaGridActiveWindow(frame, anchor(frame, first, visible.last(), visible))
+            assertEquals(columns * 8, active.size)
+        }
     }
 
     @Test
@@ -80,9 +91,9 @@ class MediaGridSteadyLoadControllerTest {
             generation = 3L,
         )
         assertEquals(longArrayOf(12, 13, 14, 15, 16, 17, 18, 19).toList(), snapshot.visibleAssetIds.toList())
-        assertEquals((8L..23L).toList(), snapshot.activeAssetIds.toList())
-        assertTrue(snapshot.isActive(8L))
-        assertFalse(snapshot.isActive(24L))
+        assertEquals((0L..31L).toList(), snapshot.activeAssetIds.toList())
+        assertTrue(snapshot.isActive(0L))
+        assertFalse(snapshot.isActive(32L))
         assertEquals(7L, snapshot.epoch)
         assertEquals(3L, snapshot.generation)
         assertEquals(15, snapshot.centerMediaOrdinal)
