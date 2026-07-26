@@ -8,6 +8,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -111,6 +112,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -3546,6 +3548,7 @@ private fun ClassifiedMediaGridContent(
                         onToggleSelection = onToggleSelection,
                         imageLoader = appContainer.mediaGridImageLoader,
                         loadState = effectiveControllerState.cells[item.entry.assetId] ?: MediaGridCellLoadState(),
+                        residentImage = effectiveControllerState.residentImages[item.entry.assetId],
                     )
                 }
             }
@@ -3825,7 +3828,7 @@ private fun ClassifiedMediaGridHeader(item: MediaGridHeaderItem) {
 }
 
 @Composable
-private fun ClassifiedMediaGridCell(
+internal fun ClassifiedMediaGridCell(
     modifier: Modifier = Modifier,
     entry: MediaGridEntry,
     sort: ClassifiedSortState,
@@ -3837,6 +3840,7 @@ private fun ClassifiedMediaGridCell(
     onToggleSelection: (Long) -> Unit,
     imageLoader: coil.ImageLoader,
     loadState: MediaGridCellLoadState,
+    residentImage: MediaGridResidentImage?,
 ) {
     val context = LocalContext.current
     val readyCandidate = loadState.readyCandidate
@@ -3845,9 +3849,10 @@ private fun ClassifiedMediaGridCell(
             buildMediaGridImageRequest(context, candidate)
         }
     }
-    val visualState = when (loadState.status) {
-        MediaGridCellLoadStatus.Ready -> MediaGridCellVisualState.Image
-        MediaGridCellLoadStatus.Failed -> MediaGridCellVisualState.Error
+    val directResident = mediaGridResidentDisplayFor(loadState, residentImage)
+    val visualState = when {
+        loadState.status == MediaGridCellLoadStatus.Ready || directResident != null -> MediaGridCellVisualState.Image
+        loadState.status == MediaGridCellLoadStatus.Failed -> MediaGridCellVisualState.Error
         else -> MediaGridCellVisualState.Placeholder
     }
     val selectionIndicatorSize = mediaGridSelectionIndicatorSize(columnCount)
@@ -3908,7 +3913,14 @@ private fun ClassifiedMediaGridCell(
                         .testTag("media_grid_placeholder_${entry.assetId}"),
                 )
             }
-            if (imageRequest != null) AsyncImage(
+            if (directResident != null) {
+                Image(
+                    bitmap = directResident.value.bitmap.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().testTag("media_grid_image_${entry.assetId}"),
+                )
+            } else if (imageRequest != null) AsyncImage(
                     model = imageRequest,
                     contentDescription = null,
                     imageLoader = imageLoader,

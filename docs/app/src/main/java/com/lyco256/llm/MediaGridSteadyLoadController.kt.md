@@ -1,5 +1,11 @@
 # `MediaGridSteadyLoadController.kt`
 
+## Resident image display revision (2026-07-26)
+
+- The existing 3-row active prefetch and metadata/Bitmap worker budgets are unchanged. Offscreen bitmap completion registers the matching retained entry as fast-display eligible.
+- A visible asset that first completes while visible remains in normal one-ready-image-per-frame publication. The entry becomes eligible only after that publication; eligible resident entries do not create new publication demand.
+- Controller UI state exposes candidate-validated resident images for the cell's first composition. Candidate/source mismatch and invalidation fall back to the normal path.
+
 ## 2026-07-26 retained image and active prefetch
 
 - `MEDIA_GRID_ACTIVE_PREFETCH_ROWS = 3`を`selectMediaGridActiveWindow()`と`buildMediaGridActiveWindowSnapshot()`で共用し、headerを含まないmedia ordinal単位で列数2〜12の上下3行をactiveにする。

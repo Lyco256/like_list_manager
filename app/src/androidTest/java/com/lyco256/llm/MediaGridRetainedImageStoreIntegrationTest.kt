@@ -85,6 +85,57 @@ class MediaGridRetainedImageStoreIntegrationTest {
     }
 
     @Test
+    fun fastDisplayEligibilityIsSeparateFromCoilRestoreAndUsesTheSameImageHandle() {
+        val loader = ImageLoader.Builder(context).memoryCache {
+            MemoryCache.Builder(context).maxSizeBytes(8 * 1024 * 1024).build()
+        }.build()
+        val store = MediaGridRetainedImageStore(loader.memoryCache)
+        val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
+        try {
+            val c = candidate(41L).copy(kind = MediaGridImageSourceKind.Local)
+            val value = MemoryCache.Value(bitmap, emptyMap())
+            store.retain(41L, c, value)
+            assertEquals(null, store.fastDisplay(41L, c))
+            assertTrue(store.markFastDisplayEligible(41L, c))
+            val resident = store.fastDisplay(41L, c)
+            assertTrue(resident != null)
+            assertTrue(value === resident?.value)
+            assertTrue(bitmap === resident?.value?.bitmap)
+        } finally {
+            store.clear()
+            bitmap.recycle()
+            loader.shutdown()
+        }
+    }
+
+    @Test
+    fun threeHundredArgbEntriesFitTheEightyMiBLimitAndEvictTheOldestNonVisibleEntry() {
+        val loader = ImageLoader.Builder(context).memoryCache {
+            MemoryCache.Builder(context).maxSizeBytes(128 * 1024 * 1024).build()
+        }.build()
+        val store = MediaGridRetainedImageStore(loader.memoryCache)
+        val owner = store.newOwnerToken()
+        val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
+        try {
+            repeat(300) { assetId ->
+                store.retain(assetId.toLong(), candidate(assetId.toLong()).copy(kind = MediaGridImageSourceKind.Local), MemoryCache.Value(bitmap, emptyMap()), true)
+            }
+            store.updateProtection(owner, longArrayOf(299L), longArrayOf())
+            store.retain(300L, candidate(300L).copy(kind = MediaGridImageSourceKind.Local), MemoryCache.Value(bitmap, emptyMap()), true)
+            assertEquals(300, store.stats().entryCount)
+            assertTrue(store.stats().estimatedBytes <= MEDIA_GRID_RETAINED_IMAGE_MAX_BYTES)
+            assertEquals(null, store.fastDisplay(0L, candidate(0L).copy(kind = MediaGridImageSourceKind.Local)))
+            assertTrue(store.fastDisplay(299L, candidate(299L).copy(kind = MediaGridImageSourceKind.Local)) != null)
+            assertTrue(store.fastDisplay(300L, candidate(300L).copy(kind = MediaGridImageSourceKind.Local)) != null)
+        } finally {
+            store.removeOwner(owner)
+            store.clear()
+            bitmap.recycle()
+            loader.shutdown()
+        }
+    }
+
+    @Test
     fun memoryTrimKeepsVisibleOnlyAtBackgroundAndHalvesAtRunningLow() {
         val loader = ImageLoader.Builder(context).memoryCache {
             MemoryCache.Builder(context).maxSizeBytes(64 * 1024 * 1024).build()
