@@ -1,5 +1,11 @@
 # `MediaGridRetainedImageStore.kt`
 
+## Resident image display revision (2026-07-26)
+
+- Each retained entry keeps the original Coil `MemoryCache.Value`, its prepared candidate, estimated bytes, and `fastDisplayEligible`; no Bitmap, Painter, ImageRequest, pack payload, or Composable is copied or retained.
+- The shared store is bounded to 300 entries and 80 MiB. Trimming protects visible entries, then active entries, and evicts the oldest eligible entry first.
+- `fastDisplay()` returns only candidate-matching eligible entries for direct Compose drawing. Coil reinsertion remains available for the normal fallback path.
+
 `MediaGridSessionCoordinator`が所有する、分類済みメディアグリッド全session共有の画像保持storeです。
 
 - `MediaGridRetainedImageKey`はasset ID、Coil memory cache key、source identityで構成し、行・列数・ordinal・viewportを含めません。
