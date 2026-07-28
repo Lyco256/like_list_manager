@@ -42,6 +42,13 @@ Current media-grid rendering is owned by `MediaGridSessionCoordinator` under `Ma
 
 # Source Files Guide
 
+## 2026-07-28 resident draw index基盤
+
+- `MediaGridRetainedImageStore.kt`は既存のaccess-order LRU、300entry、byte上限、visible／active保護、restore、memory trimを維持したまま、`MediaGridResidentImageIdentity`、`MediaGridResidentDrawHandle`、`MediaGridResidentDrawIndex`を追加する。
+- `AtomicReference`のimmutable draw indexはasset IDから現在identityを確認してO(1)でhandleを返す。lookupはstore lock、Coil cache書込み、request、pack read、decode、pixel copyを行わない。
+- visible assetのLRU touchは`updateProtection()`内のasset ID補助indexで行い、セル描画からstore lockを取得しない。production UI、Placeholder、AsyncImage、frame publication、queue、worker、先読み範囲は変更しない。
+- 実機画像・競合の証跡は`MediaGridRetainedImageStoreIntegrationTest.kt`と対応docsに置く。
+
 ## 2026-07-24 cache-hit starvation fix
 
 - `MediaGridSteadyLoadController.kt` owns the unified cache-hit transition, asset-local work reconciliation, bounded metadata retry/failure state, conflated UI publication, and deterministic controller snapshots.

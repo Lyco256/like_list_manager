@@ -1,5 +1,12 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-07-28 resident draw index基盤
+
+- `MediaGridResidentImageIdentity`、immutable `MediaGridResidentDrawHandle`、`AtomicReference`公開の`MediaGridResidentDrawIndex`を追加した。lookupはasset ID補助mapとcandidate identityを使い、store lockと画像生成・Coil restoreを行わない。
+- retain、candidate置換、eviction、asset invalidation、memory trim、clearはmutable storeとdraw indexを一回の整合更新として公開し、restoreとvisible touchではindex versionを増やさない。
+- `MediaGridRetainedImageStoreIntegrationTest`に、別インスタンスの256×256 RGB_565 Bitmap 300件、301件目のLRU eviction、identity lookup、lock-free seam、固定barrier順序のretain／lookup／invalidate／protection／trim／restore競合を追加した。
+- ローカル安全検証は`run-safe-debug-check.cmd`のBuild / UnitTest / Lint / Successを確認済み。`run-safe-integration-check.cmd -DebugMethod wireless`でPreflight / Build / UnitTest / Lint / Install / IntegrationTest / Successを確認済み。
+
 ## 2026-07-25 frame-paced image publication
 
 | 要件 | 証跡 |

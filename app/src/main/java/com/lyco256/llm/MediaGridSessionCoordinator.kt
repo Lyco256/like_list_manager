@@ -99,7 +99,7 @@ internal class MediaGridSessionCoordinator(
         sessions.values.forEach { disposeSession(it) }
         sessions.clear()
         context.applicationContext.unregisterComponentCallbacks(retainedImageStore)
-        retainedImageStore.clear()
+        retainedImageStore.close()
         scope.coroutineContext.cancel()
     }
 

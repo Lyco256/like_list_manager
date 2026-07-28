@@ -637,11 +637,6 @@ internal class MediaGridSteadyLoadController(
                 if (activeSnapshot?.epoch == epoch && activeSnapshot?.generation == generation) return@synchronized
                 activeSnapshot = snapshot
                 retainedImageStore?.updateProtection(ownerToken, snapshot.visibleAssetIds, snapshot.activeAssetIds)
-                snapshot.visibleAssetIds.forEach { assetId ->
-                    states[assetId]?.readyCandidate?.let { candidate ->
-                        retainedImageStore?.touch(assetId, candidate)
-                    }
-                }
                 promoteUrgentMetadataLocked(snapshot)
                 promoteUrgentBitmapLocked(snapshot)
                 enqueueVisiblePreparedLocked(snapshot)
