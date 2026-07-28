@@ -66,6 +66,45 @@ class MediaGridRetainedImageStoreIntegrationTest {
     }
 
     @Test
+    fun eligibilityIsIdentitySafeMonotonicAndLockFree() {
+        val loader = ImageLoader.Builder(context).memoryCache {
+            MemoryCache.Builder(context).maxSizeBytes(8 * 1024 * 1024).build()
+        }.build()
+        val store = MediaGridRetainedImageStore(loader.memoryCache)
+        val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.RGB_565)
+        try {
+            val original = candidate(7L)
+            val value = MemoryCache.Value(bitmap, emptyMap())
+            store.retain(7L, original, value, directDrawEligible = false)
+            assertFalse(store.hasEligibleDrawHandle(7L))
+            val beforeMark = store.drawIndexSnapshot().version
+            store.markDirectDrawEligible(7L, original)
+            assertTrue(store.lookupEligibleDrawHandle(7L)!!.directDrawEligible)
+            val afterMark = store.drawIndexSnapshot().version
+            assertTrue(afterMark > beforeMark)
+            val lockCount = store.lockAcquisitionCount()
+            repeat(1_000) { assertTrue(store.hasEligibleDrawHandle(7L)) }
+            assertEquals(lockCount, store.lockAcquisitionCount())
+            store.retain(7L, original, value, directDrawEligible = false)
+            assertTrue(store.hasEligibleDrawHandle(7L))
+            assertEquals(afterMark, store.drawIndexSnapshot().version)
+            val replacement = candidate(7L, "replacement")
+            store.retain(7L, replacement, value, directDrawEligible = false)
+            assertFalse(store.hasEligibleDrawHandle(7L))
+            store.markDirectDrawEligible(7L, original)
+            assertFalse(store.hasEligibleDrawHandle(7L))
+            store.markDirectDrawEligible(7L, replacement)
+            assertTrue(store.hasEligibleDrawHandle(7L))
+            store.invalidateAsset(7L)
+            assertFalse(store.hasEligibleDrawHandle(7L))
+        } finally {
+            store.clear()
+            bitmap.recycle()
+            loader.shutdown()
+        }
+    }
+
+    @Test
     fun sharedStoreKeepsThreeHundredEntriesAndEvictsOldestUnprotectedFirst() {
         val loader = ImageLoader.Builder(context).memoryCache {
             MemoryCache.Builder(context).maxSizeBytes(64 * 1024 * 1024).build()

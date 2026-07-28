@@ -265,6 +265,9 @@ internal interface MediaGridBitmapGateway {
     fun isCached(assetId: Long, candidate: MediaGridPreparedCandidate): Boolean = isCached(candidate)
     suspend fun load(candidate: MediaGridPreparedCandidate): Boolean
     fun retain(assetId: Long, candidate: MediaGridPreparedCandidate) = Unit
+    fun retain(assetId: Long, candidate: MediaGridPreparedCandidate, directDrawEligible: Boolean) {
+        retain(assetId, candidate)
+    }
 }
 
 internal interface MediaGridFramePublicationTarget {
@@ -288,9 +291,9 @@ private class CoilMediaGridBitmapGateway(
         return retainedImageStore?.restore(assetId, candidate) == true
     }
 
-    override fun retain(assetId: Long, candidate: MediaGridPreparedCandidate) {
+    override fun retain(assetId: Long, candidate: MediaGridPreparedCandidate, directDrawEligible: Boolean) {
         imageLoader.memoryCache?.get(MemoryCache.Key(candidate.cacheKey))?.let { value ->
-            retainedImageStore?.retain(assetId, candidate, value)
+            retainedImageStore?.retain(assetId, candidate, value, directDrawEligible)
         }
     }
 
@@ -755,6 +758,7 @@ internal class MediaGridSteadyLoadController(
             val snapshot = activeSnapshot?.takeIf { it.generation == generation }
             val visible = snapshot?.visibleAssetIds ?: longArrayOf()
             val startupBatch = startupState != MediaGridStartupState.Ready || startupPublicationBatchPending
+            val previousPublished = publishedCells.toMap()
             val next = LinkedHashMap<Long, MediaGridCellLoadState>(visible.size)
             visible.forEachIndexed { _, assetId ->
                 val internal = states[assetId] ?: return@forEachIndexed
@@ -776,7 +780,11 @@ internal class MediaGridSteadyLoadController(
                 }
             }
 
-            if (!startupBatch && maxNewReady > 0) {
+            if (startupPublicationBatchPending && startupState == MediaGridStartupState.Ready) {
+                visible.forEach { assetId ->
+                    states[assetId]?.takeIf { it.status == MediaGridCellLoadStatus.Ready }?.let { next[assetId] = it }
+                }
+            } else if (!startupBatch && maxNewReady > 0) {
                 val center = snapshot?.centerMediaOrdinal ?: 0
                 mediaGridReadyAttachmentOrder(
                     visible, states, publishedCells, ordinalIndex.mediaOrdinalByAssetId, center,
@@ -787,10 +795,19 @@ internal class MediaGridSteadyLoadController(
 
             publishedCells.clear()
             publishedCells.putAll(next)
+            next.forEach { (assetId, state) ->
+                if (state.status == MediaGridCellLoadStatus.Ready && !mediaGridSameReadyCandidate(state, previousPublished[assetId])) {
+                    state.readyCandidate?.let { candidate ->
+                        retainedImageStore?.markDirectDrawEligible(assetId, candidate)
+                    }
+                }
+            }
             if (startupBatch) startupPublicationBatchPending = false
             val demand = !publicationPaused && !disposed && visible.any { assetId ->
                 val internal = states[assetId]
-                internal?.status == MediaGridCellLoadStatus.Ready && !mediaGridSameReadyCandidate(internal, publishedCells[assetId])
+                internal?.status == MediaGridCellLoadStatus.Ready &&
+                    !mediaGridSameReadyCandidate(internal, publishedCells[assetId]) &&
+                    retainedImageStore?.lookupEligibleDrawHandle(assetId) == null
             }
             val old = _uiState.value
             nextState = old.copy(
@@ -963,7 +980,8 @@ internal class MediaGridSteadyLoadController(
         record.candidateIndex = candidateIndex
         record.sourceIdentity = candidate.sourceIdentity
         record.bitmapStatus = QueueTaskStatus.Complete
-        bitmapGateway.retain(assetId, candidate)
+        val visibleNow = activeSnapshot?.visibleAssetIds?.any { it == assetId } == true
+        bitmapGateway.retain(assetId, candidate, directDrawEligible = !visibleNow)
         ordinalIndex.mediaOrdinalByAssetId[assetId]?.let { bitmapPending.remove(it) }
         urgentBitmapQueue.removeAll { it.assetId == assetId }
         states[assetId] = MediaGridCellLoadState(MediaGridCellLoadStatus.Ready, prepared, candidateIndex)
@@ -1145,7 +1163,9 @@ internal class MediaGridSteadyLoadController(
         if (publicationPaused || disposed) return false
         return visible.any { assetId ->
             val internal = states[assetId]
-            internal?.status == MediaGridCellLoadStatus.Ready && !mediaGridSameReadyCandidate(internal, publishedCells[assetId])
+            internal?.status == MediaGridCellLoadStatus.Ready &&
+                !mediaGridSameReadyCandidate(internal, publishedCells[assetId]) &&
+                retainedImageStore?.lookupEligibleDrawHandle(assetId) == null
         }
     }
 

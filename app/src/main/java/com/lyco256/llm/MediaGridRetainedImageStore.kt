@@ -1,5 +1,6 @@
 package com.lyco256.llm
 
+import android.graphics.Bitmap
 import android.content.ComponentCallbacks2
 import android.content.res.Configuration
 import coil.memory.MemoryCache
@@ -25,6 +26,7 @@ internal data class MediaGridResidentDrawHandle(
     val identity: MediaGridResidentImageIdentity,
     val value: MemoryCache.Value,
     val estimatedBytes: Long,
+    val directDrawEligible: Boolean,
 )
 
 /** Immutable, lock-free read snapshot for resident drawing. */
@@ -36,6 +38,7 @@ internal data class MediaGridResidentDrawIndex(
 
 internal data class MediaGridRetainedImageStats(
     val entryCount: Int,
+    val eligibleEntryCount: Int,
     val estimatedBytes: Long,
     val evictions: Long,
     val restores: Long,
@@ -54,6 +57,7 @@ internal class MediaGridRetainedImageStore(
         val key: MediaGridRetainedImageKey,
         val value: MemoryCache.Value,
         val estimatedBytes: Long,
+        val directDrawEligible: Boolean,
     )
 
     private val lock = Any()
@@ -96,18 +100,24 @@ internal class MediaGridRetainedImageStore(
         }
     }
 
-    fun retain(assetId: Long, candidate: MediaGridPreparedCandidate, value: MemoryCache.Value) {
+    fun retain(
+        assetId: Long,
+        candidate: MediaGridPreparedCandidate,
+        value: MemoryCache.Value,
+        directDrawEligible: Boolean = false,
+    ) {
         val key = MediaGridRetainedImageKey(assetId, candidate.cacheKey, candidate.sourceIdentity)
-        val entry = Entry(key, value, mediaGridEstimatedBitmapBytes(candidate))
         lockAcquisitionCount.incrementAndGet()
         synchronized(lock) {
             var changed = false
             if (closed) return
             keyByAssetId[assetId]?.takeIf { it != key }?.let { changed = removeLocked(it) || changed }
             val previous = entries.remove(key)
+            val eligibility = previous?.directDrawEligible == true || directDrawEligible
+            val entry = Entry(key, value, mediaGridEstimatedBitmapBytes(candidate), eligibility)
             if (previous != null) {
                 estimatedBytes -= previous.estimatedBytes
-                changed = changed || previous.value !== value || previous.estimatedBytes != entry.estimatedBytes
+                changed = changed || previous.value !== value || previous.estimatedBytes != entry.estimatedBytes || previous.directDrawEligible != eligibility
             } else {
                 changed = true
             }
@@ -117,6 +127,19 @@ internal class MediaGridRetainedImageStore(
             val trimmed = trimLocked()
             changed = trimmed || changed
             if (changed) publishDrawIndexLocked()
+        }
+    }
+
+    /** Marks one still-current identity eligible without touching the image cache or LRU order. */
+    fun markDirectDrawEligible(assetId: Long, candidate: MediaGridPreparedCandidate) {
+        val key = MediaGridRetainedImageKey(assetId, candidate.cacheKey, candidate.sourceIdentity)
+        lockAcquisitionCount.incrementAndGet()
+        synchronized(lock) {
+            if (closed) return
+            val entry = entries[key] ?: return
+            if (entry.directDrawEligible) return
+            entries[key] = entry.copy(directDrawEligible = true)
+            publishDrawIndexLocked()
         }
     }
 
@@ -142,6 +165,16 @@ internal class MediaGridRetainedImageStore(
         return snapshot.handlesByIdentity[identity]
     }
 
+    /** Reads only the immutable draw index and returns eligible entries without allocation or locking. */
+    fun lookupEligibleDrawHandle(assetId: Long): MediaGridResidentDrawHandle? {
+        val snapshot = drawIndex.get()
+        val identity = snapshot.identityByAssetId[assetId] ?: return null
+        val handle = snapshot.handlesByIdentity[identity] ?: return null
+        return handle.takeIf { it.directDrawEligible && it.value.bitmap.isValidForDirectDraw() }
+    }
+
+    fun hasEligibleDrawHandle(assetId: Long): Boolean = lookupEligibleDrawHandle(assetId) != null
+
     internal fun drawIndexSnapshot(): MediaGridResidentDrawIndex = drawIndex.get()
 
     internal fun lockAcquisitionCount(): Long = lockAcquisitionCount.get()
@@ -156,6 +189,7 @@ internal class MediaGridRetainedImageStore(
             entries.forEach { (key, entry) ->
                 val handle = snapshot.handlesByIdentity[key] ?: return false
                 if (handle.value !== entry.value || handle.estimatedBytes != entry.estimatedBytes) return false
+                if (handle.directDrawEligible != entry.directDrawEligible) return false
             }
             keyByAssetId.all { (assetId, key) -> snapshot.identityByAssetId[assetId] == key }
         }
@@ -189,7 +223,13 @@ internal class MediaGridRetainedImageStore(
     fun stats(): MediaGridRetainedImageStats {
         lockAcquisitionCount.incrementAndGet()
         return synchronized(lock) {
-            MediaGridRetainedImageStats(entries.size, estimatedBytes, evictionCount, restoreCount)
+            MediaGridRetainedImageStats(
+                entryCount = entries.size,
+                eligibleEntryCount = entries.values.count { it.directDrawEligible },
+                estimatedBytes = estimatedBytes,
+                evictions = evictionCount,
+                restores = restoreCount,
+            )
         }
     }
 
@@ -254,7 +294,7 @@ internal class MediaGridRetainedImageStore(
         val handles = HashMap<MediaGridResidentImageIdentity, MediaGridResidentDrawHandle>(entries.size)
         val identities = HashMap<Long, MediaGridResidentImageIdentity>(keyByAssetId.size)
         entries.values.forEach { entry ->
-            handles[entry.key] = MediaGridResidentDrawHandle(entry.key, entry.value, entry.estimatedBytes)
+            handles[entry.key] = MediaGridResidentDrawHandle(entry.key, entry.value, entry.estimatedBytes, entry.directDrawEligible)
         }
         keyByAssetId.forEach { (assetId, key) -> if (entries.containsKey(key)) identities[assetId] = key }
         drawIndex.set(
@@ -266,6 +306,10 @@ internal class MediaGridRetainedImageStore(
         )
         _drawIndexVersion.value = drawIndexVersion
     }
+}
+
+private fun Bitmap.isValidForDirectDraw(): Boolean {
+    return !isRecycled && width > 0 && height > 0
 }
 
 internal const val MEDIA_GRID_RETAINED_IMAGE_TARGET_ENTRIES = 300

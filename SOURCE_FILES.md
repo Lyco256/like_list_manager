@@ -45,14 +45,15 @@ Current media-grid rendering is owned by `MediaGridSessionCoordinator` under `Ma
 ## 2026-07-28 resident draw index基盤
 
 - `MediaGridRetainedImageStore.kt`は既存のaccess-order LRU、300entry、byte上限、visible／active保護、restore、memory trimを維持したまま、`MediaGridResidentImageIdentity`、`MediaGridResidentDrawHandle`、`MediaGridResidentDrawIndex`を追加する。
+- `MediaGridResidentDrawHandle.directDrawEligible`はoffscreen先読み完了またはpublication／初回warm-up確定後だけtrueになる。同一identityのfalse retainではtrueを上書きせず、`lookupEligibleDrawHandle()`／`hasEligibleDrawHandle()`はimmutable draw indexだけを読む。
 - `AtomicReference`のimmutable draw indexはasset IDから現在identityを確認してO(1)でhandleを返す。lookupはstore lock、Coil cache書込み、request、pack read、decode、pixel copyを行わない。
 - visible assetのLRU touchは`updateProtection()`内のasset ID補助indexで行い、セル描画からstore lockを取得しない。production UI、Placeholder、AsyncImage、frame publication、queue、worker、先読み範囲は変更しない。
 - 実機画像・競合の証跡は`MediaGridRetainedImageStoreIntegrationTest.kt`と対応docsに置く。
 
 ## 2026-07-28 resident single Canvas layer
 
-- `MediaGridResidentCanvas.kt` defines the explicit `Disabled`/`TestVisible` mode, identity/value keyed ImageBitmap adapter, visible-only geometry snapshot, centered crop calculation, immutable draw commands, and one Canvas draw pass.
-- The normal classified grid keeps its existing `AsyncImage`, placeholder, frame publication, queue, worker, prefetch, RGB_565 pack, selection, and pinch/scroll behavior because `ClassifiedMediaGridContent` defaults to `Disabled`.
+- `MediaGridResidentCanvas.kt` defines the explicit `Disabled`/`Enabled`/`TestVisible` mode, identity/value keyed ImageBitmap adapter, current `LazyGridState.layoutInfo` geometry snapshot, centered crop calculation, immutable draw commands, and one `drawWithCache` DrawModifier that draws residents before `drawContent()`.
+- `Enabled` and `TestVisible` share the same production draw engine. The normal classified grid passes `Enabled` explicitly; the content default remains `Disabled`. Resident cells omit background, Placeholder, Error, and `AsyncImage` while preserving overlays and input.
 - `MediaGridRetainedImageStore.drawIndexVersionFlow` publishes only draw-index content changes; restore, protection, LRU touch, and viewport movement do not publish a version.
 
 ## 2026-07-24 cache-hit starvation fix

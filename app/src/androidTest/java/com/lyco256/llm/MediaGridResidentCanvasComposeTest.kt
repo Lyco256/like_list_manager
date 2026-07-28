@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.captureToImage
@@ -25,6 +26,7 @@ import com.lyco256.llm.data.MediaGridPreparedCandidate
 import org.junit.Rule
 import org.junit.Test
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import kotlin.math.abs
 
 class MediaGridResidentCanvasComposeTest {
@@ -56,16 +58,27 @@ class MediaGridResidentCanvasComposeTest {
         )
         cells.forEachIndexed { index, cell ->
             val candidate = MediaGridPreparedCandidate(MediaGridImageSourceKind.Rgb565Pack, index.toLong(), "source-$index", "cache-$index", 256, 256)
-            store.retain(index.toLong(), candidate, MemoryCache.Value(bitmaps[index], emptyMap()))
+            store.retain(index.toLong(), candidate, MemoryCache.Value(bitmaps[index], emptyMap()), directDrawEligible = true)
         }
         try {
             composeRule.setContent {
                 val state = rememberLazyGridState()
+                val adapter = remember { MediaGridResidentCanvasImageAdapter() }
                 Box(Modifier.width(240.dp).height(180.dp)) {
-                    LazyVerticalGrid(GridCells.Fixed(4), state = state, modifier = Modifier.fillMaxSize()) {
+                    LazyVerticalGrid(
+                        GridCells.Fixed(4),
+                        state = state,
+                        modifier = Modifier.fillMaxSize().mediaGridResidentCanvas(
+                            frame = frame,
+                            state = state,
+                            retainedImageStore = store,
+                            adapter = adapter,
+                            drawIndexVersion = store.drawIndexSnapshot().version,
+                            mode = MediaGridResidentCanvasMode.TestVisible,
+                        ),
+                    ) {
                         items(cells, key = { it.key }) { Box(Modifier.size(60.dp)) }
                     }
-                    MediaGridResidentCanvasLayer(frame, state, store, MediaGridResidentCanvasMode.TestVisible)
                 }
             }
             composeRule.waitForIdle()
@@ -84,4 +97,76 @@ class MediaGridResidentCanvasComposeTest {
             bitmaps.forEach(Bitmap::recycle)
         }
     }
+
+    @Test
+    fun threeHundredEligibleRgb565AssetsAreDrawnAfterOneJumpFrame() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val memoryCache = MemoryCache.Builder(context).maxSizeBytes(64 * 1024 * 1024).build()
+        val store = MediaGridRetainedImageStore(memoryCache)
+        val bitmaps = (0 until 300).map { index ->
+            Bitmap.createBitmap(256, 256, Bitmap.Config.RGB_565).also {
+                it.eraseColor(Color.rgb(index % 256, (index * 3) % 256, (index * 7) % 256))
+            }
+        }
+        val cells = bitmaps.indices.map { index ->
+            val entry = MediaGridEntry(index.toLong(), index.toLong(), index.toLong(), "media-$index", 0, "photo", null, "ready", null, "2026-01-01T00:00:00Z", null)
+            MediaGridCellItem("media_grid_item_${index}", entry, index)
+        }
+        val frame = MediaGridFrameData(
+            key = MediaGridRenderKey(MediaGridDataKey(2L, 2L, TweetFilterState(), ClassifiedSortState()), 4),
+            items = cells,
+            itemByKey = cells.associateBy { it.key },
+            mediaCellIndices = IntArray(cells.size) { it },
+        )
+        cells.forEachIndexed { index, _ ->
+            val candidate = MediaGridPreparedCandidate(MediaGridImageSourceKind.Rgb565Pack, index.toLong(), "source-$index", "cache-$index", 256, 256)
+            store.retain(index.toLong(), candidate, MemoryCache.Value(bitmaps[index], emptyMap()), directDrawEligible = true)
+        }
+        try {
+            lateinit var gridState: androidx.compose.foundation.lazy.grid.LazyGridState
+            composeRule.mainClock.autoAdvance = false
+            composeRule.setContent {
+                val state = rememberLazyGridState()
+                gridState = state
+                val adapter = remember { MediaGridResidentCanvasImageAdapter() }
+                LaunchedEffect(Unit) { state.scrollToItem(200) }
+                LazyVerticalGrid(
+                    GridCells.Fixed(4),
+                    state = state,
+                    modifier = Modifier.width(240.dp).height(240.dp).mediaGridResidentCanvas(
+                        frame = frame,
+                        state = state,
+                        retainedImageStore = store,
+                        adapter = adapter,
+                        drawIndexVersion = store.drawIndexSnapshot().version,
+                        mode = MediaGridResidentCanvasMode.TestVisible,
+                    ),
+                ) {
+                    items(cells, key = { it.key }) { Box(Modifier.fillMaxSize()) }
+                }
+            }
+            composeRule.mainClock.advanceTimeByFrame()
+            composeRule.waitForIdle()
+            var visibleAssets = emptyList<Long>()
+            var commandCount = -1
+            composeRule.runOnIdle {
+                visibleAssets = gridState.layoutInfo.visibleItemsInfo.mapNotNull { info ->
+                    (frame.itemByKey[info.key] as? MediaGridCellItem)?.entry?.assetId
+                }
+                commandCount = visibleAssets.count { store.hasEligibleDrawHandle(it) }
+            }
+            assertTrue(visibleAssets.isNotEmpty())
+            assertTrue(visibleAssets.maxOrNull()!! >= 200L)
+            assertEquals(300, store.stats().entryCount)
+            assertEquals(300, store.stats().eligibleEntryCount)
+            assertTrue(store.stats().estimatedBytes <= 48L * 1024L * 1024L)
+            assertEquals(visibleAssets.size, commandCount)
+            visibleAssets.forEach { assertTrue(store.hasEligibleDrawHandle(it)) }
+            composeRule.onNodeWithTag("media_grid_resident_canvas").assertExists()
+        } finally {
+            store.clear()
+            bitmaps.forEach(Bitmap::recycle)
+        }
+    }
+
 }

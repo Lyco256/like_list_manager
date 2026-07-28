@@ -1,5 +1,15 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-07-28 resident Canvas通常表示切替
+
+- `MediaGridResidentDrawHandle.directDrawEligible`を追加し、offscreen先読み完了・通常publication後・初回warm-up公開後だけeligibleになる経路を実装した。visible中の新規loadはpublication前falseを維持し、publication後にmarkする。
+- eligible判定とframe publication demand除外はimmutable draw indexのlock-free lookupを使用する。restore、LRU touch、列数変更、source invalidationはeligible規則を壊さない。
+- `MediaGridResidentCanvasMode.Enabled`と`TestVisible`は同じLazyGrid自身の`drawWithCache` DrawModifierを使用し、resident画像を先に描画して`drawContent()`でheader・overlay・操作UIを上に残す。通常画面は`Enabled`を明示し、defaultは`Disabled`。
+- residentセルでは背景を透明にし、Placeholder・Error・AsyncImageを構成せず、nonresidentセルは従来経路を維持する。
+- 300個の異なる256x256 RGB_565画像をeligible retainし、jump後visible画像のcommand数、300entry、eligible 300件、48MiB以下をCompose/Integration Testで確認した。301件目eviction、source invalidation、既存のlike数・動画badge・選択・header・操作・2〜12列テストは既存suiteで継続確認した。
+- 指定入口の実績: `run-safe-integration-check.cmd -DebugMethod wireless` は `Preflight / Build / UnitTest / Lint / Install / IntegrationTest / Success`、`run-safe-debug-check.cmd -InstallToDevice` は `Preflight / Build / UnitTest / Lint / Install / Success`。
+- Macrobenchmarkは実行していない。300entry、48MiB、先読み3行、worker、queue、候補順、Progress、scroll保持は変更していない。
+
 ## 2026-07-28 resident draw index基盤
 
 - `MediaGridResidentImageIdentity`、immutable `MediaGridResidentDrawHandle`、`AtomicReference`公開の`MediaGridResidentDrawIndex`を追加した。lookupはasset ID補助mapとcandidate identityを使い、store lockと画像生成・Coil restoreを行わない。

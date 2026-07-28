@@ -1,15 +1,6 @@
 package com.lyco256.llm
 
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.ImageBitmap
@@ -25,6 +16,7 @@ import java.util.LinkedHashMap
 
 internal enum class MediaGridResidentCanvasMode {
     Disabled,
+    Enabled,
     TestVisible,
 }
 
@@ -157,7 +149,9 @@ internal fun buildMediaGridResidentCanvasCommands(
     adapter.sync(index)
     return snapshot.items.mapNotNull { item ->
         val identity = index.identityByAssetId[item.assetId] ?: return@mapNotNull null
-        val handle = index.handlesByIdentity[identity] ?: return@mapNotNull null
+        val handle = index.handlesByIdentity[identity]
+            ?.takeIf { it.directDrawEligible }
+            ?: return@mapNotNull null
         val image = adapter.resolve(handle) ?: return@mapNotNull null
         val source = mediaGridCropSourceRect(image.width, image.height, item.destination.width.roundToInt(), item.destination.height.roundToInt())
             ?: return@mapNotNull null
@@ -165,30 +159,25 @@ internal fun buildMediaGridResidentCanvasCommands(
     }.sortedBy { it.visibleOrder }
 }
 
-@Composable
-internal fun MediaGridResidentCanvasLayer(
+internal fun Modifier.mediaGridResidentCanvas(
     frame: MediaGridFrameData,
     state: LazyGridState,
     retainedImageStore: MediaGridRetainedImageStore,
+    adapter: MediaGridResidentCanvasImageAdapter,
+    drawIndexVersion: Long,
     mode: MediaGridResidentCanvasMode = MediaGridResidentCanvasMode.Disabled,
-) {
-    if (mode != MediaGridResidentCanvasMode.TestVisible) return
-    val version by retainedImageStore.drawIndexVersionFlow.collectAsState()
-    var geometry by remember(frame.key) { mutableStateOf<MediaGridVisibleCanvasSnapshot?>(null) }
-    val adapter = remember { MediaGridResidentCanvasImageAdapter() }
-    LaunchedEffect(state, frame.key) {
-        snapshotFlow { buildMediaGridVisibleCanvasSnapshot(frame, state.layoutInfo) }
-            .collect { next -> if (next != geometry) geometry = next }
-    }
-    val snapshot = geometry ?: return
-    val index = retainedImageStore.drawIndexSnapshot().takeIf { it.version == version } ?: return
-    val commands = remember(snapshot, version) {
-        buildMediaGridResidentCanvasCommands(snapshot, index, adapter)
-    }
-    Canvas(Modifier.fillMaxSize().testTag("media_grid_resident_canvas")) {
-        drawContext.canvas.save()
-        drawContext.canvas.clipRect(0f, 0f, size.width, size.height)
-        try {
+): Modifier {
+    if (mode == MediaGridResidentCanvasMode.Disabled) return this
+    val tagged = if (mode == MediaGridResidentCanvasMode.TestVisible) {
+        testTag("media_grid_resident_canvas")
+    } else this
+    return tagged.drawWithCache {
+        // Reading these snapshot/atomic values in the cache block makes the cache rebuild after layout or index changes.
+        drawIndexVersion
+        val snapshot = buildMediaGridVisibleCanvasSnapshot(frame, state.layoutInfo)
+        val index = retainedImageStore.drawIndexSnapshot()
+        val commands = buildMediaGridResidentCanvasCommands(snapshot, index, adapter)
+        onDrawWithContent {
             commands.forEach { command ->
                 drawImage(
                     image = command.image.imageBitmap,
@@ -198,8 +187,7 @@ internal fun MediaGridResidentCanvasLayer(
                     dstSize = IntSize(command.destination.width.roundToInt(), command.destination.height.roundToInt()),
                 )
             }
-        } finally {
-            drawContext.canvas.restore()
+            drawContent()
         }
     }
 }

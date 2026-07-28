@@ -516,6 +516,7 @@ internal fun EnhancedClassifiedScreen(
                     selectedClipIds = selectedVisibleMediaGridClipIds,
                     selectionMode = mediaGridSelectionMode,
                     multiAssetClipIds = multiAssetMediaGridClipIds,
+                    residentCanvasMode = MediaGridResidentCanvasMode.Enabled,
                     onToggleSelection = { clipId ->
                         mediaGridSelectionMode = true
                         selectedMediaGridClipIds = selectedMediaGridClipIds.toMutableSet().apply {
@@ -3474,6 +3475,13 @@ private fun ClassifiedMediaGridContent(
     val effectiveControllerState = if (controller == null) {
         fallbackControllerState
     } else controllerState
+    val residentDrawIndexVersion = if (residentCanvasMode != MediaGridResidentCanvasMode.Disabled && retainedImageStore != null) {
+        val version by retainedImageStore.drawIndexVersionFlow.collectAsState()
+        version
+    } else 0L
+    val residentCanvasAdapter = if (residentCanvasMode != MediaGridResidentCanvasMode.Disabled && retainedImageStore != null) {
+        remember(retainedImageStore) { MediaGridResidentCanvasImageAdapter() }
+    } else null
     if (fallbackController != null) DisposableEffect(fallbackController) { onDispose { fallbackController.dispose() } }
     LaunchedEffect(state, frame.key, effectiveController) {
         kotlinx.coroutines.coroutineScope {
@@ -3518,6 +3526,18 @@ private fun ClassifiedMediaGridContent(
                     sourceRevision = frame.key.dataKey.sourceRevision,
                     state = state,
                     onPinchFinished = onPinchFinished,
+                )
+                .then(
+                    if (retainedImageStore != null && residentCanvasAdapter != null) {
+                        Modifier.mediaGridResidentCanvas(
+                            frame = frame,
+                            state = state,
+                            retainedImageStore = retainedImageStore,
+                            adapter = residentCanvasAdapter,
+                            drawIndexVersion = residentDrawIndexVersion,
+                            mode = residentCanvasMode,
+                        )
+                    } else Modifier,
                 ),
             horizontalArrangement = Arrangement.spacedBy(0.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
@@ -3547,17 +3567,10 @@ private fun ClassifiedMediaGridContent(
                         onToggleSelection = onToggleSelection,
                         imageLoader = appContainer.mediaGridImageLoader,
                         loadState = effectiveControllerState.cells[item.entry.assetId] ?: MediaGridCellLoadState(),
+                        residentDrawAvailable = retainedImageStore?.hasEligibleDrawHandle(item.entry.assetId) == true && residentCanvasMode != MediaGridResidentCanvasMode.Disabled,
                     )
                 }
             }
-        }
-        if (residentCanvasMode == MediaGridResidentCanvasMode.TestVisible && retainedImageStore != null) {
-            MediaGridResidentCanvasLayer(
-                frame = frame,
-                state = state,
-                retainedImageStore = retainedImageStore,
-                mode = residentCanvasMode,
-            )
         }
         if (showProgress) {
             Box(
@@ -3846,11 +3859,12 @@ private fun ClassifiedMediaGridCell(
     onToggleSelection: (Long) -> Unit,
     imageLoader: coil.ImageLoader,
     loadState: MediaGridCellLoadState,
+    residentDrawAvailable: Boolean,
 ) {
     val context = LocalContext.current
     val readyCandidate = loadState.readyCandidate
-    val imageRequest = remember(readyCandidate) {
-        readyCandidate?.let { candidate ->
+    val imageRequest = remember(readyCandidate, residentDrawAvailable) {
+        if (residentDrawAvailable) null else readyCandidate?.let { candidate ->
             buildMediaGridImageRequest(context, candidate)
         }
     }
@@ -3866,7 +3880,7 @@ private fun ClassifiedMediaGridCell(
     val hapticFeedback = LocalHapticFeedback.current
     val selectionBackground = mediaGridSelectionBackground(MaterialTheme.colorScheme.primary, multiAsset)
     val selectionCheckColor = if (multiAsset) Color.White else Color.Black
-    val cellBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 1f)
+    val cellBackground = if (residentDrawAvailable) Color.Transparent else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 1f)
     val placeholderStartColor = cellBackground
     val placeholderEndColor = MaterialTheme.colorScheme.surface.copy(alpha = 1f)
     Box(
@@ -3888,9 +3902,12 @@ private fun ClassifiedMediaGridCell(
                 )
             }
             .testTag("media_grid_item_${entry.assetId}")
+            .then(if (residentDrawAvailable) Modifier.testTag("media_grid_resident_image_${entry.assetId}") else Modifier)
             .background(cellBackground),
     ) {
-        if (visualState == MediaGridCellVisualState.Error) {
+        if (residentDrawAvailable) {
+            // The LazyGrid draw modifier supplies the image below this cell content.
+        } else if (visualState == MediaGridCellVisualState.Error) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()

@@ -40,7 +40,7 @@ class MediaGridResidentCanvasIntegrationTest {
                     width = 256,
                     height = 256,
                 )
-                store.retain(index.toLong(), candidate, MemoryCache.Value(bitmap, emptyMap()))
+                store.retain(index.toLong(), candidate, MemoryCache.Value(bitmap, emptyMap()), directDrawEligible = true)
             }
             val index = store.drawIndexSnapshot()
             adapter.sync(index)

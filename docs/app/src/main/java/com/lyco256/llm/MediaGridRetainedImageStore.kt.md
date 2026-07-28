@@ -12,6 +12,8 @@ The resident store also exposes `drawIndexVersionFlow`, a conflated latest-versi
 - controllerごとのowner tokenでvisible／active保護を管理し、pause／resume／disposeではowner保護だけを更新します。
 - `ComponentCallbacks2`のmemory trimではvisibleを維持し、DB、元画像、JPEG、RGB_565 packへ変更を加えません。
 - `MediaGridResidentImageIdentity`は既存keyと同じasset ID、Coil memory cache key、source identityだけで構成し、`MediaGridResidentDrawHandle`は同じ`MemoryCache.Value`と推定bytesを不変参照します。coordinator dispose時は`close()`で空snapshotを公開し、新規retainを受け付けません。
+- `MediaGridResidentDrawHandle.directDrawEligible`はvisible中の新規load完了ではfalse、offscreen先読み完了ではtrueで保持します。通常publicationまたは初回warm-up公開の確定後に`markDirectDrawEligible()`でtrueへ遷移し、同一identityのfalse retainではtrueを失いません。
 - `AtomicReference<MediaGridResidentDrawIndex>`が最大約300entryのimmutable handle mapとasset ID補助mapを公開します。`lookupDrawHandle()`はsnapshotだけを読み、store lock、Coil restore、request、pack read、decode、pixel copyを行いません。
+- `lookupEligibleDrawHandle(assetId)`と`hasEligibleDrawHandle(assetId)`はeligibleかつ有効なBitmapだけをimmutable indexからlock-freeで返し、LRU touchやMap生成を行いません。
 - retain、candidate置換、eviction、asset invalidation、memory trim、clearはmutable LRU、asset補助index、draw indexを同一lock内で更新してから一度だけsnapshotを公開します。restoreとvisible touchはdraw indexを再構築しません。
 - `updateProtection()`はasset ID補助indexからvisible entryをO(1)でaccess-order touchします。セル描画側からstoreの`touch()`を呼び出さず、UI、Placeholder、AsyncImage、frame publication、queue、worker、先読み範囲は変更しません。
