@@ -1,5 +1,7 @@
 # `MediaGridRetainedImageStore.kt`
 
+The resident store also exposes `drawIndexVersionFlow`, a conflated latest-version signal. It changes only when the immutable draw index content changes; restore, LRU touch, protection updates, and viewport movement do not publish a new version.
+
 `MediaGridSessionCoordinator`が所有する、分類済みメディアグリッド全session共有の画像保持storeです。
 
 - `MediaGridRetainedImageKey`はasset ID、Coil memory cache key、source identityで構成し、行・列数・ordinal・viewportを含めません。

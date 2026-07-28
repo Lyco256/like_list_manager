@@ -1,0 +1,3 @@
+# `MediaGridResidentCanvasIntegrationTest.kt`
+
+12個の異なる256x256 `RGB_565` Bitmapをresident draw indexへ登録し、各identityのCanvas用ImageBitmap adapterが一度だけ作られ、同じ`MemoryCache.Value`では再利用されることをAndroid testで確認します。元Bitmapのpixel bufferはcopyせず、recycleはテスト終了時だけ行います。

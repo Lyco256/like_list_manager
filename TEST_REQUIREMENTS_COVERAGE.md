@@ -7,6 +7,17 @@
 - `MediaGridRetainedImageStoreIntegrationTest`に、別インスタンスの256×256 RGB_565 Bitmap 300件、301件目のLRU eviction、identity lookup、lock-free seam、固定barrier順序のretain／lookup／invalidate／protection／trim／restore競合を追加した。
 - ローカル安全検証は`run-safe-debug-check.cmd`のBuild / UnitTest / Lint / Successを確認済み。`run-safe-integration-check.cmd -DebugMethod wireless`でPreflight / Build / UnitTest / Lint / Install / IntegrationTest / Successを確認済み。
 
+## 2026-07-28 resident single Canvas layer
+
+| Requirement | Evidence | Status |
+|---|---|---|
+| explicit Disabled/TestVisible mode and production default | `MediaGridResidentCanvas.kt`, `TagHierarchyUiV2.kt` | Implemented |
+| conflated draw-index version notification | `MediaGridRetainedImageStore.drawIndexVersionFlow`, `MediaGridRetainedImageStoreIntegrationTest.drawIndexVersionFlowOnlyPublishesContentChanges` | Implemented |
+| non-copying identity/value keyed ImageBitmap adapter | `MediaGridResidentCanvasImageAdapter`, `MediaGridResidentCanvasIntegrationTest` | Implemented; wireless integration passed |
+| visible-only geometry, centered crop, immutable commands, one Canvas | `MediaGridResidentCanvas.kt`, `MediaGridResidentCanvasTest`, `MediaGridResidentCanvasComposeTest` | Implemented; wireless integration passed |
+| existing production AsyncImage/frame/queue/worker/prefetch path unchanged | `git diff`, `TagHierarchyUiV2.kt`, `MediaGridSteadyLoadController.kt` | Static audit passed |
+| integration and production safety verification | `run-safe-integration-check.cmd -DebugMethod wireless`, `run-safe-debug-check.cmd -InstallToDevice` | Success; production package metadata PostCheck passed |
+
 ## 2026-07-25 frame-paced image publication
 
 | 要件 | 証跡 |

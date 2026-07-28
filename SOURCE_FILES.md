@@ -49,6 +49,12 @@ Current media-grid rendering is owned by `MediaGridSessionCoordinator` under `Ma
 - visible assetのLRU touchは`updateProtection()`内のasset ID補助indexで行い、セル描画からstore lockを取得しない。production UI、Placeholder、AsyncImage、frame publication、queue、worker、先読み範囲は変更しない。
 - 実機画像・競合の証跡は`MediaGridRetainedImageStoreIntegrationTest.kt`と対応docsに置く。
 
+## 2026-07-28 resident single Canvas layer
+
+- `MediaGridResidentCanvas.kt` defines the explicit `Disabled`/`TestVisible` mode, identity/value keyed ImageBitmap adapter, visible-only geometry snapshot, centered crop calculation, immutable draw commands, and one Canvas draw pass.
+- The normal classified grid keeps its existing `AsyncImage`, placeholder, frame publication, queue, worker, prefetch, RGB_565 pack, selection, and pinch/scroll behavior because `ClassifiedMediaGridContent` defaults to `Disabled`.
+- `MediaGridRetainedImageStore.drawIndexVersionFlow` publishes only draw-index content changes; restore, protection, LRU touch, and viewport movement do not publish a version.
+
 ## 2026-07-24 cache-hit starvation fix
 
 - `MediaGridSteadyLoadController.kt` owns the unified cache-hit transition, asset-local work reconciliation, bounded metadata retry/failure state, conflated UI publication, and deterministic controller snapshots.

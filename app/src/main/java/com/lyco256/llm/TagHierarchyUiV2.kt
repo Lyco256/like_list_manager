@@ -3447,6 +3447,7 @@ private fun ClassifiedMediaGridContent(
     onCellClick: (Long) -> Unit,
     selectedClipIds: Set<Long>,
     onToggleSelection: (Long) -> Unit,
+    residentCanvasMode: MediaGridResidentCanvasMode = MediaGridResidentCanvasMode.Disabled,
 ) {
     val context = LocalContext.current
     val appContainer = (context.applicationContext as LikeListManagerApp).container
@@ -3549,6 +3550,14 @@ private fun ClassifiedMediaGridContent(
                     )
                 }
             }
+        }
+        if (residentCanvasMode == MediaGridResidentCanvasMode.TestVisible && retainedImageStore != null) {
+            MediaGridResidentCanvasLayer(
+                frame = frame,
+                state = state,
+                retainedImageStore = retainedImageStore,
+                mode = residentCanvasMode,
+            )
         }
         if (showProgress) {
             Box(

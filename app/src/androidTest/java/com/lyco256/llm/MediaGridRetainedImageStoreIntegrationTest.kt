@@ -17,6 +17,8 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -34,6 +36,34 @@ class MediaGridRetainedImageStoreIntegrationTest {
         width = 256,
         height = 256,
     )
+
+    @Test
+    fun drawIndexVersionFlowOnlyPublishesContentChanges() = runBlocking {
+        val loader = ImageLoader.Builder(context).memoryCache {
+            MemoryCache.Builder(context).maxSizeBytes(8 * 1024 * 1024).build()
+        }.build()
+        val store = MediaGridRetainedImageStore(loader.memoryCache)
+        val owner = store.newOwnerToken()
+        val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.RGB_565)
+        try {
+            val c = candidate(1L)
+            val value = MemoryCache.Value(bitmap, emptyMap())
+            val initial = store.drawIndexVersionFlow.first()
+            store.retain(1L, c, value)
+            val retained = store.drawIndexVersionFlow.first { it > initial }
+            store.updateProtection(owner, longArrayOf(1L), longArrayOf())
+            assertEquals(retained, store.drawIndexVersionFlow.value)
+            assertTrue(store.restore(1L, c))
+            assertEquals(retained, store.drawIndexVersionFlow.value)
+            store.invalidateAsset(1L)
+            assertTrue(store.drawIndexVersionFlow.value > retained)
+        } finally {
+            store.removeOwner(owner)
+            store.clear()
+            bitmap.recycle()
+            loader.shutdown()
+        }
+    }
 
     @Test
     fun sharedStoreKeepsThreeHundredEntriesAndEvictsOldestUnprotectedFirst() {

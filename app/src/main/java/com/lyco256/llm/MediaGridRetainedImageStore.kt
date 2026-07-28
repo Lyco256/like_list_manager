@@ -8,6 +8,9 @@ import java.util.Collections
 import java.util.LinkedHashMap
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 internal data class MediaGridResidentImageIdentity(
     val assetId: Long,
@@ -60,6 +63,9 @@ internal class MediaGridRetainedImageStore(
     private val nextOwnerToken = AtomicLong(1L)
     private val lockAcquisitionCount = AtomicLong(0L)
     private val drawIndex = AtomicReference(MediaGridResidentDrawIndex(0L, emptyMap(), emptyMap()))
+    private val _drawIndexVersion = MutableStateFlow(0L)
+    /** Latest draw-index version only; viewport/protection/restore do not publish here. */
+    val drawIndexVersionFlow: StateFlow<Long> = _drawIndexVersion.asStateFlow()
     private var estimatedBytes = 0L
     private var evictionCount = 0L
     private var restoreCount = 0L
@@ -258,6 +264,7 @@ internal class MediaGridRetainedImageStore(
                 identityByAssetId = Collections.unmodifiableMap(identities),
             ),
         )
+        _drawIndexVersion.value = drawIndexVersion
     }
 }
 

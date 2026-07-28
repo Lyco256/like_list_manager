@@ -1,0 +1,3 @@
+# `MediaGridResidentCanvasComposeTest.kt`
+
+4列のLazyGrid上に`TestVisible` resident Canvasを重ね、12個の異なるRGB_565画像を一つのCanvasで各セルへ描画するCompose Testです。Canvasはpointer inputやsemantics actionを持たず、下層のセル操作を妨げない構成を使用します。
