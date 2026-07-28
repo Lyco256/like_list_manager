@@ -1,11 +1,5 @@
 # `TagHierarchyUiV2.kt`
 
-## Resident image display revision (2026-07-26)
-
-- Classified media cells resolve the current published Ready state first, then a candidate-matching fast resident image, then Placeholder.
-- Fast resident images use the existing Coil Bitmap handle directly with Compose `Image`; this branch does not create an ImageRequest or wait for cache reinsertion.
-- The normal AsyncImage path remains the fallback for missing, stale, unsupported, or non-eligible entries.
-
 ## 第14実装
 
 セルはcontrollerが選んだraw→JPEG→local→URL候補を使います。`downloadState == "failed"`でも利用可能候補を抑止しません。pack open、mapping、metadata検査、raw生成はComposableで行いません。
