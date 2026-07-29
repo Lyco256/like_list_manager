@@ -15,13 +15,30 @@ class MediaGridRenderingContractTest {
     }
 
     @Test
-    fun residentDrawCommandsAreClippedBeforeDrawContent() {
+    fun residentDrawIsClippedBeforeDrawContentWithoutCommands() {
         val source = locateSource("src/main/java/com/lyco256/llm/MediaGridResidentCanvas.kt").readText()
         val clip = source.indexOf("clipRect(")
         val drawContent = source.indexOf("drawContent()")
         assertTrue(clip >= 0)
         assertTrue(drawContent > clip)
-        assertTrue(source.substring(clip, drawContent).contains("commands.forEach"))
+        assertTrue(source.substring(clip, drawContent).contains("visibleItemsInfo.forEach"))
+        assertTrue(source.substring(clip, drawContent).contains("preparedImageByAssetId"))
+        assertTrue(source.substring(clip, drawContent).contains("drawImage"))
+        assertTrue(!source.substring(clip, drawContent).contains("drawIndexSnapshot"))
+        assertTrue(!source.substring(clip, drawContent).contains("adapter."))
+        assertTrue(!source.substring(clip, drawContent).contains("mediaGridCropSourceRect"))
+    }
+
+    @Test
+    fun preparedIndexIsKeyedByFrameStoreAdapterAndDrawIndexVersion() {
+        val source = locateSource("src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt").readText()
+        val prepared = source.indexOf("val residentPreparedIndex")
+        val draw = source.indexOf("Modifier.mediaGridResidentCanvas")
+        assertTrue(prepared >= 0)
+        assertTrue(draw > prepared)
+        assertTrue(source.substring(prepared, draw).contains("remember(frame.key, retainedImageStore, residentCanvasAdapter, residentDrawIndexVersion)"))
+        assertTrue(source.substring(prepared, draw).contains("drawIndexSnapshot()"))
+        assertTrue(source.substring(prepared, draw).contains("residentCanvasMode != MediaGridResidentCanvasMode.Disabled"))
     }
 
     private fun locateSource(relativePath: String): File = sequenceOf(

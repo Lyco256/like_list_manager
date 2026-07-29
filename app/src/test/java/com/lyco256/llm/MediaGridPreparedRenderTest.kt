@@ -2,6 +2,7 @@ package com.lyco256.llm
 
 import com.lyco256.llm.data.MediaGridPreparedImage
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -42,6 +43,9 @@ class MediaGridPreparedRenderTest {
         assertTrue(frame.items.isNotEmpty())
         assertTrue(frame.itemByKey.containsKey("media_grid_item_1"))
         assertTrue(frame.itemByKey.containsKey("media_grid_item_2"))
+        assertEquals(1L, frame.assetIdByItemKey["media_grid_item_1"])
+        assertEquals(2L, frame.assetIdByItemKey["media_grid_item_2"])
+        assertTrue(frame.assetIdByItemKey.keys.all { frame.itemByKey[it] is MediaGridCellItem })
         assertArrayEquals(intArrayOf(0, 1), frame.mediaCellIndices)
     }
 

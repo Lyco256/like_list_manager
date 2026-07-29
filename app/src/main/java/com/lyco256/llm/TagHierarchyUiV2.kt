@@ -172,6 +172,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.TemporalAdjusters
 import java.util.Locale
+import java.util.Collections
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.roundToInt
@@ -3056,6 +3057,7 @@ internal data class MediaGridFrameData(
     val items: List<ClassifiedMediaGridItem>,
     val itemByKey: Map<String, ClassifiedMediaGridItem>,
     val mediaCellIndices: IntArray,
+    val assetIdByItemKey: Map<String, Long> = emptyMap(),
 )
 
 internal fun mediaGridFrameMatches(frameKey: MediaGridRenderKey?, currentKey: MediaGridRenderKey): Boolean =
@@ -3069,16 +3071,21 @@ internal fun buildMediaGridFrameData(
 ): MediaGridFrameData {
     val items = buildClassifiedMediaGridItems(entries, sort, columnCount)
     val itemByKey = HashMap<String, ClassifiedMediaGridItem>(items.size)
+    val assetIdByItemKey = HashMap<String, Long>(entries.size)
     val mediaIndices = ArrayList<Int>(entries.size)
     items.forEachIndexed { index, item ->
         itemByKey[item.key] = item
-        if (item is MediaGridCellItem) mediaIndices += index
+        if (item is MediaGridCellItem) {
+            mediaIndices += index
+            assetIdByItemKey[item.key] = item.entry.assetId
+        }
     }
     return MediaGridFrameData(
         key = MediaGridRenderKey(dataKey, columnCount),
         items = items,
         itemByKey = itemByKey,
         mediaCellIndices = mediaIndices.toIntArray(),
+        assetIdByItemKey = Collections.unmodifiableMap(assetIdByItemKey),
     )
 }
 
@@ -3490,6 +3497,18 @@ private fun ClassifiedMediaGridContent(
     val residentCanvasAdapter = if (residentCanvasMode != MediaGridResidentCanvasMode.Disabled && retainedImageStore != null) {
         remember(retainedImageStore) { MediaGridResidentCanvasImageAdapter() }
     } else null
+    val residentPreparedIndex = if (
+        residentCanvasMode != MediaGridResidentCanvasMode.Disabled &&
+            retainedImageStore != null &&
+            residentCanvasAdapter != null
+    ) {
+        remember(frame.key, retainedImageStore, residentCanvasAdapter, residentDrawIndexVersion) {
+            buildMediaGridResidentCanvasPreparedIndex(
+                drawIndex = retainedImageStore.drawIndexSnapshot(),
+                adapter = residentCanvasAdapter,
+            )
+        }
+    } else null
     if (fallbackController != null) DisposableEffect(fallbackController) { onDispose { fallbackController.dispose() } }
     LaunchedEffect(state, frame.key, effectiveController) {
         kotlinx.coroutines.coroutineScope {
@@ -3537,13 +3556,11 @@ private fun ClassifiedMediaGridContent(
                     onPinchFinished = onPinchFinished,
                 )
                 .then(
-                    if (retainedImageStore != null && residentCanvasAdapter != null) {
+                    if (residentPreparedIndex != null) {
                         Modifier.mediaGridResidentCanvas(
-                            frame = frame,
                             state = state,
-                            retainedImageStore = retainedImageStore,
-                            adapter = residentCanvasAdapter,
-                            drawIndexVersion = residentDrawIndexVersion,
+                            assetIdByItemKey = frame.assetIdByItemKey,
+                            preparedIndex = residentPreparedIndex,
                             mode = residentCanvasMode,
                         )
                     } else Modifier,

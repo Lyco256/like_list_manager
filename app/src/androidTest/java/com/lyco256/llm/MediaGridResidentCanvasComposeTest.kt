@@ -58,27 +58,21 @@ class MediaGridResidentCanvasComposeTest {
             items = cells,
             itemByKey = cells.associateBy { it.key },
             mediaCellIndices = IntArray(12) { it },
+            assetIdByItemKey = cells.associate { it.key to it.entry.assetId },
         )
         cells.forEachIndexed { index, cell ->
             val candidate = MediaGridPreparedCandidate(MediaGridImageSourceKind.Rgb565Pack, index.toLong(), "source-$index", "cache-$index", 256, 256)
             store.retain(index.toLong(), candidate, MemoryCache.Value(bitmaps[index], emptyMap()), directDrawEligible = true)
         }
+        val preparedIndex = buildMediaGridResidentCanvasPreparedIndex(store.drawIndexSnapshot(), MediaGridResidentCanvasImageAdapter())
         try {
             composeRule.setContent {
                 val state = rememberLazyGridState()
-                val adapter = remember { MediaGridResidentCanvasImageAdapter() }
                 Box(Modifier.width(240.dp).height(180.dp)) {
                     LazyVerticalGrid(
                         GridCells.Fixed(4),
                         state = state,
-                        modifier = Modifier.fillMaxSize().mediaGridResidentCanvas(
-                            frame = frame,
-                            state = state,
-                            retainedImageStore = store,
-                            adapter = adapter,
-                            drawIndexVersion = store.drawIndexSnapshot().version,
-                            mode = MediaGridResidentCanvasMode.TestVisible,
-                        ),
+                        modifier = Modifier.fillMaxSize().mediaGridResidentCanvas(state, frame.assetIdByItemKey, preparedIndex, MediaGridResidentCanvasMode.TestVisible),
                     ) {
                         items(cells, key = { it.key }) { Box(Modifier.size(60.dp)) }
                     }
@@ -114,6 +108,7 @@ class MediaGridResidentCanvasComposeTest {
             items = listOf(cell),
             itemByKey = mapOf(cell.key to cell),
             mediaCellIndices = intArrayOf(0),
+            assetIdByItemKey = mapOf(cell.key to cell.entry.assetId),
         )
         store.retain(
             assetId = 1L,
@@ -121,10 +116,10 @@ class MediaGridResidentCanvasComposeTest {
             value = MemoryCache.Value(bitmap, emptyMap()),
             directDrawEligible = true,
         )
+        val preparedIndex = buildMediaGridResidentCanvasPreparedIndex(store.drawIndexSnapshot(), MediaGridResidentCanvasImageAdapter())
         try {
             composeRule.setContent {
                 val state = rememberLazyGridState()
-                val adapter = remember { MediaGridResidentCanvasImageAdapter() }
                 Box(
                     Modifier
                         .width(160.dp)
@@ -138,14 +133,7 @@ class MediaGridResidentCanvasComposeTest {
                         modifier = Modifier
                             .width(120.dp)
                             .requiredHeight(100.dp)
-                            .mediaGridResidentCanvas(
-                                frame = frame,
-                                state = state,
-                                retainedImageStore = store,
-                                adapter = adapter,
-                                drawIndexVersion = store.drawIndexSnapshot().version,
-                                mode = MediaGridResidentCanvasMode.TestVisible,
-                            ),
+                            .mediaGridResidentCanvas(state, frame.assetIdByItemKey, preparedIndex, MediaGridResidentCanvasMode.TestVisible),
                     ) {
                         items(listOf(cell), key = { it.key }) {
                             Box(Modifier.height(140.dp))
@@ -187,30 +175,24 @@ class MediaGridResidentCanvasComposeTest {
             items = cells,
             itemByKey = cells.associateBy { it.key },
             mediaCellIndices = IntArray(cells.size) { it },
+            assetIdByItemKey = cells.associate { it.key to it.entry.assetId },
         )
         cells.forEachIndexed { index, _ ->
             val candidate = MediaGridPreparedCandidate(MediaGridImageSourceKind.Rgb565Pack, index.toLong(), "source-$index", "cache-$index", 256, 256)
             store.retain(index.toLong(), candidate, MemoryCache.Value(bitmaps[index], emptyMap()), directDrawEligible = true)
         }
+        val preparedIndex = buildMediaGridResidentCanvasPreparedIndex(store.drawIndexSnapshot(), MediaGridResidentCanvasImageAdapter())
         try {
             lateinit var gridState: androidx.compose.foundation.lazy.grid.LazyGridState
             composeRule.mainClock.autoAdvance = false
             composeRule.setContent {
                 val state = rememberLazyGridState()
                 gridState = state
-                val adapter = remember { MediaGridResidentCanvasImageAdapter() }
                 LaunchedEffect(Unit) { state.scrollToItem(200) }
                 LazyVerticalGrid(
                     GridCells.Fixed(4),
                     state = state,
-                    modifier = Modifier.width(240.dp).height(240.dp).mediaGridResidentCanvas(
-                        frame = frame,
-                        state = state,
-                        retainedImageStore = store,
-                        adapter = adapter,
-                        drawIndexVersion = store.drawIndexSnapshot().version,
-                        mode = MediaGridResidentCanvasMode.TestVisible,
-                    ),
+                    modifier = Modifier.width(240.dp).height(240.dp).mediaGridResidentCanvas(state, frame.assetIdByItemKey, preparedIndex, MediaGridResidentCanvasMode.TestVisible),
                 ) {
                     items(cells, key = { it.key }) { Box(Modifier.fillMaxSize()) }
                 }

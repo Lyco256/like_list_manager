@@ -44,6 +44,13 @@ Current media-grid rendering is owned by `MediaGridSessionCoordinator` under `Ma
 
 ## 2026-07-28 resident draw index基盤
 
+## 2026-07-29 resident Canvas draw hot path
+
+- `MediaGridFrameData.assetIdByItemKey` is built during the existing single item scan and contains media keys only; headers remain absent.
+- `MediaGridResidentCanvasPreparedIndex` is rebuilt only for frame/store/adapter/draw-index-version changes. It converts eligible retained `MemoryCache.Value` instances to reusable `ImageBitmap` references and computes square `ContentScale.Crop` source offsets once, with the existing 300-entry resident limit.
+- The production draw phase scans `visibleItemsInfo` once, resolves key→asset→prepared image with O(1) lookups, applies existing offsets and sizes, clips to the grid viewport, and calls `drawContent()` afterward. It does not build snapshots, commands, collections, sorting, `Rect`s, crops, or access the store/adapter.
+- Fine-scroll regression coverage is in `MediaGridRenderingContractTest`, `MediaGridResidentCanvasComposeTest`, and `MediaGridResidentCanvasIntegrationTest`. Scheduler, worker, queue, publication pacing, prefetch range, and pointer input are unchanged.
+
 - `MediaGridRetainedImageStore.kt`は既存のaccess-order LRU、300entry、byte上限、visible／active保護、restore、memory trimを維持したまま、`MediaGridResidentImageIdentity`、`MediaGridResidentDrawHandle`、`MediaGridResidentDrawIndex`を追加する。
 - `MediaGridResidentDrawHandle.directDrawEligible`はoffscreen先読み完了またはpublication／初回warm-up確定後だけtrueになる。同一identityのfalse retainではtrueを上書きせず、`lookupEligibleDrawHandle()`／`hasEligibleDrawHandle()`はimmutable draw indexだけを読む。
 - `AtomicReference`のimmutable draw indexはasset IDから現在identityを確認してO(1)でhandleを返す。lookupはstore lock、Coil cache書込み、request、pack read、decode、pixel copyを行わない。

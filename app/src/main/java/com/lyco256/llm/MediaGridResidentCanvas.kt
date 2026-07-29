@@ -1,19 +1,18 @@
 package com.lyco256.llm
 
-import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
-import androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo
-import androidx.compose.foundation.lazy.grid.LazyGridState
 import coil.memory.MemoryCache
-import kotlin.math.roundToInt
+import java.util.Collections
 import java.util.LinkedHashMap
+import kotlin.math.roundToInt
 
 internal enum class MediaGridResidentCanvasMode {
     Disabled,
@@ -21,28 +20,29 @@ internal enum class MediaGridResidentCanvasMode {
     TestVisible,
 }
 
-internal data class MediaGridVisibleCanvasItem(
-    val assetId: Long,
-    val itemKey: String,
-    val destination: Rect,
-    val visibleOrder: Int,
-    val intersectsViewport: Boolean,
-)
-
-internal data class MediaGridVisibleCanvasSnapshot(
-    val frameKey: MediaGridRenderKey,
-    val viewportWidth: Int,
-    val viewportHeight: Int,
-    val layoutGeneration: Long,
-    val items: List<MediaGridVisibleCanvasItem>,
-)
-
 internal data class MediaGridResidentCanvasImage(
     val identity: MediaGridResidentImageIdentity,
     val imageBitmap: ImageBitmap,
     val width: Int,
     val height: Int,
 )
+
+internal data class MediaGridResidentCanvasPreparedImage(
+    val assetId: Long,
+    val identity: MediaGridResidentImageIdentity,
+    val image: ImageBitmap,
+    val srcOffset: IntOffset,
+    val srcSize: IntSize,
+    val sourceWidth: Int,
+    val sourceHeight: Int,
+)
+
+internal data class MediaGridResidentCanvasPreparedIndex(
+    val drawIndexVersion: Long,
+    val preparedImageByAssetId: Map<Long, MediaGridResidentCanvasPreparedImage>,
+) {
+    val entryCount: Int get() = preparedImageByAssetId.size
+}
 
 private data class CachedResidentImage(
     val value: MemoryCache.Value,
@@ -85,120 +85,93 @@ internal fun mediaGridCropSourceRect(
     sourceHeight: Int,
     destinationWidth: Int,
     destinationHeight: Int,
-): Rect? {
+): androidx.compose.ui.geometry.Rect? {
     if (sourceWidth <= 0 || sourceHeight <= 0 || destinationWidth <= 0 || destinationHeight <= 0) return null
     val sourceAspect = sourceWidth.toDouble() / sourceHeight
     val destinationAspect = destinationWidth.toDouble() / destinationHeight
     return if (sourceAspect > destinationAspect) {
         val cropWidth = (sourceHeight * destinationAspect).coerceIn(1.0, sourceWidth.toDouble())
         val left = (sourceWidth - cropWidth) / 2.0
-        Rect(left.toFloat(), 0f, (left + cropWidth).toFloat(), sourceHeight.toFloat())
+        androidx.compose.ui.geometry.Rect(left.toFloat(), 0f, (left + cropWidth).toFloat(), sourceHeight.toFloat())
     } else {
         val cropHeight = (sourceWidth / destinationAspect).coerceIn(1.0, sourceHeight.toDouble())
         val top = (sourceHeight - cropHeight) / 2.0
-        Rect(0f, top.toFloat(), sourceWidth.toFloat(), (top + cropHeight).toFloat())
+        androidx.compose.ui.geometry.Rect(0f, top.toFloat(), sourceWidth.toFloat(), (top + cropHeight).toFloat())
     }
 }
 
-internal data class MediaGridResidentCanvasDrawCommand(
-    val assetId: Long,
-    val identity: MediaGridResidentImageIdentity,
-    val image: MediaGridResidentCanvasImage,
-    val sourceCrop: Rect,
-    val destination: Rect,
-    val visibleOrder: Int,
-)
-
-internal fun mediaGridResidentCanvasViewportRect(width: Int, height: Int): Rect = Rect(
-    left = 0f,
-    top = 0f,
-    right = width.coerceAtLeast(0).toFloat(),
-    bottom = height.coerceAtLeast(0).toFloat(),
-)
-
-internal fun buildMediaGridVisibleCanvasSnapshot(
-    frame: MediaGridFrameData,
-    layout: LazyGridLayoutInfo,
-): MediaGridVisibleCanvasSnapshot {
-    val viewportWidth = layout.viewportSize.width.coerceAtLeast(0)
-    val viewportHeight = (layout.viewportEndOffset - layout.viewportStartOffset).coerceAtLeast(0)
-    val items = ArrayList<MediaGridVisibleCanvasItem>(layout.visibleItemsInfo.size)
-    val seenAssets = HashSet<Long>()
-    layout.visibleItemsInfo.forEachIndexed { order, info ->
-        val item = (info.key as? String)?.let(frame.itemByKey::get) as? MediaGridCellItem ?: return@forEachIndexed
-        if (!seenAssets.add(item.entry.assetId)) return@forEachIndexed
-        val destination = mediaGridCanvasDestinationRect(info.offset, info.size, layout.viewportStartOffset)
-        val viewport = Rect(0f, 0f, viewportWidth.toFloat(), viewportHeight.toFloat())
-        if (destination.intersect(viewport).isEmpty) return@forEachIndexed
-        items += MediaGridVisibleCanvasItem(item.entry.assetId, item.key, destination, order, true)
-    }
-    val generation = items.fold(17L) { acc, item ->
-        acc * 31 + item.itemKey.hashCode() * 31L + item.destination.hashCode()
-    }
-    return MediaGridVisibleCanvasSnapshot(frame.key, viewportWidth, viewportHeight, generation, items.toList())
-}
+internal fun mediaGridResidentCanvasViewportRect(width: Int, height: Int): androidx.compose.ui.geometry.Rect =
+    androidx.compose.ui.geometry.Rect(0f, 0f, width.coerceAtLeast(0).toFloat(), height.coerceAtLeast(0).toFloat())
 
 internal fun mediaGridCanvasDestinationRect(
     offset: IntOffset,
     size: IntSize,
     viewportStartOffset: Int,
-): Rect = Rect(
+): androidx.compose.ui.geometry.Rect = androidx.compose.ui.geometry.Rect(
     offset.x.toFloat(),
     (offset.y - viewportStartOffset).toFloat(),
     (offset.x + size.width).toFloat(),
     (offset.y - viewportStartOffset + size.height).toFloat(),
 )
 
-internal fun buildMediaGridResidentCanvasCommands(
-    snapshot: MediaGridVisibleCanvasSnapshot,
-    index: MediaGridResidentDrawIndex,
+internal fun buildMediaGridResidentCanvasPreparedIndex(
+    drawIndex: MediaGridResidentDrawIndex,
     adapter: MediaGridResidentCanvasImageAdapter,
-): List<MediaGridResidentCanvasDrawCommand> {
-    adapter.sync(index)
-    return snapshot.items.mapNotNull { item ->
-        val identity = index.identityByAssetId[item.assetId] ?: return@mapNotNull null
-        val handle = index.handlesByIdentity[identity]
-            ?.takeIf { it.directDrawEligible }
-            ?: return@mapNotNull null
-        val image = adapter.resolve(handle) ?: return@mapNotNull null
-        val source = mediaGridCropSourceRect(image.width, image.height, item.destination.width.roundToInt(), item.destination.height.roundToInt())
-            ?: return@mapNotNull null
-        MediaGridResidentCanvasDrawCommand(item.assetId, identity, image, source, item.destination, item.visibleOrder)
-    }.sortedBy { it.visibleOrder }
+): MediaGridResidentCanvasPreparedIndex {
+    adapter.sync(drawIndex)
+    val prepared = LinkedHashMap<Long, MediaGridResidentCanvasPreparedImage>(drawIndex.handlesByIdentity.size)
+    drawIndex.handlesByIdentity.values.forEach { handle ->
+        if (prepared.size >= MEDIA_GRID_RETAINED_IMAGE_TARGET_ENTRIES || !handle.directDrawEligible) return@forEach
+        val image = adapter.resolve(handle) ?: return@forEach
+        val crop = mediaGridCropSourceRect(image.width, image.height, 1, 1) ?: return@forEach
+        val srcOffset = IntOffset(crop.left.roundToInt(), crop.top.roundToInt())
+        val srcSize = IntSize(crop.width.roundToInt(), crop.height.roundToInt())
+        if (srcOffset.x < 0 || srcOffset.y < 0 || srcOffset.x + srcSize.width > image.width || srcOffset.y + srcSize.height > image.height) return@forEach
+        prepared[handle.identity.assetId] = MediaGridResidentCanvasPreparedImage(
+            assetId = handle.identity.assetId,
+            identity = handle.identity,
+            image = image.imageBitmap,
+            srcOffset = srcOffset,
+            srcSize = srcSize,
+            sourceWidth = image.width,
+            sourceHeight = image.height,
+        )
+    }
+    return MediaGridResidentCanvasPreparedIndex(
+        drawIndexVersion = drawIndex.version,
+        preparedImageByAssetId = Collections.unmodifiableMap(prepared),
+    )
 }
 
+/** The draw modifier only applies current LazyGrid coordinates to an immutable prepared index. */
 internal fun Modifier.mediaGridResidentCanvas(
-    frame: MediaGridFrameData,
     state: LazyGridState,
-    retainedImageStore: MediaGridRetainedImageStore,
-    adapter: MediaGridResidentCanvasImageAdapter,
-    drawIndexVersion: Long,
+    assetIdByItemKey: Map<String, Long>,
+    preparedIndex: MediaGridResidentCanvasPreparedIndex,
     mode: MediaGridResidentCanvasMode = MediaGridResidentCanvasMode.Disabled,
 ): Modifier {
     if (mode == MediaGridResidentCanvasMode.Disabled) return this
-    val tagged = if (mode == MediaGridResidentCanvasMode.TestVisible) {
-        testTag("media_grid_resident_canvas")
-    } else this
+    val tagged = if (mode == MediaGridResidentCanvasMode.TestVisible) testTag("media_grid_resident_canvas") else this
     return tagged.drawWithCache {
-        // Reading these snapshot/atomic values in the cache block makes the cache rebuild after layout or index changes.
-        drawIndexVersion
-        val snapshot = buildMediaGridVisibleCanvasSnapshot(frame, state.layoutInfo)
-        val index = retainedImageStore.drawIndexSnapshot()
-        val commands = buildMediaGridResidentCanvasCommands(snapshot, index, adapter)
         onDrawWithContent {
-            clipRect(
-                left = 0f,
-                top = 0f,
-                right = size.width,
-                bottom = size.height,
-            ) {
-                commands.forEach { command ->
+            val layout = state.layoutInfo
+            clipRect(left = 0f, top = 0f, right = size.width, bottom = size.height) {
+                layout.visibleItemsInfo.forEach { info ->
+                    val assetId = (info.key as? String)?.let(assetIdByItemKey::get) ?: return@forEach
+                    val image = preparedIndex.preparedImageByAssetId[assetId] ?: return@forEach
+                    val left = info.offset.x
+                    val top = info.offset.y - layout.viewportStartOffset
+                    val width = info.size.width
+                    val height = info.size.height
+                    val right = left + width
+                    val bottom = top + height
+                    if (right <= 0 || bottom <= 0 || left >= size.width || top >= size.height || width <= 0 || height <= 0) return@forEach
                     drawImage(
-                        image = command.image.imageBitmap,
-                        srcOffset = IntOffset(command.sourceCrop.left.roundToInt(), command.sourceCrop.top.roundToInt()),
-                        srcSize = IntSize(command.sourceCrop.width.roundToInt(), command.sourceCrop.height.roundToInt()),
-                        dstOffset = IntOffset(command.destination.left.roundToInt(), command.destination.top.roundToInt()),
-                        dstSize = IntSize(command.destination.width.roundToInt(), command.destination.height.roundToInt()),
+                        image = image.image,
+                        srcOffset = image.srcOffset,
+                        srcSize = image.srcSize,
+                        dstOffset = IntOffset(left, top),
+                        dstSize = IntSize(width, height),
                     )
                 }
             }

@@ -1,9 +1,9 @@
 # `MediaGridResidentCanvas.kt`
 
-`Disabled`、`Enabled`、`TestVisible`を持つresident画像の単一DrawModifierです。`Enabled`と`TestVisible`は同じ`drawWithCache`エンジンを使い、通常画面は`Enabled`を明示し、既定値は`Disabled`です。`Disabled`ではCanvas、layout collector、draw-index version collector、ImageBitmap adapterを作りません。
+`Disabled`、`Enabled`、`TestVisible`を持つresident画像の単一DrawModifierです。`Enabled`と`TestVisible`は同じ`drawWithCache`エンジンを使い、通常画面は`Enabled`を明示し、既定値は`Disabled`です。`Disabled`ではCanvas、draw-index version collector、ImageBitmap adapter、prepared indexを作りません。
 
 - `MediaGridResidentCanvasImageAdapter`はdraw indexのidentityと`MemoryCache.Value`インスタンスをキーに、既存Bitmapへ`asImageBitmap()`を一度だけ適用します。Bitmapのcopy、decode、pixel read/write、recycleは行いません。
-- `buildMediaGridVisibleCanvasSnapshot`は`LazyGridLayoutInfo.visibleItemsInfo`だけを読み、frameに存在するmedia cell、viewportと交差する矩形、visible順を保持します。header、viewport外、重複assetを除外します。
-- `buildMediaGridResidentCanvasCommands`はlayoutInfoまたはdraw index versionの変更時だけ呼び出され、eligible resident hitだけを中央crop矩形つきcommandへ変換します。
-- `mediaGridResidentCanvas`はLazyGrid自身の一つのDrawModifierで、layout後の最新layoutInfoからcommandを構築します。resident画像はGridローカルの`0..size.width` / `0..size.height`へ`clipRect`して先に描き、clip終了後に`drawContent()`を呼ぶため、見出し・Placeholder・fallback画像・badge・選択overlayは従来どおり描画されます。draw scopeは事前構築済みcommandを順番に描画し、store lookup、state更新、collection生成、IO、ImageRequest、decode、pack readは行いません。
+- `MediaGridResidentCanvasPreparedIndex`はdraw index versionが変化した時だけ、eligible entryの既存`MemoryCache.Value`と`ImageBitmap` adapterを使って構築します。正方形ContentScale.Cropのsource offset/sizeもidentityごとに一度だけ計算し、最大300件をimmutable mapで保持します。
+- `MediaGridFrameData.assetIdByItemKey`はframe作成時の既存item一回走査でmedia cellだけを登録します。header keyは登録せず、draw中に`itemByKey`のobject取得や型castを行いません。
+- `mediaGridResidentCanvas`はLazyGrid自身の一つのDrawModifierで、draw phase内の最新`visibleItemsInfo`を一回だけ順番に走査します。item key→asset ID→prepared画像をO(1) lookupし、既存offset/sizeをdestinationへ適用してGridローカルviewportへclipします。resident missでは何も描かず、clip終了後に`drawContent()`を呼ぶため、見出し・Placeholder・fallback画像・badge・選択overlayは従来どおり描画されます。draw scopeはsnapshot、command List、collection、sort、Rect、crop計算、adapter/store lookup、IO、decode、pack readを行いません。
 - productionの`ClassifiedMediaGridContent`はmodeを指定せず、AsyncImage、Placeholder、frame publication、queue、worker、selectionの既存経路を維持します。

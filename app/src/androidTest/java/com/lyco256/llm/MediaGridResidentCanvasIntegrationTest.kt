@@ -59,4 +59,44 @@ class MediaGridResidentCanvasIntegrationTest {
             loader.shutdown()
         }
     }
+
+    @Test
+    fun preparedIndexUsesOnlyEligibleEntriesAndReusesAdaptedImagesAcrossRebuilds() {
+        val loader = ImageLoader.Builder(context).memoryCache {
+            MemoryCache.Builder(context).maxSizeBytes(32 * 1024 * 1024).build()
+        }.build()
+        val store = MediaGridRetainedImageStore(loader.memoryCache)
+        val adapter = MediaGridResidentCanvasImageAdapter()
+        val bitmaps = (0 until 300).map {
+            Bitmap.createBitmap(32, 32, Bitmap.Config.RGB_565).also { bitmap -> bitmap.eraseColor(Color.rgb(it % 256, 0, 0)) }
+        }
+        try {
+            bitmaps.forEachIndexed { assetId, bitmap ->
+                val candidate = MediaGridPreparedCandidate(
+                    kind = MediaGridImageSourceKind.Rgb565Pack,
+                    requestData = assetId.toLong(),
+                    sourceIdentity = "prepared-source-$assetId",
+                    cacheKey = "prepared-cache-$assetId",
+                    width = bitmap.width,
+                    height = bitmap.height,
+                )
+                store.retain(assetId.toLong(), candidate, MemoryCache.Value(bitmap, emptyMap()), directDrawEligible = assetId % 2 == 0)
+            }
+            val first = buildMediaGridResidentCanvasPreparedIndex(store.drawIndexSnapshot(), adapter)
+            val second = buildMediaGridResidentCanvasPreparedIndex(store.drawIndexSnapshot(), adapter)
+
+            assertEquals(150, first.entryCount)
+            assertEquals(first.entryCount, second.entryCount)
+            assertEquals(first.drawIndexVersion, second.drawIndexVersion)
+            first.preparedImageByAssetId.forEach { (assetId, image) ->
+                assertTrue(assetId % 2 == 0L)
+                assertSame(image.image, second.preparedImageByAssetId[assetId]?.image)
+            }
+            assertEquals(150, adapter.size())
+        } finally {
+            store.clear()
+            bitmaps.forEach(Bitmap::recycle)
+            loader.shutdown()
+        }
+    }
 }
