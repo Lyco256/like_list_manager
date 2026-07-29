@@ -51,19 +51,13 @@ internal data class MediaGridViewportAnchor(
     val renderKey: MediaGridRenderKey,
     val firstVisibleItemIndex: Int,
     val lastVisibleItemIndex: Int,
-    val visibleMediaItemIndices: IntArray,
+    val firstVisibleMediaOrdinal: Int,
+    val lastVisibleMediaOrdinal: Int,
     val viewportWidthPx: Int,
     val viewportHeightPx: Int,
     val cellSizePx: Int,
     val columnCount: Int,
-) {
-    override fun equals(other: Any?): Boolean = other is MediaGridViewportAnchor &&
-        renderKey == other.renderKey && firstVisibleItemIndex == other.firstVisibleItemIndex &&
-        lastVisibleItemIndex == other.lastVisibleItemIndex && visibleMediaItemIndices.contentEquals(other.visibleMediaItemIndices) &&
-        viewportWidthPx == other.viewportWidthPx && viewportHeightPx == other.viewportHeightPx &&
-        cellSizePx == other.cellSizePx && columnCount == other.columnCount
-    override fun hashCode(): Int = 31 * renderKey.hashCode() + firstVisibleItemIndex
-}
+)
 
 internal data class MediaGridCellLoadState(
     val status: MediaGridCellLoadStatus = MediaGridCellLoadStatus.Pending,
@@ -106,29 +100,31 @@ internal fun mediaGridReadyAttachmentOrder(
 ).map { it.first }.toList()
 
 internal fun selectMediaGridInitialWarmupIndices(frame: MediaGridFrameData, anchor: MediaGridViewportAnchor): IntArray {
-    if (anchor.cellSizePx <= 0 || anchor.columnCount <= 0 || frame.mediaCellIndices.isEmpty()) return intArrayOf()
-    val visible = anchor.visibleMediaItemIndices.toList().sorted()
-    val first = visible.firstOrNull()?.let { lowerBoundMedia(frame.mediaCellIndices, it) } ?: lowerBoundMedia(frame.mediaCellIndices, anchor.firstVisibleItemIndex)
-    val last = visible.lastOrNull()?.let { upperBoundMedia(frame.mediaCellIndices, it) } ?: first
+    val index = frame.ordinalIndex
+    if (anchor.cellSizePx <= 0 || anchor.columnCount <= 0 || index.itemIndexByMediaOrdinal.isEmpty()) return intArrayOf()
+    val first = if (anchor.firstVisibleMediaOrdinal >= 0) {
+        anchor.firstVisibleMediaOrdinal.coerceIn(0, index.itemIndexByMediaOrdinal.size)
+    } else {
+        lowerBoundMedia(index.itemIndexByMediaOrdinal, anchor.firstVisibleItemIndex)
+            .coerceIn(0, index.itemIndexByMediaOrdinal.size)
+    }
+    val last = if (anchor.lastVisibleMediaOrdinal >= first) {
+        (anchor.lastVisibleMediaOrdinal + 1).coerceIn(first, index.itemIndexByMediaOrdinal.size)
+    } else first
     val perScreen = (kotlin.math.ceil(anchor.viewportHeightPx.toDouble() / anchor.cellSizePx).toInt().coerceAtLeast(1) * anchor.columnCount)
-    val ordered = ArrayList<Int>()
+    val maxAssets = minOf(MEDIA_GRID_WARMUP_MAX_ASSETS, (MEDIA_GRID_WARMUP_MAX_BYTES / (256L * 256L * 4L)).toInt())
+    val result = IntArray(maxAssets)
+    var count = 0
     fun append(from: Int, to: Int) {
-        val start = from.coerceIn(0, frame.mediaCellIndices.size)
-        val end = to.coerceIn(start, frame.mediaCellIndices.size)
-        if (start < end) frame.mediaCellIndices.copyOfRange(start, end).forEach { if (it !in ordered) ordered += it }
+        var ordinal = from.coerceIn(0, index.itemIndexByMediaOrdinal.size)
+        val end = to.coerceIn(ordinal, index.itemIndexByMediaOrdinal.size)
+        while (ordinal < end && count < result.size) {
+            result[count++] = index.itemIndexByMediaOrdinal[ordinal++]
+        }
     }
     append(first, last); append(last, last + perScreen); append(last + perScreen, last + perScreen * 2)
     if (anchor.firstVisibleItemIndex > 0) append(first - anchor.columnCount, first)
-    val maxAssets = minOf(MEDIA_GRID_WARMUP_MAX_ASSETS, (MEDIA_GRID_WARMUP_MAX_BYTES / (256L * 256L * 4L)).toInt())
-    return ordered.take(maxAssets).toIntArray()
-}
-
-internal fun selectMediaGridActiveWindow(frame: MediaGridFrameData, anchor: MediaGridViewportAnchor): Set<Int> {
-    if (anchor.visibleMediaItemIndices.isEmpty() || anchor.columnCount <= 0) return emptySet()
-    val first = lowerBoundMedia(frame.mediaCellIndices, anchor.visibleMediaItemIndices.min())
-    val last = upperBoundMedia(frame.mediaCellIndices, anchor.visibleMediaItemIndices.max())
-    val prefetchCells = anchor.columnCount * MEDIA_GRID_ACTIVE_PREFETCH_ROWS
-    return frame.mediaCellIndices.copyOfRange((first - prefetchCells).coerceAtLeast(0), (last + prefetchCells).coerceAtMost(frame.mediaCellIndices.size)).toSet()
+    return result.copyOf(count)
 }
 
 internal data class MediaGridActiveWindowSnapshot(
@@ -137,34 +133,14 @@ internal data class MediaGridActiveWindowSnapshot(
     val renderKey: MediaGridRenderKey,
     val visibleAssetIds: LongArray,
     val activeAssetIds: LongArray,
-    val activeAssetMembership: Set<Long>,
+    val activeStartMediaOrdinal: Int,
+    val activeEndMediaOrdinalExclusive: Int,
     val centerMediaOrdinal: Int,
 ) {
-    fun isActive(assetId: Long): Boolean = assetId in activeAssetMembership
-}
-
-/** Stable O(1) mappings for the media cells in one frame. */
-internal data class MediaGridOrdinalIndex(
-    val assetIdByMediaOrdinal: LongArray,
-    val itemIndexByMediaOrdinal: IntArray,
-    val mediaOrdinalByAssetId: Map<Long, Int>,
-    val itemIndexByAssetId: Map<Long, Int>,
-)
-
-internal fun buildMediaGridOrdinalIndex(frame: MediaGridFrameData): MediaGridOrdinalIndex {
-    val assets = ArrayList<Long>(frame.mediaCellIndices.size)
-    val items = ArrayList<Int>(frame.mediaCellIndices.size)
-    val ordinalByAsset = HashMap<Long, Int>(frame.mediaCellIndices.size)
-    val itemByAsset = HashMap<Long, Int>(frame.mediaCellIndices.size)
-    frame.mediaCellIndices.forEach { itemIndex ->
-        val assetId = (frame.items.getOrNull(itemIndex) as? MediaGridCellItem)?.entry?.assetId ?: return@forEach
-        if (ordinalByAsset.containsKey(assetId)) return@forEach
-        ordinalByAsset[assetId] = assets.size
-        itemByAsset[assetId] = itemIndex
-        assets += assetId
-        items += itemIndex
+    fun isActive(assetId: Long, ordinalByAssetId: Map<Long, Int>): Boolean {
+        val ordinal = ordinalByAssetId[assetId] ?: return false
+        return ordinal in activeStartMediaOrdinal until activeEndMediaOrdinalExclusive
     }
-    return MediaGridOrdinalIndex(assets.toLongArray(), items.toIntArray(), ordinalByAsset, itemByAsset)
 }
 
 internal class MediaGridOrdinalPendingSet(private val mediaCellCount: Int) {
@@ -208,33 +184,41 @@ internal fun buildMediaGridActiveWindowSnapshot(
     epoch: Long,
     generation: Long,
 ): MediaGridActiveWindowSnapshot {
-    val visibleIndices = anchor.visibleMediaItemIndices
-    val visibleAssetIds = visibleIndices.asSequence()
-        .mapNotNull { index -> (frame.items.getOrNull(index) as? MediaGridCellItem)?.entry?.assetId }
-        .distinct()
-        .toList()
-        .toLongArray()
-    if (visibleIndices.isEmpty() || anchor.columnCount <= 0) {
-        return MediaGridActiveWindowSnapshot(epoch, generation, frame.key, visibleAssetIds, longArrayOf(), emptySet(), centerMediaOrdinal = -1)
+    val index = frame.ordinalIndex
+    val visibleStart = anchor.firstVisibleMediaOrdinal.coerceIn(0, index.assetIdByMediaOrdinal.size)
+    val visibleEnd = (anchor.lastVisibleMediaOrdinal + 1).coerceIn(visibleStart, index.assetIdByMediaOrdinal.size)
+    val visibleAssetIds = mediaGridAssetIdsForOrdinalRange(index, visibleStart, visibleEnd)
+    if (anchor.firstVisibleMediaOrdinal < 0 || anchor.lastVisibleMediaOrdinal < anchor.firstVisibleMediaOrdinal || anchor.columnCount <= 0) {
+        return MediaGridActiveWindowSnapshot(epoch, generation, frame.key, visibleAssetIds, longArrayOf(), 0, 0, centerMediaOrdinal = -1)
     }
-    val first = lowerBoundMedia(frame.mediaCellIndices, visibleIndices.min())
-    val last = upperBoundMedia(frame.mediaCellIndices, visibleIndices.max())
     val prefetchCells = anchor.columnCount * MEDIA_GRID_ACTIVE_PREFETCH_ROWS
-    val start = (first - prefetchCells).coerceAtLeast(0)
-    val end = (last + prefetchCells).coerceAtMost(frame.mediaCellIndices.size)
-    val activeAssetIds = frame.mediaCellIndices.copyOfRange(start, end)
-        .asSequence()
-        .mapNotNull { index -> (frame.items.getOrNull(index) as? MediaGridCellItem)?.entry?.assetId }
-        .distinct()
-        .toList()
-        .toLongArray()
-    val centerItemIndex = (anchor.firstVisibleItemIndex + anchor.lastVisibleItemIndex) / 2
-    val centerMediaOrdinal = lowerBoundMedia(frame.mediaCellIndices, centerItemIndex)
-        .coerceIn(0, (frame.mediaCellIndices.size - 1).coerceAtLeast(0))
-    return MediaGridActiveWindowSnapshot(epoch, generation, frame.key, visibleAssetIds, activeAssetIds, activeAssetIds.toSet(), centerMediaOrdinal)
+    val start = (visibleStart - prefetchCells).coerceAtLeast(0)
+    val end = (visibleEnd + prefetchCells).coerceAtMost(index.assetIdByMediaOrdinal.size)
+    val activeAssetIds = mediaGridAssetIdsForOrdinalRange(index, start, end)
+    val centerMediaOrdinal = (visibleStart + visibleEnd - 1) / 2
+    return MediaGridActiveWindowSnapshot(epoch, generation, frame.key, visibleAssetIds, activeAssetIds, start, end, centerMediaOrdinal)
 }
 
-internal fun <T> retainMediaGridActiveLoadStates(states: Map<Long, T>, activeAssetIds: Set<Long>): Map<Long, T> = states.filterKeys(activeAssetIds::contains)
+private fun mediaGridAssetIdsForOrdinalRange(index: MediaGridOrdinalIndex, start: Int, end: Int): LongArray {
+    if (start >= end) return LongArray(0)
+    var hasDuplicate = false
+    var ordinal = start
+    while (ordinal < end) {
+        val assetId = index.assetIdByMediaOrdinal[ordinal]
+        if (index.mediaOrdinalByAssetId[assetId] != ordinal) { hasDuplicate = true; break }
+        ordinal++
+    }
+    if (!hasDuplicate) return index.assetIdByMediaOrdinal.copyOfRange(start, end)
+    val seen = HashSet<Long>(end - start)
+    val result = LongArray(end - start)
+    var count = 0
+    ordinal = start
+    while (ordinal < end) {
+        val assetId = index.assetIdByMediaOrdinal[ordinal++]
+        if (seen.add(assetId)) result[count++] = assetId
+    }
+    return result.copyOf(count)
+}
 
 internal fun mediaGridEstimatedBitmapBytes(candidate: MediaGridPreparedCandidate): Long {
     if (candidate.width <= 0 || candidate.height <= 0) return 0L
@@ -475,7 +459,7 @@ internal class MediaGridSteadyLoadController(
     private var startupPublicationBatchPending = false
     private var startupState = MediaGridStartupState.PreparingFrame
     private var workerJobs = emptyList<Job>()
-    private var ordinalIndex = buildMediaGridOrdinalIndex(frame)
+    private var ordinalIndex = frame.ordinalIndex
     private var metadataPending = MediaGridOrdinalPendingSet(ordinalIndex.assetIdByMediaOrdinal.size)
     private var bitmapPending = MediaGridOrdinalPendingSet(ordinalIndex.assetIdByMediaOrdinal.size)
     @Volatile private var activeSnapshot: MediaGridActiveWindowSnapshot? = null
@@ -536,7 +520,7 @@ internal class MediaGridSteadyLoadController(
         mediaGridRetentionChangedAssets(frame, nextFrame).forEach { retainedImageStore?.invalidateAsset(it) }
         generation++
         frame = nextFrame
-        ordinalIndex = buildMediaGridOrdinalIndex(frame)
+        ordinalIndex = frame.ordinalIndex
         synchronized(lock) {
             val valid = ordinalIndex.mediaOrdinalByAssetId.keys
             frameTransitionPreserved.retainAll(valid)
@@ -596,9 +580,10 @@ internal class MediaGridSteadyLoadController(
         val initial = selectMediaGridInitialWarmupIndices(frame, anchor)
         synchronized(lock) {
             startupAssets.clear()
-            initial.asSequence().mapNotNull { index ->
-                (frame.items.getOrNull(index) as? MediaGridCellItem)?.entry?.assetId
-            }.forEach(startupAssets::add)
+            initial.forEach { itemIndex ->
+                val ordinal = frame.ordinalIndex.mediaOrdinalByItemIndex.getOrNull(itemIndex) ?: -1
+                if (ordinal >= 0) startupAssets += frame.ordinalIndex.assetIdByMediaOrdinal[ordinal]
+            }
             startupAssets.removeAll { it in metadata }
             startupPending = startupAssets.size
             if (startupPending == 0) { startupReady = true; startupSignal.trySend(Unit) }
@@ -1007,7 +992,7 @@ internal class MediaGridSteadyLoadController(
             }
             val itemIndex = ordinalIndex.itemIndexByAssetId[assetId] ?: return
             if (record.metadataStatus !in setOf(QueueTaskStatus.Running, QueueTaskStatus.BackgroundQueued, QueueTaskStatus.UrgentQueued)) {
-                enqueueMetadataLocked(assetId, itemIndex, if (activeSnapshot?.isActive(assetId) == true) LoadLane.Urgent else preferredLane)
+                enqueueMetadataLocked(assetId, itemIndex, if (activeSnapshot?.isActive(assetId, ordinalIndex.mediaOrdinalByAssetId) == true) LoadLane.Urgent else preferredLane)
             }
             return
         }
@@ -1032,7 +1017,7 @@ internal class MediaGridSteadyLoadController(
         } else if (states[assetId] == null || states[assetId]?.prepared == null) {
             states[assetId] = MediaGridCellLoadState(MediaGridCellLoadStatus.Pending, prepared, candidateIndex)
         }
-        val active = activeSnapshot?.isActive(assetId) == true
+        val active = activeSnapshot?.isActive(assetId, ordinalIndex.mediaOrdinalByAssetId) == true
         val lane = if (active) LoadLane.Urgent else preferredLane
         if (!isLocalCandidate(candidate) && !active) return
         if (!mediaGridBitmapQueueEntryMatches(record.bitmapStatus, record.candidateIndex, record.sourceIdentity, candidateIndex, candidate.sourceIdentity)) {
@@ -1060,7 +1045,7 @@ internal class MediaGridSteadyLoadController(
     private fun addBitmapTaskLocked(assetId: Long, prepared: MediaGridPreparedImage, candidateIndex: Int, lane: LoadLane) {
         val candidate = prepared.candidates.getOrNull(candidateIndex) ?: return
         val record = queueRecords.getOrPut(assetId) { AssetQueueRecord(generation = generation) }
-        val urgent = lane == LoadLane.Urgent || activeSnapshot?.isActive(assetId) == true
+        val urgent = lane == LoadLane.Urgent || activeSnapshot?.isActive(assetId, ordinalIndex.mediaOrdinalByAssetId) == true
         val normalizedLane = if (urgent) LoadLane.Urgent else LoadLane.Background
         if (mediaGridBitmapQueueEntryMatches(record.bitmapStatus, record.candidateIndex, record.sourceIdentity, candidateIndex, candidate.sourceIdentity)) return
         record.bitmapToken++
@@ -1094,7 +1079,7 @@ internal class MediaGridSteadyLoadController(
             record.metadataStatus = QueueTaskStatus.Unregistered
             record.bitmapStatus = QueueTaskStatus.Unregistered
             ordinalIndex.itemIndexByAssetId[assetId]?.let { itemIndex ->
-                enqueueMetadataLocked(assetId, itemIndex, if (activeSnapshot?.isActive(assetId) == true) LoadLane.Urgent else LoadLane.Background)
+                enqueueMetadataLocked(assetId, itemIndex, if (activeSnapshot?.isActive(assetId, ordinalIndex.mediaOrdinalByAssetId) == true) LoadLane.Urgent else LoadLane.Background)
             }
         }
         invalidated.clear()

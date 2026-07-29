@@ -258,6 +258,12 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 旧操作状態と生成停止方式の詳細はGit履歴だけに残します。現行の直接表示とpreloadの証跡は、冒頭のdirect preview節と`MediaGridDirectPreviewTest`にあります。
 # `TagHierarchyUiV2.kt`
 
+## 2026-07-29 viewport signature and shared ordinal index
+
+- `buildMediaGridFrameData()`はframe itemの一回の走査でitem map、media ordinal配列、headerを`-1`とする逆引き配列、asset ID mapを構築し、`MediaGridFrameData.ordinalIndex`としてUI/controllerへ共有する。
+- viewport `snapshotFlow`は`visibleItemsInfo`を一回直接走査し、item indexから`mediaOrdinalByItemIndex`を引いてprimitive境界を作る。pixel offsetはsignatureに含めず、visible境界・header境界・viewport寸法・cell size・列数・render keyの変更だけを通知する。
+- 既存のresident Canvas、scroll anchor checkpoint、pointer input、列数変更、header/card/selection UIは変更しない。
+
 ## 2026-07-29 idle anchor persistence
 
 - Classified media-grid anchor persistence is checkpoint-based. It observes only `isScrollInProgress` transitions and captures once on a real `true -> false`; the initial `false`, active scrolling, and restoration/handoff intermediate states are not saved.

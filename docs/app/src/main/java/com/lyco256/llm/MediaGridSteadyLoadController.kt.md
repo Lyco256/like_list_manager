@@ -1,8 +1,15 @@
 # `MediaGridSteadyLoadController.kt`
 
+## 2026-07-29 viewport boundary and active window optimization
+
+- `MediaGridFrameData.ordinalIndex` owns `assetIdByMediaOrdinal`、`itemIndexByMediaOrdinal`、`mediaOrdinalByItemIndex`、asset ID mapsをframe構築中のitems一回走査で作り、UIとcontrollerが共有する。controllerはframe更新時に再構築しない。
+- `MediaGridViewportAnchor`はvisible media ordinalのfirst/last境界だけを保持する。active snapshotはそのordinal範囲と上下3行からvisible/active asset IDsを作り、active membershipはframeのasset mapと範囲比較で判定する。
+- initial warm-upはvisible ordinal、下2画面、必要時の直前1行を固定容量のIntArrayへ順に詰め、cell indexの二重走査・List contains・copyOfRangeを使わない。
+- scheduler、worker並列数、urgent/background queue、1 frame 1枚のpublication、resident protection、idle anchor保存、pointer input、Morphは変更しない。
+
 ## 2026-07-26 retained image and active prefetch
 
-- `MEDIA_GRID_ACTIVE_PREFETCH_ROWS = 3`を`selectMediaGridActiveWindow()`と`buildMediaGridActiveWindowSnapshot()`で共用し、headerを含まないmedia ordinal単位で列数2〜12の上下3行をactiveにする。
+- `MEDIA_GRID_ACTIVE_PREFETCH_ROWS = 3`を`buildMediaGridActiveWindowSnapshot()`で使い、headerを含まないmedia ordinal単位で列数2〜12の上下3行をactiveにする。
 - 初回warm-up、metadata／Bitmap worker並列数、queue優先順位、候補順、1 frame 1枚公開、Progress、scroll保持は変更しない。
 - `MediaGridSessionCoordinator`共有の`MediaGridRetainedImageStore`へ、Coil cache hit／load成功／visible化を反映する。Coil miss時は同一candidateのretained valueをCoilへrestoreして通常loadを省略する。
 - source／candidate変更、asset削除、明示invalidationでは対象assetのretained entryだけを破棄する。

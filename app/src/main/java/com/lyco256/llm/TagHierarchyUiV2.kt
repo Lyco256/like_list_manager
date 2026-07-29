@@ -3118,12 +3118,82 @@ internal data class MediaGridRenderKey(
     val columnCount: Int,
 )
 
+internal data class MediaGridOrdinalIndex(
+    val assetIdByMediaOrdinal: LongArray,
+    val itemIndexByMediaOrdinal: IntArray,
+    val mediaOrdinalByItemIndex: IntArray,
+    val mediaOrdinalByAssetId: Map<Long, Int>,
+    val itemIndexByAssetId: Map<Long, Int>,
+)
+
 internal data class MediaGridFrameData(
     val key: MediaGridRenderKey,
     val items: List<ClassifiedMediaGridItem>,
     val itemByKey: Map<String, ClassifiedMediaGridItem>,
     val mediaCellIndices: IntArray,
     val assetIdByItemKey: Map<String, Long> = emptyMap(),
+    val ordinalIndex: MediaGridOrdinalIndex = MediaGridOrdinalIndex(
+        LongArray(0), IntArray(0), IntArray(0), emptyMap(), emptyMap(),
+    ),
+)
+
+internal data class MediaGridViewportSignature(
+    val renderKey: MediaGridRenderKey,
+    val firstVisibleItemIndex: Int,
+    val lastVisibleItemIndex: Int,
+    val firstVisibleMediaOrdinal: Int,
+    val lastVisibleMediaOrdinal: Int,
+    val viewportWidthPx: Int,
+    val viewportHeightPx: Int,
+    val cellSizePx: Int,
+    val columnCount: Int,
+)
+
+internal fun buildMediaGridViewportSignature(
+    layout: androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo,
+    frame: MediaGridFrameData,
+    columnCount: Int,
+): MediaGridViewportSignature {
+    var firstItemIndex = Int.MAX_VALUE
+    var lastItemIndex = Int.MIN_VALUE
+    var firstMediaOrdinal = Int.MAX_VALUE
+    var lastMediaOrdinal = Int.MIN_VALUE
+    var cellSizePx = 0
+    val mediaOrdinalByItemIndex = frame.ordinalIndex.mediaOrdinalByItemIndex
+    for (info in layout.visibleItemsInfo) {
+        val itemIndex = info.index
+        if (itemIndex < firstItemIndex) firstItemIndex = itemIndex
+        if (itemIndex > lastItemIndex) lastItemIndex = itemIndex
+        val mediaOrdinal = mediaOrdinalByItemIndex.getOrNull(itemIndex) ?: -1
+        if (mediaOrdinal >= 0) {
+            if (mediaOrdinal < firstMediaOrdinal) firstMediaOrdinal = mediaOrdinal
+            if (mediaOrdinal > lastMediaOrdinal) lastMediaOrdinal = mediaOrdinal
+            if (cellSizePx == 0) cellSizePx = info.size.width
+        }
+    }
+    return MediaGridViewportSignature(
+        renderKey = frame.key,
+        firstVisibleItemIndex = if (firstItemIndex == Int.MAX_VALUE) -1 else firstItemIndex,
+        lastVisibleItemIndex = if (lastItemIndex == Int.MIN_VALUE) -1 else lastItemIndex,
+        firstVisibleMediaOrdinal = if (firstMediaOrdinal == Int.MAX_VALUE) -1 else firstMediaOrdinal,
+        lastVisibleMediaOrdinal = if (lastMediaOrdinal == Int.MIN_VALUE) -1 else lastMediaOrdinal,
+        viewportWidthPx = layout.viewportSize.width,
+        viewportHeightPx = (layout.viewportEndOffset - layout.viewportStartOffset).coerceAtLeast(0),
+        cellSizePx = cellSizePx,
+        columnCount = columnCount,
+    )
+}
+
+internal fun MediaGridViewportSignature.toAnchor(): MediaGridViewportAnchor = MediaGridViewportAnchor(
+    renderKey = renderKey,
+    firstVisibleItemIndex = firstVisibleItemIndex,
+    lastVisibleItemIndex = lastVisibleItemIndex,
+    firstVisibleMediaOrdinal = firstVisibleMediaOrdinal,
+    lastVisibleMediaOrdinal = lastVisibleMediaOrdinal,
+    viewportWidthPx = viewportWidthPx,
+    viewportHeightPx = viewportHeightPx,
+    cellSizePx = cellSizePx,
+    columnCount = columnCount,
 )
 
 internal fun mediaGridFrameMatches(frameKey: MediaGridRenderKey?, currentKey: MediaGridRenderKey): Boolean =
@@ -3138,20 +3208,42 @@ internal fun buildMediaGridFrameData(
     val items = buildClassifiedMediaGridItems(entries, sort, columnCount)
     val itemByKey = HashMap<String, ClassifiedMediaGridItem>(items.size)
     val assetIdByItemKey = HashMap<String, Long>(entries.size)
-    val mediaIndices = ArrayList<Int>(entries.size)
+    val mediaIndices = IntArray(entries.size)
+    val assetIds = LongArray(entries.size)
+    val itemIndices = IntArray(entries.size)
+    val mediaOrdinalByItemIndex = IntArray(items.size) { -1 }
+    val mediaOrdinalByAssetId = HashMap<Long, Int>(entries.size)
+    val itemIndexByAssetId = HashMap<Long, Int>(entries.size)
+    var mediaCount = 0
     items.forEachIndexed { index, item ->
         itemByKey[item.key] = item
         if (item is MediaGridCellItem) {
-            mediaIndices += index
+            mediaIndices[mediaCount] = index
+            assetIds[mediaCount] = item.entry.assetId
+            itemIndices[mediaCount] = index
+            mediaOrdinalByItemIndex[index] = mediaCount
             assetIdByItemKey[item.key] = item.entry.assetId
+            if (!mediaOrdinalByAssetId.containsKey(item.entry.assetId)) {
+                mediaOrdinalByAssetId[item.entry.assetId] = mediaCount
+                itemIndexByAssetId[item.entry.assetId] = index
+            }
+            mediaCount++
         }
     }
+    val ordinalIndex = MediaGridOrdinalIndex(
+        assetIdByMediaOrdinal = assetIds.copyOf(mediaCount),
+        itemIndexByMediaOrdinal = itemIndices.copyOf(mediaCount),
+        mediaOrdinalByItemIndex = mediaOrdinalByItemIndex,
+        mediaOrdinalByAssetId = Collections.unmodifiableMap(mediaOrdinalByAssetId),
+        itemIndexByAssetId = Collections.unmodifiableMap(itemIndexByAssetId),
+    )
     return MediaGridFrameData(
         key = MediaGridRenderKey(dataKey, columnCount),
         items = items,
         itemByKey = itemByKey,
-        mediaCellIndices = mediaIndices.toIntArray(),
+        mediaCellIndices = ordinalIndex.itemIndexByMediaOrdinal,
         assetIdByItemKey = Collections.unmodifiableMap(assetIdByItemKey),
+        ordinalIndex = ordinalIndex,
     )
 }
 
@@ -3602,23 +3694,9 @@ private fun ClassifiedMediaGridContent(
         kotlinx.coroutines.coroutineScope {
             launch {
                 snapshotFlow {
-                    val layout = state.layoutInfo
-                    val visibleItems = layout.visibleItemsInfo
-                    val mediaIndices = visibleItems.mapNotNull { info ->
-                        (frame.itemByKey[info.key] as? MediaGridCellItem)?.let { info.index }
-                    }.toIntArray()
-                    MediaGridViewportAnchor(
-                        renderKey = frame.key,
-                        firstVisibleItemIndex = state.firstVisibleItemIndex,
-                        lastVisibleItemIndex = visibleItems.maxOfOrNull { it.index } ?: state.firstVisibleItemIndex,
-                        visibleMediaItemIndices = mediaIndices,
-                        viewportWidthPx = layout.viewportSize.width,
-                        viewportHeightPx = (layout.viewportEndOffset - layout.viewportStartOffset).coerceAtLeast(0),
-                        cellSizePx = visibleItems.firstOrNull { frame.itemByKey[it.key] is MediaGridCellItem }?.size?.width ?: 0,
-                        columnCount = columnCount,
-                    )
+                    buildMediaGridViewportSignature(state.layoutInfo, frame, columnCount)
                 }.distinctUntilChanged().collect { anchor ->
-                    effectiveController?.updateViewport(anchor)
+                    effectiveController?.updateViewport(anchor.toAnchor())
                 }
             }
             launch {

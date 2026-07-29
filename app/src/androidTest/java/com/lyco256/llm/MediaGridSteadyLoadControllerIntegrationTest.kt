@@ -40,7 +40,11 @@ class MediaGridSteadyLoadControllerIntegrationTest {
         val last = (first + frame.key.columnCount - 1).coerceAtMost(frame.mediaCellIndices.lastIndex)
         val visible = frame.mediaCellIndices.copyOfRange(first, last + 1)
         return MediaGridViewportAnchor(
-            frame.key, visible.firstOrNull() ?: 0, visible.lastOrNull() ?: 0, visible,
+            frame.key,
+            visible.firstOrNull() ?: 0,
+            visible.lastOrNull() ?: 0,
+            first,
+            last,
             400, 600, 100, frame.key.columnCount,
         )
     }
@@ -142,7 +146,7 @@ class MediaGridSteadyLoadControllerIntegrationTest {
             val snapshot = controller.stateSnapshot()
             assertEquals(MediaGridCellLoadStatus.Ready, snapshot.cells[0L]?.status)
             assertEquals(0, gateway.requests)
-            assertTrue(mediaGridControllerStateViolations(snapshot, buildMediaGridOrdinalIndex(frame).mediaOrdinalByAssetId).isEmpty())
+            assertTrue(mediaGridControllerStateViolations(snapshot, frame.ordinalIndex.mediaOrdinalByAssetId).isEmpty())
         } finally {
             controller.dispose()
             loader.shutdown()
@@ -164,7 +168,7 @@ class MediaGridSteadyLoadControllerIntegrationTest {
             assertEquals(QueueTaskStatus.Failed, snapshot.records[0L]?.metadataStatus)
             assertTrue(snapshot.records[0L]?.let { it.metadataAttempts >= 3 } == true)
             assertTrue(0L !in snapshot.metadata)
-            assertTrue(mediaGridControllerStateViolations(snapshot, buildMediaGridOrdinalIndex(frame).mediaOrdinalByAssetId).none { it.contains("metadata complete") })
+            assertTrue(mediaGridControllerStateViolations(snapshot, frame.ordinalIndex.mediaOrdinalByAssetId).none { it.contains("metadata complete") })
         } finally {
             controller.dispose()
             loader.shutdown()
@@ -186,7 +190,7 @@ class MediaGridSteadyLoadControllerIntegrationTest {
             assertEquals(QueueTaskStatus.Failed, snapshot.records[0L]?.metadataStatus)
             assertTrue(snapshot.records[0L]?.metadataAttempts == 3)
             assertTrue(0L !in snapshot.metadata)
-            assertTrue(mediaGridControllerStateViolations(snapshot, buildMediaGridOrdinalIndex(frame).mediaOrdinalByAssetId).none { it.contains("metadata complete") })
+            assertTrue(mediaGridControllerStateViolations(snapshot, frame.ordinalIndex.mediaOrdinalByAssetId).none { it.contains("metadata complete") })
         } finally {
             controller.dispose()
             loader.shutdown()
@@ -208,7 +212,7 @@ class MediaGridSteadyLoadControllerIntegrationTest {
             gateway.evict("cache-0")
             controller.resume()
             await { gateway.requests == 1 && controller.stateSnapshot().cells[0L]?.status == MediaGridCellLoadStatus.Ready }
-            assertConsistentState(controller.stateSnapshot(), buildMediaGridOrdinalIndex(frame).mediaOrdinalByAssetId)
+            assertConsistentState(controller.stateSnapshot(), frame.ordinalIndex.mediaOrdinalByAssetId)
         } finally {
             controller.dispose()
             loader.shutdown()
@@ -230,7 +234,7 @@ class MediaGridSteadyLoadControllerIntegrationTest {
             await { controller.stateSnapshot().cells[0L]?.status == MediaGridCellLoadStatus.Ready }
             assertEquals(2, gateway.requests)
             assertEquals(1, controller.stateSnapshot().cells[0L]?.candidateIndex)
-            assertConsistentState(controller.stateSnapshot(), buildMediaGridOrdinalIndex(frame).mediaOrdinalByAssetId)
+            assertConsistentState(controller.stateSnapshot(), frame.ordinalIndex.mediaOrdinalByAssetId)
         } finally {
             controller.dispose()
             loader.shutdown()
@@ -258,7 +262,7 @@ class MediaGridSteadyLoadControllerIntegrationTest {
             await { controller.stateSnapshot().cells[0L]?.status == MediaGridCellLoadStatus.Failed }
             val snapshot = controller.stateSnapshot()
             assertTrue(snapshot.cells.values.none { it.status == MediaGridCellLoadStatus.Pending })
-            assertConsistentState(snapshot, buildMediaGridOrdinalIndex(frame).mediaOrdinalByAssetId)
+            assertConsistentState(snapshot, frame.ordinalIndex.mediaOrdinalByAssetId)
         } finally {
             controller.dispose()
             loader.shutdown()
@@ -297,7 +301,7 @@ class MediaGridSteadyLoadControllerIntegrationTest {
                 val snapshot = controller.stateSnapshot()
                 snapshot.cells[24L]?.status == MediaGridCellLoadStatus.Ready && snapshot.metadata[24L]?.key == nextFrame.key
             }
-            assertConsistentState(controller.stateSnapshot(), buildMediaGridOrdinalIndex(nextFrame).mediaOrdinalByAssetId)
+            assertConsistentState(controller.stateSnapshot(), nextFrame.ordinalIndex.mediaOrdinalByAssetId)
         } finally {
             controller.dispose()
             loader.shutdown()
@@ -324,7 +328,7 @@ class MediaGridSteadyLoadControllerIntegrationTest {
                 visible.isNotEmpty() && controller.uiState.value.cells.keys.containsAll(visible) &&
                     visible.all { controller.uiState.value.cells[it]?.status == MediaGridCellLoadStatus.Ready }
             }
-            assertConsistentState(controller.stateSnapshot(), buildMediaGridOrdinalIndex(frame).mediaOrdinalByAssetId)
+            assertConsistentState(controller.stateSnapshot(), frame.ordinalIndex.mediaOrdinalByAssetId)
         } finally {
             controller.dispose()
             loader.shutdown()
@@ -349,7 +353,7 @@ class MediaGridSteadyLoadControllerIntegrationTest {
             val snapshot = controller.stateSnapshot()
             assertTrue(gateway.requests in 1..31)
             assertTrue(snapshot.cells.values.none { it.status == MediaGridCellLoadStatus.Pending })
-            assertConsistentState(snapshot, buildMediaGridOrdinalIndex(frame).mediaOrdinalByAssetId)
+            assertConsistentState(snapshot, frame.ordinalIndex.mediaOrdinalByAssetId)
         } finally {
             controller.dispose()
             loader.shutdown()
@@ -371,7 +375,7 @@ class MediaGridSteadyLoadControllerIntegrationTest {
             await(15_000L) { controller.stateSnapshot().cells.size == 300 && controller.stateSnapshot().cells.values.all { it.status == MediaGridCellLoadStatus.Ready || it.status == MediaGridCellLoadStatus.Failed } }
             val snapshot = controller.stateSnapshot()
             assertTrue(snapshot.cells.values.none { it.status == MediaGridCellLoadStatus.Pending })
-            assertConsistentState(snapshot, buildMediaGridOrdinalIndex(frame).mediaOrdinalByAssetId)
+            assertConsistentState(snapshot, frame.ordinalIndex.mediaOrdinalByAssetId)
         } finally {
             controller.dispose()
             loader.shutdown()
@@ -400,7 +404,7 @@ class MediaGridSteadyLoadControllerIntegrationTest {
             val snapshot = controller.stateSnapshot()
             assertEquals(0, gateway.requests)
             assertTrue(snapshot.cells.values.none { it.status == MediaGridCellLoadStatus.Pending })
-            assertTrue(mediaGridControllerStateViolations(snapshot, buildMediaGridOrdinalIndex(frame).mediaOrdinalByAssetId).isEmpty())
+            assertTrue(mediaGridControllerStateViolations(snapshot, frame.ordinalIndex.mediaOrdinalByAssetId).isEmpty())
         } finally {
             controller.dispose()
             loader.shutdown()
@@ -420,7 +424,7 @@ class MediaGridSteadyLoadControllerIntegrationTest {
             await(15_000L) { controller.stateSnapshot().cells.size == 100 && controller.stateSnapshot().cells.values.all { it.status == MediaGridCellLoadStatus.Ready } }
             assertEquals(0, gateway.requests)
             assertTrue(controller.stateSnapshot().cells.values.none { it.status == MediaGridCellLoadStatus.Pending })
-            assertConsistentState(controller.stateSnapshot(), buildMediaGridOrdinalIndex(frame).mediaOrdinalByAssetId)
+            assertConsistentState(controller.stateSnapshot(), frame.ordinalIndex.mediaOrdinalByAssetId)
         } finally {
             controller.dispose()
             loader.shutdown()
@@ -445,7 +449,7 @@ class MediaGridSteadyLoadControllerIntegrationTest {
             controller.publishOneReadyImageForFrame()
             val visible = (100..111).toList().toIntArray()
             controller.updateViewport(
-                MediaGridViewportAnchor(frame.key, 100, 111, visible, 400, 600, 100, 4),
+                MediaGridViewportAnchor(frame.key, 100, 111, 100, 111, 400, 600, 100, 4),
             )
             await { controller.stateSnapshot().framePublicationDemand }
             await { controller.stateSnapshot().publishedCells.keys.none { it in visible.map(Int::toLong) } }
@@ -480,15 +484,15 @@ class MediaGridSteadyLoadControllerIntegrationTest {
             controller.start()
             repeat(1_000) {
                 when (random.nextInt(7)) {
-                    0 -> controller.updateViewport(MediaGridViewportAnchor(frame.key, 0, 3, intArrayOf(0, 1, 2, 3), 400, 600, 100, 4))
-                    1 -> controller.updateViewport(MediaGridViewportAnchor(frame.key, 4, 7, intArrayOf(4, 5, 6, 7), 400, 600, 100, 4))
+                    0 -> controller.updateViewport(MediaGridViewportAnchor(frame.key, 0, 3, 0, 3, 400, 600, 100, 4))
+                    1 -> controller.updateViewport(MediaGridViewportAnchor(frame.key, 4, 7, 4, 7, 400, 600, 100, 4))
                     2 -> controller.pause()
                     3 -> controller.resume()
                     4 -> controller.invalidate(random.nextInt(32).toLong())
                     5 -> controller.updateFrame(frame(32))
-                    else -> controller.updateViewport(MediaGridViewportAnchor(frame.key, 8, 11, intArrayOf(8, 9, 10, 11), 400, 600, 100, 4))
+                    else -> controller.updateViewport(MediaGridViewportAnchor(frame.key, 8, 11, 8, 11, 400, 600, 100, 4))
                 }
-                assertConsistentState(controller.stateSnapshot(), buildMediaGridOrdinalIndex(frame).mediaOrdinalByAssetId)
+                assertConsistentState(controller.stateSnapshot(), frame.ordinalIndex.mediaOrdinalByAssetId)
             }
             await { controller.stateSnapshot().cells.values.all { it.status == MediaGridCellLoadStatus.Ready } }
         } finally {

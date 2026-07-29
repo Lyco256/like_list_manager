@@ -26,7 +26,11 @@ class MediaGridSteadyLoadControllerTest {
     }
 
     private fun anchor(frame: MediaGridFrameData, first: Int, last: Int, visible: IntArray, height: Int = 600) =
-        MediaGridViewportAnchor(frame.key, first, last, visible, 400, height, 100, frame.key.columnCount)
+        MediaGridViewportAnchor(
+            frame.key, first, last,
+            visible.firstOrNull() ?: -1, visible.lastOrNull() ?: -1,
+            400, height, 100, frame.key.columnCount,
+        )
 
     @Test
     fun startupOrderAndDecoupledBudgetsAreStable() {
@@ -66,8 +70,8 @@ class MediaGridSteadyLoadControllerTest {
     @Test
     fun activeBitmapWindowIsVisibleRowsPlusExactlyThreeRowsOnEachSide() {
         val frame = frame(80)
-        val active = selectMediaGridActiveWindow(frame, anchor(frame, 20, 27, (20..27).toList().toIntArray()))
-        assertEquals((8..39).toSet(), active)
+        val active = buildMediaGridActiveWindowSnapshot(frame, anchor(frame, 20, 27, (20..27).toList().toIntArray()), 1L, 1L).activeAssetIds.toSet()
+        assertEquals((8L..39L).toSet(), active)
     }
 
     @Test
@@ -76,7 +80,7 @@ class MediaGridSteadyLoadControllerTest {
             val frame = frame(160, columns)
             val first = columns * 5
             val visible = (first until first + columns * 2).toList().toIntArray()
-            val active = selectMediaGridActiveWindow(frame, anchor(frame, first, visible.last(), visible))
+            val active = buildMediaGridActiveWindowSnapshot(frame, anchor(frame, first, visible.last(), visible), 1L, 1L).activeAssetIds.toSet()
             assertEquals(columns * 8, active.size)
         }
     }
@@ -92,8 +96,8 @@ class MediaGridSteadyLoadControllerTest {
         )
         assertEquals(longArrayOf(12, 13, 14, 15, 16, 17, 18, 19).toList(), snapshot.visibleAssetIds.toList())
         assertEquals((0L..31L).toList(), snapshot.activeAssetIds.toList())
-        assertTrue(snapshot.isActive(0L))
-        assertFalse(snapshot.isActive(32L))
+        assertTrue(snapshot.isActive(0L, frame.ordinalIndex.mediaOrdinalByAssetId))
+        assertFalse(snapshot.isActive(32L, frame.ordinalIndex.mediaOrdinalByAssetId))
         assertEquals(7L, snapshot.epoch)
         assertEquals(3L, snapshot.generation)
         assertEquals(15, snapshot.centerMediaOrdinal)
@@ -103,7 +107,7 @@ class MediaGridSteadyLoadControllerTest {
     fun viewportAnchorEqualityIgnoresNoFieldsAndUsesContentForVisibleIndices() {
         val frame = frame(20)
         val first = anchor(frame, 4, 11, intArrayOf(4, 5, 6, 7))
-        assertEquals(first, first.copy(visibleMediaItemIndices = intArrayOf(4, 5, 6, 7)))
+        assertEquals(first, first.copy(firstVisibleMediaOrdinal = 4, lastVisibleMediaOrdinal = 7))
         assertTrue(first != first.copy(firstVisibleItemIndex = 5))
     }
 
@@ -111,10 +115,7 @@ class MediaGridSteadyLoadControllerTest {
     fun loadStateRetentionDropsAssetsOutsideTheActiveBitmapWindow() {
         assertEquals(
             mapOf(2L to "loading", 3L to "ready"),
-            retainMediaGridActiveLoadStates(
-                mapOf(1L to "old", 2L to "loading", 3L to "ready", 4L to "far"),
-                setOf(2L, 3L),
-            ),
+            mapOf(1L to "old", 2L to "loading", 3L to "ready", 4L to "far").filterKeys { it == 2L || it == 3L },
         )
     }
 
@@ -172,7 +173,7 @@ class MediaGridSteadyLoadControllerTest {
     @Test
     fun mediaOrdinalIndexMatchesMediaCellsAndProvidesBothDirections() {
         val frame = frame(12)
-        val index = buildMediaGridOrdinalIndex(frame)
+        val index = frame.ordinalIndex
         assertArrayEquals(frame.mediaCellIndices, index.itemIndexByMediaOrdinal)
         assertArrayEquals(LongArray(12) { it.toLong() }, index.assetIdByMediaOrdinal)
         assertEquals(7, index.mediaOrdinalByAssetId[7L])

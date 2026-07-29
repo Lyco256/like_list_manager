@@ -7,6 +7,31 @@ import org.junit.Test
 
 class MediaGridRenderingContractTest {
     @Test
+    fun viewportAndActiveWindowUseOrdinalBoundariesWithoutLegacyCollections() {
+        val uiSource = locateSource("src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt").readText()
+        val controllerSource = locateSource("src/main/java/com/lyco256/llm/MediaGridSteadyLoadController.kt").readText()
+        val viewport = uiSource.substringAfter("internal fun buildMediaGridViewportSignature").substringBefore("internal fun MediaGridViewportSignature.toAnchor")
+        val active = controllerSource.substringAfter("internal fun buildMediaGridActiveWindowSnapshot").substringBefore("internal fun mediaGridEstimatedBitmapBytes")
+        assertTrue(viewport.contains("for (info in layout.visibleItemsInfo)"))
+        assertTrue(!viewport.contains("mapNotNull") && !viewport.contains("toIntArray") && !viewport.contains("itemByKey") && !viewport.contains("MediaGridCellItem"))
+        assertTrue(!controllerSource.contains("buildMediaGridOrdinalIndex"))
+        assertTrue(!controllerSource.contains("visibleMediaItemIndices"))
+        assertTrue(!active.contains("asSequence") && !active.contains("toList()") && !active.contains("activeAssetIds.toSet()"))
+        assertTrue(!active.contains("frame.items") && !active.contains("MediaGridCellItem"))
+        assertTrue(!controllerSource.contains("activeAssetMembership"))
+    }
+
+    @Test
+    fun schedulerAndPublicationContractsRemainUntouched() {
+        val source = locateSource("src/main/java/com/lyco256/llm/MediaGridSteadyLoadController.kt").readText()
+        assertTrue(source.contains("MEDIA_GRID_METADATA_MAX_CONCURRENCY = 4"))
+        assertTrue(source.contains("MEDIA_GRID_BACKGROUND_MAX_CONCURRENCY = 2"))
+        assertTrue(source.contains("MEDIA_GRID_ACTIVE_PREFETCH_ROWS = 3"))
+        assertTrue(source.contains("publishOneReadyImageForFrame"))
+        assertTrue(!source.contains("delay(") && !source.contains("Thread.sleep"))
+    }
+
+    @Test
     fun productionGridOwnsTheOnlyOverscrollOptOutAndToolbarsSharePositiveLayer() {
         val source = locateSource("src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt").readText()
         assertEquals(1, Regex("LocalOverscrollConfiguration\\s+provides\\s+null").findAll(source).count())

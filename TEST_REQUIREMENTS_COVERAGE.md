@@ -1,5 +1,12 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-07-29 viewport boundary and active window optimization
+
+- frame ordinal index、header除外、重複assetの代表Map、viewport signatureの境界・geometry比較、active ordinal範囲、warm-up上限をunit testで固定した。
+- production sourceの静的契約として、viewportの旧List/Set/IntArray・item lookup・cast、controllerの二重ordinal index、active membership Set、active snapshotのitem参照を検出するテストを追加した。
+- scheduler／worker数／urgent予約／先読み上下3行／publication pacingを変更していないことを契約テストで確認する。
+- 指定実機検証は隔離統合テスト成功後に本番安全上書きチェックを実行する。Macrobenchmarkは実行しない。
+
 ## 2026-07-29 idle anchor persistence optimization
 
 | 対象 | 実装・証跡 | 状態 |
