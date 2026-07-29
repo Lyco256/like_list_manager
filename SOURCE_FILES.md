@@ -42,6 +42,13 @@ Current media-grid rendering is owned by `MediaGridSessionCoordinator` under `Ma
 
 # Source Files Guide
 
+## 2026-07-29 idle anchor persistence
+
+- `TagHierarchyUiV2.kt` no longer keeps a continuously updated classified-grid anchor state. Anchor persistence observes only `LazyGridState.isScrollInProgress`; the initial `false` and the `false -> true` transition do nothing, and the observed `true -> false` transition captures once.
+- Scroll-idle restoration and column handoff are suppressed while their explicit restore work is running. Composition disposal, `ON_STOP`, session replacement, and completed handoff use explicit checkpoint callbacks.
+- `captureClassifiedMediaGridScrollAnchor()` scans `visibleItemsInfo` once and uses `MediaGridFrameData.assetIdByItemKey` to exclude headers without intermediate media lists or per-item `Offset` objects. Viewport notification remains in the existing `snapshotFlow` path.
+- `MediaGridSessionCoordinator.saveAnchor(sessionKey, anchor)` updates only an existing matching session, skips equal anchors, and does not publish UI state.
+
 ## 2026-07-28 resident draw index基盤
 
 ## 2026-07-29 resident Canvas draw hot path

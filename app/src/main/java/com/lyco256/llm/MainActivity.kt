@@ -871,7 +871,9 @@ fun MainScreen(
                 mediaGridSessionState = mediaGridSessionState,
                 listState = classifiedListState,
                 mediaGridLazyState = mediaGridLazyState,
-                onMediaGridAnchorChange = viewModel.mediaGridSessionCoordinator::saveAnchor,
+                onMediaGridAnchorCheckpoint = { sessionKey, anchor ->
+                    viewModel.mediaGridSessionCoordinator.saveAnchor(sessionKey, anchor)
+                },
                 displayMode = classifiedDisplayMode,
                 mediaGridColumnCount = classifiedMediaGridColumnCount,
                 onMediaGridColumnCountChange = { classifiedMediaGridColumnCount = it },

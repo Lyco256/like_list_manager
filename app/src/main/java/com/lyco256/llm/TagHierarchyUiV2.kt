@@ -130,6 +130,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -373,7 +376,7 @@ internal fun EnhancedClassifiedScreen(
     mediaGridSessionState: MediaGridSessionUiState,
     listState: LazyListState,
     mediaGridLazyState: androidx.compose.foundation.lazy.grid.LazyGridState,
-    onMediaGridAnchorChange: (ClassifiedMediaGridScrollAnchor) -> Unit = {},
+    onMediaGridAnchorCheckpoint: (MediaGridSessionKey, ClassifiedMediaGridScrollAnchor) -> Unit = { _, _ -> },
     displayMode: ClassifiedDisplayMode,
     mediaGridColumnCount: Int,
     onMediaGridColumnCountChange: (Int) -> Unit,
@@ -403,17 +406,74 @@ internal fun EnhancedClassifiedScreen(
         if (displayMode == ClassifiedDisplayMode.Card) uiState.classified.map { it.clip.id } else emptyList()
     }
     var pendingPinchAnchor by remember { mutableStateOf<ClassifiedMediaGridScrollAnchor?>(null) }
-    val mediaGridAnchor = rememberClassifiedMediaGridAnchor(mediaGridLazyState)
-    LaunchedEffect(mediaGridAnchor) {
-        mediaGridAnchor?.let(onMediaGridAnchorChange)
+    var pinchCompletionGeneration by remember { mutableStateOf(0) }
+    val latestSessionKey by rememberUpdatedState(mediaGridSessionState.sessionKey)
+    val latestFrame by rememberUpdatedState(mediaGridSessionState.frame)
+    val latestCheckpoint by rememberUpdatedState(onMediaGridAnchorCheckpoint)
+    var suppressScrollCheckpoint by remember(mediaGridSessionState.sessionKey) { mutableStateOf(false) }
+    val lifecycleOwner = LocalContext.current as? LifecycleOwner
+    if (displayMode == ClassifiedDisplayMode.MediaGrid && lifecycleOwner != null) {
+        DisposableEffect(lifecycleOwner, mediaGridSessionState.sessionKey, displayMode) {
+            val outgoingSessionKey = mediaGridSessionState.sessionKey
+            val outgoingFrame = mediaGridSessionState.frame
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_STOP) {
+                    val key = latestSessionKey
+                    val frame = latestFrame
+                    if (key != null && frame != null) {
+                        captureClassifiedMediaGridScrollAnchor(mediaGridLazyState, frame.assetIdByItemKey)
+                            ?.let { latestCheckpoint(key, it) }
+                    }
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose {
+                if (displayMode == ClassifiedDisplayMode.MediaGrid && outgoingSessionKey != null && outgoingFrame != null) {
+                    captureClassifiedMediaGridScrollAnchor(mediaGridLazyState, outgoingFrame.assetIdByItemKey)
+                        ?.let { latestCheckpoint(outgoingSessionKey, it) }
+                }
+                lifecycleOwner.lifecycle.removeObserver(observer)
+            }
+        }
+    }
+    LaunchedEffect(mediaGridLazyState, mediaGridSessionState.sessionKey, displayMode) {
+        var checkpointState = MediaGridScrollCheckpointState()
+        snapshotFlow { mediaGridLazyState.isScrollInProgress }
+            .distinctUntilChanged()
+            .collect { inProgress ->
+                val transition = mediaGridScrollCheckpointTransition(checkpointState, inProgress)
+                checkpointState = transition.state
+                if (transition.shouldCheckpoint) {
+                    val key = latestSessionKey
+                    val frame = latestFrame
+                    if (!suppressScrollCheckpoint && displayMode == ClassifiedDisplayMode.MediaGrid && key != null && frame != null) {
+                        captureClassifiedMediaGridScrollAnchor(mediaGridLazyState, frame.assetIdByItemKey)
+                            ?.let { latestCheckpoint(key, it) }
+                    }
+                }
+            }
     }
     var previousMediaGridSessionKey by remember { mutableStateOf<MediaGridSessionKey?>(null) }
     LaunchedEffect(mediaGridSessionState.sessionKey) {
         val key = mediaGridSessionState.sessionKey ?: return@LaunchedEffect
         if (key == previousMediaGridSessionKey) return@LaunchedEffect
+        suppressScrollCheckpoint = true
         val saved = mediaGridSessionState.anchor
-        if (saved == null) mediaGridLazyState.scrollToItem(0)
-        else mediaGridLazyState.scrollToItem(saved.index.coerceAtLeast(0), saved.offset)
+        val frame = mediaGridSessionState.frame
+        if (saved == null || frame == null || frame.items.isEmpty()) {
+            if (frame != null && frame.items.isNotEmpty()) mediaGridLazyState.scrollToItem(0)
+        } else {
+            val targetIndex = frame.items.indexOfFirst { it.key == saved.key }
+                .takeIf { it >= 0 }
+                ?: saved.index.coerceIn(0, frame.items.lastIndex)
+            mediaGridLazyState.scrollToItem(targetIndex, saved.offset)
+        }
+        withFrameNanos { }
+        frame?.let { value ->
+            captureClassifiedMediaGridScrollAnchor(mediaGridLazyState, value.assetIdByItemKey)
+                ?.let { latestCheckpoint(key, it) }
+        }
+        suppressScrollCheckpoint = false
         previousMediaGridSessionKey = key
     }
     val selectableMediaGridClipIds = remember(mediaGridState.entries) {
@@ -432,10 +492,11 @@ internal fun EnhancedClassifiedScreen(
         pendingPinchAnchor = null
     }
     if (displayMode == ClassifiedDisplayMode.Card) PreserveScrollAnchor(listState, "classified", itemKeys)
-    LaunchedEffect(mediaGridSessionState.sessionKey, mediaGridSessionState.columnCount, mediaGridSessionState.frame) {
-        val anchor = pendingPinchAnchor ?: mediaGridSessionState.anchor ?: mediaGridAnchor ?: return@LaunchedEffect
+    LaunchedEffect(mediaGridSessionState.sessionKey, mediaGridSessionState.columnCount, mediaGridSessionState.frame, pinchCompletionGeneration) {
+        val anchor = pendingPinchAnchor ?: mediaGridSessionState.anchor ?: return@LaunchedEffect
         val frame = mediaGridSessionState.frame ?: return@LaunchedEffect
         if (frame.items.isEmpty()) return@LaunchedEffect
+        suppressScrollCheckpoint = true
         val targetIndex = frame.items.indexOfFirst { it.key == anchor.key }
             .takeIf { it >= 0 }
             ?: anchor.index.coerceIn(0, frame.items.lastIndex)
@@ -453,6 +514,10 @@ internal fun EnhancedClassifiedScreen(
             mediaGridLazyState.scrollBy(laidOutTarget.offset.y + laidOutTarget.size.height / 2f - viewportCenter - anchor.centerOffset)
         }
         pendingPinchAnchor = null
+        withFrameNanos { }
+        captureClassifiedMediaGridScrollAnchor(mediaGridLazyState, frame.assetIdByItemKey)
+            ?.let { latestSessionKey?.let { key -> latestCheckpoint(key, it) } }
+        suppressScrollCheckpoint = false
     }
     BackHandler(enabled = displayMode == ClassifiedDisplayMode.MediaGrid && mediaGridSelectionMode && !bulkTagDialogOpen) {
         mediaGridSelectionMode = false
@@ -512,7 +577,8 @@ internal fun EnhancedClassifiedScreen(
                     showProgress = mediaGridSessionState.showInitialProgress,
                     onPinchFinished = { anchor, nextColumnCount ->
                         val changed = nextColumnCount != mediaGridColumnCount
-                        pendingPinchAnchor = anchor.takeIf { changed }
+                        pendingPinchAnchor = anchor
+                        pinchCompletionGeneration++
                         if (changed) {
                             onMediaGridColumnCountChange(nextColumnCount)
                         }
@@ -3102,6 +3168,28 @@ internal data class ClassifiedMediaGridScrollAnchor(
     val centerOffset: Float,
 )
 
+internal data class MediaGridScrollCheckpointState(val observedScrollStart: Boolean = false)
+
+internal data class MediaGridScrollCheckpointTransition(
+    val state: MediaGridScrollCheckpointState,
+    val shouldCheckpoint: Boolean,
+)
+
+internal fun mediaGridScrollCheckpointTransition(
+    state: MediaGridScrollCheckpointState,
+    isScrollInProgress: Boolean,
+): MediaGridScrollCheckpointTransition = when {
+    isScrollInProgress -> MediaGridScrollCheckpointTransition(
+        state = state.copy(observedScrollStart = true),
+        shouldCheckpoint = false,
+    )
+    state.observedScrollStart -> MediaGridScrollCheckpointTransition(
+        state = MediaGridScrollCheckpointState(),
+        shouldCheckpoint = true,
+    )
+    else -> MediaGridScrollCheckpointTransition(state, shouldCheckpoint = false)
+}
+
 internal fun buildClassifiedMediaGridItems(
     entries: List<MediaGridEntry>,
     sort: ClassifiedSortState,
@@ -3553,6 +3641,7 @@ private fun ClassifiedMediaGridContent(
                     currentColumnCount = columnCount,
                     sourceRevision = frame.key.dataKey.sourceRevision,
                     state = state,
+                    frame = frame,
                     onPinchFinished = onPinchFinished,
                 )
                 .then(
@@ -3608,54 +3697,44 @@ private fun ClassifiedMediaGridContent(
     }
 }
 
-@Composable
-private fun rememberClassifiedMediaGridAnchor(
+internal fun captureClassifiedMediaGridScrollAnchor(
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
-): ClassifiedMediaGridScrollAnchor? {
-    var anchor by remember { mutableStateOf<ClassifiedMediaGridScrollAnchor?>(null) }
-    LaunchedEffect(state) {
-        snapshotFlow { captureClassifiedMediaGridScrollAnchor(state) }
-            .collect { next ->
-                if (next != null) anchor = next
-            }
-    }
-    return anchor
-}
-
-private fun captureClassifiedMediaGridScrollAnchor(
-    state: androidx.compose.foundation.lazy.grid.LazyGridState,
+    assetIdByItemKey: Map<String, Long>,
     preferredCenter: Offset? = null,
 ): ClassifiedMediaGridScrollAnchor? {
     val layoutInfo = state.layoutInfo
     if (layoutInfo.visibleItemsInfo.isEmpty()) return null
     val viewportCenterY = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2f
-    val viewportCenter = Offset(layoutInfo.viewportSize.width / 2f, viewportCenterY)
-    val center = preferredCenter ?: viewportCenter
-    val mediaItems = layoutInfo.visibleItemsInfo.filter { (it.key as? String)?.startsWith("media_grid_item_") == true }
-    val selected = preferredCenter?.let { pinchCenter ->
-        mediaItems.firstOrNull { info ->
-            pinchCenter.x >= info.offset.x && pinchCenter.x <= info.offset.x + info.size.width &&
-                pinchCenter.y >= info.offset.y && pinchCenter.y <= info.offset.y + info.size.height
+    val centerX = preferredCenter?.x ?: layoutInfo.viewportSize.width / 2f
+    val centerY = preferredCenter?.y ?: viewportCenterY
+    var selected: androidx.compose.foundation.lazy.grid.LazyGridItemInfo? = null
+    var selectedDistance = Float.POSITIVE_INFINITY
+    for (info in layoutInfo.visibleItemsInfo) {
+        if (selectedDistance < 0f) continue
+        val key = info.key as? String ?: continue
+        if (assetIdByItemKey[key] == null) continue
+        val containsCenter = preferredCenter != null &&
+            centerX >= info.offset.x && centerX <= info.offset.x + info.size.width &&
+            centerY >= info.offset.y && centerY <= info.offset.y + info.size.height
+        val itemCenterX = info.offset.x + info.size.width / 2f
+        val itemCenterY = info.offset.y + info.size.height / 2f
+        val dx = itemCenterX - centerX
+        val dy = itemCenterY - centerY
+        val distance = dx * dx + dy * dy
+        if (containsCenter || selected == null || distance < selectedDistance) {
+            selected = info
+            selectedDistance = distance
+            if (containsCenter) selectedDistance = -1f
         }
-    } ?: mediaItems.minByOrNull {
-        val itemCenter = Offset(
-            it.offset.x + it.size.width / 2f,
-            it.offset.y + it.size.height / 2f,
-        )
-        val dx = itemCenter.x - center.x
-        val dy = itemCenter.y - center.y
-        dx * dx + dy * dy
     }
-    return selected
-        ?.let { info ->
-            val itemCenterY = info.offset.y + info.size.height / 2f
-            ClassifiedMediaGridScrollAnchor(
-                key = info.key as String,
-                index = info.index,
-                offset = info.offset.y,
-                centerOffset = itemCenterY - viewportCenterY,
-            )
-        }
+    val selectedInfo = selected ?: return null
+    val selectedKey = selectedInfo.key as? String ?: return null
+    return ClassifiedMediaGridScrollAnchor(
+        key = selectedKey,
+        index = selectedInfo.index,
+        offset = selectedInfo.offset.y,
+        centerOffset = selectedInfo.offset.y + selectedInfo.size.height / 2f - viewportCenterY,
+    )
 }
 
 @Composable
@@ -3663,6 +3742,7 @@ private fun Modifier.mediaGridPinchToResize(
     currentColumnCount: Int,
     sourceRevision: Long,
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
+    frame: MediaGridFrameData,
     onPinchFinished: (ClassifiedMediaGridScrollAnchor?, Int) -> Unit,
 ): Modifier {
     val latestColumnCount by rememberUpdatedState(currentColumnCount)
@@ -3689,7 +3769,7 @@ private fun Modifier.mediaGridPinchToResize(
                             (pressed[0].position.x + pressed[1].position.x) / 2f,
                             (pressed[0].position.y + pressed[1].position.y) / 2f,
                         )
-                        gestureAnchor = captureClassifiedMediaGridScrollAnchor(latestState, center)
+                        gestureAnchor = captureClassifiedMediaGridScrollAnchor(latestState, frame.assetIdByItemKey, center)
                     }
                     val previousDistance = distanceBetween(pressed[0].previousPosition, pressed[1].previousPosition)
                     val currentDistance = distanceBetween(pressed[0].position, pressed[1].position)

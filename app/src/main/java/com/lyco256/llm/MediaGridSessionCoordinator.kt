@@ -88,9 +88,14 @@ internal class MediaGridSessionCoordinator(
         publish(session)
     }
 
-    @Synchronized fun saveAnchor(anchor: ClassifiedMediaGridScrollAnchor) {
-        val session = activeSession() ?: return
+    @Synchronized fun saveAnchor(sessionKey: MediaGridSessionKey, anchor: ClassifiedMediaGridScrollAnchor) {
+        val session = sessions[sessionKey] ?: return
+        if (session.anchor == anchor) return
         session.anchor = anchor
+    }
+
+    @Synchronized fun saveAnchor(anchor: ClassifiedMediaGridScrollAnchor) {
+        activeKey?.let { saveAnchor(it, anchor) }
     }
 
     @Synchronized fun invalidate(assetId: Long) { activeSession()?.controller?.invalidate(assetId) }

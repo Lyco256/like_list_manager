@@ -6,6 +6,20 @@ import org.junit.Test
 
 class MediaGridSessionCoordinatorTest {
     @Test
+    fun scrollCheckpointOnlyFiresOnObservedTrueToFalse() {
+        var state = MediaGridScrollCheckpointState()
+        fun transition(value: Boolean): Boolean = mediaGridScrollCheckpointTransition(state, value).also { state = it.state }.shouldCheckpoint
+
+        assertEquals(false, transition(false))
+        assertEquals(false, transition(true))
+        assertEquals(false, transition(true))
+        assertEquals(true, transition(false))
+        assertEquals(false, transition(false))
+        assertEquals(false, transition(true))
+        assertEquals(true, transition(false))
+    }
+
+    @Test
     fun columnsAndSourceRevisionsDoNotChangeSessionIdentity() {
         val filter = TweetFilterState(query = "robot")
         val sort = ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime)

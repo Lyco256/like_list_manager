@@ -256,3 +256,11 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 ## 2026-07-19 第4実装 viewport監視（廃止済み）
 
 旧操作状態と生成停止方式の詳細はGit履歴だけに残します。現行の直接表示とpreloadの証跡は、冒頭のdirect preview節と`MediaGridDirectPreviewTest`にあります。
+# `TagHierarchyUiV2.kt`
+
+## 2026-07-29 idle anchor persistence
+
+- Classified media-grid anchor persistence is checkpoint-based. It observes only `isScrollInProgress` transitions and captures once on a real `true -> false`; the initial `false`, active scrolling, and restoration/handoff intermediate states are not saved.
+- Explicit checkpoints cover `ON_STOP`, grid disposal/session replacement, and completed column handoff. Restoration completion also captures the final valid layout once.
+- Capture directly scans visible items once and accepts only keys in `MediaGridFrameData.assetIdByItemKey`, preserving header exclusion and center/fallback selection without collection or per-item `Offset` allocations.
+- The viewport `snapshotFlow` and all controller/scheduler/resident Canvas/pointer-input behavior remain unchanged.

@@ -1,5 +1,17 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-07-29 idle anchor persistence optimization
+
+| 対象 | 実装・証跡 | 状態 |
+|---|---|---|
+| 初期falseを除外したtrue→falseのみの通常checkpoint | `MediaGridScrollCheckpointState`、`mediaGridScrollCheckpointTransition`、`MediaGridSessionCoordinatorTest.scrollCheckpointOnlyFiresOnObservedTrueToFalse` | 完了 |
+| 毎scroll anchor state/save廃止 | `TagHierarchyUiV2.kt`、静的確認 | 完了 |
+| session key指定・同値skip・非publish保存 | `MediaGridSessionCoordinator.saveAnchor(sessionKey, anchor)` | 完了 |
+| session A/B分離・inactive target保存・同値保存非publish | `MediaGridAnchorPersistenceIntegrationTest.explicitAnchorSaveStaysWithTargetSessionAndEqualSaveDoesNotPublish` | 完了 |
+| header除外・一回走査・collection/Offset allocation除去 | `captureClassifiedMediaGridScrollAnchor`、`MediaGridFrameData.assetIdByItemKey` | 完了 |
+| restoration/handoff/lifecycle/disposal checkpoint | `EnhancedClassifiedScreen` の明示checkpoint経路 | 要Compose・実機確認 |
+| 既存viewport、scheduler、resident Canvas、pointer input | 対象ソース差分の静的確認 | 要最終確認 |
+
 ## 2026-07-28 resident Canvas通常表示切替
 
 - `MediaGridResidentDrawHandle.directDrawEligible`を追加し、offscreen先読み完了・通常publication後・初回warm-up公開後だけeligibleになる経路を実装した。visible中の新規loadはpublication前falseを維持し、publication後にmarkする。

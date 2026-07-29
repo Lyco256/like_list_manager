@@ -11,3 +11,9 @@
 - source更新は保持frameを表示したままbackground refreshし、変更assetだけを再準備します。
 - 画面離脱ではcontrollerをpauseし、`MainViewModel.onCleared()`またはLRU除外時だけdisposeします。
 - controllerへActivityやBitmap/Drawable/Imageを渡したり、sessionへ画像本体を保持したりしません。
+# `MediaGridSessionCoordinator.kt`
+
+## 2026-07-29 explicit anchor checkpoint
+
+- `saveAnchor(sessionKey, anchor)` targets an existing session only, does not create or publish a session UI state, and skips an identical anchor. The legacy active-session overload delegates to the explicit-key API.
+- UI callers pass the outgoing/current `MediaGridSessionKey`, so disposal, lifecycle, session transition, idle, and handoff checkpoints cannot write into a newly active session.
