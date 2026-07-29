@@ -15,6 +15,7 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.LocalOverscrollConfiguration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -92,6 +93,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
@@ -132,6 +134,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import com.lyco256.llm.data.AssetEntity
 import com.lyco256.llm.data.ClipEntity
@@ -177,6 +180,7 @@ internal const val ClassifiedMediaGridMinColumnCount = 2
 internal const val ClassifiedMediaGridMaxColumnCount = 12
 internal const val ClassifiedMediaGridDefaultColumnCount = 4
 private const val ClassifiedMediaGridPinchScaleStep = 1.12f
+private const val ClassifiedMediaGridToolbarZIndex = 1f
 
 internal data class VisibleTagRow(
     val node: TagTreeNode,
@@ -1318,7 +1322,7 @@ private fun TagFilterSummaryRow(
 ) {
     val filters = uiState.filters
     Row(
-        Modifier.fillMaxWidth(),
+        Modifier.fillMaxWidth().zIndex(ClassifiedMediaGridToolbarZIndex),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -3232,7 +3236,10 @@ private fun MediaGridSelectionToolbar(
     onClose: () -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().testTag("media_grid_selection_toolbar"),
+        modifier = Modifier
+            .fillMaxWidth()
+            .zIndex(ClassifiedMediaGridToolbarZIndex)
+            .testTag("media_grid_selection_toolbar"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -3433,6 +3440,7 @@ internal fun MediaGridFramePublicationRunner(target: MediaGridFramePublicationTa
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun ClassifiedMediaGridContent(
     frame: MediaGridFrameData,
     sort: ClassifiedSortState,
@@ -3515,7 +3523,8 @@ private fun ClassifiedMediaGridContent(
     }
     effectiveController?.let { MediaGridFramePublicationRunner(it) }
     Box(Modifier.fillMaxSize()) {
-        LazyVerticalGrid(
+        CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
+            LazyVerticalGrid(
             columns = GridCells.Fixed(columnCount),
             state = state,
             modifier = Modifier
@@ -3570,6 +3579,7 @@ private fun ClassifiedMediaGridContent(
                         residentDrawAvailable = retainedImageStore?.hasEligibleDrawHandle(item.entry.assetId) == true && residentCanvasMode != MediaGridResidentCanvasMode.Disabled,
                     )
                 }
+            }
             }
         }
         if (showProgress) {

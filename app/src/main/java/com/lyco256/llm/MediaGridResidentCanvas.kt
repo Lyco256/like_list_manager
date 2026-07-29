@@ -5,6 +5,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -108,6 +109,13 @@ internal data class MediaGridResidentCanvasDrawCommand(
     val visibleOrder: Int,
 )
 
+internal fun mediaGridResidentCanvasViewportRect(width: Int, height: Int): Rect = Rect(
+    left = 0f,
+    top = 0f,
+    right = width.coerceAtLeast(0).toFloat(),
+    bottom = height.coerceAtLeast(0).toFloat(),
+)
+
 internal fun buildMediaGridVisibleCanvasSnapshot(
     frame: MediaGridFrameData,
     layout: LazyGridLayoutInfo,
@@ -178,14 +186,21 @@ internal fun Modifier.mediaGridResidentCanvas(
         val index = retainedImageStore.drawIndexSnapshot()
         val commands = buildMediaGridResidentCanvasCommands(snapshot, index, adapter)
         onDrawWithContent {
-            commands.forEach { command ->
-                drawImage(
-                    image = command.image.imageBitmap,
-                    srcOffset = IntOffset(command.sourceCrop.left.roundToInt(), command.sourceCrop.top.roundToInt()),
-                    srcSize = IntSize(command.sourceCrop.width.roundToInt(), command.sourceCrop.height.roundToInt()),
-                    dstOffset = IntOffset(command.destination.left.roundToInt(), command.destination.top.roundToInt()),
-                    dstSize = IntSize(command.destination.width.roundToInt(), command.destination.height.roundToInt()),
-                )
+            clipRect(
+                left = 0f,
+                top = 0f,
+                right = size.width,
+                bottom = size.height,
+            ) {
+                commands.forEach { command ->
+                    drawImage(
+                        image = command.image.imageBitmap,
+                        srcOffset = IntOffset(command.sourceCrop.left.roundToInt(), command.sourceCrop.top.roundToInt()),
+                        srcSize = IntSize(command.sourceCrop.width.roundToInt(), command.sourceCrop.height.roundToInt()),
+                        dstOffset = IntOffset(command.destination.left.roundToInt(), command.destination.top.roundToInt()),
+                        dstSize = IntSize(command.destination.width.roundToInt(), command.destination.height.roundToInt()),
+                    )
+                }
             }
             drawContent()
         }

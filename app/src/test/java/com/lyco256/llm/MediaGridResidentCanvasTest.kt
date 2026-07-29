@@ -45,6 +45,12 @@ class MediaGridResidentCanvasTest {
         assertTrue(wide.left >= 0f && wide.right <= 400f && wide.top >= 0f && wide.bottom <= 200f)
     }
 
+    @Test
+    fun residentCanvasViewportIsGridLocalAndNeverNegative() {
+        assertEquals(RectExpectation(0f, 0f, 240f, 160f), mediaGridResidentCanvasViewportRect(240, 160).toExpectation())
+        assertEquals(RectExpectation(0f, 0f, 0f, 0f), mediaGridResidentCanvasViewportRect(-1, -1).toExpectation())
+    }
+
     private data class RectExpectation(val left: Float, val top: Float, val right: Float, val bottom: Float)
 
     private fun androidx.compose.ui.geometry.Rect?.toExpectation(): RectExpectation? = this?.let {

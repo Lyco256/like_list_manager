@@ -3,8 +3,10 @@ package com.lyco256.llm
 import android.graphics.Bitmap
 import android.graphics.Color
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -14,6 +16,7 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -95,6 +98,73 @@ class MediaGridResidentCanvasComposeTest {
         } finally {
             store.clear()
             bitmaps.forEach(Bitmap::recycle)
+        }
+    }
+
+    @Test
+    fun residentImagesAreClippedToGridViewportBeforeDrawContent() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val memoryCache = MemoryCache.Builder(context).maxSizeBytes(4 * 1024 * 1024).build()
+        val store = MediaGridRetainedImageStore(memoryCache)
+        val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.RGB_565).also { it.eraseColor(Color.RED) }
+        val entry = MediaGridEntry(1L, 1L, 1L, "media-clip", 0, "photo", null, "ready", null, "2026-01-01T00:00:00Z", null)
+        val cell = MediaGridCellItem("media_grid_item_1", entry, 0)
+        val frame = MediaGridFrameData(
+            key = MediaGridRenderKey(MediaGridDataKey(3L, 3L, TweetFilterState(), ClassifiedSortState()), 2),
+            items = listOf(cell),
+            itemByKey = mapOf(cell.key to cell),
+            mediaCellIndices = intArrayOf(0),
+        )
+        store.retain(
+            assetId = 1L,
+            candidate = MediaGridPreparedCandidate(MediaGridImageSourceKind.Rgb565Pack, 1L, "source-clip", "cache-clip", 256, 256),
+            value = MemoryCache.Value(bitmap, emptyMap()),
+            directDrawEligible = true,
+        )
+        try {
+            composeRule.setContent {
+                val state = rememberLazyGridState()
+                val adapter = remember { MediaGridResidentCanvasImageAdapter() }
+                Box(
+                    Modifier
+                        .width(160.dp)
+                        .height(160.dp)
+                        .background(androidx.compose.ui.graphics.Color.Black)
+                        .testTag("resident_clip_parent"),
+                ) {
+                    LazyVerticalGrid(
+                        GridCells.Fixed(1),
+                        state = state,
+                        modifier = Modifier
+                            .width(120.dp)
+                            .requiredHeight(100.dp)
+                            .mediaGridResidentCanvas(
+                                frame = frame,
+                                state = state,
+                                retainedImageStore = store,
+                                adapter = adapter,
+                                drawIndexVersion = store.drawIndexSnapshot().version,
+                                mode = MediaGridResidentCanvasMode.TestVisible,
+                            ),
+                    ) {
+                        items(listOf(cell), key = { it.key }) {
+                            Box(Modifier.height(140.dp))
+                        }
+                    }
+                }
+            }
+            composeRule.waitForIdle()
+            val pixels = composeRule.onNodeWithTag("resident_clip_parent").captureToImage().toPixelMap()
+            val centerX = pixels.width / 2
+            val insideY = pixels.height * 0.3f
+            val outsideY = pixels.height * 0.95f
+            assertTrue(pixels[centerX, insideY.toInt()].red > 0.9f)
+            assertTrue(pixels[centerX, outsideY.toInt()].red < 0.1f)
+            assertTrue(pixels[centerX, outsideY.toInt()].green < 0.1f)
+            assertTrue(pixels[centerX, outsideY.toInt()].blue < 0.1f)
+        } finally {
+            store.clear()
+            bitmap.recycle()
         }
     }
 

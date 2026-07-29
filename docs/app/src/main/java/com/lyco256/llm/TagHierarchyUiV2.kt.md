@@ -156,7 +156,8 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - `EnhancedClassifiedScreen` now switches between the existing card list and a new media-grid mode with a single icon toggle.
 - `buildMediaGridEntries(clips)` flattens `uiState.classified` into `MediaGridEntry` rows so the grid can stay independent from direct `ClipWithDetails` nesting in the UI.
 - Only `photo` and `video_thumbnail` assets are included, and the grid keeps `displayUrl = localPath ?: previewUrl ?: remoteUrl`.
-- `classified_media_grid` uses `LazyVerticalGrid` with `GridCells.Fixed(columnCount)`, where `columnCount` is maintained from 2 through 12 by pinch gestures, with zero item spacing.
+- `classified_media_grid` uses `LazyVerticalGrid` with `GridCells.Fixed(columnCount)`, where `columnCount` is maintained from 2 through 12 by pinch gestures, with zero item spacing. Production classification-grid overscroll is explicitly disabled by a grid-local `CompositionLocalProvider(LocalOverscrollConfiguration provides null)` because the current Compose BOM does not expose the newer `overscrollEffect` LazyGrid parameter; no other scroll region inherits this setting.
+- `TagFilterSummaryRow` and `MediaGridSelectionToolbar` use the same positive `zIndex`, higher than the grid, so their buttons remain in front of resident images. The grid itself remains the normal single `LazyVerticalGrid`; resident image clipping is handled by `MediaGridResidentCanvas`.
 - Failed downloads, missing local files, and assets with no usable URL render as error cells via `media_grid_error_<assetId>`.
 - The later follow-up adds headings and pinch-to-change columns while preserving the existing grid-mode filter and sort dialogs.
 ## 2026-07 media grid lightweight UI
