@@ -9,6 +9,7 @@
 - `buildMediaGridMorphPreparedPairs()`はproductionとUnit Testで共有する唯一のbuilderで、隣接する増加・減少方向のimmutable `MediaGridMorphPreparedPair`を作る。2列の減少方向と12列の増加方向は作らない。
 - pairはsource revision、frame key、from/to列数、viewport、viewport signature、start/target layout、slot template、header band template、media ordinal範囲を保持する。画像、Painter、TextLayout、store、queue、workerは保持しない。
 - target layoutとstart overscanは、それぞれの列数に対する`viewport.width / columnCount`をcellのwidth／heightへ使用する。start visible cellだけはcaptureした実測rectを上書きして維持するため、2〜12列のtargetはすべて正方形になる。
+- Default並びのbounded範囲がordinal 0以外から始まる場合、target layoutは先頭ordinalのtarget列剰余を維持する。実際に先頭item indexが0より後ろでdataset末尾がviewport下端へ接する場合だけtarget最終行も下端へ揃え、先頭から全件がちょうど収まる状態とは区別する。
 
 ## media slot
 
@@ -39,4 +40,4 @@
 
 `TagHierarchyUiV2.kt`は初期有効layoutとscroll完全停止後だけbounded captureを行い、slot／header計算を`Dispatchers.Default`へ渡す。二本指操作中は要求せず、pointer処理は現行の`mediaGridColumnCountAfterPinchRelease()`だけを使用する。
 
-`MediaGridMorphInteraction.kt`のcontroller／pointer入力／settle／handoff要求と`MediaGridMorphCanvas.kt`のCanvasはTEST_HARNESS限定で、productionへ接続していない。実LazyGrid handoffは未実装であり、resident Canvas、viewport通知、idle anchor、queue、worker、先読み、1frame1枚公開も変更しない。
+`MediaGridMorphInteraction.kt`のcontroller／pointer入力／settle／handoff要求、`MediaGridMorphCanvas.kt`のCanvas、実LazyGrid handoff hostはTEST_HARNESS限定で、productionへ接続していない。resident Canvas、viewport通知、idle anchor、queue、worker、先読み、1frame1枚公開も変更しない。

@@ -402,7 +402,11 @@ private fun buildMediaGridMorphLayout(
         mediaGridMorphBucketSpec(it.xCreatedAt, it.likeCount, capture.sortBase, columnCount)
     }
     var row = 0
-    var column = 0
+    var column = if (capture.sortBase == ClassifiedSortBase.Default) {
+        capture.media.firstOrNull()?.mediaOrdinal?.mod(columnCount) ?: 0
+    } else {
+        0
+    }
     var y = 0f
 
     fun finishRow() {
@@ -449,10 +453,22 @@ private fun buildMediaGridMorphLayout(
     val generatedAnchor = firstVisible?.let { actual ->
         media.firstOrNull { it.mediaOrdinal == actual.mediaOrdinal }?.rect
     }
-    val shiftY = if (firstVisible != null && generatedAnchor != null) {
-        firstVisible.rect.top - generatedAnchor.top
-    } else {
-        capture.viewport.top
+    val lastVisible = capture.visibleMediaRects.maxByOrNull { it.mediaOrdinal }
+    val generatedEndAnchor = lastVisible?.let { actual ->
+        media.firstOrNull { it.mediaOrdinal == actual.mediaOrdinal }?.rect
+    }
+    val capturesDatasetEnd =
+        lastVisible != null &&
+            generatedEndAnchor != null &&
+            capture.identity.viewportSignature.firstVisibleItemIndex > 0 &&
+            lastVisible.mediaOrdinal == capture.media.lastOrNull()?.mediaOrdinal &&
+            abs(lastVisible.rect.bottom - capture.viewport.bottom) <= 1f
+    val shiftY = when {
+        capturesDatasetEnd ->
+            capture.viewport.bottom - generatedEndAnchor!!.bottom
+        firstVisible != null && generatedAnchor != null ->
+            firstVisible.rect.top - generatedAnchor.top
+        else -> capture.viewport.top
     }
     var shiftedMedia = media.map { it.copy(rect = it.rect.translateY(shiftY)) }
     var shiftedHeaders = headers.map { it.copy(rect = it.rect.translateY(shiftY)) }

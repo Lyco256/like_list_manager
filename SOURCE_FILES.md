@@ -2,11 +2,18 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 
 この文書は、全体構成、現状の実装、変更目的別入口、個別docs一覧だけを担当する。禁止事項、完了報告、検証手順は置かない。
 
+## 2026-07-30 TEST_HARNESS 実LazyGrid handoff基盤
+
+- `MediaGridMorphHandoff.kt`はbounded planから一回だけ選ぶtarget anchorと、列変更、target frame採用、item表示、最大3回のY補正、geometry確認、次frame完了、rollbackを管理する純粋coordinatorを所有する。
+- target anchorはinteraction slotのend Asset、final pinch centerを含むend rect、最寄りend rectの順で選ぶ。requestはsource data/frame key、expected target frame key、media ordinal、focal位置、維持Canvas位置を固定する。
+- `MediaGridMorphLazyGridHandoffTestHost.kt`はTEST_HARNESSだけで一枚の実`LazyVerticalGrid`、full-span header、既存interactive Morph Canvasを接続する。handoff中はuser scrollとanchor checkpointを抑止でき、target frame遅延中とrollback中もCanvasを維持する。
+- productionの`ClassifiedMediaGridContent`、`mediaGridPinchToResize`、resident Canvas、viewport、anchor、queue、publicationは変更しない。
+
 ## 2026-07-30 TEST_HARNESS Morph gesture tracking／settle
 
 - `MediaGridMorphInteraction.kt`はTEST_HARNESS限定controller、固定pointer ID入力、二本指初期距離基準progress、2次元focal correction、180ms線形settle、immutable exactly-once handoff requestを所有する。
 - gesture開始時のprepared pair snapshotを固定し、dead zoneへ戻ってprogress 0、反対方向へ越えた時だけ別pairのplanへ切り替える。pointer update／settle frameではrender model、画像、crop、text、viewport、queueを再準備しない。
-- `MediaGridMorphInteractiveTestLayer`だけが既存単一Canvasへ接続する。productionの`ClassifiedMediaGridContent`、`mediaGridPinchToResize`、LazyGrid列数、resident Canvas、viewport、anchor、scheduler、publicationは変更しない。実handoffは次工程に残す。
+- `MediaGridMorphInteractiveTestLayer`だけが既存単一Canvasへ接続する。productionの`ClassifiedMediaGridContent`、`mediaGridPinchToResize`、LazyGrid列数、resident Canvas、viewport、anchor、scheduler、publicationは変更しない。実handoffはTEST_HARNESS hostだけへ接続する。
 
 ## 2026-07-30 TEST_HARNESS単一Morph Canvas
 
@@ -265,6 +272,8 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/MediaGridPlaceholderRendering.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/MediaGridSessionCoordinator.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/MediaGridMorphCanvas.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/MediaGridMorphHandoff.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/MediaGridMorphLazyGridHandoffTestHost.kt.md`
 - Classified tab card/grid switching is handled in `MainActivity.kt` and `TagHierarchyUiV2.kt`; the grid path is built from `ClassifiedMediaGridState` over the lightweight repository source, while the card path continues to use `uiState.classified`.
 
 ### Data・API
@@ -288,9 +297,11 @@ MainActivity / Compose UI
 
 - `docs/app/src/test/java/com/lyco256/llm/TagHierarchyTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/MediaGridMorphTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/MediaGridMorphHandoffTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/MediaGridRenderingContractTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/MediaGridPlaceholderRenderingTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/MediaGridMorphCanvasComposeTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/MediaGridMorphLazyGridHandoffComposeTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/UiStateRenderingTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/SearchFilterDatabaseIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LikeListDatabaseMigrationTest.kt.md`

@@ -32,6 +32,8 @@
 - current完了はprogress／correction 0でIdleへ戻る。
 - target補正はrelease時の最後の中心を固定し、各progressで純粋関数から再計算する。完了時はprogress 1のCanvasを維持した`AwaitingGridHandoff`となる。
 - immutable `MediaGridMorphHandoffRequest`はinteraction generationごとに一回だけ生成・通知する。完了通知でto列数のIdle、取消通知でfrom列数のIdleへ戻る。
+- request生成時にbounded planからtarget Asset、media ordinal、focal位置、維持Canvas位置を一回だけ確定し、source data/frame keyとexpected target frame keyを固定する。target Assetがなければrequestを出さない。
+- `AwaitingGridHandoff`中は同じsource identityの再通知とexpected target identityへの変更だけを許可し、plan、progress 1、final correction、request、Canvasを維持する。
 - identity変更とcancelはgenerationを照合して古いsettle更新とstale handoffを拒否する。
 
 pointer updateとsettle frameではprepared pair、render model、画像解決、crop、text measure、viewport、anchor、queue、publicationを再構築・更新しない。

@@ -1,5 +1,22 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-07-30 TEST_HARNESS 実LazyGrid handoff基盤
+
+| 要件 | 証跡 | 状態 |
+| --- | --- | --- |
+| bounded target anchor、request時一回確定 | `selectMediaGridMorphTargetAnchor`、interaction slot／center／nearest／targetなし Unit Test | Unit Test完了 |
+| expected target identityでもCanvas維持 | `MediaGridMorphInteractionController.updateIdentity`、source再通知／target許可／stale cancel Unit Test | Unit Test完了 |
+| exactly-once列変更、frame待機、最大3回補正、次frame complete | `MediaGridMorphGridHandoffCoordinator`と`MediaGridMorphHandoffTest` | Unit Test完了 |
+| Asset消失ordinal fallback、invalid frame／geometry rollback | coordinator Unit Test、実LazyGrid Compose Test | Unit・隔離integration完了 |
+| 2↔3、4↔5、8↔9、11↔12とheader再構成 | `MediaGridMorphLazyGridHandoffComposeTest` | 隔離integration完了 |
+| Canvas消失前後pixel一致、target frame遅延 | 同Compose Testの実Canvas captureとframe制御 | 隔離integration完了 |
+| viewport先頭・末尾・部分表示 | 同Compose Testの実`LazyGridState`初期位置と実layout geometry、非ゼロordinal／末尾alignment Unit Test | Unit・隔離integration完了 |
+| handoff中scroll/checkpoint抑止phase、完了後scroll再開 | coordinator snapshotのexactly-once checkpoint Unit Test、hostが実gridへ渡すscroll enabled状態 | Unit・隔離integration完了 |
+| render model／画像解決の再実行なし | 同Compose Testのhandoff前後counter | 隔離integration完了 |
+| production未接続、二枚grid／Delay／pollingなし | 新規TEST_HARNESS hostのみ。`ClassifiedMediaGridContent`／`mediaGridPinchToResize`差分なし | 静的確認完了 |
+
+検証結果: `scripts\run-safe-integration-check.cmd`成功、続けて`scripts\run-safe-debug-check.cmd -InstallToDevice`成功。Macrobenchmark、本番DB／設定／認証情報の初期化は実施していない。
+
 ## 2026-07-30 TEST_HARNESS Morph gesture tracking／settle
 
 | 要件 | 証跡 | 状態 |

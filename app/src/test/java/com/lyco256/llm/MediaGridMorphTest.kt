@@ -630,6 +630,35 @@ class MediaGridMorphTest {
     }
 
     @Test
+    fun defaultTargetLayoutKeepsGlobalColumnAndBottomAlignmentAtDatasetEnd() {
+        val base = capture(columns = 2, count = 10, startOrdinal = 62)
+        val endVisible = (66..71).mapIndexed { index, ordinal ->
+            val row = index / 2
+            val column = index % 2
+            MediaGridMorphCapturedRect(
+                mediaOrdinal = ordinal,
+                rect = Rect(
+                    column * 600f,
+                    row * 200f,
+                    (column + 1) * 600f,
+                    row * 200f + 200f,
+                ),
+            )
+        }
+        val prepared = pair(
+            columns = 2,
+            capture = base.copy(visibleMediaRects = endVisible),
+            direction = MediaGridMorphDirection.IncreaseColumns,
+        )
+
+        val first = prepared.targetLayout.media.first { it.mediaOrdinal == 62 }
+        val last = prepared.targetLayout.media.first { it.mediaOrdinal == 71 }
+        assertEquals(2, first.column)
+        assertEquals(800f, first.rect.left, 0.001f)
+        assertEquals(prepared.viewport.bottom, last.rect.bottom, 0.001f)
+    }
+
+    @Test
     fun capturedStartCellsStayMeasuredWhileStartOverscanUsesCurrentSquareSize() {
         val prepared = pair(4, capture(columns = 4, count = 24))
         val visible = prepared.startLayout.media.first { it.mediaOrdinal == 0 }

@@ -134,6 +134,31 @@ class MediaGridRenderingContractTest {
         assertTrue(!pointer.contains("MediaGridMorphHandoffRequest"))
     }
 
+    @Test
+    fun realLazyGridHandoffHostIsTestOnlySingleGridAndEventDriven() {
+        val uiSource = locateSource("src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt").readText()
+        val hostSource = locateSource(
+            "src/main/java/com/lyco256/llm/MediaGridMorphLazyGridHandoffTestHost.kt",
+        ).readText()
+        val coordinatorSource = locateSource(
+            "src/main/java/com/lyco256/llm/MediaGridMorphHandoff.kt",
+        ).readText()
+
+        assertTrue(hostSource.contains("check(BuildConfig.TEST_HARNESS)"))
+        assertEquals(1, Regex("\\bLazyVerticalGrid\\(").findAll(hostSource).count())
+        assertTrue(hostSource.contains("GridItemSpan(maxLineSpan)"))
+        assertTrue(hostSource.contains("val userScrollEnabled = !handoffSnapshot.suppressesUserScroll"))
+        assertTrue(hostSource.contains("userScrollEnabled = userScrollEnabled"))
+        assertTrue(!hostSource.contains("delay(") && !hostSource.contains("Thread.sleep"))
+        assertTrue(!coordinatorSource.contains("delay(") && !coordinatorSource.contains("Thread.sleep"))
+        assertTrue(!coordinatorSource.contains("Bitmap"))
+        assertTrue(!coordinatorSource.contains("ImageBitmap"))
+        assertTrue(!coordinatorSource.contains("ImageRequest"))
+        assertTrue(!coordinatorSource.contains("MediaGridResident"))
+        assertTrue(!uiSource.contains("MediaGridMorphLazyGridHandoffTestHost"))
+        assertTrue(!uiSource.contains("MediaGridMorphGridHandoffCoordinator"))
+    }
+
     private fun locateSource(relativePath: String): File = sequenceOf(
         File(relativePath),
         File("app", relativePath.removePrefix("src/")),

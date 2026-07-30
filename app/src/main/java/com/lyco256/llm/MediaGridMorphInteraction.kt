@@ -31,13 +31,18 @@ internal data class MediaGridMorphInteractionIdentity(
 internal data class MediaGridMorphHandoffRequest(
     val interactionGeneration: Long,
     val sourceRevision: Long,
-    val frameKey: MediaGridRenderKey,
+    val sourceDataKey: MediaGridDataKey,
+    val sourceFrameKey: MediaGridRenderKey,
+    val expectedTargetFrameKey: MediaGridRenderKey,
     val fromColumnCount: Int,
     val toColumnCount: Int,
     val plan: MediaGridMorphPlan,
-    val anchor: MediaGridMorphAnchor?,
+    val interactionAnchor: MediaGridMorphAnchor?,
+    val targetAnchor: MediaGridMorphTargetAnchor,
     val finalCorrection: Offset,
     val finalPinchCenter: Offset,
+    val viewportWidth: Int,
+    val viewportHeight: Int,
 )
 
 internal data class MediaGridMorphInteractionSnapshot(
@@ -132,10 +137,12 @@ internal class MediaGridMorphInteractionController(
     private val _activePlan = mutableStateOf<MediaGridMorphPlan?>(null)
     private val _progress = mutableStateOf(0f)
     private val _correction = mutableStateOf(Offset.Zero)
+    private val _handoffRequest = mutableStateOf<MediaGridMorphHandoffRequest?>(null)
     internal val settleSignal: MutableState<Long> = mutableLongStateOf(0L)
     val activePlan: State<MediaGridMorphPlan?> get() = _activePlan
     val progress: State<Float> get() = _progress
     val correction: State<Offset> get() = _correction
+    val handoffRequest: State<MediaGridMorphHandoffRequest?> get() = _handoffRequest
 
     fun snapshot(): MediaGridMorphInteractionSnapshot = currentSnapshot
 
@@ -265,9 +272,40 @@ internal class MediaGridMorphInteractionController(
     }
 
     fun updateIdentity(identity: MediaGridMorphInteractionIdentity) {
-        currentIdentity = identity
         val snapshot = currentSnapshot
-        if (snapshot.phase == MediaGridMorphPhase.Idle) return
+        if (snapshot.phase == MediaGridMorphPhase.Idle) {
+            currentIdentity = identity
+            return
+        }
+        if (snapshot.phase == MediaGridMorphPhase.AwaitingGridHandoff) {
+            val request = snapshot.handoffRequest ?: run {
+                currentIdentity = identity
+                resetToIdle(identity.currentColumnCount, snapshot.interactionGeneration)
+                return
+            }
+            val sameData =
+                identity.sourceRevision == request.sourceRevision &&
+                    identity.frameKey.dataKey == request.sourceDataKey
+            val sameViewport =
+                identity.viewportSignature.viewportWidthPx == request.viewportWidth &&
+                    identity.viewportSignature.viewportHeightPx == request.viewportHeight
+            val sourceIdentity =
+                identity.currentColumnCount in setOf(request.fromColumnCount, request.toColumnCount) &&
+                    identity.frameKey == request.sourceFrameKey
+            val expectedTargetIdentity =
+                identity.currentColumnCount == request.toColumnCount &&
+                    identity.frameKey == request.expectedTargetFrameKey
+            if (sameData && sameViewport && (sourceIdentity || expectedTargetIdentity)) {
+                if (expectedTargetIdentity) currentIdentity = identity
+                return
+            }
+            currentIdentity = identity
+            gesture = null
+            settle = null
+            resetToIdle(identity.currentColumnCount, snapshot.interactionGeneration)
+            return
+        }
+        currentIdentity = identity
         val plan = snapshot.plan
         if (
             snapshot.sourceRevision != identity.sourceRevision ||
@@ -329,16 +367,33 @@ internal class MediaGridMorphInteractionController(
             return
         }
         val identity = currentIdentity ?: return
+        val targetAnchor = selectMediaGridMorphTargetAnchor(
+            plan = plan,
+            finalCorrection = nextCorrection,
+            finalPinchCenter = activeSettle.fixedPinchCenter,
+        )
+        if (targetAnchor == null) {
+            resetToIdle(plan.fromColumnCount, generation)
+            return
+        }
         val request = MediaGridMorphHandoffRequest(
             interactionGeneration = generation,
             sourceRevision = identity.sourceRevision,
-            frameKey = identity.frameKey,
+            sourceDataKey = identity.frameKey.dataKey,
+            sourceFrameKey = identity.frameKey,
+            expectedTargetFrameKey = MediaGridRenderKey(
+                dataKey = identity.frameKey.dataKey,
+                columnCount = plan.toColumnCount,
+            ),
             fromColumnCount = plan.fromColumnCount,
             toColumnCount = plan.toColumnCount,
             plan = plan,
-            anchor = plan.anchor,
+            interactionAnchor = plan.anchor,
+            targetAnchor = targetAnchor,
             finalCorrection = nextCorrection,
             finalPinchCenter = activeSettle.fixedPinchCenter,
+            viewportWidth = identity.viewportSignature.viewportWidthPx,
+            viewportHeight = identity.viewportSignature.viewportHeightPx,
         )
         publish(
             phase = MediaGridMorphPhase.AwaitingGridHandoff,
@@ -387,6 +442,7 @@ internal class MediaGridMorphInteractionController(
     ) {
         _progress.value = progress
         _correction.value = correction
+        _handoffRequest.value = handoffRequest
         currentSnapshot = MediaGridMorphInteractionSnapshot(
             phase = phase,
             direction = direction,
@@ -407,6 +463,7 @@ internal class MediaGridMorphInteractionController(
         _activePlan.value = null
         _progress.value = 0f
         _correction.value = Offset.Zero
+        _handoffRequest.value = null
         currentSnapshot = MediaGridMorphInteractionSnapshot(
             phase = MediaGridMorphPhase.Idle,
             direction = null,
