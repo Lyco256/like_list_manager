@@ -26,7 +26,7 @@
 - `MediaGridResidentCanvasMode.Enabled`と`TestVisible`は同じLazyGrid自身の`drawWithCache` DrawModifierを使用し、resident画像を先に描画して`drawContent()`でheader・overlay・操作UIを上に残す。通常画面は`Enabled`を明示し、defaultは`Disabled`。
 - residentセルでは背景を透明にし、Placeholder・Error・AsyncImageを構成せず、nonresidentセルは従来経路を維持する。
 - 300個の異なる256x256 RGB_565画像をeligible retainし、jump後visible画像のcommand数、300entry、eligible 300件、48MiB以下をCompose/Integration Testで確認した。301件目eviction、source invalidation、既存のlike数・動画badge・選択・header・操作・2〜12列テストは既存suiteで継続確認した。
-- 指定入口の実績: `run-safe-integration-check.cmd -DebugMethod wireless` は `Preflight / Build / UnitTest / Lint / Install / IntegrationTest / Success`、`run-safe-debug-check.cmd -InstallToDevice` は `Preflight / Build / UnitTest / Lint / Install / Success`。
+- 指定入口の実績: `run-safe-integration-check.cmd` は `Preflight / Build / UnitTest / Lint / Install / IntegrationTest / Success`、`run-safe-debug-check.cmd -InstallToDevice` は `Preflight / Build / UnitTest / Lint / Install / Success`。
 - Macrobenchmarkは実行していない。300entry、48MiB、先読み3行、worker、queue、候補順、Progress、scroll保持は変更していない。
 
 ## 2026-07-28 resident draw index基盤
@@ -34,7 +34,7 @@
 - `MediaGridResidentImageIdentity`、immutable `MediaGridResidentDrawHandle`、`AtomicReference`公開の`MediaGridResidentDrawIndex`を追加した。lookupはasset ID補助mapとcandidate identityを使い、store lockと画像生成・Coil restoreを行わない。
 - retain、candidate置換、eviction、asset invalidation、memory trim、clearはmutable storeとdraw indexを一回の整合更新として公開し、restoreとvisible touchではindex versionを増やさない。
 - `MediaGridRetainedImageStoreIntegrationTest`に、別インスタンスの256×256 RGB_565 Bitmap 300件、301件目のLRU eviction、identity lookup、lock-free seam、固定barrier順序のretain／lookup／invalidate／protection／trim／restore競合を追加した。
-- ローカル安全検証は`run-safe-debug-check.cmd`のBuild / UnitTest / Lint / Successを確認済み。`run-safe-integration-check.cmd -DebugMethod wireless`でPreflight / Build / UnitTest / Lint / Install / IntegrationTest / Successを確認済み。
+- ローカル安全検証は`run-safe-debug-check.cmd`のBuild / UnitTest / Lint / Successを確認済み。`run-safe-integration-check.cmd`でPreflight / Build / UnitTest / Lint / Install / IntegrationTest / Successを確認済み。
 
 ## 2026-07-28 resident single Canvas layer
 
@@ -45,7 +45,7 @@
 | non-copying identity/value keyed ImageBitmap adapter | `MediaGridResidentCanvasImageAdapter`, `MediaGridResidentCanvasIntegrationTest` | Implemented; wireless integration passed |
 | visible-only geometry, centered crop, immutable commands, one Canvas | `MediaGridResidentCanvas.kt`, `MediaGridResidentCanvasTest`, `MediaGridResidentCanvasComposeTest` | Implemented; wireless integration passed |
 | existing production AsyncImage/frame/queue/worker/prefetch path unchanged | `git diff`, `TagHierarchyUiV2.kt`, `MediaGridSteadyLoadController.kt` | Static audit passed |
-| integration and production safety verification | `run-safe-integration-check.cmd -DebugMethod wireless`, `run-safe-debug-check.cmd -InstallToDevice` | Success; production package metadata PostCheck passed |
+| integration and production safety verification | `run-safe-integration-check.cmd`, `run-safe-debug-check.cmd -InstallToDevice` | Success; production package metadata PostCheck passed |
 
 ## 2026-07-25 frame-paced image publication
 
@@ -55,7 +55,7 @@
 | fake frame clock、1frame最大1件、12件を12frame以内に公開 | `MediaGridSteadyLoadControllerTest.fakeFrameClockPublishesAtMostOneNewAttachmentPerFrameAndFinishesInTwelveFrames`、`MediaGridFramePublicationComposeTest`、`MediaGridSteadyLoadControllerIntegrationTest.postStartupTwelveVisibleReadyAssetsUseAtMostOneAttachmentPerFrame` |
 | frame callback内のIO・Bitmap loadなし、画像test tag | `MediaGridFramePublicationRunner`、`MediaGridSteadyLoadController.publishOneReadyImageForFrame`、`media_grid_image_<assetId>` |
 
-- Wireless隔離検証は `scripts\run-safe-integration-check.cmd -DebugMethod wireless` のPreflight / Build / UnitTest / Lint / Install / IntegrationTestをSuccessで完了した。Macrobenchmarkは要件どおり未実行。
+- Wireless隔離検証は `scripts\run-safe-integration-check.cmd` のPreflight / Build / UnitTest / Lint / Install / IntegrationTestをSuccessで完了した。Macrobenchmarkは要件どおり未実行。
 
 ## 2026-07-24 第16実装: decoupled load and UI publication pipeline
 
@@ -79,7 +79,7 @@
 
 検証結果:
 
-- `scripts\run-safe-integration-check.cmd -DebugMethod wireless`: `Preflight / Build / UnitTest / Lint / Install / IntegrationTest / Success`
+- `scripts\run-safe-integration-check.cmd`: `Preflight / Build / UnitTest / Lint / Install / IntegrationTest / Success`
 - `scripts\run-safe-debug-check.cmd -InstallToDevice`: `Preflight / Build / UnitTest / Lint / Install / Success`
 - 本番DB、元WebP、JPEG、RGB_565 pack、設定、認証情報の初期化・変更は行っていない。
 
@@ -93,7 +93,7 @@
 
 検証結果:
 
-- `scripts\run-safe-integration-check.cmd -DebugMethod wireless`: `Preflight / Build / UnitTest / Lint / Install / IntegrationTest / Success`
+- `scripts\run-safe-integration-check.cmd`: `Preflight / Build / UnitTest / Lint / Install / IntegrationTest / Success`
 - `scripts\run-safe-debug-check.cmd -InstallToDevice`: `Preflight / Build / UnitTest / Lint / Install / Success`
 - 本番DB、元WebP、JPEG、RGB_565 pack、設定、認証情報の初期化・変更は行っていない。
 
@@ -126,7 +126,7 @@
 
 検証結果:
 
-- `scripts\run-safe-integration-check.cmd -DebugMethod wireless`: `Preflight / Build / UnitTest / Lint / Install / IntegrationTest / Success`
+- `scripts\run-safe-integration-check.cmd`: `Preflight / Build / UnitTest / Lint / Install / IntegrationTest / Success`
 - `scripts\run-safe-debug-check.cmd -InstallToDevice`: `Preflight / Build / UnitTest / Lint / Install / Success`
 - production DB、元WebP、既存JPEG、設定、認証情報の初期化は行っていない
 - Macrobenchmarkは要件どおり未実行
@@ -152,7 +152,7 @@
 | frame専用metadata、dispose/stale破棄、asset単位preview無効化 | controller generation/frame lifecycle、`MediaGridPreviewNotifier` |
 | DB・元画像・JPEG生成・Coil容量/並列・UI操作・Macrobenchmark | 変更なし。Macrobenchmarkは要件により未実行 |
 
-2026-07-22の最終実装に対し、`run-safe-integration-check.cmd -DebugMethod wireless`はBuild・UnitTest・Lint・Install・IntegrationTestの全フェーズSuccess。続けて`run-safe-debug-check.cmd -InstallToDevice`はBuild・UnitTest・Lint・Installの全フェーズSuccess。本番packageのDB・元画像・生成済みJPEG・設定・認証情報は初期化していない。Macrobenchmarkは要件どおり未実行。
+2026-07-22の最終実装に対し、`run-safe-integration-check.cmd`はBuild・UnitTest・Lint・Install・IntegrationTestの全フェーズSuccess。続けて`run-safe-debug-check.cmd -InstallToDevice`はBuild・UnitTest・Lint・Installの全フェーズSuccess。本番packageのDB・元画像・生成済みJPEG・設定・認証情報は初期化していない。Macrobenchmarkは要件どおり未実行。
 
 ## 2026-07-22 第11実装: retired image pipeline removal
 
@@ -193,7 +193,7 @@
 
 指定順検証結果:
 
-- `scripts\run-safe-integration-check.cmd -DebugMethod wireless`: `Preflight / Build / UnitTest / Lint / Install / IntegrationTest / Success`
+- `scripts\run-safe-integration-check.cmd`: `Preflight / Build / UnitTest / Lint / Install / IntegrationTest / Success`
 - `scripts\run-safe-debug-check.cmd -InstallToDevice`: `Preflight / Build / UnitTest / Lint / Install / Success`
 - Macrobenchmarkは実行していない。
 
@@ -211,7 +211,7 @@
 | one adjacent row, direction/viewport cancellation, no visible/prefetch duplicate | Implemented | `MediaGridDirectPreview.kt`, `MediaGridDirectPreviewTest.kt` |
 | retired generator, cache restore, operation gate, and broad scheduler removed from every source set | Implemented | current source tree static search; `TagHierarchyUiV2.kt` |
 | initial multi-cell load, drag/fling, recreation/filter/sort, mixed source/error regression | Implemented | `MainActivityComposeTest.kt`, `UiStateRenderingTest.kt`; wireless safe integration check succeeded |
-| required verification order; Macrobenchmark not run | Implemented | `run-safe-integration-check.cmd -DebugMethod wireless` and `run-safe-debug-check.cmd -InstallToDevice` succeeded; Macrobenchmark was not run |
+| required verification order; Macrobenchmark not run | Implemented | `run-safe-integration-check.cmd` and `run-safe-debug-check.cmd -InstallToDevice` succeeded; Macrobenchmark was not run |
 
 ## 安全境界
 
@@ -247,12 +247,15 @@
 
 ## 合格ゲート
 
-- 通常必須: `assembleDebug`、`testDebugUnitTest`、`lintDebug`
+- 通常必須: debug／integration共通Build task集合、`testDebugUnitTest`、`lintDebug`。phase別入力と成功stateにより自動省略し、main入力不変時の変更unit test classだけは限定実行できる。判断不能時はphase全体へ戻る
 - 実機必須: `verifyTestEnvironmentIsolation`、`connectedIntegrationTestAndroidTest`
 - 安全実行入口: `scripts/run-safe-integration-check.cmd`
-- wireless安全実行入口: `scripts/run-safe-integration-check.cmd -DebugMethod wireless`
+- USB／wireless共通の安全実行入口: `scripts/run-safe-integration-check.cmd`
 - Macrobenchmark安全実行入口: `scripts/run-safe-macrobenchmark-check.cmd`
 - snapshot任意入口: `scripts/run-safe-snapshot-check.cmd`
+- 2026-07-30: 同一SC-56Cの重複wireless endpointをhardware serial一致確認後に整理した。ADB serverをmDNS自動接続無効で再起動し、同じ設定を持つ`run-safe-debug-check.cmd -InstallToDevice`がSuccess。終了後はSDK platform-toolsのADB server 1process、USB device entry 1件だけ
+- 2026-07-30: debug／integrationを共通Build task集合と`app-build`・`app-unit-test`・`app-lint` stateへ統一した。debug成功後の3 stateをintegrationが更新せず再利用し、Install・IntegrationTestは通常実行してSuccess
+- 2026-07-30: unit testファイルだけの一時的な非機能変更ではBuild・Lint stateを維持し、`com.lyco256.llm.data.TagColorPaletteTest`だけを実行してSuccess。変更を完全に戻した際も同classの部分UnitTestがSuccessし、検証用ソース差分は残していない。`-FullRebuildTest`は使用していない
 
 ## 2026-07-01 追記
 
@@ -290,12 +293,12 @@
 
 - ローカル安全確認: `run-safe-debug-check.cmd` のBuild / UnitTest / Lint / Successを確認。
 - 実装確認対象: MainUiState遅延評価、カード経路限定scroll key、明示的source revision、タグ構造revision、source更新時前計算、LongArrayタグ保持、グリッドmatchingClipCount表示。
-- 隔離実機: `run-safe-integration-check.cmd -DebugMethod wireless` を本命上書き前に実行する。
+- 隔離実機: `run-safe-integration-check.cmd` を本命上書き前に実行する。
 
 - These generator/scheduler details are retired and kept only as historical context. The current path is covered by the direct-preview and persistent-preview sections at the top of this file.
 - `run-safe-debug-check.cmd` passed Build, UnitTest, and Lint after the change. Isolation-device verification remains required before production overwrite.
 
-隔離実機チェックは`run-safe-integration-check.cmd -DebugMethod wireless`で実施し、Build・UnitTest・Lint・IntegrationTestのSuccessを確認する。本命上書きは隔離チェック成功後に`run-safe-debug-check.cmd -InstallToDevice`で実施する。Paging、低解像度サムネイル、画像処理キューは対象外。
+隔離実機チェックは`run-safe-integration-check.cmd`で実施し、Build・UnitTest・Lint・IntegrationTestのSuccessを確認する。本命上書きは隔離チェック成功後に`run-safe-debug-check.cmd -InstallToDevice`で実施する。Paging、低解像度サムネイル、画像処理キューは対象外。
 ## 2026-07 single-step media-grid resize（履歴: 現行経路では不使用）
 
 - Pinch direction recognition changes the column count by exactly one within 2–12 and locks further changes until all fingers are released, including reverse movement.
@@ -338,7 +341,7 @@
 - `MediaGridMorphUiState` applies handoff completion and overlay removal in one state update after the target grid has laid out; normal anchor restoration is blocked in all non-Idle phases.
 - Safety verification completed: wireless isolated integration check, wireless production-package debug overwrite, and wireless Macrobenchmark all succeeded; the macrobenchmark PostCheck preserved production package metadata and kept benchmark UID separate.
 - 実装: 256×256 JPEG quality 60、cacheDir再生成、inSampleSize縮小デコード、直列最新viewport優先、セル単位StateFlow、専用ImageLoader設定。
-- `run-safe-integration-check.cmd -DebugMethod wireless`: Success。隔離packageでIntegrationTestまで完了。
+- `run-safe-integration-check.cmd`: Success。隔離packageでIntegrationTestまで完了。
 - `run-safe-debug-check.cmd -InstallToDevice`: Success。本命packageへ安全に上書きし、スクリプトのpackage情報不変チェックを通過。
 
 ## 2026-07-14 実装22 coverage

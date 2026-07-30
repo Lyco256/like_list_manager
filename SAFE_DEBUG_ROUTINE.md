@@ -22,7 +22,7 @@ Codexは、検証・ビルド・テスト・lint・実機操作を自己判断�
 * `adb mdns services`
 * `adb connect <mDNS名またはhost:port>`、`adb disconnect <endpoint>`、`adb reconnect`
 
-この例外では、`adb install`、`adb uninstall`、`adb shell pm clear`、`adb shell am instrument`、アプリ起動・停止、ファイル転送、設定変更、権限変更、DB・画像・Preferencesへ触れる操作は禁止する。接続復旧後のbuild、install、test、lintは必ず対応する`.cmd`入口へ戻す。wireless統合テストは、許可serialからendpointを解決する`run-safe-integration-check.cmd -DebugMethod wireless`を優先する。
+この例外では、`adb install`、`adb uninstall`、`adb shell pm clear`、`adb shell am instrument`、アプリ起動・停止、ファイル転送、設定変更、権限変更、DB・画像・Preferencesへ触れる操作は禁止する。接続復旧後のbuild、install、test、lintは必ず対応する`.cmd`入口へ戻す。統合テストとMacrobenchmarkの安全入口は、許可hardware serialに一致するUSB接続を優先し、USB接続がなければwireless ADB endpointを自動解決する。
 
 専用入口がない検証が必要な場合は、直接コマンドを実行せず、必要な入口を追加するか、未実行として報告する。
 
@@ -46,11 +46,7 @@ Codexは、検証・ビルド・テスト・lint・実機操作を自己判断�
 .\scripts\run-safe-integration-check.cmd
 ```
 
-ワイヤレスデバッグ端末では、次のように指定する。`testDeviceSerial`に登録したhardware serialからmDNSのADB TLS endpointを安全スクリプトが解決し、端末serialを照合して接続する。
-
-```powershell
-.\scripts\run-safe-integration-check.cmd -DebugMethod wireless
-```
+USB接続とワイヤレスデバッグで入口は共通です。`testDeviceSerial`に登録したhardware serialと接続端末を照合し、USB接続がなければmDNSのADB TLS endpointを自動解決する。
 
 Macrobenchmark:
 
@@ -58,11 +54,7 @@ Macrobenchmark:
 .\scripts\run-safe-macrobenchmark-check.cmd
 ```
 
-ワイヤレスデバッグ端末では、mDNSのADB TLS endpointを`testDeviceSerial`のhardware serialへ照合して接続する。
-
-```powershell
-.\scripts\run-safe-macrobenchmark-check.cmd -DebugMethod wireless
-```
+USB接続とワイヤレスデバッグで入口は共通です。USB接続を優先し、USB接続がなければmDNSのADB TLS endpointを`testDeviceSerial`のhardware serialへ照合して接続する。
 
 Snapshot互換テスト:
 
@@ -99,6 +91,10 @@ Snapshot互換テスト:
 
 成功時の標準出力は、フェーズ名と `Success` だけを確認する。
 
+通常確認と隔離統合確認は、debug APK、隔離設定検証、integration target APK、androidTest APKを生成する同じBuild task集合と成功stateを共有する。Build、UnitTest、Lintはphase別の入力fingerprintを使い、必要なphaseだけを実行する。Buildは通常`clean`せずGradle incremental buildを使う。main入力が不変で変更unit test classを安全に抽出できる場合だけUnitTestをそのclassへ限定し、判断不能時は全UnitTestへ戻る。Build成果物は前回成功時のSHA-256と一致する必要がある。利用者が部分範囲を指定するオプションは設けない。
+
+`-FullRebuildTest`オプションは存在するが、Codexはユーザーから実行を明示指示された場合だけ使用する。Codex自身の判断では使用しない。
+
 ```text
 Preflight
 Build
@@ -116,6 +112,8 @@ Success
 ```
 
 この入口は、既存packageへの `adb install -r` だけを許可する。`adb uninstall`、`adb shell pm clear`、新規インストール、package変更、署名変更、applicationId変更は行わない。
+
+各`.cmd`入口はADB serverのmDNS自動接続を無効化する。USBとwirelessのADB entryが同時に見えても、`ro.serialno`が同じ1台の物理端末だけを示す場合はUSB entryを優先して自動選択する。同じ物理端末の余分なwireless entryは`adb disconnect`して1件へ整理する。wireless接続が必要な場合だけ安全resolverがmDNS候補1件へ明示接続する。異なる物理端末が混在する場合や端末identityを確認できない場合は停止する。選択したserialはpackage確認、install、前後確認の全ADB操作へ明示する。
 
 成功時の標準出力は、フェーズ名と `Success` だけを確認する。
 
@@ -136,7 +134,9 @@ Instrumentation、Compose、Room統合テストは、メインアプリと隔離
 .\scripts\run-safe-integration-check.cmd
 ```
 
-この入口だけを使う。`connectedDebugAndroidTest`、`connectedAndroidTest`、`connectedIntegrationTestAndroidTest` を直接実行しない。
+この入口だけを使う。`connectedDebugAndroidTest`、`connectedAndroidTest`、`connectedIntegrationTestAndroidTest` を直接実行しない。接続方式にかかわらず、検証済みのtarget APKとandroidTest APKを上書き導入し、許可端末を明示してInstrumentationを実行する。端末解決は既存接続を先に再利用し、同じhardware serialの重複wireless endpointを切断する。接続済みendpointがない場合だけmDNS候補を1件選んで接続する。
+
+Build、UnitTest、Lintには通常検証と同じ共有state・部分実行を適用する。Install、IntegrationTest、本番package metadataとUIDの前後確認は毎回実行する。
 
 この入口は、次を満たさない限り停止する。
 

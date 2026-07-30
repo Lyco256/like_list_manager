@@ -364,7 +364,9 @@ MainActivity / Compose UI
 - `SnapshotCompatibilityTest` は明示指定されたDB・画像をホスト側の一時コピーで検証し、コピー元hash不変を確認します。
 - `scripts/run-safe-integration-check.cmd` はGit管理外の許可serialだけを受け入れ、同じ実機上でメインと `.test` のpackage・UID分離、メインmetadata前後不変を検証します。
 - `scripts/run-safe-macrobenchmark-check.cmd` は同じ許可serial上で `.test.benchmark` 対象APKとMacrobenchmarkホストだけを扱い、メインmetadata前後不変を検証します。
-- 2026-06-23以降、SC-56Cで本番と隔離テストを共存させ、AndroidJUnitRunnerによる実機統合テストを継続実行しています。wireless時は`run-safe-integration-check.cmd -DebugMethod wireless`がhardware serialからmDNS endpointを解決します。
+- 実機系`.cmd`入口はADB serverのmDNS自動接続を無効化します。既存ADB接続を先にhardware serialで照合し、同じ物理端末のUSBを優先して余分なwireless endpointを切断します。接続済みendpointがない場合だけ安全resolverがmDNS候補を1件明示接続します。異なる物理端末が混在する場合は停止し、選択serialを全ADB操作へ明示します。
+- 通常確認と隔離統合確認は、debug APK、隔離設定検証、integration target APK、androidTest APKを生成する同じBuild task集合と成功stateを共有します。Build・UnitTest・Lintはphase別の入力fingerprintを使い、BuildはGradle incremental処理、UnitTestはmain入力不変時の変更test class限定を安全条件付きで使います。判断不能時はphase全体へ戻り、Build省略には全APKのSHA-256一致も必須です。`-FullRebuildTest`はユーザー明示指示時だけ使う全体確認境界です。Macrobenchmarkのcleanと実機フェーズは省略しません。
+- 2026-06-23以降、SC-56Cで本番と隔離テストを共存させ、AndroidJUnitRunnerによる実機統合テストを継続実行しています。`run-safe-integration-check.cmd`はhardware serialに一致するUSB接続を優先し、USB接続がなければmDNS endpointを解決します。
 
 追加したテスト文書:
 

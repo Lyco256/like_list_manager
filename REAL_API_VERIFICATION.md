@@ -68,10 +68,10 @@ Androidアプリに入力するのはOAuth 2.0 Client IDだけです。Client Se
 .\scripts\run-safe-debug-check.cmd
 ```
 
-隔離実機確認はwireless endpointの自動解決を含む次の入口を使用します。
+隔離実機確認はUSB接続とwireless endpointを自動判定する次の入口を使用します。
 
 ```powershell
-.\scripts\run-safe-integration-check.cmd -DebugMethod wireless
+.\scripts\run-safe-integration-check.cmd
 ```
 
 ## いいね数再取得の確認（2026-06-20）

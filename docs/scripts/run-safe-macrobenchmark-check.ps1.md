@@ -4,11 +4,11 @@
 
 通常実行は端末側の `media-grid-metrics`、instrumentation完了marker、benchmark targetデータを終了時に削除しない。ADBが途中で切断されても、端末上で開始済みのinstrumentationは継続し、結果をapp-specific外部領域へ保存する。
 
-後から回収する場合は `.\scripts\run-safe-macrobenchmark-check.cmd -DebugMethod wireless -RecoverMetricsOnly` を使う。回収確認後に端末側成果を削除する場合だけ `.\scripts\run-safe-macrobenchmark-check.cmd -DebugMethod wireless -CleanupOnly` を使う。
+後から回収する場合は `.\scripts\run-safe-macrobenchmark-check.cmd -RecoverMetricsOnly` を使う。回収確認後に端末側成果を削除する場合だけ `.\scripts\run-safe-macrobenchmark-check.cmd -CleanupOnly` を使う。
 
 未回収成果が端末にある場合、通常実行は `pm clear` 前に失敗する。通常実行の前に回収と明示cleanupを行う。
 
-Wireless mode: `-DebugMethod wireless` resolves the mDNS `_adb-tls-connect._tcp` endpoint whose reported hardware serial matches `testDeviceSerial`, then uses that endpoint for the same package and UID safety checks. It does not uninstall the production app or clear device data.
+The script first matches connected devices against the hardware serial in `testDeviceSerial`. It prefers a matching USB connection, disconnects extra wireless endpoints for the same physical device, and reuses the single remaining endpoint. Only when no matching endpoint is connected does it connect one preferred mDNS `_adb-tls-connect._tcp` service. Both connection types use the same package and UID safety checks. It does not uninstall the production app or clear device data.
 
 同じ実機に本番 `com.lyco256.llm` を残したまま、隔離された性能測定対象 `com.lyco256.llm.test.benchmark` とMacrobenchmarkホスト `com.lyco256.llm.macrobenchmark.host` だけを扱う安全実行スクリプトです。
 

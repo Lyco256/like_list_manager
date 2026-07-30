@@ -1,6 +1,4 @@
 param(
-    [ValidateSet("usb", "wireless")]
-    [string]$DebugMethod = "usb",
     [string]$DeviceConfig = (Join-Path $PSScriptRoot "..\test-device.local.properties"),
     [switch]$CleanupOnly,
     [switch]$RecoverMetricsOnly,
@@ -179,7 +177,7 @@ function Resolve-RemovableStorageRoot {
     return $root
 }
 
-function Resolve-WirelessAllowedDevice {
+function Resolve-AllowedDevice {
     param(
         [Parameter(Mandatory = $true)][string]$Adb,
         [Parameter(Mandatory = $true)][string]$HardwareSerial,
@@ -187,26 +185,49 @@ function Resolve-WirelessAllowedDevice {
     )
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     do {
-        $services = @(Invoke-LoggedAdb -Adb $Adb -Arguments @("mdns", "services"))
-        foreach ($line in $services) {
-            if ($line -match "^\s*(adb-[^\s]+)\s+_adb-tls-connect\._tcp\s+([^\s]+)\s*$" -and $line -match [regex]::Escape($HardwareSerial)) {
-                $serviceEndpoint = "$($Matches[1])._adb-tls-connect._tcp"
-                Invoke-LoggedAdb -Adb $Adb -Arguments @("connect", $serviceEndpoint) | Out-Null
+        $devices = @(Invoke-LoggedAdb -Adb $Adb -Arguments @("devices", "-l"))
+        $matchingEndpoints = @()
+        foreach ($candidate in @($devices | Where-Object { $_ -match "^\S+\s+device\s" })) {
+            $endpoint = [regex]::Match($candidate, "^(.*?)\s+device(?:\s|$)").Groups[1].Value.Trim()
+            $reportedSerial = ((Invoke-LoggedAdb -Adb $Adb -Arguments @("-s", $endpoint, "shell", "getprop", "ro.serialno")) -join "").Trim()
+            if ($reportedSerial -eq $HardwareSerial) {
+                $matchingEndpoints += $endpoint
             }
         }
-        $devices = @(Invoke-LoggedAdb -Adb $Adb -Arguments @("devices", "-l"))
-        $candidates = @($devices | Where-Object { $_ -match "^\S+\s+device\s" })
-        $matches = @()
-        foreach ($candidate in $candidates) {
-            $endpoint = ($candidate -split "\s+")[0]
-            if ($endpoint -eq $HardwareSerial) { continue }
-            $reportedSerial = ((Invoke-LoggedAdb -Adb $Adb -Arguments @("-s", $endpoint, "shell", "getprop", "ro.serialno")) -join "").Trim()
-            if ($reportedSerial -eq $HardwareSerial) { $matches += $endpoint }
+        $connectedMatches = @($matchingEndpoints | Select-Object -Unique)
+        if ($connectedMatches.Count -gt 0) {
+            $selected = if ($connectedMatches -contains $HardwareSerial) {
+                $HardwareSerial
+            } else {
+                $connectedMatches |
+                    Sort-Object @{ Expression = { if ($_ -match " \(\d+\)\._adb-tls-connect\._tcp$") { 1 } else { 0 } } }, @{ Expression = { $_ } } |
+                    Select-Object -First 1
+            }
+            foreach ($extra in @($connectedMatches | Where-Object { $_ -ne $selected })) {
+                Invoke-LoggedAdb -Adb $Adb -Arguments @("disconnect", $extra) | Out-Null
+                Write-SafeLog "Disconnected duplicate ADB endpoint $extra for hardware serial $HardwareSerial."
+            }
+            return $selected
         }
-        if ($matches.Count -eq 1) { return $matches[0] }
+
+        $matchingServices = @()
+        foreach ($line in @(Invoke-LoggedAdb -Adb $Adb -Arguments @("mdns", "services"))) {
+            if ($line -match "^\s*(.+?)\s+_adb-tls-connect\._tcp\s+([^\s]+)\s*$") {
+                $serviceName = $Matches[1].Trim()
+                if ($serviceName -match [regex]::Escape($HardwareSerial)) {
+                    $matchingServices += $serviceName
+                }
+            }
+        }
+        $selectedService = $matchingServices |
+            Sort-Object @{ Expression = { if ($_ -match " \(\d+\)$") { 1 } else { 0 } } }, @{ Expression = { $_ } } |
+            Select-Object -First 1
+        if ($selectedService) {
+            Invoke-LoggedAdb -Adb $Adb -Arguments @("connect", "${selectedService}._adb-tls-connect._tcp") | Out-Null
+        }
         Start-Sleep -Seconds 2
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw "Wireless device with hardware serial $HardwareSerial did not resolve to exactly one connected endpoint within $TimeoutSeconds seconds."
+    throw "Allowed device with hardware serial $HardwareSerial did not resolve to a unique USB or wireless endpoint within $TimeoutSeconds seconds."
 }
 
 function Get-PackageMetadata {
@@ -639,15 +660,15 @@ function Wait-DetachedMacrobenchmarkCompletion {
             $state = @(& $script:adb -s $script:serial get-state 2>$null)
             $connected = $LASTEXITCODE -eq 0 -and (($state -join "").Trim() -eq "device")
         } catch { }
-        if (-not $connected -and $DebugMethod -eq "wireless") {
+        if (-not $connected) {
             try {
-                $script:serial = Resolve-WirelessAllowedDevice -Adb $script:adb -HardwareSerial $script:hardwareSerial -TimeoutSeconds 15
+                $script:serial = Resolve-AllowedDevice -Adb $script:adb -HardwareSerial $script:hardwareSerial -TimeoutSeconds 15
                 $env:ANDROID_SERIAL = $script:serial
                 $connected = $true
-                Write-SafeLog "Wireless ADB reconnected while the device-side benchmark continued."
+                Write-SafeLog "ADB reconnected while the device-side benchmark continued."
             } catch {
                 if (([DateTime]::UtcNow - $lastConnectionNotice).TotalSeconds -ge 60) {
-                    Write-SafeLog "Wireless ADB is unavailable; benchmark continues on-device and results remain recoverable."
+                    Write-SafeLog "ADB is unavailable; benchmark continues on-device and results remain recoverable."
                     $lastConnectionNotice = [DateTime]::UtcNow
                 }
             }
@@ -1011,12 +1032,7 @@ try {
         $script:adb = Join-Path $env:LOCALAPPDATA "Android\Sdk\platform-tools\adb.exe"
         if (-not (Test-Path -LiteralPath $script:adb)) { throw "adb was not found: $script:adb" }
         $script:aapt = Get-Aapt
-        if ($DebugMethod -eq "wireless") {
-            $script:serial = Resolve-WirelessAllowedDevice -Adb $script:adb -HardwareSerial $script:hardwareSerial
-        } else {
-            $script:serial = $script:hardwareSerial
-            Wait-AllowedDevice -Adb $script:adb -Serial $script:serial
-        }
+        $script:serial = Resolve-AllowedDevice -Adb $script:adb -HardwareSerial $script:hardwareSerial
         Wait-AllowedDevice -Adb $script:adb -Serial $script:serial
         $env:ANDROID_SERIAL = $script:serial
         $script:removableStorageRoot = Resolve-RemovableStorageRoot -Required:(-not $CleanupOnly)
@@ -1179,6 +1195,8 @@ try {
         if (-not $productionUserId -or -not $targetUserId -or $productionUserId -eq $targetUserId) {
             throw [SafePhaseException]::new("Macrobenchmark", "Production and benchmark target apps do not have distinct Android UIDs.", "")
         }
+        $script:serial = Resolve-AllowedDevice -Adb $script:adb -HardwareSerial $script:hardwareSerial
+        $env:ANDROID_SERIAL = $script:serial
     } catch {
         if ($_.Exception -is [SafePhaseException]) {
             throw

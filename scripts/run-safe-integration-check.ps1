@@ -1,6 +1,5 @@
 param(
-    [ValidateSet("usb", "wireless")]
-    [string]$DebugMethod = "usb",
+    [switch]$FullRebuildTest,
     [string]$DeviceConfig = (Join-Path $PSScriptRoot "..\test-device.local.properties")
 )
 
@@ -16,6 +15,28 @@ $timeouts = @{
     Install = 600
     IntegrationTest = 5400
 }
+$validationConfigInputs = @(
+    "app\build.gradle.kts",
+    "build.gradle.kts",
+    "settings.gradle.kts",
+    "gradle.properties",
+    "local.properties",
+    "gradle",
+    "gradlew",
+    "gradlew.bat",
+    "scripts\SafeScriptCommon.ps1",
+    "scripts\run-safe-debug-check.ps1",
+    "scripts\run-safe-integration-check.ps1"
+)
+$buildInputs = $validationConfigInputs + @(
+    "app\src\main",
+    "app\src\androidTest",
+    "app\src\integrationTest",
+    "app\src\benchmark"
+)
+$unitMainInputs = $validationConfigInputs + @("app\src\main")
+$unitInputs = $unitMainInputs + @("app\src\test")
+$lintInputs = $validationConfigInputs + @("app\src\main")
 
 function Invoke-LoggedAdb {
     param(
@@ -74,7 +95,7 @@ function Wait-AllowedDevice {
     throw "Allowed test device $Serial did not reconnect exactly once within $TimeoutSeconds seconds."
 }
 
-function Resolve-WirelessAllowedDevice {
+function Resolve-AllowedDevice {
     param(
         [Parameter(Mandatory = $true)][string]$Adb,
         [Parameter(Mandatory = $true)][string]$HardwareSerial,
@@ -82,32 +103,49 @@ function Resolve-WirelessAllowedDevice {
     )
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     do {
-        $services = @(Invoke-LoggedAdb -Adb $Adb -Arguments @("mdns", "services"))
-        foreach ($line in $services) {
-            if ($line -match "^\s*(adb-[^\s]+)\s+_adb-tls-connect\._tcp\s+([^\s]+)\s*$") {
-                $serviceName = $Matches[1]
-                if ($line -match [regex]::Escape($HardwareSerial)) {
-                    Invoke-LoggedAdb -Adb $Adb -Arguments @("connect", $serviceName) | Out-Null
+        $devices = @(Invoke-LoggedAdb -Adb $Adb -Arguments @("devices", "-l"))
+        $matchingEndpoints = @()
+        foreach ($candidate in @($devices | Where-Object { $_ -match "^\S+\s+device\s" })) {
+            $endpoint = [regex]::Match($candidate, "^(.*?)\s+device(?:\s|$)").Groups[1].Value.Trim()
+            $reportedSerial = ((Invoke-LoggedAdb -Adb $Adb -Arguments @("-s", $endpoint, "shell", "getprop", "ro.serialno")) -join "").Trim()
+            if ($reportedSerial -eq $HardwareSerial) {
+                $matchingEndpoints += $endpoint
+            }
+        }
+        $connectedMatches = @($matchingEndpoints | Select-Object -Unique)
+        if ($connectedMatches.Count -gt 0) {
+            $selected = if ($connectedMatches -contains $HardwareSerial) {
+                $HardwareSerial
+            } else {
+                $connectedMatches |
+                    Sort-Object @{ Expression = { if ($_ -match " \(\d+\)\._adb-tls-connect\._tcp$") { 1 } else { 0 } } }, @{ Expression = { $_ } } |
+                    Select-Object -First 1
+            }
+            foreach ($extra in @($connectedMatches | Where-Object { $_ -ne $selected })) {
+                Invoke-LoggedAdb -Adb $Adb -Arguments @("disconnect", $extra) | Out-Null
+                Write-SafeLog "Disconnected duplicate ADB endpoint $extra for hardware serial $HardwareSerial."
+            }
+            return $selected
+        }
+
+        $matchingServices = @()
+        foreach ($line in @(Invoke-LoggedAdb -Adb $Adb -Arguments @("mdns", "services"))) {
+            if ($line -match "^\s*(.+?)\s+_adb-tls-connect\._tcp\s+([^\s]+)\s*$") {
+                $serviceName = $Matches[1].Trim()
+                if ($serviceName -match [regex]::Escape($HardwareSerial)) {
+                    $matchingServices += $serviceName
                 }
             }
         }
-
-        $devices = @(Invoke-LoggedAdb -Adb $Adb -Arguments @("devices", "-l"))
-        $candidates = @($devices | Where-Object { $_ -match "^\S+\s+device\s" })
-        $matches = @()
-        foreach ($candidate in $candidates) {
-            $endpoint = ($candidate -split "\s+")[0]
-            $reportedSerial = ((Invoke-LoggedAdb -Adb $Adb -Arguments @("-s", $endpoint, "shell", "getprop", "ro.serialno")) -join "").Trim()
-            if ($reportedSerial -eq $HardwareSerial) {
-                $matches += $endpoint
-            }
-        }
-        if ($matches.Count -eq 1) {
-            return $matches[0]
+        $selectedService = $matchingServices |
+            Sort-Object @{ Expression = { if ($_ -match " \(\d+\)$") { 1 } else { 0 } } }, @{ Expression = { $_ } } |
+            Select-Object -First 1
+        if ($selectedService) {
+            Invoke-LoggedAdb -Adb $Adb -Arguments @("connect", "${selectedService}._adb-tls-connect._tcp") | Out-Null
         }
         Start-Sleep -Seconds 2
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw "Wireless device with hardware serial $HardwareSerial did not resolve to exactly one connected endpoint within $TimeoutSeconds seconds."
+    throw "Allowed device with hardware serial $HardwareSerial did not resolve to a unique USB or wireless endpoint within $TimeoutSeconds seconds."
 }
 
 function Get-PackageMetadata {
@@ -134,15 +172,19 @@ Start-SafeScript -Name "run-safe-integration-check" -RepoRoot $repoRoot
 Set-Location $repoRoot
 
 $configPath = ""
+$hardwareSerial = ""
 $serial = ""
 $productionPackage = ""
 $testPackage = ""
 $testRunnerComponent = ""
-$selectedDebugMethod = ""
 $adb = ""
 $targetApk = ""
 $androidTestApk = ""
 $productionBefore = ""
+$buildFingerprint = ""
+$unitMainFingerprint = ""
+$unitFingerprint = ""
+$lintFingerprint = ""
 $runError = $null
 
 try {
@@ -161,8 +203,8 @@ try {
             }
         }
 
-        $script:serial = $properties["testDeviceSerial"]
-        if ([string]::IsNullOrWhiteSpace($script:serial)) { throw "testDeviceSerial is required in $script:configPath" }
+        $script:hardwareSerial = $properties["testDeviceSerial"]
+        if ([string]::IsNullOrWhiteSpace($script:hardwareSerial)) { throw "testDeviceSerial is required in $script:configPath" }
         $allowCoLocated = $properties["allowCoLocatedProductionApp"]
         if ($allowCoLocated -ne "true") { throw "allowCoLocatedProductionApp=true is required in $script:configPath" }
         $script:productionPackage = $properties["productionPackage"]
@@ -170,14 +212,11 @@ try {
         if ($script:productionPackage -ne "com.lyco256.llm") { throw "productionPackage must be com.lyco256.llm" }
         if ($script:testPackage -ne "com.lyco256.llm.test") { throw "testPackage must be com.lyco256.llm.test" }
         if ($script:productionPackage -eq $script:testPackage) { throw "Production and test package IDs must be different." }
-        $script:selectedDebugMethod = $DebugMethod.ToLowerInvariant()
         $script:testRunnerComponent = "$($script:testPackage).test/androidx.test.runner.AndroidJUnitRunner"
 
         $script:adb = Join-Path $env:LOCALAPPDATA "Android\Sdk\platform-tools\adb.exe"
         if (-not (Test-Path -LiteralPath $script:adb)) { throw "adb was not found: $script:adb" }
-        if ($script:selectedDebugMethod -eq "wireless") {
-            $script:serial = Resolve-WirelessAllowedDevice -Adb $script:adb -HardwareSerial $script:serial
-        }
+        $script:serial = Resolve-AllowedDevice -Adb $script:adb -HardwareSerial $script:hardwareSerial
         Wait-AllowedDevice -Adb $script:adb -Serial $script:serial
         $env:ANDROID_SERIAL = $script:serial
 
@@ -186,21 +225,38 @@ try {
             $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
             Write-SafeLog "JAVA_HOME=$env:JAVA_HOME"
         }
+        $script:buildFingerprint = Get-SafeValidationFingerprint -RepoRoot $repoRoot -InputPaths $buildInputs -CacheVersion "safe-shared-build-v1"
+        $script:unitMainFingerprint = Get-SafeValidationFingerprint -RepoRoot $repoRoot -InputPaths $unitMainInputs -CacheVersion "safe-unit-main-v1"
+        $script:unitFingerprint = Get-SafeValidationFingerprint -RepoRoot $repoRoot -InputPaths $unitInputs -CacheVersion "safe-unit-validation-v3"
+        $script:lintFingerprint = Get-SafeValidationFingerprint -RepoRoot $repoRoot -InputPaths $lintInputs -CacheVersion "safe-lint-validation-v2"
 
         $script:productionBefore = Get-PackageMetadata -Adb $script:adb -Serial $script:serial -PackageName $script:productionPackage
     }
 
     try {
         Invoke-SafePhase -Name "Build" -Action {
-            Invoke-SafeNativeCommand -FilePath ".\gradlew.bat" -Arguments @(":app:assembleDebug", ":app:verifyTestEnvironmentIsolation", ":app:assembleIntegrationTest", ":app:assembleIntegrationTestAndroidTest", "--console=plain", "--no-daemon") -TimeoutSeconds $timeouts.Build -WorkingDirectory $repoRoot
+            if ($FullRebuildTest -or -not (Test-SafeValidationCache -RepoRoot $repoRoot -Key "app-build" -Fingerprint $script:buildFingerprint)) {
+                $buildArguments = @()
+                if ($FullRebuildTest) { $buildArguments += ":app:clean" }
+                $buildArguments += @(":app:assembleDebug", ":app:verifyTestEnvironmentIsolation", ":app:assembleIntegrationTest", ":app:assembleIntegrationTestAndroidTest", "--console=plain", "--no-daemon")
+                Invoke-SafeNativeCommand -FilePath ".\gradlew.bat" -Arguments $buildArguments -TimeoutSeconds $timeouts.Build -WorkingDirectory $repoRoot
+                Set-SafeValidationCache -RepoRoot $repoRoot -Key "app-build" -Fingerprint $script:buildFingerprint -OutputPaths @(
+                    "app\build\outputs\apk\debug\app-debug.apk",
+                    "app\build\outputs\apk\integrationTest\app-integrationTest.apk",
+                    "app\build\outputs\apk\androidTest\integrationTest\app-integrationTest-androidTest.apk"
+                )
+            }
         }
 
         Invoke-SafePhase -Name "UnitTest" -Action {
-            Invoke-SafeNativeCommand -FilePath ".\gradlew.bat" -Arguments @(":app:testDebugUnitTest", "--console=plain", "--no-daemon") -TimeoutSeconds $timeouts.UnitTest -WorkingDirectory $repoRoot
+            Invoke-SafeUnitTestValidation -RepoRoot $repoRoot -Fingerprint $script:unitFingerprint -MainFingerprint $script:unitMainFingerprint -TimeoutSeconds $timeouts.UnitTest -ForceFull:$FullRebuildTest
         }
 
         Invoke-SafePhase -Name "Lint" -Action {
-            Invoke-SafeNativeCommand -FilePath ".\gradlew.bat" -Arguments @(":app:lintDebug", "--console=plain", "--no-daemon") -TimeoutSeconds $timeouts.Lint -WorkingDirectory $repoRoot
+            if ($FullRebuildTest -or -not (Test-SafeValidationCache -RepoRoot $repoRoot -Key "app-lint" -Fingerprint $script:lintFingerprint)) {
+                Invoke-SafeNativeCommand -FilePath ".\gradlew.bat" -Arguments @(":app:lintDebug", "--console=plain", "--no-daemon") -TimeoutSeconds $timeouts.Lint -WorkingDirectory $repoRoot
+                Set-SafeValidationCache -RepoRoot $repoRoot -Key "app-lint" -Fingerprint $script:lintFingerprint
+            }
         }
 
         Invoke-SafePhase -Name "Install" -Action {
@@ -239,19 +295,13 @@ try {
             }
             Wait-AllowedDevice -Adb $script:adb -Serial $script:serial
             Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "install", "-r", $script:targetApk) -TimeoutSeconds $timeouts.Install -WorkingDirectory $repoRoot
-            if ($script:selectedDebugMethod -eq "wireless") {
-                Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "install", "-r", $script:androidTestApk) -TimeoutSeconds $timeouts.Install -WorkingDirectory $repoRoot
-            }
+            Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "install", "-r", $script:androidTestApk) -TimeoutSeconds $timeouts.Install -WorkingDirectory $repoRoot
         }
 
         Invoke-SafePhase -Name "IntegrationTest" -Action {
             Wait-AllowedDevice -Adb $script:adb -Serial $script:serial
             Prepare-ComposeTestDevice -Adb $script:adb -Serial $script:serial
-            if ($script:selectedDebugMethod -eq "wireless") {
-                Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "shell", "am", "instrument", "-w", "-r", $script:testRunnerComponent) -TimeoutSeconds $timeouts.IntegrationTest -WorkingDirectory $repoRoot
-            } else {
-                Invoke-SafeNativeCommand -FilePath ".\gradlew.bat" -Arguments @(":app:connectedIntegrationTestAndroidTest", "--console=plain", "--no-daemon") -TimeoutSeconds $timeouts.IntegrationTest -WorkingDirectory $repoRoot
-            }
+            Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "shell", "am", "instrument", "-w", "-r", $script:testRunnerComponent) -TimeoutSeconds $timeouts.IntegrationTest -WorkingDirectory $repoRoot
             $testPath = ((Invoke-LoggedAdb -Adb $script:adb -Arguments @("-s", $script:serial, "shell", "pm", "path", $script:testPackage)) -join "`n").Trim()
             if (-not $testPath.StartsWith("package:")) {
                 Invoke-SafeNativeCommand -FilePath $script:adb -Arguments @("-s", $script:serial, "install", "-r", $script:targetApk) -TimeoutSeconds $timeouts.Install -WorkingDirectory $repoRoot
@@ -278,6 +328,8 @@ try {
         if (-not $productionUserId -or -not $testUserId -or $productionUserId -eq $testUserId) {
             throw [SafePhaseException]::new("IntegrationTest", "Production and test apps do not have distinct Android UIDs.", "")
         }
+        $script:serial = Resolve-AllowedDevice -Adb $script:adb -HardwareSerial $script:hardwareSerial
+        $env:ANDROID_SERIAL = $script:serial
     } catch {
         if ($_.Exception -is [SafePhaseException]) {
             throw
