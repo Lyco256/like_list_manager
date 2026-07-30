@@ -33,6 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -401,6 +402,183 @@ class MediaGridMorphCanvasComposeTest {
             assertEquals(1, resolved.get())
             assertSame(prepared.preparedImageByAssetId.getValue(300L), model.slots.single().startImage)
             assertSame(model.slots.single().startImage, model.slots.single().endImage)
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    @Test
+    fun interactiveLayerTracksFixedPointersReversesAndReusesResolvedRenderWork() {
+        val red = solidBitmap(AndroidColor.RED)
+        val blue = solidBitmap(AndroidColor.BLUE)
+        val prepared = preparedIndex(1L, mapOf(1L to red, 2L to blue))
+        val increase = pair(
+            viewport = Rect(0f, 0f, 120f, 120f),
+            slots = listOf(
+                slot(Rect(0f, 0f, 120f, 120f), 1L, 2L).copy(
+                    endRect = Rect(20f, 20f, 100f, 100f),
+                ),
+            ),
+        ).copy(fromColumnCount = 4, toColumnCount = 5)
+        val decrease = increase.copy(toColumnCount = 3)
+        val pairs = mapOf(
+            MediaGridMorphDirection.IncreaseColumns to increase,
+            MediaGridMorphDirection.DecreaseColumns to decrease,
+        )
+        val identity = MediaGridMorphInteractionIdentity(
+            sourceRevision = increase.sourceRevision,
+            frameKey = increase.frameKey,
+            currentColumnCount = 4,
+            viewportSignature = increase.viewportSignature,
+        )
+        val requests = ArrayList<MediaGridMorphHandoffRequest>()
+        val controller = MediaGridMorphInteractionController(requests::add)
+        val modelBuilds = AtomicInteger()
+        val imageResolutions = AtomicInteger()
+        val textMeasures = AtomicInteger()
+        var initiallyTrackedPointerIds: Pair<Long, Long>? = null
+        try {
+            composeRule.setContent {
+                MaterialTheme {
+                    Box(
+                        Modifier
+                            .requiredSize(120.dp / androidx.compose.ui.platform.LocalDensity.current.density)
+                            .background(Color.Black)
+                            .testTag("interactive_morph_root"),
+                    ) {
+                        MediaGridMorphInteractiveTestLayer(
+                            controller = controller,
+                            identity = identity,
+                            preparedPairsSnapshot = { pairs },
+                            preparedIndex = prepared,
+                            isScrollInProgress = { false },
+                            onRenderModelBuilt = { modelBuilds.incrementAndGet() },
+                            onImageResolved = { imageResolutions.incrementAndGet() },
+                            onTextMeasured = { textMeasures.incrementAndGet() },
+                        )
+                    }
+                }
+            }
+            composeRule.waitForIdle()
+
+            composeRule.onNodeWithTag("interactive_morph_root").performTouchInput {
+                down(0, Offset(30f, 60f))
+                moveTo(0, Offset(40f, 60f))
+                up(0)
+            }
+            composeRule.waitForIdle()
+            assertEquals(MediaGridMorphPhase.Idle, controller.snapshot().phase)
+            assertEquals(0, modelBuilds.get())
+
+            composeRule.onNodeWithTag("interactive_morph_root").performTouchInput {
+                down(0, Offset(30f, 60f))
+                down(1, Offset(90f, 60f))
+                moveTo(0, Offset(40f, 60f))
+                moveTo(1, Offset(80f, 60f))
+            }
+            composeRule.waitForIdle()
+            assertEquals(MediaGridMorphPhase.Tracking, controller.snapshot().phase)
+            initiallyTrackedPointerIds = controller.trackedPointerIds()
+            assertTrue(initiallyTrackedPointerIds != null)
+            assertTrue(initiallyTrackedPointerIds!!.first != initiallyTrackedPointerIds!!.second)
+            assertEquals(MediaGridMorphDirection.IncreaseColumns, controller.snapshot().direction)
+            assertEquals(1f, controller.snapshot().progress, 0.001f)
+            assertEquals(1, modelBuilds.get())
+            assertEquals(2, imageResolutions.get())
+            var pixels = composeRule.onNodeWithTag("interactive_morph_root").captureToImage().toPixelMap()
+            assertTrue(pixels[60, 60].blue > pixels[60, 60].red)
+            assertTrue(pixels[5, 60].red < 0.05f && pixels[5, 60].blue < 0.05f)
+
+            composeRule.onNodeWithTag("interactive_morph_root").performTouchInput {
+                moveTo(0, Offset(30f, 60f))
+                moveTo(1, Offset(90f, 60f))
+            }
+            composeRule.waitForIdle()
+            assertEquals(0f, controller.snapshot().progress, 0.001f)
+            assertEquals(1, modelBuilds.get())
+            pixels = composeRule.onNodeWithTag("interactive_morph_root").captureToImage().toPixelMap()
+            assertTrue(pixels[60, 60].red > pixels[60, 60].blue)
+            assertTrue(pixels[5, 60].red > 0.9f)
+
+            composeRule.onNodeWithTag("interactive_morph_root").performTouchInput {
+                moveTo(0, Offset(15f, 70f))
+                moveTo(1, Offset(105f, 70f))
+                down(2, Offset(60f, 20f))
+                moveTo(2, Offset(80f, 20f))
+            }
+            composeRule.waitForIdle()
+            assertEquals(MediaGridMorphDirection.DecreaseColumns, controller.snapshot().direction)
+            assertTrue(controller.snapshot().progress > 0f)
+            assertEquals(initiallyTrackedPointerIds, controller.trackedPointerIds())
+            assertEquals(Offset(0f, 10f), controller.snapshot().currentPinchCenter!! - Offset(60f, 60f))
+            assertEquals(2, modelBuilds.get())
+            assertEquals(4, imageResolutions.get())
+
+            composeRule.onNodeWithTag("interactive_morph_root").performTouchInput {
+                up(0)
+                up(1)
+                up(2)
+            }
+            composeRule.waitForIdle()
+            assertEquals(MediaGridMorphPhase.AwaitingGridHandoff, controller.snapshot().phase)
+            assertEquals(1, requests.size)
+            assertEquals(1f, controller.snapshot().progress, 0.001f)
+            composeRule.onAllNodesWithTag("media_grid_morph_canvas").assertCountEquals(1)
+            assertEquals(2, modelBuilds.get())
+            assertEquals(4, imageResolutions.get())
+            assertEquals(0, textMeasures.get())
+            pixels = composeRule.onNodeWithTag("interactive_morph_root").captureToImage().toPixelMap()
+            assertTrue(pixels[60, 60].blue > pixels[60, 60].red)
+        } finally {
+            red.recycle()
+            blue.recycle()
+        }
+    }
+
+    @Test
+    fun interactiveLayerCancelProducesNoHandoff() {
+        val bitmap = solidBitmap(AndroidColor.RED)
+        val prepared = preparedIndex(1L, mapOf(1L to bitmap))
+        val pair = pair(
+            viewport = Rect(0f, 0f, 100f, 100f),
+            slots = listOf(slot(Rect(0f, 0f, 100f, 100f), 1L, 1L)),
+        ).copy(fromColumnCount = 4, toColumnCount = 5)
+        val identity = MediaGridMorphInteractionIdentity(
+            pair.sourceRevision,
+            pair.frameKey,
+            4,
+            pair.viewportSignature,
+        )
+        val requests = ArrayList<MediaGridMorphHandoffRequest>()
+        val controller = MediaGridMorphInteractionController(requests::add)
+        try {
+            composeRule.setContent {
+                MaterialTheme {
+                    MediaGridMorphInteractiveTestLayer(
+                        controller = controller,
+                        identity = identity,
+                        preparedPairsSnapshot = {
+                            mapOf(MediaGridMorphDirection.IncreaseColumns to pair)
+                        },
+                        preparedIndex = prepared,
+                        isScrollInProgress = { false },
+                        modifier = Modifier
+                            .requiredSize(100.dp / androidx.compose.ui.platform.LocalDensity.current.density)
+                            .testTag("cancel_morph_root"),
+                    )
+                }
+            }
+            composeRule.onNodeWithTag("cancel_morph_root").performTouchInput {
+                down(0, Offset(25f, 50f))
+                down(1, Offset(75f, 50f))
+                moveTo(0, Offset(35f, 50f))
+                moveTo(1, Offset(65f, 50f))
+                cancel()
+            }
+            composeRule.waitForIdle()
+            assertEquals(MediaGridMorphPhase.Idle, controller.snapshot().phase)
+            assertTrue(requests.isEmpty())
+            assertFalse(controller.snapshot().handoffRequest != null)
         } finally {
             bitmap.recycle()
         }

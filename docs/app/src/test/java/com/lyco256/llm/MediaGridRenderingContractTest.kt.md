@@ -1,5 +1,9 @@
 # `MediaGridRenderingContractTest.kt`
 
+## 2026-07-30 Morph interaction production境界
+
+`MediaGridMorphInteraction.kt`がTEST_HARNESS guardと`withFrameNanos` runnerを持つ一方、production `TagHierarchyUiV2.kt`がinteractive layer、controller、handoff requestを参照せず、既存`mediaGridPinchToResize`とrelease時列数callbackを維持することを静的に固定する。
+
 ## 対応ソース
 
 `app/src/test/java/com/lyco256/llm/MediaGridRenderingContractTest.kt`

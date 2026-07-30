@@ -1,0 +1,605 @@
+package com.lyco256.llm
+
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.changedToUp
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlin.math.hypot
+
+internal data class MediaGridMorphInteractionIdentity(
+    val sourceRevision: Long,
+    val frameKey: MediaGridRenderKey,
+    val currentColumnCount: Int,
+    val viewportSignature: MediaGridViewportSignature,
+)
+
+internal data class MediaGridMorphHandoffRequest(
+    val interactionGeneration: Long,
+    val sourceRevision: Long,
+    val frameKey: MediaGridRenderKey,
+    val fromColumnCount: Int,
+    val toColumnCount: Int,
+    val plan: MediaGridMorphPlan,
+    val anchor: MediaGridMorphAnchor?,
+    val finalCorrection: Offset,
+    val finalPinchCenter: Offset,
+)
+
+internal data class MediaGridMorphInteractionSnapshot(
+    val phase: MediaGridMorphPhase,
+    val direction: MediaGridMorphDirection?,
+    val plan: MediaGridMorphPlan?,
+    val progress: Float,
+    val correction: Offset,
+    val currentPinchCenter: Offset?,
+    val fromColumnCount: Int,
+    val toColumnCount: Int,
+    val sourceRevision: Long?,
+    val frameKey: MediaGridRenderKey?,
+    val handoffRequest: MediaGridMorphHandoffRequest?,
+    val interactionGeneration: Long,
+)
+
+internal fun mediaGridMorphScale(initialDistance: Float, currentDistance: Float): Float? {
+    if (
+        !initialDistance.isFinite() ||
+        !currentDistance.isFinite() ||
+        initialDistance <= 0f ||
+        currentDistance <= 0f
+    ) return null
+    return initialDistance / currentDistance.coerceAtLeast(0.001f)
+}
+
+internal fun mediaGridMorphShouldConsumePointer(
+    accepted: Boolean,
+    pointerId: Long,
+    firstTrackedPointerId: Long,
+    secondTrackedPointerId: Long,
+): Boolean = accepted &&
+    (pointerId == firstTrackedPointerId || pointerId == secondTrackedPointerId)
+
+internal fun mediaGridMorphFocalCorrection(
+    plan: MediaGridMorphPlan,
+    progress: Float,
+    currentPinchCenter: Offset,
+): Offset {
+    val anchor = plan.anchor ?: return Offset.Zero
+    val rect = mediaGridMorphRect(anchor.slot, progress.coerceIn(0f, 1f))
+    val focalInViewport = Offset(
+        x = rect.left + rect.width * anchor.focalU,
+        y = rect.top + rect.height * anchor.focalV,
+    )
+    val focalInCanvas = focalInViewport - plan.viewport.topLeft
+    return currentPinchCenter - focalInCanvas
+}
+
+internal class MediaGridMorphInteractionController(
+    private val onHandoffRequest: (MediaGridMorphHandoffRequest) -> Unit = {},
+) {
+    private data class Gesture(
+        val identity: MediaGridMorphInteractionIdentity,
+        val pairs: Map<MediaGridMorphDirection, MediaGridMorphPreparedPair>,
+        val firstPointerId: Long,
+        val secondPointerId: Long,
+        val initialDistance: Float,
+        val initialCenter: Offset,
+        val generation: Long,
+    )
+
+    private data class Settle(
+        val generation: Long,
+        val startProgress: Float,
+        val startCorrection: Offset,
+        val fixedPinchCenter: Offset,
+        val toTarget: Boolean,
+        var firstFrameNanos: Long? = null,
+    )
+
+    private var nextGeneration = 0L
+    private var gesture: Gesture? = null
+    private var settle: Settle? = null
+    private var currentIdentity: MediaGridMorphInteractionIdentity? = null
+    private var currentSnapshot = MediaGridMorphInteractionSnapshot(
+        phase = MediaGridMorphPhase.Idle,
+        direction = null,
+        plan = null,
+        progress = 0f,
+        correction = Offset.Zero,
+        currentPinchCenter = null,
+        fromColumnCount = 0,
+        toColumnCount = 0,
+        sourceRevision = null,
+        frameKey = null,
+        handoffRequest = null,
+        interactionGeneration = 0L,
+    )
+
+    private val _activePlan = mutableStateOf<MediaGridMorphPlan?>(null)
+    private val _progress = mutableStateOf(0f)
+    private val _correction = mutableStateOf(Offset.Zero)
+    internal val settleSignal: MutableState<Long> = mutableLongStateOf(0L)
+    val activePlan: State<MediaGridMorphPlan?> get() = _activePlan
+    val progress: State<Float> get() = _progress
+    val correction: State<Offset> get() = _correction
+
+    fun snapshot(): MediaGridMorphInteractionSnapshot = currentSnapshot
+
+    fun beginPointers(
+        identity: MediaGridMorphInteractionIdentity,
+        preparedPairsSnapshot: Map<MediaGridMorphDirection, MediaGridMorphPreparedPair>,
+        firstPointerId: Long,
+        secondPointerId: Long,
+        firstPosition: Offset,
+        secondPosition: Offset,
+    ): Boolean {
+        val initialDistance = pointerDistance(firstPosition, secondPosition)
+        if (!initialDistance.isFinite() || initialDistance <= 0f) return false
+        val validPairs = preparedPairsSnapshot.filterValues { it.matches(identity) }
+        if (validPairs.isEmpty()) return false
+        val generation = ++nextGeneration
+        val center = midpoint(firstPosition, secondPosition)
+        currentIdentity = identity
+        gesture = Gesture(
+            identity = identity,
+            pairs = validPairs,
+            firstPointerId = firstPointerId,
+            secondPointerId = secondPointerId,
+            initialDistance = initialDistance,
+            initialCenter = center,
+            generation = generation,
+        )
+        settle = null
+        _activePlan.value = null
+        publish(
+            phase = MediaGridMorphPhase.Tracking,
+            direction = null,
+            plan = null,
+            progress = 0f,
+            correction = Offset.Zero,
+            center = center,
+            identity = identity,
+            toColumnCount = identity.currentColumnCount,
+            handoffRequest = null,
+            generation = generation,
+        )
+        return true
+    }
+
+    fun trackedPointerIds(): Pair<Long, Long>? =
+        gesture?.let { it.firstPointerId to it.secondPointerId }
+
+    fun updatePointers(firstPosition: Offset, secondPosition: Offset) {
+        val activeGesture = gesture ?: return
+        if (currentSnapshot.phase != MediaGridMorphPhase.Tracking) return
+        val currentDistance = pointerDistance(firstPosition, secondPosition)
+        val scale = mediaGridMorphScale(activeGesture.initialDistance, currentDistance) ?: return
+        val center = midpoint(firstPosition, secondPosition)
+        val nextDirection = mediaGridMorphDirectionForScale(scale)
+        var plan = currentSnapshot.plan
+        var direction = currentSnapshot.direction
+        if (nextDirection != null && nextDirection != direction) {
+            val pair = activeGesture.pairs[nextDirection]
+            if (pair != null) {
+                plan = MediaGridMorphPlan.select(pair, activeGesture.initialCenter)
+                direction = nextDirection
+                _activePlan.value = plan
+            }
+        }
+        val nextProgress = if (nextDirection == null || plan == null) {
+            0f
+        } else {
+            mediaGridMorphProgressForScale(scale, nextDirection)
+        }
+        val nextCorrection = plan?.let {
+            mediaGridMorphFocalCorrection(it, nextProgress, center)
+        } ?: Offset.Zero
+        publish(
+            phase = MediaGridMorphPhase.Tracking,
+            direction = direction,
+            plan = plan,
+            progress = nextProgress,
+            correction = nextCorrection,
+            center = center,
+            identity = activeGesture.identity,
+            toColumnCount = plan?.toColumnCount ?: activeGesture.identity.currentColumnCount,
+            handoffRequest = null,
+            generation = activeGesture.generation,
+        )
+    }
+
+    fun releasePointers(releaseTimeNanos: Long? = null) {
+        val activeGesture = gesture ?: return
+        if (currentSnapshot.phase != MediaGridMorphPhase.Tracking) return
+        val plan = currentSnapshot.plan
+        val center = currentSnapshot.currentPinchCenter
+        gesture = null
+        if (plan == null || center == null) {
+            resetToIdle(activeGesture.identity.currentColumnCount, activeGesture.generation)
+            return
+        }
+        val toTarget = currentSnapshot.progress >= MediaGridMorphDefaults.ReleaseThreshold
+        settle = Settle(
+            generation = activeGesture.generation,
+            startProgress = currentSnapshot.progress,
+            startCorrection = currentSnapshot.correction,
+            fixedPinchCenter = center,
+            toTarget = toTarget,
+            firstFrameNanos = releaseTimeNanos,
+        )
+        publish(
+            phase = if (toTarget) MediaGridMorphPhase.SettlingToTarget else MediaGridMorphPhase.SettlingToCurrent,
+            direction = currentSnapshot.direction,
+            plan = plan,
+            progress = currentSnapshot.progress,
+            correction = currentSnapshot.correction,
+            center = center,
+            identity = activeGesture.identity,
+            toColumnCount = plan.toColumnCount,
+            handoffRequest = null,
+            generation = activeGesture.generation,
+        )
+        settleSignal.value = activeGesture.generation
+    }
+
+    fun cancelPointers() {
+        val identity = currentIdentity
+        val generation = currentSnapshot.interactionGeneration
+        gesture = null
+        settle = null
+        resetToIdle(identity?.currentColumnCount ?: currentSnapshot.fromColumnCount, generation)
+    }
+
+    fun updateIdentity(identity: MediaGridMorphInteractionIdentity) {
+        currentIdentity = identity
+        val snapshot = currentSnapshot
+        if (snapshot.phase == MediaGridMorphPhase.Idle) return
+        val plan = snapshot.plan
+        if (
+            snapshot.sourceRevision != identity.sourceRevision ||
+            snapshot.frameKey != identity.frameKey ||
+            snapshot.fromColumnCount != identity.currentColumnCount ||
+            plan?.preparedPair?.viewportSignature != identity.viewportSignature
+        ) {
+            gesture = null
+            settle = null
+            resetToIdle(identity.currentColumnCount, snapshot.interactionGeneration)
+        }
+    }
+
+    fun isSettling(generation: Long): Boolean =
+        settle?.generation == generation &&
+            (currentSnapshot.phase == MediaGridMorphPhase.SettlingToCurrent ||
+                currentSnapshot.phase == MediaGridMorphPhase.SettlingToTarget)
+
+    fun advanceSettleFrame(frameNanos: Long) {
+        val activeSettle = settle ?: return
+        val first = activeSettle.firstFrameNanos ?: frameNanos.also {
+            activeSettle.firstFrameNanos = it
+        }
+        val elapsedMillis = ((frameNanos - first).coerceAtLeast(0L) / 1_000_000L)
+        advanceSettleElapsed(activeSettle.generation, elapsedMillis)
+    }
+
+    fun advanceSettleElapsed(generation: Long, elapsedMillis: Long) {
+        val activeSettle = settle ?: return
+        if (activeSettle.generation != generation || currentSnapshot.interactionGeneration != generation) return
+        val plan = currentSnapshot.plan ?: return
+        val duration = MediaGridMorphDefaults.SettleDurationMillis.coerceAtLeast(1L)
+        val fraction = (elapsedMillis.toFloat() / duration).coerceIn(0f, 1f)
+        val targetProgress = if (activeSettle.toTarget) 1f else 0f
+        val nextProgress = lerpValue(activeSettle.startProgress, targetProgress, fraction)
+        val nextCorrection = if (activeSettle.toTarget) {
+            mediaGridMorphFocalCorrection(plan, nextProgress, activeSettle.fixedPinchCenter)
+        } else {
+            lerpOffset(activeSettle.startCorrection, Offset.Zero, fraction)
+        }
+        if (fraction < 1f) {
+            publish(
+                phase = currentSnapshot.phase,
+                direction = currentSnapshot.direction,
+                plan = plan,
+                progress = nextProgress,
+                correction = nextCorrection,
+                center = activeSettle.fixedPinchCenter,
+                identity = currentIdentity ?: return,
+                toColumnCount = plan.toColumnCount,
+                handoffRequest = null,
+                generation = generation,
+            )
+            return
+        }
+        settle = null
+        if (!activeSettle.toTarget) {
+            resetToIdle(plan.fromColumnCount, generation)
+            return
+        }
+        val identity = currentIdentity ?: return
+        val request = MediaGridMorphHandoffRequest(
+            interactionGeneration = generation,
+            sourceRevision = identity.sourceRevision,
+            frameKey = identity.frameKey,
+            fromColumnCount = plan.fromColumnCount,
+            toColumnCount = plan.toColumnCount,
+            plan = plan,
+            anchor = plan.anchor,
+            finalCorrection = nextCorrection,
+            finalPinchCenter = activeSettle.fixedPinchCenter,
+        )
+        publish(
+            phase = MediaGridMorphPhase.AwaitingGridHandoff,
+            direction = currentSnapshot.direction,
+            plan = plan,
+            progress = 1f,
+            correction = nextCorrection,
+            center = activeSettle.fixedPinchCenter,
+            identity = identity,
+            toColumnCount = plan.toColumnCount,
+            handoffRequest = request,
+            generation = generation,
+        )
+        onHandoffRequest(request)
+    }
+
+    fun completeHandoff(generation: Long) {
+        val request = currentSnapshot.handoffRequest ?: return
+        if (
+            currentSnapshot.phase != MediaGridMorphPhase.AwaitingGridHandoff ||
+            request.interactionGeneration != generation
+        ) return
+        resetToIdle(request.toColumnCount, generation)
+    }
+
+    fun cancelHandoff(generation: Long) {
+        val request = currentSnapshot.handoffRequest ?: return
+        if (
+            currentSnapshot.phase != MediaGridMorphPhase.AwaitingGridHandoff ||
+            request.interactionGeneration != generation
+        ) return
+        resetToIdle(request.fromColumnCount, generation)
+    }
+
+    private fun publish(
+        phase: MediaGridMorphPhase,
+        direction: MediaGridMorphDirection?,
+        plan: MediaGridMorphPlan?,
+        progress: Float,
+        correction: Offset,
+        center: Offset?,
+        identity: MediaGridMorphInteractionIdentity,
+        toColumnCount: Int,
+        handoffRequest: MediaGridMorphHandoffRequest?,
+        generation: Long,
+    ) {
+        _progress.value = progress
+        _correction.value = correction
+        currentSnapshot = MediaGridMorphInteractionSnapshot(
+            phase = phase,
+            direction = direction,
+            plan = plan,
+            progress = progress,
+            correction = correction,
+            currentPinchCenter = center,
+            fromColumnCount = identity.currentColumnCount,
+            toColumnCount = toColumnCount,
+            sourceRevision = identity.sourceRevision,
+            frameKey = identity.frameKey,
+            handoffRequest = handoffRequest,
+            interactionGeneration = generation,
+        )
+    }
+
+    private fun resetToIdle(currentColumnCount: Int, generation: Long) {
+        _activePlan.value = null
+        _progress.value = 0f
+        _correction.value = Offset.Zero
+        currentSnapshot = MediaGridMorphInteractionSnapshot(
+            phase = MediaGridMorphPhase.Idle,
+            direction = null,
+            plan = null,
+            progress = 0f,
+            correction = Offset.Zero,
+            currentPinchCenter = null,
+            fromColumnCount = currentColumnCount,
+            toColumnCount = currentColumnCount,
+            sourceRevision = currentIdentity?.sourceRevision,
+            frameKey = currentIdentity?.frameKey,
+            handoffRequest = null,
+            interactionGeneration = generation,
+        )
+    }
+}
+
+@Composable
+internal fun Modifier.mediaGridMorphGestureInput(
+    controller: MediaGridMorphInteractionController,
+    identity: MediaGridMorphInteractionIdentity,
+    preparedPairsSnapshot: () -> Map<MediaGridMorphDirection, MediaGridMorphPreparedPair>,
+    isScrollInProgress: () -> Boolean,
+): Modifier {
+    check(BuildConfig.TEST_HARNESS) {
+        "mediaGridMorphGestureInput is restricted to TEST_HARNESS"
+    }
+    val latestIdentity by rememberUpdatedState(identity)
+    val latestPairs by rememberUpdatedState(preparedPairsSnapshot)
+    val latestScroll by rememberUpdatedState(isScrollInProgress)
+    return pointerInput(controller) {
+        awaitEachGesture {
+            var accepted = false
+            var released = false
+            var firstId = Long.MIN_VALUE
+            var secondId = Long.MIN_VALUE
+            try {
+                while (true) {
+                    val event = awaitPointerEvent()
+                    if (event.type == PointerEventType.Unknown) {
+                        if (accepted && !released) {
+                            released = true
+                            controller.cancelPointers()
+                        }
+                        break
+                    }
+                    if (!accepted && !released && !latestScroll()) {
+                        var first: PointerInputChange? = null
+                        var second: PointerInputChange? = null
+                        for (change in event.changes) {
+                            if (!change.pressed) continue
+                            if (first == null) first = change else if (second == null) {
+                                second = change
+                                break
+                            }
+                        }
+                        if (first != null && second != null) {
+                            firstId = first.id.value
+                            secondId = second.id.value
+                            accepted = controller.beginPointers(
+                                identity = latestIdentity,
+                                preparedPairsSnapshot = latestPairs(),
+                                firstPointerId = firstId,
+                                secondPointerId = secondId,
+                                firstPosition = first.position,
+                                secondPosition = second.position,
+                            )
+                        }
+                    }
+                    if (accepted && !released) {
+                        var first: PointerInputChange? = null
+                        var second: PointerInputChange? = null
+                        for (change in event.changes) {
+                            when (change.id.value) {
+                                firstId -> first = change
+                                secondId -> second = change
+                            }
+                        }
+                        if (first == null || second == null || !first.pressed || !second.pressed) {
+                            released = true
+                            val normalRelease =
+                                first?.changedToUp() == true || second?.changedToUp() == true
+                            if (normalRelease) {
+                                val releaseUptimeMillis = maxOf(
+                                    first?.uptimeMillis ?: 0L,
+                                    second?.uptimeMillis ?: 0L,
+                                )
+                                controller.releasePointers(
+                                    releaseTimeNanos = releaseUptimeMillis * 1_000_000L,
+                                )
+                            } else {
+                                controller.cancelPointers()
+                            }
+                            first?.takeIf {
+                                mediaGridMorphShouldConsumePointer(true, it.id.value, firstId, secondId)
+                            }?.consume()
+                            second?.takeIf {
+                                mediaGridMorphShouldConsumePointer(true, it.id.value, firstId, secondId)
+                            }?.consume()
+                        } else {
+                            controller.updatePointers(first.position, second.position)
+                            if (
+                                first.position != first.previousPosition &&
+                                mediaGridMorphShouldConsumePointer(true, first.id.value, firstId, secondId)
+                            ) first.consume()
+                            if (
+                                second.position != second.previousPosition &&
+                                mediaGridMorphShouldConsumePointer(true, second.id.value, firstId, secondId)
+                            ) second.consume()
+                        }
+                    }
+                    var anyPressed = false
+                    for (change in event.changes) {
+                        if (change.pressed) {
+                            anyPressed = true
+                            break
+                        }
+                    }
+                    if (!anyPressed) break
+                }
+            } finally {
+                if (accepted && !released) controller.cancelPointers()
+            }
+        }
+    }
+}
+
+@Composable
+internal fun MediaGridMorphInteractiveTestLayer(
+    controller: MediaGridMorphInteractionController,
+    identity: MediaGridMorphInteractionIdentity,
+    preparedPairsSnapshot: () -> Map<MediaGridMorphDirection, MediaGridMorphPreparedPair>,
+    preparedIndex: MediaGridResidentCanvasPreparedIndex,
+    isScrollInProgress: () -> Boolean,
+    modifier: Modifier = Modifier,
+    onRenderModelBuilt: (() -> Unit)? = null,
+    onImageResolved: ((Long) -> Unit)? = null,
+    onTextMeasured: ((String) -> Unit)? = null,
+) {
+    check(BuildConfig.TEST_HARNESS) {
+        "MediaGridMorphInteractiveTestLayer is restricted to TEST_HARNESS"
+    }
+    controller.updateIdentity(identity)
+    val settleGeneration = controller.settleSignal.value
+    LaunchedEffect(controller, settleGeneration) {
+        if (settleGeneration == 0L) return@LaunchedEffect
+        while (controller.isSettling(settleGeneration)) {
+            withFrameNanos(controller::advanceSettleFrame)
+        }
+    }
+    Box(
+        modifier
+            .fillMaxSize()
+            .mediaGridMorphGestureInput(
+                controller = controller,
+                identity = identity,
+                preparedPairsSnapshot = preparedPairsSnapshot,
+                isScrollInProgress = isScrollInProgress,
+            ),
+    ) {
+        val plan = controller.activePlan.value
+        if (plan != null) {
+            MediaGridMorphCanvasLayer(
+                plan = plan,
+                preparedIndex = preparedIndex,
+                progress = controller.progress,
+                correction = controller.correction,
+                mode = MediaGridMorphCanvasMode.TestVisible,
+                onRenderModelBuilt = onRenderModelBuilt,
+                onImageResolved = onImageResolved,
+                onTextMeasured = onTextMeasured,
+            )
+        }
+    }
+}
+
+private fun MediaGridMorphPreparedPair.matches(identity: MediaGridMorphInteractionIdentity): Boolean =
+    sourceRevision == identity.sourceRevision &&
+        frameKey == identity.frameKey &&
+        fromColumnCount == identity.currentColumnCount &&
+        viewportSignature == identity.viewportSignature
+
+private fun pointerDistance(first: Offset, second: Offset): Float =
+    hypot(first.x - second.x, first.y - second.y)
+
+private fun midpoint(first: Offset, second: Offset): Offset =
+    Offset((first.x + second.x) / 2f, (first.y + second.y) / 2f)
+
+private fun lerpValue(start: Float, end: Float, fraction: Float): Float =
+    start + (end - start) * fraction
+
+private fun lerpOffset(start: Offset, end: Offset, fraction: Float): Offset =
+    Offset(
+        lerpValue(start.x, end.x, fraction),
+        lerpValue(start.y, end.y, fraction),
+    )

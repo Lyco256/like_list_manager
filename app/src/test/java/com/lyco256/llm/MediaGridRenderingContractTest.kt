@@ -114,6 +114,26 @@ class MediaGridRenderingContractTest {
         assertTrue(!canvasDraw.contains("drawIndex"))
     }
 
+    @Test
+    fun morphInteractionIsTestHarnessOnlyAndDoesNotReplaceProductionPinchOrGridHandoff() {
+        val uiSource = locateSource("src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt").readText()
+        val interactionSource = locateSource(
+            "src/main/java/com/lyco256/llm/MediaGridMorphInteraction.kt",
+        ).readText()
+        val pointer = uiSource.substringAfter("private fun Modifier.mediaGridPinchToResize")
+            .substringBefore("private fun ClassifiedMediaGridHeader")
+
+        assertTrue(interactionSource.contains("check(BuildConfig.TEST_HARNESS)"))
+        assertTrue(interactionSource.contains("withFrameNanos(controller::advanceSettleFrame)"))
+        assertTrue(interactionSource.contains("MediaGridMorphCanvasMode.TestVisible"))
+        assertTrue(!uiSource.contains("MediaGridMorphInteractiveTestLayer"))
+        assertTrue(!uiSource.contains("mediaGridMorphGestureInput"))
+        assertTrue(pointer.contains("mediaGridColumnCountAfterPinchRelease"))
+        assertTrue(pointer.contains("latestOnPinchFinished(gestureAnchor, nextColumnCount)"))
+        assertTrue(!pointer.contains("MediaGridMorphInteractionController"))
+        assertTrue(!pointer.contains("MediaGridMorphHandoffRequest"))
+    }
+
     private fun locateSource(relativePath: String): File = sequenceOf(
         File(relativePath),
         File("app", relativePath.removePrefix("src/")),

@@ -1,5 +1,12 @@
 # `MediaGridMorphTest.kt`
 
+## 2026-07-30 gesture tracking／settle
+
+- 初期距離÷現在距離、無効距離、既存dead zone／progressの0／0.25／0.5／0.75／1を検証する。
+- 同一gestureの増加→dead zone→減少pair切替とprogress 0／correction 0の連続性を検証する。
+- 正規化2次元focal点、X／Y中心移動、slot外、非0 viewport originの開始時非jumpを検証する。
+- release progress 0.25／0.5、0／45／90／135／180msのrelease基準線形settle、current／target終端、exactly-once handoff、Awaiting維持、complete、stale generation拒否を検証する。
+
 ## 対応ソース
 
 `app/src/test/java/com/lyco256/llm/MediaGridMorphTest.kt`

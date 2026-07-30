@@ -139,8 +139,10 @@ internal data class MediaGridMorphPreparedPair(
 
 internal data class MediaGridMorphAnchor(
     val assetId: Long,
-    val fromViewportCenterY: Float,
     val slot: MediaGridMorphSlot,
+    val focalU: Float,
+    val focalV: Float,
+    val initialPinchCenter: Offset,
 )
 
 /** Gesture-time wrapper. Slot and header templates are never rebuilt here. */
@@ -157,14 +159,28 @@ internal data class MediaGridMorphPlan(
 
     companion object {
         fun select(preparedPair: MediaGridMorphPreparedPair, pinchCenter: Offset): MediaGridMorphPlan {
-            val startSlots = preparedPair.slots.filter { it.startAssetId != null }
-            val selected = startSlots.firstOrNull { pinchCenter in it.startRect }
-                ?: startSlots.minByOrNull { distanceSquared(it.startRect.center, pinchCenter) }
+            val viewportPinchCenter = pinchCenter + preparedPair.viewport.topLeft
+            var selected: MediaGridMorphSlot? = null
+            var selectedDistance = Float.POSITIVE_INFINITY
+            for (slot in preparedPair.slots) {
+                val rect = slot.startRect
+                if (slot.startAssetId == null || rect.width <= 0f || rect.height <= 0f) continue
+                val containsCenter = viewportPinchCenter in rect
+                val distance = distanceSquared(rect.center, viewportPinchCenter)
+                if (containsCenter || selected == null || distance < selectedDistance) {
+                    selected = slot
+                    selectedDistance = if (containsCenter) -1f else distance
+                    if (containsCenter) break
+                }
+            }
             val anchor = selected?.startAssetId?.let { assetId ->
+                val rect = selected.startRect
                 MediaGridMorphAnchor(
                     assetId = assetId,
-                    fromViewportCenterY = selected.startRect.center.y,
                     slot = selected,
+                    focalU = (viewportPinchCenter.x - rect.left) / rect.width,
+                    focalV = (viewportPinchCenter.y - rect.top) / rect.height,
+                    initialPinchCenter = pinchCenter,
                 )
             }
             return MediaGridMorphPlan(preparedPair, anchor)
@@ -671,6 +687,7 @@ internal data class MediaGridMorphSession(
     val sourceRevision: Long?,
     val plan: MediaGridMorphPlan?,
     val targetHandoffDispatched: Boolean = false,
+    val settleStartProgress: Float? = null,
 ) {
     companion object {
         fun idle(currentColumnCount: Int): MediaGridMorphSession = MediaGridMorphSession(
@@ -723,6 +740,7 @@ internal data class MediaGridMorphSession(
             } else {
                 MediaGridMorphPhase.SettlingToTarget
             },
+            settleStartProgress = progress.coerceIn(0f, 1f),
         )
         else -> this
     }
@@ -741,7 +759,8 @@ internal data class MediaGridMorphSession(
         val nextElapsed = elapsedMillis.coerceAtLeast(0L).coerceAtMost(duration)
         val fraction = nextElapsed.toFloat() / duration
         val targetProgress = if (phase == MediaGridMorphPhase.SettlingToTarget) 1f else 0f
-        val nextProgress = currentProgress + (targetProgress - currentProgress) * fraction
+        val releaseProgress = settleStartProgress ?: currentProgress
+        val nextProgress = releaseProgress + (targetProgress - releaseProgress) * fraction
         if (nextElapsed < duration) return MediaGridMorphSettleResult(this, nextProgress, nextElapsed)
         if (phase == MediaGridMorphPhase.SettlingToCurrent) {
             return MediaGridMorphSettleResult(idle(fromColumnCount), 0f, nextElapsed)

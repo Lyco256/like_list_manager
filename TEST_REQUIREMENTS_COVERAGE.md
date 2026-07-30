@@ -1,5 +1,16 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-07-30 TEST_HARNESS Morph gesture tracking／settle
+
+| 要件 | 証跡 | 状態 |
+|---|---|---|
+| 初期距離÷現在距離、既存dead zone／progress、方向反転 | `MediaGridMorphInteractionController`、`MediaGridMorphTest.directDistanceScaleAndExistingProgressFunctionsCoverBothDirections`／`controllerReturnsThroughDeadZoneAndSwitchesPreparedDirectionContinuously` | Unit Test完了 |
+| 非clamp 2次元focal anchor／correction | `MediaGridMorphAnchor`、`mediaGridMorphFocalCorrection`、固定中心・XY移動・slot外・viewport origin test | Unit Test完了 |
+| 固定pointer ID、一本指非consume、三本目無視、release／cancel | `mediaGridMorphGestureInput`、`MediaGridMorphCanvasComposeTest.interactiveLayerTracksFixedPointersReversesAndReusesResolvedRenderWork`／`interactiveLayerCancelProducesNoHandoff` | 隔離Compose Test完了 |
+| release基準180ms線形settle、exactly-once handoff、Awaiting維持 | `advanceSettleElapsed`、0／45／90／135／180ms、stale generation、complete test | Unit Test完了 |
+| pointer／settle中のrender work再実行防止 | plan Stateをdirection切替時だけ更新、Canvas既存counter test、interactive counter test | Unit・隔離Compose Test完了 |
+| production未接続、通常pinch／LazyGrid不変 | `MediaGridRenderingContractTest.morphInteractionIsTestHarnessOnlyAndDoesNotReplaceProductionPinchOrGridHandoff` | 静的契約・隔離integration完了 |
+
 ## 2026-07-30 TEST_HARNESS単一Morph Canvas
 
 | 対象 | 実装・証跡 | 状態 |

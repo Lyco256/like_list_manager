@@ -2,6 +2,12 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 
 この文書は、全体構成、現状の実装、変更目的別入口、個別docs一覧だけを担当する。禁止事項、完了報告、検証手順は置かない。
 
+## 2026-07-30 TEST_HARNESS Morph gesture tracking／settle
+
+- `MediaGridMorphInteraction.kt`はTEST_HARNESS限定controller、固定pointer ID入力、二本指初期距離基準progress、2次元focal correction、180ms線形settle、immutable exactly-once handoff requestを所有する。
+- gesture開始時のprepared pair snapshotを固定し、dead zoneへ戻ってprogress 0、反対方向へ越えた時だけ別pairのplanへ切り替える。pointer update／settle frameではrender model、画像、crop、text、viewport、queueを再準備しない。
+- `MediaGridMorphInteractiveTestLayer`だけが既存単一Canvasへ接続する。productionの`ClassifiedMediaGridContent`、`mediaGridPinchToResize`、LazyGrid列数、resident Canvas、viewport、anchor、scheduler、publicationは変更しない。実handoffは次工程に残す。
+
 ## 2026-07-30 TEST_HARNESS単一Morph Canvas
 
 - `MediaGridMorph.kt`のtarget layoutとstart overscanは各列数のcell幅を高さにも使う。start visible cellだけは実測rectを維持する。

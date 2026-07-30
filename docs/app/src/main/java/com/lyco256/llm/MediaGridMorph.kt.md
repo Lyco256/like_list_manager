@@ -1,6 +1,6 @@
 # MediaGridMorph.kt
 
-`MediaGridMorph.kt`は、列数Morphの描画前に使用する局所計画基盤と、既存のrelease判定・未接続state machineを保持する。
+`MediaGridMorph.kt`は、列数Morphの描画前に使用する局所計画基盤、2次元focal anchor、release判定を保持する。
 
 ## 事前計画
 
@@ -29,8 +29,14 @@
 - 新しいidentityを要求するとgeneration tokenが更新され、古いframe・列数・viewport・revisionの計算結果は公開できない。
 - 公開先は`AtomicReference`であり、prepared pair公開だけではLazyGridをrecomposeしない。
 
+## 2次元anchorとsettle基盤
+
+- `MediaGridMorphPlan.select()`はCanvasローカルpinch centerをviewport座標へ変換し、中心を含む有効start slot、なければ中心が最も近いslotを一回選択する。
+- anchorはstart rect内の`focalU`／`focalV`をclampせず保持するため、slot外開始でもprogress 0のcorrectionは0になる。
+- 旧`MediaGridMorphSession.advanceSettle()`もrelease時progressを保存し、各elapsed fractionをrelease値へ適用する線形補間へ統一した。前frame値への累積補間は行わない。
+
 ## 現在のproduction状態
 
 `TagHierarchyUiV2.kt`は初期有効layoutとscroll完全停止後だけbounded captureを行い、slot／header計算を`Dispatchers.Default`へ渡す。二本指操作中は要求せず、pointer処理は現行の`mediaGridColumnCountAfterPinchRelease()`だけを使用する。
 
-`MediaGridMorphCanvas.kt`のTEST_HARNESS限定Canvasはproductionへ接続していない。animation、handoffも未接続であり、resident Canvas、viewport通知、idle anchor、queue、worker、先読み、1frame1枚公開も変更しない。
+`MediaGridMorphInteraction.kt`のcontroller／pointer入力／settle／handoff要求と`MediaGridMorphCanvas.kt`のCanvasはTEST_HARNESS限定で、productionへ接続していない。実LazyGrid handoffは未実装であり、resident Canvas、viewport通知、idle anchor、queue、worker、先読み、1frame1枚公開も変更しない。

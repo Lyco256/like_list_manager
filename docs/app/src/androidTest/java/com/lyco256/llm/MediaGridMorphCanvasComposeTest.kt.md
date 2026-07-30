@@ -1,5 +1,11 @@
 # `MediaGridMorphCanvasComposeTest.kt`
 
+## 2026-07-30 interactive TEST_HARNESS
+
+- 実multi-touch sequenceで一本指非consume、二本指tracking、dead zoneへの復帰、反対方向切替、固定pointer ID、三本目無視、2次元中心移動、release後Awaitingと一回のhandoffを検証する。
+- interactive layerのrender model／画像解決counterがpointer event数では増えずplan切替境界だけに限定されること、Awaiting中もCanvasが残ることを検証する。
+- pointer cancelがIdleへ戻りhandoffを生成しないことを検証する。
+
 ## 対応ソース
 
 `app/src/androidTest/java/com/lyco256/llm/MediaGridMorphCanvasComposeTest.kt`

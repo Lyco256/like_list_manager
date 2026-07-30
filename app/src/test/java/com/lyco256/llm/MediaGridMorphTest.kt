@@ -5,6 +5,7 @@ import androidx.compose.ui.geometry.Rect
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -359,6 +360,256 @@ class MediaGridMorphTest {
     }
 
     @Test
+    fun directDistanceScaleAndExistingProgressFunctionsCoverBothDirections() {
+        assertEquals(2f, mediaGridMorphScale(100f, 50f)!!, 0.001f)
+        assertNull(mediaGridMorphScale(100f, 0f))
+        assertNull(mediaGridMorphScale(100f, Float.NaN))
+        assertNull(mediaGridMorphScale(100f, Float.POSITIVE_INFINITY))
+        val deadZone = MediaGridMorphDefaults.DeadZoneScale
+        val inverseDeadZone = 1f / deadZone
+        listOf(0f, 0.25f, 0.5f, 0.75f, 1f).forEach { expected ->
+            val increaseScale = deadZone + expected * deadZone * (deadZone - 1f)
+            val decreaseScale = inverseDeadZone - expected * (1f - inverseDeadZone)
+            assertEquals(
+                expected,
+                mediaGridMorphProgressForScale(increaseScale, MediaGridMorphDirection.IncreaseColumns),
+                0.001f,
+            )
+            assertEquals(
+                expected,
+                mediaGridMorphProgressForScale(decreaseScale, MediaGridMorphDirection.DecreaseColumns),
+                0.001f,
+            )
+        }
+        assertNull(mediaGridMorphDirectionForScale(1.01f))
+    }
+
+    @Test
+    fun consumePolicyAcceptsOnlyTheTwoFixedPointers() {
+        assertFalse(mediaGridMorphShouldConsumePointer(false, 1L, 1L, 2L))
+        assertTrue(mediaGridMorphShouldConsumePointer(true, 1L, 1L, 2L))
+        assertTrue(mediaGridMorphShouldConsumePointer(true, 2L, 1L, 2L))
+        assertFalse(mediaGridMorphShouldConsumePointer(true, 3L, 1L, 2L))
+    }
+
+    @Test
+    fun controllerDoesNotAcceptPreparedDirectionBeyondColumnBounds() {
+        listOf(
+            2 to MediaGridMorphDirection.DecreaseColumns,
+            12 to MediaGridMorphDirection.IncreaseColumns,
+        ).forEach { (columns, blockedDirection) ->
+            val capture = capture(columns = columns, count = 24)
+            val pairs = buildMediaGridMorphPreparedPairs(capture)
+            assertFalse(pairs.containsKey(blockedDirection))
+            val controller = MediaGridMorphInteractionController()
+            assertTrue(
+                controller.beginPointers(
+                    capture.identity.toInteractionIdentity(),
+                    pairs,
+                    1L,
+                    2L,
+                    Offset(0f, 0f),
+                    Offset(100f, 0f),
+                ),
+            )
+            val blockedScale = if (blockedDirection == MediaGridMorphDirection.IncreaseColumns) 1.5f else 0.5f
+            val distance = 100f / blockedScale
+            controller.updatePointers(
+                Offset(50f - distance / 2f, 0f),
+                Offset(50f + distance / 2f, 0f),
+            )
+            assertNull(controller.snapshot().plan)
+            assertEquals(0f, controller.snapshot().progress, 0.001f)
+        }
+    }
+
+    @Test
+    fun controllerReturnsThroughDeadZoneAndSwitchesPreparedDirectionContinuously() {
+        val capture = capture(columns = 4, count = 24)
+        val pairs = buildMediaGridMorphPreparedPairs(capture)
+        val controller = MediaGridMorphInteractionController()
+        val identity = capture.identity.toInteractionIdentity()
+        assertTrue(
+            controller.beginPointers(
+                identity,
+                pairs,
+                10L,
+                20L,
+                Offset(50f, 50f),
+                Offset(150f, 50f),
+            ),
+        )
+
+        controller.updatePointers(Offset(60f, 50f), Offset(140f, 50f))
+        val increasePlan = controller.snapshot().plan
+        assertEquals(MediaGridMorphDirection.IncreaseColumns, controller.snapshot().direction)
+        assertTrue(controller.snapshot().progress > 0f)
+
+        controller.updatePointers(Offset(50f, 50f), Offset(150f, 50f))
+        assertSame(increasePlan, controller.snapshot().plan)
+        assertEquals(0f, controller.snapshot().progress, 0.001f)
+        assertEquals(Offset.Zero, controller.snapshot().correction)
+
+        val inverseDeadZone = 1f / MediaGridMorphDefaults.DeadZoneScale
+        val distance = 100f / inverseDeadZone
+        controller.updatePointers(
+            Offset(100f - distance / 2f, 50f),
+            Offset(100f + distance / 2f, 50f),
+        )
+        assertEquals(MediaGridMorphDirection.DecreaseColumns, controller.snapshot().direction)
+        assertEquals(0f, controller.snapshot().progress, 0.001f)
+        assertEquals(Offset.Zero, controller.snapshot().correction)
+        assertTrue(controller.snapshot().plan !== increasePlan)
+
+        val beforeInvalidDistance = controller.snapshot()
+        controller.updatePointers(Offset(100f, 50f), Offset(100f, 50f))
+        assertSame(beforeInvalidDistance, controller.snapshot())
+    }
+
+    @Test
+    fun focalAnchorKeepsNormalizedPointAndTracksCenterInTwoDimensions() {
+        val pair = pair(4, capture(columns = 4, count = 24))
+        val initialCenter = Offset(80f, 60f)
+        val plan = MediaGridMorphPlan.select(pair, initialCenter)
+        val anchor = plan.anchor!!
+
+        val initialCorrection = mediaGridMorphFocalCorrection(plan, 0f, initialCenter)
+        assertEquals(0f, initialCorrection.x, 0.001f)
+        assertEquals(0f, initialCorrection.y, 0.001f)
+        val progress = 0.6f
+        val fixedCorrection = mediaGridMorphFocalCorrection(plan, progress, initialCenter)
+        val movedCorrection = mediaGridMorphFocalCorrection(
+            plan,
+            progress,
+            initialCenter + Offset(23f, -17f),
+        )
+        assertEquals(23f, movedCorrection.x - fixedCorrection.x, 0.001f)
+        assertEquals(-17f, movedCorrection.y - fixedCorrection.y, 0.001f)
+
+        val rect = mediaGridMorphRect(anchor.slot, progress)
+        val focal = Offset(
+            rect.left + rect.width * anchor.focalU,
+            rect.top + rect.height * anchor.focalV,
+        ) - plan.viewport.topLeft + fixedCorrection
+        assertEquals(initialCenter.x, focal.x, 0.001f)
+        assertEquals(initialCenter.y, focal.y, 0.001f)
+    }
+
+    @Test
+    fun slotOutsidePinchAndNonZeroViewportOriginDoNotJumpAtProgressZero() {
+        val base = pair(4, capture(columns = 4, count = 24))
+        val shifted = base.copy(
+            viewport = Rect(20f, -40f, 1220f, 560f),
+            slots = base.slots.map {
+                it.copy(
+                    startRect = it.startRect.translate(Offset(20f, -40f)),
+                    endRect = it.endRect.translate(Offset(20f, -40f)),
+                )
+            },
+        )
+        val outsideCenter = Offset(-30f, 700f)
+        val plan = MediaGridMorphPlan.select(shifted, outsideCenter)
+
+        assertTrue(plan.anchor!!.focalU !in 0f..1f || plan.anchor!!.focalV !in 0f..1f)
+        val initialCorrection = mediaGridMorphFocalCorrection(plan, 0f, outsideCenter)
+        assertEquals(0f, initialCorrection.x, 0.001f)
+        assertEquals(0f, initialCorrection.y, 0.001f)
+    }
+
+    @Test
+    fun elapsedSettleIsLinearForCurrentAndTargetAndHandoffIsExactlyOnce() {
+        val capture = capture(columns = 4, count = 24)
+        val pairs = buildMediaGridMorphPreparedPairs(capture)
+        val identity = capture.identity.toInteractionIdentity()
+        val requests = ArrayList<MediaGridMorphHandoffRequest>()
+        val target = MediaGridMorphInteractionController(requests::add)
+        beginAtProgress(target, identity, pairs, 0.5f)
+        target.releasePointers()
+        val generation = target.snapshot().interactionGeneration
+        val expected = listOf(0L to 0.5f, 45L to 0.625f, 90L to 0.75f, 135L to 0.875f)
+        expected.forEach { (elapsed, progress) ->
+            target.advanceSettleElapsed(generation, elapsed)
+            assertEquals(progress, target.snapshot().progress, 0.001f)
+        }
+        target.advanceSettleElapsed(generation, 157L)
+        assertEquals(0.5f + 0.5f * (157f / 180f), target.snapshot().progress, 0.001f)
+        target.advanceSettleElapsed(generation, 180L)
+        assertEquals(MediaGridMorphPhase.AwaitingGridHandoff, target.snapshot().phase)
+        assertEquals(1f, target.snapshot().progress, 0.001f)
+        val expectedFinalCorrection = mediaGridMorphFocalCorrection(
+            target.snapshot().plan!!,
+            1f,
+            target.snapshot().currentPinchCenter!!,
+        )
+        assertEquals(expectedFinalCorrection.x, target.snapshot().correction.x, 0.001f)
+        assertEquals(expectedFinalCorrection.y, target.snapshot().correction.y, 0.001f)
+        assertEquals(1, requests.size)
+        target.advanceSettleElapsed(generation, 360L)
+        assertEquals(1, requests.size)
+        assertSame(requests.single(), target.snapshot().handoffRequest)
+        target.completeHandoff(generation)
+        assertEquals(MediaGridMorphPhase.Idle, target.snapshot().phase)
+        assertEquals(5, target.snapshot().fromColumnCount)
+
+        val current = MediaGridMorphInteractionController()
+        beginAtProgress(current, identity, pairs, 0.25f)
+        val releaseCorrection = current.snapshot().correction
+        current.releasePointers()
+        val currentGeneration = current.snapshot().interactionGeneration
+        current.advanceSettleElapsed(currentGeneration, 90L)
+        assertEquals(0.125f, current.snapshot().progress, 0.001f)
+        assertEquals(releaseCorrection.x / 2f, current.snapshot().correction.x, 0.001f)
+        assertEquals(releaseCorrection.y / 2f, current.snapshot().correction.y, 0.001f)
+        current.advanceSettleElapsed(currentGeneration, 180L)
+        assertEquals(MediaGridMorphPhase.Idle, current.snapshot().phase)
+        assertEquals(Offset.Zero, current.snapshot().correction)
+    }
+
+    @Test
+    fun awaitingHandoffCanCancelToFromAndStaleIdentityInvalidatesRequest() {
+        val capture = capture(columns = 4, count = 24)
+        val pairs = buildMediaGridMorphPreparedPairs(capture)
+        val identity = capture.identity.toInteractionIdentity()
+
+        val cancelled = MediaGridMorphInteractionController()
+        beginAtProgress(cancelled, identity, pairs, 0.75f)
+        cancelled.releasePointers()
+        val cancelGeneration = cancelled.snapshot().interactionGeneration
+        cancelled.advanceSettleElapsed(cancelGeneration, 180L)
+        cancelled.cancelHandoff(cancelGeneration)
+        assertEquals(MediaGridMorphPhase.Idle, cancelled.snapshot().phase)
+        assertEquals(4, cancelled.snapshot().fromColumnCount)
+        assertNull(cancelled.snapshot().handoffRequest)
+
+        val stale = MediaGridMorphInteractionController()
+        beginAtProgress(stale, identity, pairs, 0.75f)
+        stale.releasePointers()
+        val staleGeneration = stale.snapshot().interactionGeneration
+        stale.advanceSettleElapsed(staleGeneration, 180L)
+        stale.updateIdentity(identity.copy(frameKey = identity.frameKey.copy(columnCount = 9)))
+        assertEquals(MediaGridMorphPhase.Idle, stale.snapshot().phase)
+        assertNull(stale.snapshot().handoffRequest)
+    }
+
+    @Test
+    fun staleIdentityAndCancelPreventOldSettleAndHandoff() {
+        val capture = capture(columns = 4, count = 24)
+        val pairs = buildMediaGridMorphPreparedPairs(capture)
+        val requests = ArrayList<MediaGridMorphHandoffRequest>()
+        val controller = MediaGridMorphInteractionController(requests::add)
+        val identity = capture.identity.toInteractionIdentity()
+        beginAtProgress(controller, identity, pairs, 0.75f)
+        controller.releasePointers()
+        val oldGeneration = controller.snapshot().interactionGeneration
+        controller.updateIdentity(identity.copy(sourceRevision = 11L))
+        controller.advanceSettleElapsed(oldGeneration, 180L)
+
+        assertEquals(MediaGridMorphPhase.Idle, controller.snapshot().phase)
+        assertEquals(0f, controller.snapshot().progress, 0.001f)
+        assertTrue(requests.isEmpty())
+    }
+
+    @Test
     fun everyTargetLayoutFromTwoThroughTwelveUsesItsOwnSquareCellSize() {
         for (fromColumns in 2..12) {
             for (direction in MediaGridMorphDirection.entries) {
@@ -452,6 +703,41 @@ class MediaGridMorphTest {
         buildMediaGridMorphPreparedPairs(capture).getValue(direction).also {
             assertEquals(columns, it.fromColumnCount)
         }
+
+    private fun MediaGridMorphPreparationIdentity.toInteractionIdentity() =
+        MediaGridMorphInteractionIdentity(
+            sourceRevision = sourceRevision,
+            frameKey = frameKey,
+            currentColumnCount = columnCount,
+            viewportSignature = viewportSignature,
+        )
+
+    private fun beginAtProgress(
+        controller: MediaGridMorphInteractionController,
+        identity: MediaGridMorphInteractionIdentity,
+        pairs: Map<MediaGridMorphDirection, MediaGridMorphPreparedPair>,
+        progress: Float,
+    ) {
+        val initialDistance = 100f
+        assertTrue(
+            controller.beginPointers(
+                identity,
+                pairs,
+                1L,
+                2L,
+                Offset(100f - initialDistance / 2f, 80f),
+                Offset(100f + initialDistance / 2f, 80f),
+            ),
+        )
+        val deadZone = MediaGridMorphDefaults.DeadZoneScale
+        val scale = deadZone + progress * deadZone * (deadZone - 1f)
+        val distance = initialDistance / scale
+        controller.updatePointers(
+            Offset(100f - distance / 2f, 80f),
+            Offset(100f + distance / 2f, 80f),
+        )
+        assertEquals(progress, controller.snapshot().progress, 0.001f)
+    }
 
     private fun capture(
         columns: Int,
