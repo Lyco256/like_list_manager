@@ -1,5 +1,22 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-07-30 TEST_HARNESS単一Morph Canvas
+
+| 対象 | 実装・証跡 | 状態 |
+|---|---|---|
+| target layout正方形化 | `buildMediaGridMorphLayout`は各列数の`viewport.width / columnCount`をwidth／heightへ使用。start visible実測維持、start overscan正方形、2〜12列target test | Unit Test完了 |
+| bounded immutable render model | `MediaGridMorphRenderModel`、prepared pair slot/headerだけの解決、resident miss null、同一Asset参照共有、300-entry indexから1-slotだけ保持するtest | 隔離integration完了 |
+| 一つのTEST_HARNESS Canvas | `MediaGridMorphCanvasMode.Disabled/TestVisible`、`BuildConfig.TEST_HARNESS` guard、Canvas test tag、一Canvas件数test | 隔離integration完了 |
+| 画像Crossfade | viewport単位の一つのsaveLayer＋`BlendMode.Plus`、0／0.25／0.5／0.75／1のRGB_565 pixel、同一Asset、片側、resident miss test | 隔離integration完了 |
+| header描画 | 不透明surface背景の高さ／位置補間、事前計測title layout、同一title共有、文字alpha helper、追加band 50%／100% pixel test | Unit Test・隔離integration完了 |
+| draw hot path | 事前解決済み画像・crop・text layoutを使用。Map／collection／resident／crop／ImageBitmap変換／measure／IOを持たない静的契約 | Unit Test完了 |
+| progress再利用・入力透過 | progress 40回更新でmodel 1回・画像解決2回・text measure 1回を維持。pair/index versionは各1回再構築。下層Buttonへの実touch到達 | 隔離integration完了 |
+| production非接続 | `TagHierarchyUiV2.kt`にCanvas／mode／tag参照なし。既存pinch release、resident、viewport、anchor、queue、publication契約継続 | Unit Test・隔離integration完了 |
+
+- `run-safe-integration-check.cmd`: 新規header色assert修正後にSuccess。最終テスト強化後は既存controller timing timeoutが一度だけ発生し、無変更再実行で`Preflight / Build / UnitTest / Lint / Install / IntegrationTest / Success`。
+- 続けて`run-safe-debug-check.cmd -InstallToDevice`: `Preflight / Build / UnitTest / Lint / Install / Success`。本番packageのDB・元WebP・JPEG・RGB_565 pack・設定・認証情報を初期化していない。
+- Macrobenchmarkは対象外で実行しない。
+
 ## 2026-07-30 bounded Morph prepared pair foundation
 
 | 対象 | 実装・証跡 | 状態 |

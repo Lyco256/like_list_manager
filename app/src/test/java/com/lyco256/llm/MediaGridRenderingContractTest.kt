@@ -89,6 +89,31 @@ class MediaGridRenderingContractTest {
         assertTrue(!uiSource.contains("MediaGridMorphWindow"))
     }
 
+    @Test
+    fun morphCanvasIsTestHarnessOnlyAndNeverConnectedToProductionGrid() {
+        val uiSource = locateSource("src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt").readText()
+        val canvasSource = locateSource("src/main/java/com/lyco256/llm/MediaGridMorphCanvas.kt").readText()
+        val canvasDraw = canvasSource.substringAfter("private fun MediaGridMorphCanvas(")
+            .substringBefore("private fun lerpMorphEdge")
+
+        assertTrue(canvasSource.contains("if (mode == MediaGridMorphCanvasMode.Disabled) return"))
+        assertTrue(canvasSource.contains("check(BuildConfig.TEST_HARNESS)"))
+        assertTrue(canvasSource.contains("rememberTextMeasurer()"))
+        assertTrue(!uiSource.contains("MediaGridMorphCanvasLayer"))
+        assertTrue(!uiSource.contains("MediaGridMorphCanvasMode"))
+        assertTrue(!uiSource.contains("media_grid_morph_canvas"))
+        assertTrue(canvasDraw.contains("val p = progress.value.coerceIn(0f, 1f)"))
+        assertTrue(canvasDraw.contains("val currentCorrection = correction.value"))
+        assertTrue(!canvasDraw.contains("preparedImageByAssetId"))
+        assertTrue(!canvasDraw.contains("mediaGridCropSourceRect"))
+        assertTrue(!canvasDraw.contains("TextMeasurer"))
+        assertTrue(!canvasDraw.contains(".map {"))
+        assertTrue(!canvasDraw.contains(".filter {"))
+        assertTrue(!canvasDraw.contains(".sortedBy"))
+        assertTrue(!canvasDraw.contains("ImageRequest"))
+        assertTrue(!canvasDraw.contains("drawIndex"))
+    }
+
     private fun locateSource(relativePath: String): File = sequenceOf(
         File(relativePath),
         File("app", relativePath.removePrefix("src/")),

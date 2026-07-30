@@ -358,6 +358,92 @@ class MediaGridMorphTest {
         assertNull(second.targetColumnCountToHandoff)
     }
 
+    @Test
+    fun everyTargetLayoutFromTwoThroughTwelveUsesItsOwnSquareCellSize() {
+        for (fromColumns in 2..12) {
+            for (direction in MediaGridMorphDirection.entries) {
+                val toColumns = mediaGridMorphTargetColumnCount(fromColumns, direction)
+                if (toColumns == fromColumns) continue
+                val prepared = pair(
+                    columns = fromColumns,
+                    capture = capture(columns = fromColumns, count = 72),
+                    direction = direction,
+                )
+                val expectedSize = prepared.viewport.width / toColumns
+                prepared.targetLayout.media.forEach { media ->
+                    assertEquals("$fromColumns->$toColumns width", expectedSize, media.rect.width, 0.001f)
+                    assertEquals("$fromColumns->$toColumns height", expectedSize, media.rect.height, 0.001f)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun capturedStartCellsStayMeasuredWhileStartOverscanUsesCurrentSquareSize() {
+        val prepared = pair(4, capture(columns = 4, count = 24))
+        val visible = prepared.startLayout.media.first { it.mediaOrdinal == 0 }
+        val overscan = prepared.startLayout.media.first { it.mediaOrdinal == 12 }
+
+        assertEquals(300f, visible.rect.width, 0.001f)
+        assertEquals(100f, visible.rect.height, 0.001f)
+        assertEquals(300f, overscan.rect.width, 0.001f)
+        assertEquals(300f, overscan.rect.height, 0.001f)
+    }
+
+    @Test
+    fun requestedAdjacentTransitionsRemainContinuousAndNonOverlapping() {
+        val transitions = listOf(
+            2 to MediaGridMorphDirection.IncreaseColumns,
+            3 to MediaGridMorphDirection.DecreaseColumns,
+            4 to MediaGridMorphDirection.IncreaseColumns,
+            5 to MediaGridMorphDirection.DecreaseColumns,
+            8 to MediaGridMorphDirection.IncreaseColumns,
+            9 to MediaGridMorphDirection.DecreaseColumns,
+            11 to MediaGridMorphDirection.IncreaseColumns,
+            12 to MediaGridMorphDirection.DecreaseColumns,
+        )
+        transitions.forEach { (fromColumns, direction) ->
+            val prepared = pair(fromColumns, capture(columns = fromColumns, count = 72), direction)
+            listOf(0f, 0.5f, 1f).forEach { progress ->
+                val rects = prepared.slots.map { mediaGridMorphRect(it, progress) }
+                    .filter { it.width > 0f && it.height > 0f }
+                rects.forEachIndexed { index, first ->
+                    for (otherIndex in index + 1 until rects.size) {
+                        val second = rects[otherIndex]
+                        val overlapWidth = minOf(first.right, second.right) - maxOf(first.left, second.left)
+                        val overlapHeight = minOf(first.bottom, second.bottom) - maxOf(first.top, second.top)
+                        assertTrue(
+                            "$fromColumns progress=$progress slots $index/$otherIndex overlap",
+                            overlapWidth <= 0.001f || overlapHeight <= 0.001f,
+                        )
+                    }
+                }
+                prepared.slots.forEach { slot ->
+                    val rect = mediaGridMorphRect(slot, progress)
+                    assertTrue(rect.left.isFinite() && rect.top.isFinite())
+                    assertTrue(rect.right.isFinite() && rect.bottom.isFinite())
+                }
+            }
+        }
+    }
+
+    @Test
+    fun canvasCoordinatesSubtractAnyViewportOriginAndApplyCorrection() {
+        val viewport = Rect(20f, -30f, 220f, 170f)
+        val local = mediaGridMorphCanvasRect(
+            startRect = Rect(40f, -10f, 80f, 30f),
+            endRect = Rect(60f, 10f, 120f, 70f),
+            viewport = viewport,
+            correction = Offset(3f, -4f),
+            progress = 0.5f,
+        )
+
+        assertEquals(33f, local.left, 0.001f)
+        assertEquals(26f, local.top, 0.001f)
+        assertEquals(83f, local.right, 0.001f)
+        assertEquals(76f, local.bottom, 0.001f)
+    }
+
     private fun pair(
         columns: Int,
         capture: MediaGridMorphCapture,

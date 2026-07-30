@@ -2,6 +2,13 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 
 この文書は、全体構成、現状の実装、変更目的別入口、個別docs一覧だけを担当する。禁止事項、完了報告、検証手順は置かない。
 
+## 2026-07-30 TEST_HARNESS単一Morph Canvas
+
+- `MediaGridMorph.kt`のtarget layoutとstart overscanは各列数のcell幅を高さにも使う。start visible cellだけは実測rectを維持する。
+- `MediaGridMorphCanvas.kt`はprepared pairと`MediaGridResidentCanvasPreparedIndex`から、slot画像参照とheader文字layoutを解決済みのbounded immutable render modelを作る。
+- `MediaGridMorphCanvasLayer`は`Disabled`をdefaultとし、`TestVisible`は`BuildConfig.TEST_HARNESS`でだけ使用できる。progress／correctionは一つのCanvasのdraw時だけ読み、画像はviewport単位の一つのoffscreen layerで加算合成し、header背景は不透明、文字だけをCrossfadeする。
+- productionの`ClassifiedMediaGridContent`、pinch、LazyGrid、resident Canvas、viewport、anchor、queue、publicationには接続しない。
+
 ## 2026-07-30 bounded Morph prepared pair foundation
 
 - `MediaGridMorph.kt`はvisible media ordinal＋上下2行のbounded capture、隣接列数layout、行・column位置slot、media ordinal境界header band、immutable prepared pair、generation付きstale拒否cacheを所有する。
@@ -251,6 +258,7 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/TagColorUi.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/MediaGridPlaceholderRendering.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/MediaGridSessionCoordinator.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/MediaGridMorphCanvas.kt.md`
 - Classified tab card/grid switching is handled in `MainActivity.kt` and `TagHierarchyUiV2.kt`; the grid path is built from `ClassifiedMediaGridState` over the lightweight repository source, while the card path continues to use `uiState.classified`.
 
 ### Data・API
@@ -274,7 +282,9 @@ MainActivity / Compose UI
 
 - `docs/app/src/test/java/com/lyco256/llm/TagHierarchyTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/MediaGridMorphTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/MediaGridRenderingContractTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/MediaGridPlaceholderRenderingTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/MediaGridMorphCanvasComposeTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/UiStateRenderingTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/SearchFilterDatabaseIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LikeListDatabaseMigrationTest.kt.md`

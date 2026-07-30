@@ -8,6 +8,7 @@
 - 局所先頭の一つ前のmediaをbucket比較専用に保持し、範囲がbucket途中から始まる場合に偽headerを生成しない。
 - `buildMediaGridMorphPreparedPairs()`はproductionとUnit Testで共有する唯一のbuilderで、隣接する増加・減少方向のimmutable `MediaGridMorphPreparedPair`を作る。2列の減少方向と12列の増加方向は作らない。
 - pairはsource revision、frame key、from/to列数、viewport、viewport signature、start/target layout、slot template、header band template、media ordinal範囲を保持する。画像、Painter、TextLayout、store、queue、workerは保持しない。
+- target layoutとstart overscanは、それぞれの列数に対する`viewport.width / columnCount`をcellのwidth／heightへ使用する。start visible cellだけはcaptureした実測rectを上書きして維持するため、2〜12列のtargetはすべて正方形になる。
 
 ## media slot
 
@@ -32,4 +33,4 @@
 
 `TagHierarchyUiV2.kt`は初期有効layoutとscroll完全停止後だけbounded captureを行い、slot／header計算を`Dispatchers.Default`へ渡す。二本指操作中は要求せず、pointer処理は現行の`mediaGridColumnCountAfterPinchRelease()`だけを使用する。
 
-今回はMorph Canvas、overlay、TextMeasurer、animation、handoffをproductionへ接続していない。resident Canvas、viewport通知、idle anchor、queue、worker、先読み、1frame1枚公開も変更しない。
+`MediaGridMorphCanvas.kt`のTEST_HARNESS限定Canvasはproductionへ接続していない。animation、handoffも未接続であり、resident Canvas、viewport通知、idle anchor、queue、worker、先読み、1frame1枚公開も変更しない。

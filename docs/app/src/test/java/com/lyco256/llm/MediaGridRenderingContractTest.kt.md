@@ -12,6 +12,7 @@
 
 - captureが`itemIndexByMediaOrdinal`とbounded ordinal loopを使用し、frame全件走査と`itemByKey`を使わないこと
 - pure builderが`Dispatchers.Default`で実行され、pointer処理では現行release helperだけを使用すること
-- `MediaGridMorphOverlay`、追加Morph Canvas、`TextMeasurer`、旧`MediaGridMorphWindow`／builderがproduction UIに存在しないこと
+- `MediaGridMorphOverlay`、TEST_HARNESS用Morph Canvas、`TextMeasurer`、旧`MediaGridMorphWindow`／builderがproduction UIに存在しないこと
+- TEST_HARNESS Canvasのdraw範囲がprogress／correctionだけを読み、resident Map、crop、TextMeasurer、collection変換、ImageRequest、draw indexへ触れないこと
 
 既存のviewport ordinal境界、scheduler／publication定数、resident Canvas draw hot path、prepared index keyの静的契約も継続して確認します。

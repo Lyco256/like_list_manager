@@ -378,7 +378,7 @@ private fun buildMediaGridMorphLayout(
     useCapturedGeometry: Boolean,
 ): MediaGridMorphLayoutSnapshot {
     val cellWidth = (capture.viewport.width / columnCount.coerceAtLeast(1)).coerceAtLeast(1f)
-    val cellHeight = capture.cellSizePx
+    val cellHeight = cellWidth
     val media = ArrayList<MediaGridMorphMedia>(capture.media.size)
     val headers = ArrayList<MediaGridMorphHeader>()
     val seenAssets = HashSet<Long>(capture.media.size)
