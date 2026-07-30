@@ -162,22 +162,21 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
-import java.time.DayOfWeek
-import java.time.YearMonth
 import java.time.ZoneOffset
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 import java.util.Collections
 import kotlin.math.abs
-import kotlin.math.hypot
 import kotlin.math.roundToInt
 
 internal const val ClassifiedMediaGridMinColumnCount = 2
@@ -3247,12 +3246,6 @@ internal fun buildMediaGridFrameData(
     )
 }
 
-private data class MediaGridBucketSpec(
-    val key: String,
-    val label: String,
-    val safeKey: String,
-)
-
 internal data class ClassifiedMediaGridScrollAnchor(
     val key: String,
     val index: Int,
@@ -3296,7 +3289,12 @@ internal fun buildClassifiedMediaGridItems(
     val items = ArrayList<ClassifiedMediaGridItem>(entries.size * 2)
     var previousBucketKey: String? = null
     entries.forEachIndexed { sourceIndex, entry ->
-        val bucket = mediaGridBucketSpec(entry, sort.baseOrder, columnCount) ?: return@forEachIndexed
+        val bucket = mediaGridMorphBucketSpec(
+            entry.xCreatedAt,
+            entry.likeCount,
+            sort.baseOrder,
+            columnCount,
+        ) ?: return@forEachIndexed
         if (bucket.key != previousBucketKey) {
             items += MediaGridHeaderItem(
                 key = "media_grid_header_${bucket.safeKey}",
@@ -3327,91 +3325,6 @@ internal fun classifiedMediaGridColumnCountForScale(
 }
 
 private fun mediaGridCellKey(entry: MediaGridEntry): String = "media_grid_item_${entry.assetId}"
-
-private fun mediaGridBucketSpec(
-    entry: MediaGridEntry,
-    baseOrder: ClassifiedSortBase,
-    columnCount: Int,
-): MediaGridBucketSpec? = when (baseOrder) {
-    ClassifiedSortBase.Default -> null
-    ClassifiedSortBase.PostTime -> mediaGridPostTimeBucket(entry.xCreatedAt, columnCount)
-    ClassifiedSortBase.LikeCount -> mediaGridLikeCountBucket(entry.likeCount, columnCount)
-}
-
-private enum class MediaGridDateGranularity { Day, Week, Month }
-
-private fun mediaGridPostTimeBucket(xCreatedAt: String, columnCount: Int): MediaGridBucketSpec {
-    val date = runCatching { Instant.parse(xCreatedAt).atZone(ZoneId.systemDefault()).toLocalDate() }.getOrNull()
-        ?: return MediaGridBucketSpec(
-            key = "post_time_unknown",
-            label = "日付不明",
-            safeKey = "post_time_unknown",
-        )
-    return when (mediaGridDateGranularity(columnCount)) {
-        MediaGridDateGranularity.Day -> MediaGridBucketSpec(
-            key = "post_time_day_$date",
-            label = formatDateBucketDate(date),
-            safeKey = "post_time_day_$date",
-        )
-        MediaGridDateGranularity.Week -> {
-            val weekStart = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-            MediaGridBucketSpec(
-                key = "post_time_week_$weekStart",
-                label = "${formatDateBucketDate(weekStart)} ~ ${formatDateBucketDate(weekStart.plusDays(6))}",
-                safeKey = "post_time_week_$weekStart",
-            )
-        }
-        MediaGridDateGranularity.Month -> {
-            val month = YearMonth.from(date)
-            MediaGridBucketSpec(
-                key = "post_time_month_$month",
-                label = formatMonthBucketDate(month),
-                safeKey = "post_time_month_$month",
-            )
-        }
-    }
-}
-
-private fun mediaGridLikeCountBucket(likeCount: Long?, columnCount: Int): MediaGridBucketSpec = when {
-    likeCount == null -> MediaGridBucketSpec(
-        key = "like_count_unknown",
-        label = "いいね数不明",
-        safeKey = "like_count_unknown",
-    )
-    likeCount >= 100_000L -> MediaGridBucketSpec(
-        key = "like_count_100000_plus",
-        label = "10万以上",
-        safeKey = "like_count_100000_plus",
-    )
-    else -> {
-        val unit = mediaGridLikeBucketUnit(columnCount)
-        val start = (likeCount / unit) * unit
-        val end = start + unit - 1
-        MediaGridBucketSpec(
-            key = "like_count_${unit}_$start",
-            label = "${formatNumberBucketValue(start)}〜${formatNumberBucketValue(end)}",
-            safeKey = "like_count_${unit}_$start",
-        )
-    }
-}
-
-private fun mediaGridDateGranularity(columnCount: Int): MediaGridDateGranularity = when (columnCount.coerceIn(2, 12)) {
-    2, 3, 4 -> MediaGridDateGranularity.Day
-    5, 6, 7, 8 -> MediaGridDateGranularity.Week
-    else -> MediaGridDateGranularity.Month
-}
-
-private fun mediaGridLikeBucketUnit(columnCount: Int): Long = when (columnCount.coerceIn(2, 12)) {
-    2, 3, 4 -> 200L
-    5, 6, 7, 8 -> 500L
-    else -> 1_000L
-}
-
-private fun formatDateBucketDate(date: LocalDate): String = DateTimeFormatter.ofPattern("yyyy/MM/dd").format(date)
-
-private fun formatMonthBucketDate(month: YearMonth): String = DateTimeFormatter.ofPattern("yyyy/M").format(month)
-
-private fun formatNumberBucketValue(value: Long): String = String.format(Locale.JAPAN, "%,d", value)
 
 @Composable
 private fun MediaGridSelectionToolbar(
@@ -3689,6 +3602,9 @@ private fun ClassifiedMediaGridContent(
             )
         }
     } else null
+    val morphPreparationCache = remember(state) { MediaGridMorphPreparationCache() }
+    val morphPointerInProgress = remember(state) { MutableStateFlow(false) }
+    val fallbackMorphHeaderHeightPx = with(LocalDensity.current) { 40.dp.toPx() }
     if (fallbackController != null) DisposableEffect(fallbackController) { onDispose { fallbackController.dispose() } }
     LaunchedEffect(state, frame.key, effectiveController) {
         kotlinx.coroutines.coroutineScope {
@@ -3706,6 +3622,49 @@ private fun ClassifiedMediaGridContent(
             }
         }
     }
+    LaunchedEffect(state, frame.key, columnCount, morphPreparationCache, morphPointerInProgress) {
+        combine(
+            snapshotFlow {
+                if (state.isScrollInProgress) {
+                    null
+                } else {
+                    buildMediaGridViewportSignature(state.layoutInfo, frame, columnCount)
+                        .takeIf {
+                            it.firstVisibleMediaOrdinal >= 0 &&
+                                it.lastVisibleMediaOrdinal >= it.firstVisibleMediaOrdinal &&
+                                it.viewportWidthPx > 0 &&
+                                it.viewportHeightPx > 0
+                        }
+                }
+            }.distinctUntilChanged(),
+            morphPointerInProgress,
+        ) { signature, pointerInProgress ->
+            signature?.takeUnless { pointerInProgress }
+        }.distinctUntilChanged().collectLatest { signature ->
+            if (signature == null) return@collectLatest
+            val identity = MediaGridMorphPreparationIdentity(
+                sourceRevision = frame.key.dataKey.sourceRevision,
+                frameKey = frame.key,
+                columnCount = columnCount,
+                viewportSignature = signature,
+            )
+            val token = morphPreparationCache.request(
+                identity = identity,
+                isScrollInProgress = false,
+                isPointerInProgress = false,
+            ) ?: return@collectLatest
+            val capture = captureMediaGridMorphInput(
+                frame = frame,
+                layoutInfo = state.layoutInfo,
+                columnCount = columnCount,
+                fallbackHeaderHeightPx = fallbackMorphHeaderHeightPx,
+            ) ?: return@collectLatest
+            val pairs = withContext(Dispatchers.Default) {
+                buildMediaGridMorphPreparedPairs(capture)
+            }
+            morphPreparationCache.publish(token, pairs)
+        }
+    }
     effectiveController?.let { MediaGridFramePublicationRunner(it) }
     Box(Modifier.fillMaxSize()) {
         CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
@@ -3720,6 +3679,7 @@ private fun ClassifiedMediaGridContent(
                     sourceRevision = frame.key.dataKey.sourceRevision,
                     state = state,
                     frame = frame,
+                    morphPointerInProgress = morphPointerInProgress,
                     onPinchFinished = onPinchFinished,
                 )
                 .then(
@@ -3821,6 +3781,7 @@ private fun Modifier.mediaGridPinchToResize(
     sourceRevision: Long,
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
     frame: MediaGridFrameData,
+    morphPointerInProgress: MutableStateFlow<Boolean>,
     onPinchFinished: (ClassifiedMediaGridScrollAnchor?, Int) -> Unit,
 ): Modifier {
     val latestColumnCount by rememberUpdatedState(currentColumnCount)
@@ -3829,187 +3790,57 @@ private fun Modifier.mediaGridPinchToResize(
     val latestOnPinchFinished by rememberUpdatedState(onPinchFinished)
     return pointerInput(Unit) {
         awaitEachGesture {
-            var accumulatedScale = 1f
-            var hadTwoPointers = false
-            var pinchAccepted = false
-            var gestureFinished = false
-            var gestureSourceRevision: Long? = null
-            var gestureAnchor: ClassifiedMediaGridScrollAnchor? = null
-            while (true) {
-                val event = awaitPointerEvent()
-                val pressed = event.changes.filter { it.pressed }
-                if (pressed.size >= 2) {
-                    if (!hadTwoPointers) {
-                        hadTwoPointers = true
-                        pinchAccepted = !latestState.isScrollInProgress
-                        gestureSourceRevision = latestSourceRevision
-                        val center = Offset(
-                            (pressed[0].position.x + pressed[1].position.x) / 2f,
-                            (pressed[0].position.y + pressed[1].position.y) / 2f,
-                        )
-                        gestureAnchor = captureClassifiedMediaGridScrollAnchor(latestState, frame.assetIdByItemKey, center)
+            morphPointerInProgress.value = false
+            try {
+                var accumulatedScale = 1f
+                var hadTwoPointers = false
+                var pinchAccepted = false
+                var gestureFinished = false
+                var gestureSourceRevision: Long? = null
+                var gestureAnchor: ClassifiedMediaGridScrollAnchor? = null
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val pressed = event.changes.filter { it.pressed }
+                    if (pressed.size >= 2) {
+                        if (!hadTwoPointers) {
+                            hadTwoPointers = true
+                            morphPointerInProgress.value = true
+                            pinchAccepted = !latestState.isScrollInProgress
+                            gestureSourceRevision = latestSourceRevision
+                            val center = Offset(
+                                (pressed[0].position.x + pressed[1].position.x) / 2f,
+                                (pressed[0].position.y + pressed[1].position.y) / 2f,
+                            )
+                            gestureAnchor = captureClassifiedMediaGridScrollAnchor(latestState, frame.assetIdByItemKey, center)
+                        }
+                        val previousDistance = distanceBetween(pressed[0].previousPosition, pressed[1].previousPosition)
+                        val currentDistance = distanceBetween(pressed[0].position, pressed[1].position)
+                        if (pinchAccepted && previousDistance > 0f && currentDistance > 0f) {
+                            accumulatedScale *= previousDistance / currentDistance
+                        }
+                        event.changes.forEach { it.consume() }
+                    } else if (hadTwoPointers && !gestureFinished) {
+                        gestureFinished = true
+                        val nextColumnCount = if (
+                            pinchAccepted && gestureSourceRevision == latestSourceRevision
+                        ) {
+                            mediaGridColumnCountAfterPinchRelease(latestColumnCount, accumulatedScale)
+                        } else {
+                            latestColumnCount
+                        }
+                        latestOnPinchFinished(gestureAnchor, nextColumnCount)
+                        event.changes.forEach { it.consume() }
+                    } else if (hadTwoPointers) {
+                        event.changes.forEach { it.consume() }
                     }
-                    val previousDistance = distanceBetween(pressed[0].previousPosition, pressed[1].previousPosition)
-                    val currentDistance = distanceBetween(pressed[0].position, pressed[1].position)
-                    if (pinchAccepted && previousDistance > 0f && currentDistance > 0f) {
-                        accumulatedScale *= previousDistance / currentDistance
-                    }
-                    event.changes.forEach { it.consume() }
-                } else if (hadTwoPointers && !gestureFinished) {
-                    gestureFinished = true
-                    val nextColumnCount = if (
-                        pinchAccepted && gestureSourceRevision == latestSourceRevision
-                    ) {
-                        mediaGridColumnCountAfterPinchRelease(latestColumnCount, accumulatedScale)
-                    } else {
-                        latestColumnCount
-                    }
-                    latestOnPinchFinished(gestureAnchor, nextColumnCount)
-                    event.changes.forEach { it.consume() }
-                } else if (hadTwoPointers) {
-                    event.changes.forEach { it.consume() }
+                    if (event.changes.none { it.pressed }) break
                 }
-                if (event.changes.none { it.pressed }) break
+            } finally {
+                morphPointerInProgress.value = false
             }
         }
     }
 }
-
-private data class MediaGridMorphWindow(
-    val fromItems: List<ClassifiedMediaGridItem>,
-    val toItems: List<ClassifiedMediaGridItem>,
-    val globalItemIndexByKey: Map<String, Int>,
-)
-
-private data class MediaGridMorphPreparedPlan(
-    val sourceRevision: Long,
-    val from: MediaGridMorphLayoutSnapshot,
-    val to: MediaGridMorphLayoutSnapshot,
-)
-
-private fun buildPreparedMediaGridMorphPlans(
-    items: List<ClassifiedMediaGridItem>,
-    layoutInfo: androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo,
-    currentColumnCount: Int,
-    sourceRevision: Long,
-    sort: ClassifiedSortState,
-): Map<MediaGridMorphDirection, MediaGridMorphPreparedPlan> {
-    if (items.isEmpty() || layoutInfo.visibleItemsInfo.isEmpty()) return emptyMap()
-    return MediaGridMorphDirection.entries.mapNotNull { direction ->
-        val targetColumnCount = mediaGridMorphTargetColumnCount(currentColumnCount, direction)
-        if (targetColumnCount == currentColumnCount) return@mapNotNull null
-        val window = buildMediaGridMorphWindow(
-            items = items,
-            layoutInfo = layoutInfo,
-            currentColumnCount = currentColumnCount,
-            targetColumnCount = targetColumnCount,
-            sort = sort,
-        )
-        val from = buildMediaGridMorphSnapshot(
-            items = window.fromItems,
-            columnCount = currentColumnCount,
-            layoutInfo = layoutInfo,
-            globalItemIndexByKey = window.globalItemIndexByKey,
-        )
-        val to = buildMediaGridMorphSnapshot(
-            items = window.toItems,
-            columnCount = targetColumnCount,
-            layoutInfo = layoutInfo,
-            globalItemIndexByKey = window.globalItemIndexByKey,
-        )
-        direction to MediaGridMorphPreparedPlan(sourceRevision, from, to)
-    }.toMap()
-}
-
-private fun buildMediaGridMorphWindow(
-    items: List<ClassifiedMediaGridItem>,
-    layoutInfo: androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo,
-    currentColumnCount: Int,
-    targetColumnCount: Int,
-    sort: ClassifiedSortState,
-): MediaGridMorphWindow {
-    if (items.isEmpty() || layoutInfo.visibleItemsInfo.isEmpty()) {
-        return MediaGridMorphWindow(emptyList(), emptyList(), emptyMap())
-    }
-    val firstVisibleIndex = layoutInfo.visibleItemsInfo.minOf { it.index }
-    val lastVisibleIndex = layoutInfo.visibleItemsInfo.maxOf { it.index }
-    val rowPadding = (maxOf(currentColumnCount, targetColumnCount) * MediaGridMorphDefaults.OverscanRows + 2)
-    val start = (firstVisibleIndex - rowPadding).coerceAtLeast(0)
-    val end = (lastVisibleIndex + rowPadding + 1).coerceAtMost(items.size)
-    val fromItems = items.subList(start, end).toList()
-    val globalItemIndexByKey = fromItems.mapIndexed { index, item -> item.key to start + index }.toMap()
-    val entries = fromItems.filterIsInstance<MediaGridCellItem>().map { it.entry }
-    val toItems = buildClassifiedMediaGridItems(entries, sort, targetColumnCount)
-    return MediaGridMorphWindow(fromItems, toItems, globalItemIndexByKey)
-}
-
-private fun buildMediaGridMorphSnapshot(
-    items: List<ClassifiedMediaGridItem>,
-    columnCount: Int,
-    layoutInfo: androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo,
-    globalItemIndexByKey: Map<String, Int> = emptyMap(),
-): MediaGridMorphLayoutSnapshot {
-    val viewport = Rect(
-        left = 0f,
-        top = layoutInfo.viewportStartOffset.toFloat(),
-        right = layoutInfo.viewportSize.width.toFloat(),
-        bottom = layoutInfo.viewportEndOffset.toFloat(),
-    )
-    val visibleRects = layoutInfo.visibleItemsInfo.associateBy { it.key }
-    val cellHeight = layoutInfo.visibleItemsInfo
-        .filter { (it.key as? String)?.startsWith("media_grid_item_") == true }
-        .map { it.size.height.toFloat() }
-        .maxOrNull()
-        ?.coerceAtLeast(1f)
-        ?: (viewport.width / columnCount.coerceAtLeast(1)).coerceAtLeast(1f)
-    val headerHeight = layoutInfo.visibleItemsInfo
-        .filter { (it.key as? String)?.startsWith("media_grid_header_") == true }
-        .map { it.size.height.toFloat() }
-        .maxOrNull()
-        ?.coerceAtLeast(1f)
-        ?: 40f
-    val generated = ArrayList<MediaGridMorphLayoutItem>(items.size)
-    val cellWidth = (viewport.width / columnCount.coerceAtLeast(1)).coerceAtLeast(1f)
-    var y = viewport.top
-    var column = 0
-    fun finishRow() {
-        if (column != 0) {
-            y += cellHeight
-            column = 0
-        }
-    }
-    items.forEachIndexed { index, item ->
-        val actual = visibleRects[item.key]
-        when (item) {
-            is MediaGridHeaderItem -> {
-                finishRow()
-                val generatedRect = Rect(0f, y, viewport.right, y + headerHeight)
-                val rect = actual?.let { Rect(it.offset.x.toFloat(), it.offset.y.toFloat(), (it.offset.x + it.size.width).toFloat(), (it.offset.y + it.size.height).toFloat()) }
-                    ?: generatedRect
-                generated += MediaGridMorphLayoutItem.Header(MediaGridMorphHeader(item.key, item.label, rect))
-                y = generatedRect.bottom
-            }
-            is MediaGridCellItem -> {
-                val generatedRect = Rect(column * cellWidth, y, (column + 1) * cellWidth, y + cellHeight)
-                val rect = actual?.let { Rect(it.offset.x.toFloat(), it.offset.y.toFloat(), (it.offset.x + it.size.width).toFloat(), (it.offset.y + it.size.height).toFloat()) }
-                    ?: generatedRect
-                generated += MediaGridMorphLayoutItem.Media(
-                    MediaGridMorphMedia(
-                        assetKey = "asset:${item.entry.assetId}",
-                        itemIndex = globalItemIndexByKey[item.key] ?: index,
-                        rect = rect,
-                    ),
-                )
-                column++
-                if (column == columnCount) finishRow()
-            }
-        }
-    }
-    finishRow()
-    return MediaGridMorphLayoutSnapshot(columnCount, viewport, generated)
-}
-
-private fun distanceBetween(first: Offset, second: Offset): Float = hypot(first.x - second.x, first.y - second.y)
 
 @Composable
 private fun ClassifiedMediaGridHeader(item: MediaGridHeaderItem) {

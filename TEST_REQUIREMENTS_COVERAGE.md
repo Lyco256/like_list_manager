@@ -1,5 +1,21 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-07-30 bounded Morph prepared pair foundation
+
+| 対象 | 実装・証跡 | 状態 |
+|---|---|---|
+| 同一Asset追跡廃止、行・column slot、右端幅0 | `MediaGridMorphSlot`、`MediaGridMorphTest.fourToFiveUsesRowAndColumnSlotsWithoutTrackingAssetAcrossRows`、5→4・代表列境界test | Unit Test完了 |
+| Asset ID、rect補間、画像Crossfade、snapshot内重複禁止 | `buildMediaGridMorphSlots`、slot interpolation／layer／uniqueness test | Unit Test完了 |
+| ordinal境界優先header、追加・削除、title Crossfade、全幅geometry | `buildMediaGridMorphHeaderBands`、日→週・週→月・いいねbucket test | Unit Test完了 |
+| visible＋上下2行、1万件bounded範囲、偽header防止、2／12境界 | `captureMediaGridMorphInput`、`mediaGridMorphOrdinalRange`、bounded／mid-bucket／boundary test | Unit Test完了 |
+| 初期・idle一回、pixel offset除外、scroll／pointer抑止 | `MediaGridMorphPreparationCache`、idle lifecycle test、`TagHierarchyUiV2.kt`のidle `snapshotFlow` | Unit Test・静的契約完了 |
+| frame／column／viewport／sort／revision stale拒否 | generation token、identity照合、stale publish test | Unit Test完了 |
+| production非描画、既存pinch／resident／viewport／queue／publication維持 | `MediaGridRenderingContractTest.morphPreparationIsBoundedIdleOnlyAndDoesNotEnableRendering`、既存回帰suite | 隔離integration・本番安全上書きSuccess |
+
+- `run-safe-integration-check.cmd`: `Preflight / Build / UnitTest / Lint / Install / IntegrationTest / Success`。
+- `run-safe-debug-check.cmd -InstallToDevice`: `Preflight / Build / UnitTest / Lint / Install / Success`。本番packageのDB・元画像・JPEG・RGB_565 pack・設定・認証情報は初期化していない。
+- Macrobenchmarkは今回の対象外で実行しない。
+
 ## 2026-07-29 viewport boundary and active window optimization
 
 - frame ordinal index、header除外、重複assetの代表Map、viewport signatureの境界・geometry比較、active ordinal範囲、warm-up上限をunit testで固定した。

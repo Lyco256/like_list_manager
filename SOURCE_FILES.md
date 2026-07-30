@@ -2,6 +2,12 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 
 この文書は、全体構成、現状の実装、変更目的別入口、個別docs一覧だけを担当する。禁止事項、完了報告、検証手順は置かない。
 
+## 2026-07-30 bounded Morph prepared pair foundation
+
+- `MediaGridMorph.kt`はvisible media ordinal＋上下2行のbounded capture、隣接列数layout、行・column位置slot、media ordinal境界header band、immutable prepared pair、generation付きstale拒否cacheを所有する。
+- `TagHierarchyUiV2.kt`は初期有効layoutとscroll完全停止後だけmain threadで局所primitive／geometryをcaptureし、共有builderを`Dispatchers.Default`で実行する。pixel offset、scroll／fling、二本指eventごとには計画を作らない。
+- prepared pairは非Compose cacheへ公開するだけで、今回のproduction描画・pinch release・resident Canvas・viewport・anchor・scheduler・先読み・frame publicationには接続しない。
+
 ## 2026-07-22 第11実装: retired image pipeline removal
 
 ## 2026-07-24 ordinal background queues

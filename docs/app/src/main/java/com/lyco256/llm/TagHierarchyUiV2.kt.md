@@ -258,6 +258,14 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 旧操作状態と生成停止方式の詳細はGit履歴だけに残します。現行の直接表示とpreloadの証跡は、冒頭のdirect preview節と`MediaGridDirectPreviewTest`にあります。
 # `TagHierarchyUiV2.kt`
 
+## 2026-07-30 bounded Morph prepared pair foundation
+
+- classified media gridは、`isScrollInProgress == false`で有効なviewport signatureが得られた初回と、scrollの`true -> false`後にvisible境界が変わった時だけMorph準備を要求する。同じ境界内のpixel offset変更はsignatureに含めない。
+- main threadでは`MediaGridOrdinalIndex`からvisible＋上下2行の局所mediaとvisible geometryだけをcaptureする。隣接列のlayout、位置slot、ordinal境界headerの対応は`Dispatchers.Default`上の共有`buildMediaGridMorphPreparedPairs()`が行う。
+- 二本指が接触している間は準備要求を抑止する。新しいframe／column／viewport／sort／source revision要求はgenerationを更新し、古い計算結果を非Compose cacheへ公開しない。
+- prepared pairは現行pointer処理へ未接続で、productionは従来どおりrelease時に`mediaGridColumnCountAfterPinchRelease()`を一回呼ぶ。Morph overlay／Canvas／animation／handoffは追加していない。
+- `MediaGridMorphWindow`、`MediaGridMorphPreparedPlan`、`buildPreparedMediaGridMorphPlans()`、旧snapshot helperは削除し、productionとテストは`MediaGridMorph.kt`の同じcapture／builder基盤を使用する。
+
 ## 2026-07-29 viewport signature and shared ordinal index
 
 - `buildMediaGridFrameData()`はframe itemの一回の走査でitem map、media ordinal配列、headerを`-1`とする逆引き配列、asset ID mapを構築し、`MediaGridFrameData.ordinalIndex`としてUI/controllerへ共有する。

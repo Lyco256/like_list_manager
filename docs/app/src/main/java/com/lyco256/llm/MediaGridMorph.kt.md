@@ -1,15 +1,35 @@
 # MediaGridMorph.kt
 
-`MediaGridMorph.kt` contains the render-independent foundation for continuous media-grid column morphing.
+`MediaGridMorph.kt`は、列数Morphの描画前に使用する局所計画基盤と、既存のrelease判定・未接続state machineを保持する。
 
-- `MediaGridMorphSession` models `Idle`, `Tracking`, `SettlingToCurrent`, `SettlingToTarget`, and `AwaitingGridHandoff`.
-- A gesture chooses one adjacent target column count only. The transaction is created once after a small direction dead zone, while `MediaGridMorphOverlayMotion.progress` is a separate reversible `0f..1f` value.
-- `MediaGridMorphPlan` contains bounded viewport-neighborhood `MediaGridMorphSlot` and `MediaGridMorphHeaderBand` records. The wider column count determines the number of slots; missing right-edge slots use a zero-width Rect at the viewport edge.
-- Header records retain both titles and use zero height for added/removed bands. The overlay interpolates both Y and height, so header height changes are reflected in the following row's precomputed target Rect. `MediaGridMorphAnchor` identifies the nearest Media Asset to the pinch center and applies a target Y correction.
-- Source revision changes cancel the session to the current column count. Target settle produces one handoff result; tracking never mutates the real grid column count.
-- `MediaGridMorphUiState` keeps the transaction, anchor, correction, and handoff-completed flag; progress is never copied into this parent state. Target handoff resolves a stable Asset key, performs one `scrollToItem` and one necessary Y correction, and completes without a later anchor restore.
-- The file has no Compose rendering, image loading, file access, DB access, or source-list subscription.
+## 事前計画
 
-## Current product-path status
+- `captureMediaGridMorphInput()`は現在frameの`MediaGridOrdinalIndex`を使い、visible media ordinalと上下2行だけをmain threadでcaptureする。局所mediaのAsset ID、ordinal、item index、bucket計算用primitive、visible geometryだけを保持し、全frame走査やresident／Bitmap／IO参照を行わない。
+- 局所先頭の一つ前のmediaをbucket比較専用に保持し、範囲がbucket途中から始まる場合に偽headerを生成しない。
+- `buildMediaGridMorphPreparedPairs()`はproductionとUnit Testで共有する唯一のbuilderで、隣接する増加・減少方向のimmutable `MediaGridMorphPreparedPair`を作る。2列の減少方向と12列の増加方向は作らない。
+- pairはsource revision、frame key、from/to列数、viewport、viewport signature、start/target layout、slot template、header band template、media ordinal範囲を保持する。画像、Painter、TextLayout、store、queue、workerは保持しない。
 
-The morph state machine and its pure layout helpers are retained as a later animation foundation. The current product grid does not create a `MediaGridMorphSession`; `mediaGridColumnCountAfterPinchRelease` is the only helper used by the production pinch path and resolves the final gesture ratio to no change or one adjacent column step.
+## media slot
+
+- `MediaGridMorphSlot`は文字列identityではなく`Long?`の`startAssetId`／`endAssetId`を持つ。
+- 対応は局所行番号と行内column位置だけで行い、同じAssetを別の行・columnまで追跡しない。
+- 片側にない右端slotはviewport右端の幅0 rectとする。slot順は上から下、行内は左から右で、各snapshotのAsset IDは一度だけ現れる。
+- rectは四辺を線形補間し、異なるAssetは`1-progress`／`progress`でCrossfadeする。同一slotの同一Assetだけ一枚をalpha 1で扱う。
+
+## header band
+
+- `MediaGridMorphHeader`はkey、title、全幅rect、直後のmedia ordinal、直後のAsset IDを保持する。
+- headerは最初に同じmedia ordinal境界で対応し、残りだけを局所Y順の未使用headerへ対応する。同じheader入力を複数bandへ使用しない。
+- keyが変わってもordinal境界が同じなら同一背景band内でtitleをCrossfadeする。追加・削除は片側を全幅・高さ0 rectとし、背景band自体はalphaで消さない。
+
+## idle cacheとstale拒否
+
+- `MediaGridMorphPreparationCache`はframe key、source revision、列数、offsetを含まないviewport signatureをidentityとして、一つのidentityを一回だけ要求する。
+- 新しいidentityを要求するとgeneration tokenが更新され、古いframe・列数・viewport・revisionの計算結果は公開できない。
+- 公開先は`AtomicReference`であり、prepared pair公開だけではLazyGridをrecomposeしない。
+
+## 現在のproduction状態
+
+`TagHierarchyUiV2.kt`は初期有効layoutとscroll完全停止後だけbounded captureを行い、slot／header計算を`Dispatchers.Default`へ渡す。二本指操作中は要求せず、pointer処理は現行の`mediaGridColumnCountAfterPinchRelease()`だけを使用する。
+
+今回はMorph Canvas、overlay、TextMeasurer、animation、handoffをproductionへ接続していない。resident Canvas、viewport通知、idle anchor、queue、worker、先読み、1frame1枚公開も変更しない。

@@ -66,6 +66,29 @@ class MediaGridRenderingContractTest {
         assertTrue(source.substring(prepared, draw).contains("residentCanvasMode != MediaGridResidentCanvasMode.Disabled"))
     }
 
+    @Test
+    fun morphPreparationIsBoundedIdleOnlyAndDoesNotEnableRendering() {
+        val uiSource = locateSource("src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt").readText()
+        val morphSource = locateSource("src/main/java/com/lyco256/llm/MediaGridMorph.kt").readText()
+        val capture = morphSource.substringAfter("internal fun captureMediaGridMorphInput")
+            .substringBefore("internal fun mediaGridMorphOrdinalRange")
+        val pointer = uiSource.substringAfter("private fun Modifier.mediaGridPinchToResize")
+            .substringBefore("private fun ClassifiedMediaGridHeader")
+
+        assertTrue(capture.contains("itemIndexByMediaOrdinal.getOrNull(ordinal)"))
+        assertTrue(capture.contains("for (ordinal in startOrdinal..endOrdinal)"))
+        assertTrue(!capture.contains("frame.items.forEach") && !capture.contains("frame.itemByKey"))
+        assertTrue(uiSource.contains("withContext(Dispatchers.Default)"))
+        assertTrue(uiSource.contains("if (state.isScrollInProgress)"))
+        assertTrue(pointer.contains("mediaGridColumnCountAfterPinchRelease"))
+        assertTrue(!pointer.contains("buildMediaGridMorphPreparedPairs"))
+        assertTrue(!uiSource.contains("MediaGridMorphOverlay"))
+        assertTrue(!uiSource.contains("MediaGridMorphCanvas"))
+        assertTrue(!uiSource.contains("TextMeasurer"))
+        assertTrue(!uiSource.contains("buildPreparedMediaGridMorphPlans"))
+        assertTrue(!uiSource.contains("MediaGridMorphWindow"))
+    }
+
     private fun locateSource(relativePath: String): File = sequenceOf(
         File(relativePath),
         File("app", relativePath.removePrefix("src/")),
