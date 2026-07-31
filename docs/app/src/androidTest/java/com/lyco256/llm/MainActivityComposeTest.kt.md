@@ -95,6 +95,7 @@
 - `classifiedDisplayToggleSwitchesBetweenCardAndMediaGridAndSurvivesActivityRecreation` waits for a valid persistent preview to display and verifies that `media_grid_placeholder_<assetId>` is gone after the current candidate succeeds.
 - The same flow verifies that an Error cell keeps `media_grid_error_<assetId>` and never exposes a placeholder tag.
 - The existing fling/retouch/cell-action test remains unchanged as the integration regression gate for scrolling and immediate interaction.
+- `normalClassifiedGridComposesProductionCanvasDuringLivePinch` drives the real classified Activity with a two-pointer pinch, seeds the production retained store from the loaded local previews, and verifies that the `media_grid_morph_canvas` is composed during the live gesture. Canvas removal and handoff completion remain covered by the production-host handoff tests.
 
 ## 2026-07 viewport dispatch integration coverage
 

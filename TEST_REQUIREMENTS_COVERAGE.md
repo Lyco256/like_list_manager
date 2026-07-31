@@ -54,6 +54,7 @@
 | One underlying LazyGrid with event-driven target geometry handoff | `MediaGridMorphProductionHost` and `productionHostUsesTheSameLazyGridAndRemovesCanvasAfterHandoff` | covered |
 | Scroll, cell interaction, checkpoint, retention, stale identity, rollback, and lifecycle safety | Production host suppression/owner protection plus existing handoff, rollback, checkpoint, and identity tests | covered |
 | Legacy production pinch modifier removed while common Test/Production input remains | `MediaGridRenderingContractTest` and source-level absence of `mediaGridPinchToResize` in production UI | covered |
+| Normal Activity live pinch composes the production Canvas | `MainActivityComposeTest.normalClassifiedGridComposesProductionCanvasDuringLivePinch` uses the real classified screen and two-pointer input; Canvas is observed mid-gesture | covered (automated; no manual screen capture available) |
 
 Final verification is required through the safe integration and safe debug-install entry points before commit.
 

@@ -29,12 +29,14 @@ import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipTagEntity
 import com.lyco256.llm.data.MediaGridImageCandidateInput
 import com.lyco256.llm.data.MediaGridImageSourceKind
+import com.lyco256.llm.data.MediaGridPreparedCandidate
 import com.lyco256.llm.data.MediaGridPersistentPreviewMetadata
 import com.lyco256.llm.data.MediaGridPersistentPreviewStore
 import com.lyco256.llm.data.PostStorageManager
 import com.lyco256.llm.data.TagEntity
 import com.lyco256.llm.data.TagColorId
 import com.lyco256.llm.data.buildMediaGridImageCandidates
+import com.lyco256.llm.data.buildMediaGridImageRequest
 import com.lyco256.llm.data.mediaGridImageCacheKey
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
@@ -390,6 +392,141 @@ class MainActivityComposeTest {
         waitDisplayed("media_grid_tweet_dialog")
         waitDisplayed("clip_card_$clipId")
         composeRule.onNodeWithTag("media_grid_tweet_dialog_close").performClick()
+    }
+
+    @Test
+    fun normalClassifiedGridComposesProductionCanvasDuringLivePinch() {
+        val now = Instant.now().toString()
+        val colors = listOf(android.graphics.Color.MAGENTA, android.graphics.Color.CYAN)
+        val paths = colors.mapIndexed { index, color ->
+            File(storage().imageDirectory(), "production-morph-live-$index.webp").apply {
+                writeBytes(bitmapBytes(8, 8, color))
+            }.absolutePath
+        }
+        val clipAndAssetIds = runBlocking {
+            storage().withDatabase { database ->
+                val clipId = database.clipDao().insertClip(
+                    ClipEntity(
+                        xPostId = "production-morph-live",
+                        authorName = "Morph Author",
+                        authorUsername = "morph_author",
+                        text = "Production morph live pinch",
+                        postUrl = "https://x.com/morph_author/status/production-morph-live",
+                        xCreatedAt = now,
+                        savedAt = now,
+                        syncedAt = now,
+                    ),
+                )
+                val tagId = database.tagDao().insertTag(
+                    TagEntity(
+                        name = "ProductionMorphLiveTag",
+                        createdAt = now,
+                        updatedAt = now,
+                    ),
+                )
+                database.clipDao().insertClipTag(ClipTagEntity(clipId, tagId, now))
+                database.clipDao().insertAssets(
+                    paths.mapIndexed { index, path ->
+                        AssetEntity(
+                            clipId = clipId,
+                            mediaKey = "production-morph-live-$index",
+                            type = "photo",
+                            remoteUrl = null,
+                            previewUrl = null,
+                            localPath = path,
+                            width = 1200,
+                            height = 1200,
+                            sizeBytes = null,
+                            downloadState = "downloaded",
+                            createdAt = now,
+                        )
+                    },
+                )
+                clipId to database.clipDao().assetsForClipIds(listOf(clipId)).map { it.id }
+            }
+        }
+        val clipId = clipAndAssetIds.first
+        val assetIds = clipAndAssetIds.second
+        val previewStore = MediaGridPersistentPreviewStore(composeRule.activity.filesDir)
+        runBlocking {
+            assetIds.zip(paths).forEach { (assetId, path) ->
+                previewStore.generate(assetId, File(path)) { true }
+            }
+        }
+
+        composeRule.onNodeWithTag("tab_classified").performClick()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("classified_display_toggle").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_query").performTextReplacement("Production morph live pinch")
+        composeRule.onNodeWithTag("filter_apply").performClick()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("media_grid_item_${assetIds.first()}").fetchSemanticsNodes().isNotEmpty() ||
+                composeRule.onAllNodesWithTag("clip_card_$clipId").fetchSemanticsNodes().isNotEmpty()
+        }
+        if (composeRule.onAllNodesWithTag("media_grid_item_${assetIds.first()}").fetchSemanticsNodes().isEmpty()) {
+            composeRule.onNodeWithTag("classified_display_toggle").performClick()
+        }
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("media_grid_item_${assetIds.first()}").fetchSemanticsNodes().isNotEmpty()
+        }
+        val mainViewModel = mainViewModel()
+        val residentStore = mainViewModel.mediaGridSessionState.value.retainedImageStore
+            ?: error("Main activity did not expose its production retained image store")
+        val imageLoader = (composeRule.activity.application as LikeListManagerApp).container.mediaGridImageLoader
+        val preparedCandidates = assetIds.zip(paths).map { (assetId, path) ->
+            val previewFile = previewStore.previewFile(assetId)
+            val source = buildMediaGridImageCandidates(
+                MediaGridImageCandidateInput(
+                    assetId = assetId,
+                    mediaKey = "production-morph-live-${paths.indexOf(path)}",
+                    localPath = path,
+                    previewUrl = null,
+                    remoteUrl = null,
+                    displayUrl = path,
+                    persistentPreview = MediaGridPersistentPreviewMetadata(
+                        filePath = previewFile.absolutePath,
+                        length = previewFile.length(),
+                        lastModified = previewFile.lastModified(),
+                    ),
+                ),
+            ).first()
+            MediaGridPreparedCandidate(
+                kind = source.kind,
+                requestData = File(source.data as String),
+                sourceIdentity = source.sourceIdentity,
+                cacheKey = mediaGridImageCacheKey(source, 256, 256),
+                width = 256,
+                height = 256,
+                useDiskCache = false,
+            )
+        }
+        runBlocking {
+            preparedCandidates.forEachIndexed { index, candidate ->
+                imageLoader.execute(buildMediaGridImageRequest(composeRule.activity, candidate))
+                val value = imageLoader.memoryCache?.get(coil.memory.MemoryCache.Key(candidate.cacheKey))
+                    ?: error("Asset ${assetIds[index]} was not present in the image cache")
+                residentStore.retain(assetIds[index], candidate, value, directDrawEligible = true)
+            }
+        }
+        assetIds.forEach { assetId ->
+            assertTrue(residentStore.hasEligibleDrawHandle(assetId))
+        }
+
+        var canvasSeenDuringGesture = false
+        pinchOnGrid(
+            gridTag = "classified_media_grid",
+            centerSpan = 260f,
+            endSpan = 180f,
+            onMidGesture = {
+                canvasSeenDuringGesture =
+                    composeRule.onAllNodesWithTag("media_grid_morph_canvas", useUnmergedTree = true)
+                        .fetchSemanticsNodes()
+                        .isNotEmpty()
+            },
+        )
+        assertTrue(canvasSeenDuringGesture)
     }
 
     @Test
@@ -2048,6 +2185,11 @@ class MainActivityComposeTest {
         }
     }
 
+    private fun mainViewModel(): MainViewModel {
+        val field = MainActivity::class.java.getDeclaredField("viewModel").apply { isAccessible = true }
+        return field.get(composeRule.activity) as MainViewModel
+    }
+
     private fun apiClientId(): String = runBlocking {
         (composeRule.activity.application as LikeListManagerApp).container.repository.loadApiSettings().clientId
     }
@@ -2275,7 +2417,12 @@ class MainActivityComposeTest {
     private fun gridItemBounds(tag: String): androidx.compose.ui.geometry.Rect =
         composeRule.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
 
-    private fun pinchOnGrid(gridTag: String, centerSpan: Float, endSpan: Float) {
+    private fun pinchOnGrid(
+        gridTag: String,
+        centerSpan: Float,
+        endSpan: Float,
+        onMidGesture: (() -> Unit)? = null,
+    ) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val location = IntArray(2)
         composeRule.activity.window.decorView.getLocationOnScreen(location)
@@ -2348,6 +2495,10 @@ class MainActivityComposeTest {
                     coords(centerX + halfSpan, centerY),
                 ),
             )
+            if (onMidGesture != null && step == stepCount / 2) {
+                instrumentation.waitForIdleSync()
+                onMidGesture()
+            }
         }
         send(
             MotionEvent.ACTION_POINTER_UP or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT),
