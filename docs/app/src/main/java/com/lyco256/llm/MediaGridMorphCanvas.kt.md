@@ -31,3 +31,8 @@
 - Canvas全体をclipし、staleなCanvas寸法、幅／高さ0以下のslot／bandは描きません。pointer input、clickable、semantics actionは持ちません。
 
 draw中はMap lookup、collection生成、resident解決、crop、ImageBitmap変換、text measure、IO、model再構築、Compose state更新を行いません。
+# MediaGridMorphCanvas.kt
+
+`MediaGridMorphCanvasMode`は`Disabled`、`TestVisible`、`ProductionVisible`の明示modeを持つ。defaultは`Disabled`で、`TestVisible`だけ`BuildConfig.TEST_HARNESS`を要求する。ProductionVisibleはproduction hostがactive plan中だけ指定する。
+
+Canvas、TextMeasurer、render modelはactive planがcomposeされている間だけ生成される。resident prepared indexだけを読み、Grid viewport内をclipしてstart/end画像とheaderを単一Canvasで描画する。

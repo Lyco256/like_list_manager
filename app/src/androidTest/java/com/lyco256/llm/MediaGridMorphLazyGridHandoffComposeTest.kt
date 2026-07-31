@@ -2,7 +2,18 @@ package com.lyco256.llm
 
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
@@ -10,9 +21,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -66,6 +79,161 @@ class MediaGridMorphLazyGridHandoffComposeTest {
     @Test
     fun twelveToElevenPreservesThousandLikeCountBuckets() =
         runHandoff(12, 11, ClassifiedSortBase.LikeCount)
+
+    @Test
+    fun productionHostUsesTheSameLazyGridAndRemovesCanvasAfterHandoff() {
+        val fixture = fixture(2, 3, ClassifiedSortBase.Default)
+        val bitmaps = fixture.entries.associate { it.assetId to assetBitmap(it.assetId) }
+        val preparedIndex = preparedIndex(bitmaps)
+        val store = MediaGridRetainedImageStore(null)
+        lateinit var hostState: MediaGridMorphProductionHostState
+        val displayedFrame = mutableStateOf(fixture.sourceFrame)
+        val displayedColumns = mutableStateOf(fixture.fromColumns)
+        var columnChanges = 0
+        val gridState = LazyGridState(
+            firstVisibleItemIndex = fixture.initialItemIndex,
+            firstVisibleItemScrollOffset = fixture.initialItemScrollOffset,
+        )
+        try {
+            composeRule.setContent {
+                val frame = displayedFrame.value
+                val columns = displayedColumns.value
+                val density = LocalDensity.current
+                hostState = rememberMediaGridMorphProductionHostState(
+                    state = gridState,
+                    sessionKey = mediaGridSessionKey(fixture.dataKey),
+                    retainedImageStore = store,
+                    enabled = true,
+                )!!
+                val identity = MediaGridMorphInteractionIdentity(
+                    sourceRevision = frame.key.dataKey.sourceRevision,
+                    frameKey = frame.key,
+                    currentColumnCount = columns,
+                    viewportSignature = fixture.pair.viewportSignature.copy(
+                        renderKey = frame.key,
+                        columnCount = columns,
+                    ),
+                )
+                val interactionLocked = hostState.controller.interactionLocked.value ||
+                    hostState.handoffSnapshot.value.suppressesUserScroll
+                MaterialTheme {
+                    Box(
+                        Modifier
+                            .requiredSize(
+                                WidthPx.dp / density.density,
+                                HeightPx.dp / density.density,
+                            )
+                            .testTag("production_morph_host"),
+                    ) {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(columns),
+                            state = gridState,
+                            userScrollEnabled = !interactionLocked,
+                            modifier = Modifier.fillMaxSize().testTag("production_morph_grid"),
+                        ) {
+                            gridItems(
+                                frame.items,
+                                key = { it.key },
+                                span = { item ->
+                                    when (item) {
+                                        is MediaGridHeaderItem -> GridItemSpan(maxLineSpan)
+                                        is MediaGridCellItem -> GridItemSpan(1)
+                                    }
+                                },
+                            ) { item ->
+                                when (item) {
+                                    is MediaGridHeaderItem -> Box(
+                                        Modifier.fillMaxWidth().height(40.dp),
+                                    )
+                                    is MediaGridCellItem -> Box(
+                                        Modifier.fillMaxWidth().aspectRatio(1f).background(Color.Gray),
+                                    )
+                                }
+                            }
+                        }
+                        MediaGridMorphProductionHost(
+                            host = hostState,
+                            frame = frame,
+                            sessionKey = mediaGridSessionKey(fixture.dataKey),
+                            identity = identity,
+                            preparedPairsSnapshot = { mapOf(fixture.direction to fixture.pair) },
+                            preparedIndex = preparedIndex,
+                            state = gridState,
+                            onColumnCountChange = { next ->
+                                columnChanges++
+                                displayedColumns.value = next
+                                displayedFrame.value = if (next == fixture.toColumns) fixture.targetFrame else fixture.sourceFrame
+                            },
+                            onAnchorCheckpoint = { _, _ -> },
+                            onCheckpointSuppressed = { },
+                            modifier = Modifier.fillMaxSize().testTag("production_morph_canvas_layer"),
+                        )
+                    }
+                }
+            }
+            composeRule.waitForIdle()
+            composeRule.runOnIdle {
+                val center = fixtureAnchorSlot(fixture.pair, fixture.toColumns).startRect.center
+                val plan = MediaGridMorphPlan.select(fixture.pair, center)
+                val anchor = plan.anchor!!
+                val targetCenter = Offset(
+                    anchor.slot.endRect.left + anchor.slot.endRect.width * anchor.focalU - fixture.pair.viewport.left,
+                    anchor.slot.endRect.top + anchor.slot.endRect.height * anchor.focalV - fixture.pair.viewport.top,
+                )
+                val identity = MediaGridMorphInteractionIdentity(
+                    fixture.dataKey.sourceRevision,
+                    fixture.sourceFrame.key,
+                    fixture.fromColumns,
+                    fixture.pair.viewportSignature,
+                )
+                assertTrue(
+                    hostState.controller.beginPointers(
+                        identity,
+                        mapOf(fixture.direction to fixture.pair),
+                        1L,
+                        2L,
+                        center - Offset(20f, 0f),
+                        center + Offset(20f, 0f),
+                    ),
+                )
+                hostState.controller.updatePointers(
+                    targetCenter - Offset(5f, 0f),
+                    targetCenter + Offset(5f, 0f),
+                )
+                hostState.controller.releasePointers()
+            }
+            composeRule.waitForIdle()
+            assertEquals(1, columnChanges)
+            assertEquals(MediaGridMorphPhase.Idle, hostState.controller.snapshot().phase)
+            composeRule.onAllNodesWithTag("media_grid_morph_canvas").assertCountEquals(0)
+        } finally {
+            composeRule.runOnIdle { store.close() }
+            bitmaps.values.forEach(Bitmap::recycle)
+        }
+    }
+
+    @Test
+    fun productionReadinessRequiresEveryPairAssetToBeResident() {
+        val fixture = fixture(2, 3, ClassifiedSortBase.Default)
+        val bitmaps = fixture.entries.associate { it.assetId to assetBitmap(it.assetId) }
+        val completeIndex = preparedIndex(bitmaps)
+        val identity = MediaGridMorphInteractionIdentity(
+            sourceRevision = fixture.dataKey.sourceRevision,
+            frameKey = fixture.sourceFrame.key,
+            currentColumnCount = fixture.fromColumns,
+            viewportSignature = fixture.pair.viewportSignature,
+        )
+        assertTrue(isMediaGridMorphProductionReady(fixture.pair, completeIndex))
+
+        val requiredAssetId = fixture.pair.slots.first {
+            it.startAssetId != null && it.endAssetId != null
+        }.startAssetId!!
+        val incompleteIndex = completeIndex.copy(
+            preparedImageByAssetId = completeIndex.preparedImageByAssetId - requiredAssetId,
+        )
+        assertTrue(fixture.pair.matchesIdentity(identity))
+        assertFalse(isMediaGridMorphProductionReady(fixture.pair, incompleteIndex))
+    }
 
     @Test
     fun eightToNineChangesLikeCountBucketGranularity() =

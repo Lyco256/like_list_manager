@@ -85,9 +85,6 @@ internal class MediaGridRetainedImageStore(
         synchronized(lock) {
             if (closed) return
             ownerProtections[ownerToken] = Protection(visibleAssetIds.toSet(), activeAssetIds.toSet())
-            visibleAssetIds.forEach { assetId ->
-                keyByAssetId[assetId]?.let { key -> entries[key] }
-            }
             if (trimLocked()) publishDrawIndexLocked()
         }
     }

@@ -258,6 +258,10 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 旧操作状態と生成停止方式の詳細はGit履歴だけに残します。現行の直接表示とpreloadの証跡は、冒頭のdirect preview節と`MediaGridDirectPreviewTest`にあります。
 # `TagHierarchyUiV2.kt`
 
+## Current production Morph contract
+
+The normal classified `LazyVerticalGrid` remains the only grid. `MediaGridMorphProductionHost` places the `ProductionVisible` Canvas above that grid and below the toolbar layer, verifies the target geometry, then removes the Canvas after the target frame is drawn. Selection/progress modes do not enable production Morph; identity and lifecycle changes cancel stale work.
+
 ## 2026-07-30 bounded Morph prepared pair foundation
 
 - classified media gridは、`isScrollInProgress == false`で有効なviewport signatureが得られた初回と、scrollの`true -> false`後にvisible境界が変わった時だけMorph準備を要求する。同じ境界内のpixel offset変更はsignatureに含めない。
@@ -278,3 +282,10 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - Explicit checkpoints cover `ON_STOP`, grid disposal/session replacement, and completed column handoff. Restoration completion also captures the final valid layout once.
 - Capture directly scans visible items once and accepts only keys in `MediaGridFrameData.assetIdByItemKey`, preserving header exclusion and center/fallback selection without collection or per-item `Offset` allocations.
 - The viewport `snapshotFlow` and all controller/scheduler/resident Canvas/pointer-input behavior remain unchanged.
+# TagHierarchyUiV2.kt
+
+`ClassifiedMediaGridContent`は通常の非選択メディアグリッドでだけproduction Morph hostと共通gesture modifierを明示的に有効化する。underlying LazyVerticalGridは一枚のままcompose/layout/drawし、Grid→progress→active Morph Canvasの順に配置する。
+
+Morph中は`userScrollEnabled`、cell tap/long press、selection/Dialog導線を抑止する。checkpoint抑止はsession restore、legacy fallback pinch、Morphを独立理由として保持し、いずれか一つの終了で他を解除しない。source/filter/sort/session/display/lifecycle変更ではgeneration identityを再検証し、stale Canvasを除去する。
+
+production readinessはprepared pairのbounded slotとviewport交差範囲だけを走査し、resident prepared indexのasset存在を確認する。未準備方向、画像不足、selection、initial Progress、scroll中は共通modifierの既存fallbackへ進み、同一gestureから二重の列数変更を発行しない。

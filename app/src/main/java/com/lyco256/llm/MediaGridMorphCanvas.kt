@@ -31,6 +31,7 @@ import kotlin.math.roundToInt
 internal enum class MediaGridMorphCanvasMode {
     Disabled,
     TestVisible,
+    ProductionVisible,
 }
 
 internal data class MediaGridMorphRenderSlot(
@@ -149,7 +150,7 @@ internal fun MediaGridMorphCanvasLayer(
     onTextMeasured: ((String) -> Unit)? = null,
 ) {
     if (mode == MediaGridMorphCanvasMode.Disabled) return
-    check(BuildConfig.TEST_HARNESS) {
+    check(mode != MediaGridMorphCanvasMode.TestVisible || BuildConfig.TEST_HARNESS) {
         "MediaGridMorphCanvasLayer is restricted to TEST_HARNESS"
     }
 

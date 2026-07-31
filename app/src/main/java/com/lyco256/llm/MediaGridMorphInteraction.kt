@@ -19,6 +19,7 @@ import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.math.hypot
 
 internal data class MediaGridMorphInteractionIdentity(
@@ -59,6 +60,12 @@ internal data class MediaGridMorphInteractionSnapshot(
     val handoffRequest: MediaGridMorphHandoffRequest?,
     val interactionGeneration: Long,
 )
+
+internal enum class MediaGridMorphGestureMode {
+    Disabled,
+    Test,
+    Production,
+}
 
 internal fun mediaGridMorphScale(initialDistance: Float, currentDistance: Float): Float? {
     if (
@@ -138,11 +145,13 @@ internal class MediaGridMorphInteractionController(
     private val _progress = mutableStateOf(0f)
     private val _correction = mutableStateOf(Offset.Zero)
     private val _handoffRequest = mutableStateOf<MediaGridMorphHandoffRequest?>(null)
+    private val _interactionLocked = mutableStateOf(false)
     internal val settleSignal: MutableState<Long> = mutableLongStateOf(0L)
     val activePlan: State<MediaGridMorphPlan?> get() = _activePlan
     val progress: State<Float> get() = _progress
     val correction: State<Offset> get() = _correction
     val handoffRequest: State<MediaGridMorphHandoffRequest?> get() = _handoffRequest
+    val interactionLocked: State<Boolean> get() = _interactionLocked
 
     fun snapshot(): MediaGridMorphInteractionSnapshot = currentSnapshot
 
@@ -156,7 +165,7 @@ internal class MediaGridMorphInteractionController(
     ): Boolean {
         val initialDistance = pointerDistance(firstPosition, secondPosition)
         if (!initialDistance.isFinite() || initialDistance <= 0f) return false
-        val validPairs = preparedPairsSnapshot.filterValues { it.matches(identity) }
+        val validPairs = preparedPairsSnapshot.filterValues { it.matchesIdentity(identity) }
         if (validPairs.isEmpty()) return false
         val generation = ++nextGeneration
         val center = midpoint(firstPosition, secondPosition)
@@ -443,6 +452,7 @@ internal class MediaGridMorphInteractionController(
         _progress.value = progress
         _correction.value = correction
         _handoffRequest.value = handoffRequest
+        _interactionLocked.value = phase != MediaGridMorphPhase.Idle
         currentSnapshot = MediaGridMorphInteractionSnapshot(
             phase = phase,
             direction = direction,
@@ -464,6 +474,7 @@ internal class MediaGridMorphInteractionController(
         _progress.value = 0f
         _correction.value = Offset.Zero
         _handoffRequest.value = null
+        _interactionLocked.value = false
         currentSnapshot = MediaGridMorphInteractionSnapshot(
             phase = MediaGridMorphPhase.Idle,
             direction = null,
@@ -483,59 +494,85 @@ internal class MediaGridMorphInteractionController(
 
 @Composable
 internal fun Modifier.mediaGridMorphGestureInput(
-    controller: MediaGridMorphInteractionController,
-    identity: MediaGridMorphInteractionIdentity,
+    mode: MediaGridMorphGestureMode,
+    controller: MediaGridMorphInteractionController?,
+    identity: MediaGridMorphInteractionIdentity?,
     preparedPairsSnapshot: () -> Map<MediaGridMorphDirection, MediaGridMorphPreparedPair>,
     isScrollInProgress: () -> Boolean,
+    onFallbackPinchFinished: (ClassifiedMediaGridScrollAnchor?, Int) -> Unit = { _, _ -> },
+    fallbackColumnCount: () -> Int = { identity?.currentColumnCount ?: 0 },
+    fallbackAnchorAtCenter: (Offset) -> ClassifiedMediaGridScrollAnchor? = { null },
+    pointerInProgress: MutableStateFlow<Boolean>? = null,
 ): Modifier {
-    check(BuildConfig.TEST_HARNESS) {
-        "mediaGridMorphGestureInput is restricted to TEST_HARNESS"
+    check(mode != MediaGridMorphGestureMode.Test || BuildConfig.TEST_HARNESS) {
+        "mediaGridMorphGestureInput Test mode is restricted to TEST_HARNESS"
     }
     val latestIdentity by rememberUpdatedState(identity)
     val latestPairs by rememberUpdatedState(preparedPairsSnapshot)
     val latestScroll by rememberUpdatedState(isScrollInProgress)
-    return pointerInput(controller) {
+    val latestFallback by rememberUpdatedState(onFallbackPinchFinished)
+    val latestColumnCount by rememberUpdatedState(fallbackColumnCount)
+    val latestFallbackAnchor by rememberUpdatedState(fallbackAnchorAtCenter)
+    return pointerInput(mode, controller) {
         awaitEachGesture {
-            var accepted = false
+            var morphAccepted = false
+            var fallbackTracking = false
             var released = false
             var firstId = Long.MIN_VALUE
             var secondId = Long.MIN_VALUE
+            var initialDistance = 0f
+            var latestDistance = 0f
+            var fallbackAnchor: ClassifiedMediaGridScrollAnchor? = null
             try {
                 while (true) {
                     val event = awaitPointerEvent()
                     if (event.type == PointerEventType.Unknown) {
-                        if (accepted && !released) {
+                        if (morphAccepted && !released) {
                             released = true
-                            controller.cancelPointers()
+                            controller?.cancelPointers()
                         }
                         break
                     }
-                    if (!accepted && !released && !latestScroll()) {
-                        var first: PointerInputChange? = null
-                        var second: PointerInputChange? = null
-                        for (change in event.changes) {
-                            if (!change.pressed) continue
-                            if (first == null) first = change else if (second == null) {
-                                second = change
-                                break
-                            }
+                    var first: PointerInputChange? = null
+                    var second: PointerInputChange? = null
+                    for (change in event.changes) {
+                        if (!change.pressed) continue
+                        if (first == null) first = change else if (second == null) {
+                            second = change
+                            break
                         }
-                        if (first != null && second != null) {
-                            firstId = first.id.value
-                            secondId = second.id.value
-                            accepted = controller.beginPointers(
-                                identity = latestIdentity,
+                    }
+                    if (!released && first != null && second != null && !fallbackTracking && !morphAccepted) {
+                        firstId = first.id.value
+                        secondId = second.id.value
+                        initialDistance = pointerDistance(first.position, second.position)
+                        latestDistance = initialDistance
+                        val canTrack = initialDistance.isFinite() && initialDistance > 0f && !latestScroll()
+                        fallbackTracking = canTrack
+                        if (canTrack) pointerInProgress?.value = true
+                        if (canTrack) {
+                            fallbackAnchor = latestFallbackAnchor(midpoint(first.position, second.position))
+                        }
+                        if (
+                            mode != MediaGridMorphGestureMode.Disabled &&
+                            canTrack &&
+                            controller != null &&
+                            latestIdentity != null
+                        ) {
+                            morphAccepted = controller.beginPointers(
+                                identity = latestIdentity!!,
                                 preparedPairsSnapshot = latestPairs(),
                                 firstPointerId = firstId,
                                 secondPointerId = secondId,
                                 firstPosition = first.position,
                                 secondPosition = second.position,
                             )
+                            if (morphAccepted) fallbackTracking = false
                         }
                     }
-                    if (accepted && !released) {
-                        var first: PointerInputChange? = null
-                        var second: PointerInputChange? = null
+                    if (morphAccepted && !released) {
+                        first = null
+                        second = null
                         for (change in event.changes) {
                             when (change.id.value) {
                                 firstId -> first = change
@@ -551,11 +588,11 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                     first?.uptimeMillis ?: 0L,
                                     second?.uptimeMillis ?: 0L,
                                 )
-                                controller.releasePointers(
+                                controller?.releasePointers(
                                     releaseTimeNanos = releaseUptimeMillis * 1_000_000L,
                                 )
                             } else {
-                                controller.cancelPointers()
+                                controller?.cancelPointers()
                             }
                             first?.takeIf {
                                 mediaGridMorphShouldConsumePointer(true, it.id.value, firstId, secondId)
@@ -564,7 +601,7 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                 mediaGridMorphShouldConsumePointer(true, it.id.value, firstId, secondId)
                             }?.consume()
                         } else {
-                            controller.updatePointers(first.position, second.position)
+                            controller?.updatePointers(first.position, second.position)
                             if (
                                 first.position != first.previousPosition &&
                                 mediaGridMorphShouldConsumePointer(true, first.id.value, firstId, secondId)
@@ -574,6 +611,33 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                 mediaGridMorphShouldConsumePointer(true, second.id.value, firstId, secondId)
                             ) second.consume()
                         }
+                    } else if (fallbackTracking && !released) {
+                        first = null
+                        second = null
+                        for (change in event.changes) {
+                            when (change.id.value) {
+                                firstId -> first = change
+                                secondId -> second = change
+                            }
+                        }
+                        if (first != null && second != null) {
+                            latestDistance = pointerDistance(first.position, second.position)
+                        }
+                        val pointersReleased = first == null || second == null || !first.pressed || !second.pressed
+                        if (pointersReleased) {
+                            released = true
+                            val scale = mediaGridMorphScale(initialDistance, latestDistance)
+                            val nextColumnCount = scale?.let {
+                                mediaGridColumnCountAfterPinchRelease(latestColumnCount(), it)
+                            } ?: latestColumnCount()
+                            latestFallback(fallbackAnchor, nextColumnCount)
+                        }
+                        for (change in event.changes) {
+                            if (change.id.value == firstId || change.id.value == secondId) change.consume()
+                        }
+                    }
+                    if (!morphAccepted && !fallbackTracking && !released && mode == MediaGridMorphGestureMode.Disabled) {
+                        // Disabled still allows the ordinary one-pointer grid interaction.
                     }
                     var anyPressed = false
                     for (change in event.changes) {
@@ -585,7 +649,8 @@ internal fun Modifier.mediaGridMorphGestureInput(
                     if (!anyPressed) break
                 }
             } finally {
-                if (accepted && !released) controller.cancelPointers()
+                if (morphAccepted && !released) controller?.cancelPointers()
+                pointerInProgress?.value = false
             }
         }
     }
@@ -618,6 +683,7 @@ internal fun MediaGridMorphInteractiveTestLayer(
         modifier
             .fillMaxSize()
             .mediaGridMorphGestureInput(
+                mode = MediaGridMorphGestureMode.Test,
                 controller = controller,
                 identity = identity,
                 preparedPairsSnapshot = preparedPairsSnapshot,
@@ -639,12 +705,6 @@ internal fun MediaGridMorphInteractiveTestLayer(
         }
     }
 }
-
-private fun MediaGridMorphPreparedPair.matches(identity: MediaGridMorphInteractionIdentity): Boolean =
-    sourceRevision == identity.sourceRevision &&
-        frameKey == identity.frameKey &&
-        fromColumnCount == identity.currentColumnCount &&
-        viewportSignature == identity.viewportSignature
 
 private fun pointerDistance(first: Offset, second: Offset): Float =
     hypot(first.x - second.x, first.y - second.y)

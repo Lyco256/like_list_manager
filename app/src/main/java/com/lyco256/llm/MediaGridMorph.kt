@@ -236,6 +236,42 @@ internal class MediaGridMorphPreparationCache {
     fun snapshot(): Map<MediaGridMorphDirection, MediaGridMorphPreparedPair> = published.get()
 }
 
+internal fun MediaGridMorphPreparedPair.matchesIdentity(
+    identity: MediaGridMorphInteractionIdentity,
+): Boolean =
+    sourceRevision == identity.sourceRevision &&
+        frameKey == identity.frameKey &&
+        fromColumnCount == identity.currentColumnCount &&
+        viewportSignature == identity.viewportSignature
+
+/**
+ * Checks only the bounded pair slots that can cross the current viewport. It
+ * never touches the retained store, starts a request, decodes, or scans the
+ * complete frame/resident index.
+ */
+internal fun isMediaGridMorphProductionReady(
+    pair: MediaGridMorphPreparedPair,
+    preparedIndex: MediaGridResidentCanvasPreparedIndex,
+): Boolean {
+    val required = HashSet<Long>()
+    for (slot in pair.slots) {
+        val left = minOf(slot.startRect.left, slot.endRect.left)
+        val top = minOf(slot.startRect.top, slot.endRect.top)
+        val right = maxOf(slot.startRect.right, slot.endRect.right)
+        val bottom = maxOf(slot.startRect.bottom, slot.endRect.bottom)
+        if (
+            right <= pair.viewport.left ||
+            left >= pair.viewport.right ||
+            bottom <= pair.viewport.top ||
+            top >= pair.viewport.bottom
+        ) continue
+        slot.startAssetId?.let(required::add)
+        slot.endAssetId?.let(required::add)
+    }
+    if (required.isEmpty()) return false
+    return required.all { it in preparedIndex.preparedImageByAssetId }
+}
+
 internal object MediaGridMorphDefaults {
     const val DeadZoneScale: Float = 1.02f
     const val ReleaseThreshold: Float = 0.5f

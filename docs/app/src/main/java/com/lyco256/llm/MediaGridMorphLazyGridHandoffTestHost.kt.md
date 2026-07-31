@@ -1,5 +1,9 @@
 # `MediaGridMorphLazyGridHandoffTestHost.kt`
 
+## Current production contract
+
+This remains a TEST_HARNESS-only one-grid host. Production `ClassifiedMediaGridContent` uses `MediaGridMorphProductionHost` and does not call this test host.
+
 `BuildConfig.TEST_HARNESS`限定で、実`LazyVerticalGrid`一枚と既存Morph interactive layerをhandoff coordinatorへ接続する。
 
 - source／targetの実`MediaGridFrameData`を可変列数の同じLazyGridへ表示する。

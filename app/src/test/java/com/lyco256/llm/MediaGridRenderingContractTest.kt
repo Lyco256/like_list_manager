@@ -72,8 +72,7 @@ class MediaGridRenderingContractTest {
         val morphSource = locateSource("src/main/java/com/lyco256/llm/MediaGridMorph.kt").readText()
         val capture = morphSource.substringAfter("internal fun captureMediaGridMorphInput")
             .substringBefore("internal fun mediaGridMorphOrdinalRange")
-        val pointer = uiSource.substringAfter("private fun Modifier.mediaGridPinchToResize")
-            .substringBefore("private fun ClassifiedMediaGridHeader")
+        val pointer = locateSource("src/main/java/com/lyco256/llm/MediaGridMorphInteraction.kt").readText()
 
         assertTrue(capture.contains("itemIndexByMediaOrdinal.getOrNull(ordinal)"))
         assertTrue(capture.contains("for (ordinal in startOrdinal..endOrdinal)"))
@@ -81,27 +80,25 @@ class MediaGridRenderingContractTest {
         assertTrue(uiSource.contains("withContext(Dispatchers.Default)"))
         assertTrue(uiSource.contains("if (state.isScrollInProgress)"))
         assertTrue(pointer.contains("mediaGridColumnCountAfterPinchRelease"))
-        assertTrue(!pointer.contains("buildMediaGridMorphPreparedPairs"))
-        assertTrue(!uiSource.contains("MediaGridMorphOverlay"))
-        assertTrue(!uiSource.contains("MediaGridMorphCanvas"))
-        assertTrue(!uiSource.contains("TextMeasurer"))
-        assertTrue(!uiSource.contains("buildPreparedMediaGridMorphPlans"))
-        assertTrue(!uiSource.contains("MediaGridMorphWindow"))
+        assertTrue(pointer.contains("MediaGridMorphGestureMode"))
+        assertTrue(!uiSource.contains("mediaGridPinchToResize"))
+        assertTrue(uiSource.contains("withContext(Dispatchers.Default)"))
     }
 
     @Test
-    fun morphCanvasIsTestHarnessOnlyAndNeverConnectedToProductionGrid() {
+    fun morphCanvasHasExplicitTestAndProductionModes() {
         val uiSource = locateSource("src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt").readText()
         val canvasSource = locateSource("src/main/java/com/lyco256/llm/MediaGridMorphCanvas.kt").readText()
+        val hostSource = locateSource("src/main/java/com/lyco256/llm/MediaGridMorphProductionHost.kt").readText()
         val canvasDraw = canvasSource.substringAfter("private fun MediaGridMorphCanvas(")
             .substringBefore("private fun lerpMorphEdge")
 
         assertTrue(canvasSource.contains("if (mode == MediaGridMorphCanvasMode.Disabled) return"))
-        assertTrue(canvasSource.contains("check(BuildConfig.TEST_HARNESS)"))
+        assertTrue(canvasSource.contains("ProductionVisible"))
+        assertTrue(canvasSource.contains("mode != MediaGridMorphCanvasMode.TestVisible || BuildConfig.TEST_HARNESS"))
         assertTrue(canvasSource.contains("rememberTextMeasurer()"))
-        assertTrue(!uiSource.contains("MediaGridMorphCanvasLayer"))
-        assertTrue(!uiSource.contains("MediaGridMorphCanvasMode"))
-        assertTrue(!uiSource.contains("media_grid_morph_canvas"))
+        assertTrue(uiSource.contains("MediaGridMorphProductionHost"))
+        assertTrue(hostSource.contains("MediaGridMorphCanvasMode.ProductionVisible"))
         assertTrue(canvasDraw.contains("val p = progress.value.coerceIn(0f, 1f)"))
         assertTrue(canvasDraw.contains("val currentCorrection = correction.value"))
         assertTrue(!canvasDraw.contains("preparedImageByAssetId"))
@@ -115,23 +112,21 @@ class MediaGridRenderingContractTest {
     }
 
     @Test
-    fun morphInteractionIsTestHarnessOnlyAndDoesNotReplaceProductionPinchOrGridHandoff() {
+    fun morphInteractionSharesOneModifierAcrossTestAndProduction() {
         val uiSource = locateSource("src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt").readText()
         val interactionSource = locateSource(
             "src/main/java/com/lyco256/llm/MediaGridMorphInteraction.kt",
         ).readText()
-        val pointer = uiSource.substringAfter("private fun Modifier.mediaGridPinchToResize")
-            .substringBefore("private fun ClassifiedMediaGridHeader")
 
-        assertTrue(interactionSource.contains("check(BuildConfig.TEST_HARNESS)"))
+        assertTrue(interactionSource.contains("MediaGridMorphGestureMode.Test"))
         assertTrue(interactionSource.contains("withFrameNanos(controller::advanceSettleFrame)"))
         assertTrue(interactionSource.contains("MediaGridMorphCanvasMode.TestVisible"))
-        assertTrue(!uiSource.contains("MediaGridMorphInteractiveTestLayer"))
-        assertTrue(!uiSource.contains("mediaGridMorphGestureInput"))
-        assertTrue(pointer.contains("mediaGridColumnCountAfterPinchRelease"))
-        assertTrue(pointer.contains("latestOnPinchFinished(gestureAnchor, nextColumnCount)"))
-        assertTrue(!pointer.contains("MediaGridMorphInteractionController"))
-        assertTrue(!pointer.contains("MediaGridMorphHandoffRequest"))
+        assertTrue(uiSource.contains("mediaGridMorphGestureInput"))
+        assertTrue(uiSource.contains("MediaGridMorphGestureMode.Production"))
+        assertTrue(uiSource.contains("val productionMorphEnabled = !selectionMode && !showProgress"))
+        assertTrue(uiSource.contains("enabled = productionMorphEnabled && residentPreparedIndex != null"))
+        assertTrue(uiSource.contains("MediaGridMorphProductionHostState"))
+        assertTrue(!uiSource.contains("mediaGridPinchToResize"))
     }
 
     @Test

@@ -45,6 +45,18 @@
 - 続けて`run-safe-debug-check.cmd -InstallToDevice`: `Preflight / Build / UnitTest / Lint / Install / Success`。本番packageのDB・元WebP・JPEG・RGB_565 pack・設定・認証情報を初期化していない。
 - Macrobenchmarkは対象外で実行しない。
 
+## 2026-07-31 production Morph integration
+
+| Requirement | Evidence | Status |
+|---|---|---|
+| Explicit Production mode on the normal non-selection, non-progress grid | `MediaGridMorphCanvasMode.ProductionVisible`, `MediaGridMorphGestureMode.Production`, and the `MediaGridMorphProductionHost` gate | covered |
+| Missing prepared pair or resident viewport asset falls back once at release | `isMediaGridMorphProductionReady`, direct initial-to-release fallback, and resident-readiness Compose test | covered |
+| One underlying LazyGrid with event-driven target geometry handoff | `MediaGridMorphProductionHost` and `productionHostUsesTheSameLazyGridAndRemovesCanvasAfterHandoff` | covered |
+| Scroll, cell interaction, checkpoint, retention, stale identity, rollback, and lifecycle safety | Production host suppression/owner protection plus existing handoff, rollback, checkpoint, and identity tests | covered |
+| Legacy production pinch modifier removed while common Test/Production input remains | `MediaGridRenderingContractTest` and source-level absence of `mediaGridPinchToResize` in production UI | covered |
+
+Final verification is required through the safe integration and safe debug-install entry points before commit.
+
 ## 2026-07-30 bounded Morph prepared pair foundation
 
 | 対象 | 実装・証跡 | 状態 |

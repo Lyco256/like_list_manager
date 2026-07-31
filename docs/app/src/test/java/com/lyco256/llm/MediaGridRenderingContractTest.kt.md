@@ -1,5 +1,9 @@
 # `MediaGridRenderingContractTest.kt`
 
+## Current production contract
+
+The contract test fixes the Production gesture/host connection, explicit `ProductionVisible` Canvas mode, absence of `mediaGridPinchToResize`, and isolation of the TEST_HARNESS host while preserving resident draw, scheduler, queue, and publication contracts.
+
 ## 2026-07-30 Morph interaction production境界
 
 `MediaGridMorphInteraction.kt`がTEST_HARNESS guardと`withFrameNanos` runnerを持つ一方、production `TagHierarchyUiV2.kt`がinteractive layer、controller、handoff requestを参照せず、既存`mediaGridPinchToResize`とrelease時列数callbackを維持することを静的に固定する。

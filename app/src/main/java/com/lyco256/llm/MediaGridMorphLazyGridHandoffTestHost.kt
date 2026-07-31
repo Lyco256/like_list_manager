@@ -38,7 +38,7 @@ import kotlinx.coroutines.channels.Channel
 
 /**
  * TEST_HARNESS-only one-grid host for the real LazyVerticalGrid handoff.
- * Production ClassifiedMediaGridContent and mediaGridPinchToResize do not call it.
+ * Production ClassifiedMediaGridContent does not call this TEST_HARNESS host.
  */
 @Composable
 internal fun MediaGridMorphLazyGridHandoffTestHost(

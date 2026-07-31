@@ -17,3 +17,6 @@ The resident store also exposes `drawIndexVersionFlow`, a conflated latest-versi
 - `lookupEligibleDrawHandle(assetId)`と`hasEligibleDrawHandle(assetId)`はeligibleかつ有効なBitmapだけをimmutable indexからlock-freeで返し、LRU touchやMap生成を行いません。
 - retain、candidate置換、eviction、asset invalidation、memory trim、clearはmutable LRU、asset補助index、draw indexを同一lock内で更新してから一度だけsnapshotを公開します。restoreとvisible touchはdraw indexを再構築しません。
 - `updateProtection()`はasset ID補助indexからvisible entryをO(1)でaccess-order touchします。セル描画側からstoreの`touch()`を呼び出さず、UI、Placeholder、AsyncImage、frame publication、queue、worker、先読み範囲は変更しません。
+# MediaGridRetainedImageStore.kt
+
+resident画像のvisible/active protectionはownerごとに独立して合成される。Morphはbounded plan内のstart/end assetを別owner tokenで一時保護する。protection登録はentry参照によるLRU touchを行わず、resident上限300件・48MiB・既存decode/Coil経路を変更しない。

@@ -1,5 +1,9 @@
 # `MediaGridMorphInteraction.kt`
 
+## Current production contract
+
+The TEST_HARNESS and production paths share the pointer state machine through `MediaGridMorphGestureMode`. Production uses bounded pair/readiness checks; when they fail, the release performs one direct column-count fallback and no Morph handoff. The former `mediaGridPinchToResize` modifier is removed.
+
 ## 役割
 
 前段のbounded prepared pairと単一Morph Canvasを、TEST_HARNESS内だけで実際の二本指入力へ接続する。productionの`ClassifiedMediaGridContent`、`mediaGridPinchToResize`、LazyGrid列数変更には接続しない。
@@ -37,3 +41,8 @@
 - identity変更とcancelはgenerationを照合して古いsettle更新とstale handoffを拒否する。
 
 pointer updateとsettle frameではprepared pair、render model、画像解決、crop、text measure、viewport、anchor、queue、publicationを再構築・更新しない。
+# MediaGridMorphInteraction.kt
+
+Testとproductionは同じ`MediaGridMorphInteractionController`、pointer state machine、scale、方向反転、focal correction、180ms settle、consume規則を共有する。
+
+`MediaGridMorphGestureMode`は`Disabled`、`Test`、`Production`。TestだけTEST_HARNESS制限を受ける。productionではprepared pair/readiness不成立時に同じmodifier内のrelease時一段変更fallbackを実行し、Morph accept時はfallbackを発行しない。fallbackのscaleはgesture開始時距離とrelease時距離から直接計算する。
