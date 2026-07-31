@@ -451,7 +451,7 @@ class MediaGridMorphCanvasComposeTest {
                             identity = identity,
                             preparedPairsSnapshot = { pairs },
                             preparedIndex = prepared,
-                            isScrollInProgress = { false },
+                            stopScroll = {},
                             onRenderModelBuilt = { modelBuilds.incrementAndGet() },
                             onImageResolved = { imageResolutions.incrementAndGet() },
                             onTextMeasured = { textMeasures.incrementAndGet() },
@@ -561,7 +561,7 @@ class MediaGridMorphCanvasComposeTest {
                             mapOf(MediaGridMorphDirection.IncreaseColumns to pair)
                         },
                         preparedIndex = prepared,
-                        isScrollInProgress = { false },
+                        stopScroll = {},
                         modifier = Modifier
                             .requiredSize(100.dp / androidx.compose.ui.platform.LocalDensity.current.density)
                             .testTag("cancel_morph_root"),

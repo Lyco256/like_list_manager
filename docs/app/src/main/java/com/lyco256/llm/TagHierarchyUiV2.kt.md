@@ -28,6 +28,12 @@
 - `MediaGridPreviewPreloader` deduplicates keys across preload requests and memory-cache hits, cancels obsolete requests on viewport/direction changes, and uses the same 256×256 memory key as the cell request. Persistent JPEG requests disable Coil disk cache; existing candidates retain their cache policy.
 - Worker publication and preview deletion emit a process-local asset ID. Only a currently visible matching cell invalidates and re-prepares; off-screen notifications are deferred until normal preparation. A persistent-JPEG decode error advances once to the existing fallback candidates and schedules best-effort deletion/re-generation once per preview identity without changing DB state.
 
+## 2026-07-31 production Morph gesture arbitration
+
+- 通常の非選択・非Progress分類グリッドは`MediaGridMorphGestureMode.Production`でcandidate／MorphClaimed／FallbackClaimedを共有する。candidate開始はscroll状態に依存せず、candidate中はLazyGridのscroll・先読み・anchor checkpoint・frame publicationを抑止しない。
+- claim時だけ`LazyGridState.stopScroll()`を一回起動し、Morphはcandidate開始位置でbeginして現在位置を同一eventでupdateする。Fallbackも同じinitial distanceを保持し、release時に従来の列数変更を一回だけ行う。
+- production hostはready pairだけをCanvasへ渡し、通常の一枚LazyGridをtarget geometry handoffへ接続する。resident Canvas、viewport、queue、先読み、1frame1枚publicationの経路は変更しない。
+
 ## 廃止済みviewport経路
 
 実装6より前の画像生成用viewport経路は削除済みです。現行仕様は冒頭のdirect preview節だけを参照します。

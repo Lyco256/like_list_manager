@@ -2,11 +2,11 @@
 
 ## Current production contract
 
-The TEST_HARNESS and production paths share the pointer state machine through `MediaGridMorphGestureMode`. Production uses bounded pair/readiness checks; when they fail, the release performs one direct column-count fallback and no Morph handoff. The former `mediaGridPinchToResize` modifier is removed.
+The TEST_HARNESS and production paths share the pointer arbitration state machine through `MediaGridMorphGestureMode`. A two-pointer candidate starts when the second pointer first appears regardless of current scroll state. It does not consume, stop scroll, set `pointerInProgress`, or lock interaction. The first event satisfying the existing direction dead zone, `touchSlop * 0.35`, and `centroid movement * 0.5` claims either Morph or the one-shot fallback. Production uses bounded pair/readiness checks; when they fail, release performs one direct column-count fallback. The former `mediaGridPinchToResize` modifier is removed.
 
 ## 役割
 
-前段のbounded prepared pairと単一Morph Canvasを、TEST_HARNESS内だけで実際の二本指入力へ接続する。productionの`ClassifiedMediaGridContent`、`mediaGridPinchToResize`、LazyGrid列数変更には接続しない。
+前段のbounded prepared pairと単一Morph Canvasを、TEST_HARNESSとproductionの二本指入力へ接続する。productionは通常の一枚の`LazyVerticalGrid`上でhandoffし、pair/readiness不成立時は従来列数変更fallbackへ戻る。
 
 ## controller
 
@@ -25,8 +25,9 @@ The TEST_HARNESS and production paths share the pointer state machine through `M
 ## pointer入力
 
 - `mediaGridMorphGestureInput`と`MediaGridMorphInteractiveTestLayer`は`BuildConfig.TEST_HARNESS`を必須とする。
-- 一本指はconsumeしない。scroll中、stale pair、valid pairなしの二本指も受理しない。
-- accepted後は固定した二pointerのposition changeだけをconsumeし、三本目は追跡対象へ切り替えない。
+- candidateは最初に揃った二pointerのID、initial positions、initial distance、centroid、generationをgesture中一回だけ固定する。scroll中でもcandidateを開始し、candidate中はconsume、`pointerInProgress`、stopScroll、anchor checkpointを行わない。
+- claim判定は既存`mediaGridMorphDirectionForScale()`、span change `>= touchSlop * 0.35f`、span change `>= centroid movement * 0.5f`の全条件で行う。claim時だけcandidate positionsでcontrollerをbeginし、同じeventの現在positionsをupdateしてからstopScrollを一回起動し、tracked pointerだけをconsumeする。
+- stale／画像不足／pairなし／hostなしは同じcandidate基準距離を使うFallbackClaimedへ進み、release時の列数変更callbackを一回だけ呼ぶ。三本目が追加されてもtracked IDは変えない。
 - 追跡pointerの一方が離れた時だけreleaseを一回処理する。pointer cancelはcurrent側へ戻し、handoffを生成しない。
 
 ## settleとhandoff

@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.gestures.stopScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
@@ -242,6 +243,57 @@ class MediaGridMorphLazyGridHandoffComposeTest {
     }
 
     @Test
+    fun productionReadinessIgnoresOutsideOverscanAndZeroSizeSideAssets() {
+        val fixture = fixture(2, 3, ClassifiedSortBase.Default)
+        val bitmaps = fixture.entries.associate { it.assetId to assetBitmap(it.assetId) }
+        val completeIndex = preparedIndex(bitmaps)
+        val outsideSlot = MediaGridMorphSlot(
+            row = 99,
+            column = 0,
+            startRect = Rect(10_000f, 10_000f, 10_100f, 10_100f),
+            endRect = Rect(10_010f, 10_010f, 10_110f, 10_110f),
+            startAssetId = 900_001L,
+            endAssetId = 900_002L,
+            startMediaOrdinal = null,
+            endMediaOrdinal = null,
+        )
+        assertTrue(
+            isMediaGridMorphProductionReady(
+                fixture.pair.copy(slots = fixture.pair.slots + outsideSlot),
+                completeIndex,
+            ),
+        )
+
+        val visibleSlot = fixture.pair.slots.first {
+            it.startRect.width > 0f && it.startRect.height > 0f &&
+                it.startRect.left < fixture.pair.viewport.right &&
+                it.startRect.right > fixture.pair.viewport.left &&
+                it.startRect.top < fixture.pair.viewport.bottom &&
+                it.startRect.bottom > fixture.pair.viewport.top
+        }
+        val zeroSizeStartSlot = visibleSlot.copy(
+            startRect = Rect(
+                visibleSlot.startRect.left,
+                visibleSlot.startRect.top,
+                visibleSlot.startRect.left,
+                visibleSlot.startRect.bottom,
+            ),
+            startAssetId = 900_003L,
+        )
+        assertTrue(
+            isMediaGridMorphProductionReady(
+                fixture.pair.copy(
+                    slots = fixture.pair.slots.map { slot ->
+                        if (slot == visibleSlot) zeroSizeStartSlot else slot
+                    },
+                ),
+                completeIndex,
+            ),
+        )
+        bitmaps.values.forEach(Bitmap::recycle)
+    }
+
+    @Test
     fun productionGestureFallsBackOnceWhenPreparedPairIsUnavailable() {
         val fixture = fixture(2, 3, ClassifiedSortBase.Default)
         val identity = MediaGridMorphInteractionIdentity(
@@ -253,6 +305,7 @@ class MediaGridMorphLazyGridHandoffComposeTest {
         val controller = MediaGridMorphInteractionController()
         var callbackCount = 0
         var fallbackColumnCount = -1
+        val stopCalls = AtomicInteger()
         composeRule.setContent {
             val density = LocalDensity.current
             Box(
@@ -264,7 +317,7 @@ class MediaGridMorphLazyGridHandoffComposeTest {
                         controller = controller,
                         identity = identity,
                         preparedPairsSnapshot = { emptyMap() },
-                        isScrollInProgress = { false },
+                        stopScroll = { stopCalls.incrementAndGet() },
                         onFallbackPinchFinished = { _, next ->
                             callbackCount++
                             fallbackColumnCount = next
@@ -285,6 +338,131 @@ class MediaGridMorphLazyGridHandoffComposeTest {
         composeRule.waitForIdle()
         assertEquals(1, callbackCount)
         assertEquals(3, fallbackColumnCount)
+        assertEquals(1, stopCalls.get())
+        assertEquals(MediaGridMorphPhase.Idle, controller.snapshot().phase)
+    }
+
+    @Test
+    fun shortPinchClaimsFallbackWithoutWaitingForASecondGesture() {
+        val controller = MediaGridMorphInteractionController()
+        val stopCalls = AtomicInteger()
+        var callbackCount = 0
+        var nextColumns = -1
+        composeRule.setContent {
+            Box(
+                Modifier
+                    .requiredSize(120.dp)
+                    .testTag("short_pinch_fallback_root")
+                    .mediaGridMorphGestureInput(
+                        mode = MediaGridMorphGestureMode.Production,
+                        controller = controller,
+                        identity = null,
+                        preparedPairsSnapshot = { emptyMap() },
+                        stopScroll = { stopCalls.incrementAndGet() },
+                        onFallbackPinchFinished = { _, next ->
+                            callbackCount++
+                            nextColumns = next
+                        },
+                        fallbackColumnCount = { 4 },
+                    ),
+            )
+        }
+        composeRule.onNodeWithTag("short_pinch_fallback_root").performTouchInput {
+            down(0, Offset(10f, 60f))
+            down(1, Offset(110f, 60f))
+            moveTo(0, Offset(15f, 60f))
+            moveTo(1, Offset(105f, 60f))
+            up(0)
+            up(1)
+        }
+        composeRule.waitForIdle()
+        assertEquals(1, callbackCount)
+        assertEquals(5, nextColumns)
+        assertEquals(1, stopCalls.get())
+    }
+
+    @Test
+    fun realLazyGridKeepsScrollAndPanUntilPinchClaimThenStopsOnce() {
+        val fixture = fixture(4, 5, ClassifiedSortBase.Default)
+        val identity = MediaGridMorphInteractionIdentity(
+            sourceRevision = fixture.dataKey.sourceRevision,
+            frameKey = fixture.sourceFrame.key,
+            currentColumnCount = fixture.fromColumns,
+            viewportSignature = fixture.pair.viewportSignature,
+        )
+        val controller = MediaGridMorphInteractionController()
+        val gridState = LazyGridState()
+        val stopCalls = AtomicInteger()
+        composeRule.setContent {
+            val density = LocalDensity.current
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(fixture.fromColumns),
+                state = gridState,
+                modifier = Modifier
+                    .requiredSize(WidthPx.dp / density.density, HeightPx.dp / density.density)
+                    .testTag("arbitration_grid")
+                    .mediaGridMorphGestureInput(
+                        mode = MediaGridMorphGestureMode.Production,
+                        controller = controller,
+                        identity = identity,
+                        preparedPairsSnapshot = {
+                            mapOf(MediaGridMorphDirection.IncreaseColumns to fixture.pair)
+                        },
+                        stopScroll = {
+                            stopCalls.incrementAndGet()
+                            gridState.stopScroll()
+                        },
+                    ),
+            ) {
+                gridItems((0 until 100).toList()) {
+                    Box(Modifier.fillMaxWidth().height(60.dp))
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("arbitration_grid").performTouchInput {
+            down(0, Offset(100f, 300f))
+            moveBy(Offset(0f, -120f))
+            up(0)
+        }
+        composeRule.waitForIdle()
+        assertTrue(gridState.firstVisibleItemIndex > 0 || gridState.firstVisibleItemScrollOffset > 0)
+
+        composeRule.onNodeWithTag("arbitration_grid").performTouchInput {
+            down(0, Offset(40f, 140f))
+            down(1, Offset(100f, 140f))
+            moveBy(Offset(0f, 30f))
+            up(1)
+            up(0)
+        }
+        composeRule.waitForIdle()
+        assertEquals(0, stopCalls.get())
+        assertEquals(MediaGridMorphPhase.Idle, controller.snapshot().phase)
+
+        composeRule.onNodeWithTag("arbitration_grid").performTouchInput {
+            down(0, Offset(100f, 140f))
+            moveTo(0, Offset(100f, 120f))
+            down(1, Offset(40f, 120f))
+            moveTo(0, Offset(90f, 120f))
+        }
+        composeRule.waitForIdle()
+        val trackedIds = controller.trackedPointerIds() ?: error("Morph did not claim")
+        composeRule.onNodeWithTag("arbitration_grid").performTouchInput {
+            down(2, Offset(70f, 40f))
+            moveTo(2, Offset(70f, 50f))
+        }
+        composeRule.waitForIdle()
+        assertEquals(trackedIds, controller.trackedPointerIds())
+        assertEquals(1, stopCalls.get())
+        assertEquals(MediaGridMorphPhase.Tracking, controller.snapshot().phase)
+
+        composeRule.onNodeWithTag("arbitration_grid").performTouchInput {
+            up(0)
+            up(1)
+            up(2)
+        }
+        composeRule.runOnIdle { controller.cancelPointers() }
         assertEquals(MediaGridMorphPhase.Idle, controller.snapshot().phase)
     }
 

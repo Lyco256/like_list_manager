@@ -13,5 +13,8 @@ TEST_HARNESSの一枚の実`LazyVerticalGrid`でhandoffを検証するCompose Te
 - column変更、complete、rollbackのexactly-once
 - handoff中のuser scroll無効化と完了後の再有効化
 - handoff中にMorph render modelと画像解決を再実行しないこと
+- production readinessでviewport外overscanとzero-size側Assetを要求しないこと
+- 実`LazyVerticalGrid`上で一本指scroll、pure二本指pan、scroll中からpinch、claim時stopScroll一回、三本目追加時のtracked ID固定を検証すること
+- pairなしfallbackのclaimとrelease時callback exactly-onceを検証すること
 
 既存gesture、settle、Canvas、header Crossfade回帰は`MediaGridMorphCanvasComposeTest`と`MediaGridMorphTest`が継続して担当する。

@@ -7,6 +7,12 @@
 - 正規化2次元focal点、X／Y中心移動、slot外、非0 viewport originの開始時非jumpを検証する。
 - release progress 0.25／0.5、0／45／90／135／180msのrelease基準線形settle、current／target終端、exactly-once handoff、Awaiting維持、complete、stale generation拒否を検証する。
 
+## 2026-07-31 gesture arbitration／readiness
+
+- candidateのdirection判定が既存DeadZone、touchSlop `0.35`、centroid移動比 `0.5`を全て満たす場合だけclaimすることを検証する。
+- candidate開始時のinitial distanceを固定したまま、pure panをclaimせず、方向反転後も全prepared pairを使ってprogressを継続する契約を検証する。
+- production readinessがviewportへ入り得る正寸法側だけを必須とし、overscan・zero-size側・null Assetを要求しない契約はCompose側で検証する。
+
 ## 対応ソース
 
 `app/src/test/java/com/lyco256/llm/MediaGridMorphTest.kt`

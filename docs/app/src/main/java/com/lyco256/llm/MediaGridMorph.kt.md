@@ -28,6 +28,10 @@
 
 - `MediaGridMorphPreparationCache`はframe key、source revision、列数、offsetを含まないviewport signatureをidentityとして、一つのidentityを一回だけ要求する。
 - 新しいidentityを要求するとgeneration tokenが更新され、古いframe・列数・viewport・revisionの計算結果は公開できない。
+
+## production readiness
+
+`isMediaGridMorphProductionReady()`はbounded pairの各slotについてstart/end rectのswept boundsとviewportの交差だけを確認する。viewportへ入り得るslotの正の寸法側Assetだけを必須とし、viewport外overscan、zero-size側、null Assetは要求しない。判定はprepared resident indexのO(1) lookupだけを使い、decode、Bitmap copy、IO、ImageRequestは行わない。
 - 公開先は`AtomicReference`であり、prepared pair公開だけではLazyGridをrecomposeしない。
 
 ## 2次元anchorとsettle基盤

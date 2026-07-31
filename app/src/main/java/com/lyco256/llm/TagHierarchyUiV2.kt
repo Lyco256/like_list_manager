@@ -14,6 +14,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.gestures.stopScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.LocalOverscrollConfiguration
 import androidx.compose.foundation.layout.Arrangement
@@ -3732,9 +3733,7 @@ private fun ClassifiedMediaGridContent(
                     controller = productionMorphHost?.controller,
                     identity = productionMorphHost?.let { morphIdentity },
                     preparedPairsSnapshot = morphPreparedPairsSnapshot,
-                    isScrollInProgress = {
-                        state.isScrollInProgress || morphInteractionLocked
-                    },
+                    stopScroll = { state.stopScroll() },
                     onFallbackPinchFinished = onPinchFinished,
                     fallbackColumnCount = { columnCount },
                     fallbackAnchorAtCenter = { center ->

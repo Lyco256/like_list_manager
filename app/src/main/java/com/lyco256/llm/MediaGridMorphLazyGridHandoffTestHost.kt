@@ -2,6 +2,7 @@ package com.lyco256.llm
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.gestures.stopScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -278,9 +279,7 @@ internal fun MediaGridMorphLazyGridHandoffTestHost(
             identity = interactionIdentity,
             preparedPairsSnapshot = preparedPairsSnapshot,
             preparedIndex = preparedIndex,
-            isScrollInProgress = {
-                state.isScrollInProgress || coordinator.snapshot().suppressesUserScroll
-            },
+            stopScroll = { state.stopScroll() },
             modifier = Modifier.fillMaxSize().testTag("media_grid_handoff_interaction"),
             onRenderModelBuilt = onRenderModelBuilt,
             onImageResolved = onImageResolved,

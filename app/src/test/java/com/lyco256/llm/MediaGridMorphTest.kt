@@ -11,6 +11,48 @@ import org.junit.Test
 
 class MediaGridMorphTest {
     @Test
+    fun candidateClaimUsesDeadZoneTouchSlopAndCentroidArbitration() {
+        assertNull(
+            mediaGridMorphCandidateDirection(
+                initialDistance = 100f,
+                currentDistance = 98f,
+                initialCentroid = Offset.Zero,
+                currentCentroid = Offset.Zero,
+                touchSlop = 10f,
+            ),
+        )
+        assertNull(
+            mediaGridMorphCandidateDirection(
+                initialDistance = 100f,
+                currentDistance = 94f,
+                initialCentroid = Offset.Zero,
+                currentCentroid = Offset(0f, 20f),
+                touchSlop = 10f,
+            ),
+        )
+        assertEquals(
+            MediaGridMorphDirection.IncreaseColumns,
+            mediaGridMorphCandidateDirection(
+                initialDistance = 100f,
+                currentDistance = 94f,
+                initialCentroid = Offset.Zero,
+                currentCentroid = Offset(0f, 2f),
+                touchSlop = 10f,
+            ),
+        )
+        assertEquals(
+            MediaGridMorphDirection.DecreaseColumns,
+            mediaGridMorphCandidateDirection(
+                initialDistance = 100f,
+                currentDistance = 106f,
+                initialCentroid = Offset.Zero,
+                currentCentroid = Offset.Zero,
+                touchSlop = 10f,
+            ),
+        )
+    }
+
+    @Test
     fun targetIsAlwaysOneColumnAwayAndRespectsBounds() {
         assertEquals(5, mediaGridMorphTargetColumnCount(4, MediaGridMorphDirection.IncreaseColumns))
         assertEquals(3, mediaGridMorphTargetColumnCount(4, MediaGridMorphDirection.DecreaseColumns))

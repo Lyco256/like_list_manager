@@ -1,5 +1,17 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-07-31 gesture arbitration fix
+
+| 要件 | 証跡 | 状態 |
+| --- | --- | --- |
+| scroll状態に依存しない二本指candidate、pointer ID／initial positions／distance一回固定 | `MediaGridMorphCandidate`、`MediaGridMorphGestureArbitrationState`、`MediaGridMorphLazyGridHandoffComposeTest.realLazyGridKeepsScrollAndPanUntilPinchClaimThenStopsOnce` | 完了 |
+| candidate中の非consume・既存direction・touchSlop 0.35・centroid 0.5判定 | `mediaGridMorphCandidateDirection`、`MediaGridMorphTest.candidateClaimUsesDeadZoneTouchSlopAndCentroidArbitration` | 完了 |
+| claim時のcandidate begin→current update、claim後のみstopScroll／consume、fallback exactly-once | `mediaGridMorphGestureInput`、`productionGestureFallsBackOnceWhenPreparedPairIsUnavailable`、実LazyGridCompose Test | 完了 |
+| viewport swept bounds内の正寸法側だけreadiness必須 | `isMediaGridMorphProductionReady`、overscan／zero-size Compose Test | 完了 |
+| resident Canvas、handoff、anchor、viewport、queue、先読み、1frame1枚公開の不変更 | 対象差分と既存Rendering／handoff／publication契約、safe integration Success | 完了 |
+
+検証結果: `scripts\run-safe-integration-check.cmd` 成功、続けて `scripts\run-safe-debug-check.cmd -InstallToDevice` も成功。Macrobenchmark、本番DB・画像・設定・認証情報の初期化は行わない。
+
 ## 2026-07-30 TEST_HARNESS 実LazyGrid handoff基盤
 
 | 要件 | 証跡 | 状態 |

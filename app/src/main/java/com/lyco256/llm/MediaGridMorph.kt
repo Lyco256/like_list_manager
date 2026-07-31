@@ -255,6 +255,9 @@ internal fun isMediaGridMorphProductionReady(
 ): Boolean {
     val required = HashSet<Long>()
     for (slot in pair.slots) {
+        val startHasSize = slot.startRect.width > 0f && slot.startRect.height > 0f
+        val endHasSize = slot.endRect.width > 0f && slot.endRect.height > 0f
+        if (!startHasSize && !endHasSize) continue
         val left = minOf(slot.startRect.left, slot.endRect.left)
         val top = minOf(slot.startRect.top, slot.endRect.top)
         val right = maxOf(slot.startRect.right, slot.endRect.right)
@@ -265,8 +268,8 @@ internal fun isMediaGridMorphProductionReady(
             bottom <= pair.viewport.top ||
             top >= pair.viewport.bottom
         ) continue
-        slot.startAssetId?.let(required::add)
-        slot.endAssetId?.let(required::add)
+        if (startHasSize) slot.startAssetId?.let(required::add)
+        if (endHasSize) slot.endAssetId?.let(required::add)
     }
     if (required.isEmpty()) return false
     return required.all { it in preparedIndex.preparedImageByAssetId }
