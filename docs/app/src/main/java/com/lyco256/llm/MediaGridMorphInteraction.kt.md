@@ -5,6 +5,7 @@
 - Pointer release accepts the first normal loss of a tracked pointer, including pointer disappearance, and calls Morph release or fallback exactly once.
 - Settle timing starts from the Compose frame clock; Android pointer uptime is not mixed with `withFrameNanos`.
 - `Failed`/identity mismatch states retain a diagnostic reason instead of silently treating a target failure as Idle.
+- Identity mismatch and target-anchor failure clear the stale Canvas/lock while retaining `Failed` plus its reason, so the current LazyGrid remains usable and a later gesture can start a new generation.
 
 ## Current production contract
 

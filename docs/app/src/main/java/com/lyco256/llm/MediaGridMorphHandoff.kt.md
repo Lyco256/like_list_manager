@@ -4,6 +4,7 @@
 
 - Target handoff is event-driven: target frame, visible geometry, optional bounded correction, underlying draw, and next-frame completion are distinct phases.
 - Production target scroll uses `ScrollToItem` for visibility and re-observes the current layout after each command; no polling or timeout was added.
+- Target-frame, visibility, viewport, geometry, stale-data, and rollback failures are retained as `MediaGridMorphGridHandoffFailureReason` enum values.
 
 ## 役割
 

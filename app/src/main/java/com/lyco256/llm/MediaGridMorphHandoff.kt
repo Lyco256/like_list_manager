@@ -113,6 +113,18 @@ internal data class MediaGridMorphVisibleItemGeometry(
     val rect: Rect,
 )
 
+internal enum class MediaGridMorphGridHandoffFailureReason {
+    StaleData,
+    UnexpectedTargetFrame,
+    TargetMediaUnavailable,
+    ViewportMismatch,
+    TargetInvisible,
+    GeometryMismatch,
+    GeometryCorrectionExhausted,
+    ExplicitFailure,
+    RequestDisappeared,
+}
+
 internal data class MediaGridMorphResolvedTarget(
     val assetId: Long,
     val mediaOrdinal: Int,
@@ -133,7 +145,7 @@ internal data class MediaGridMorphGridHandoffSnapshot(
     val targetScrollIssued: Boolean = false,
     val rollbackScrollIssued: Boolean = false,
     val finalAnchorCheckpointPending: Boolean = false,
-    val failureReason: String? = null,
+    val failureReason: MediaGridMorphGridHandoffFailureReason? = null,
 ) {
     val suppressesUserScroll: Boolean
         get() = phase != MediaGridMorphGridHandoffPhase.Idle &&
@@ -210,7 +222,7 @@ internal class MediaGridMorphGridHandoffCoordinator {
         if (current.phase != MediaGridMorphGridHandoffPhase.WaitingForTargetFrame) return null
         if (frame.key == request.sourceFrameKey) return null
         if (frame.key != request.expectedTargetFrameKey) {
-            return beginRollback("unexpected target frame ${frame.key}")
+            return beginRollback(MediaGridMorphGridHandoffFailureReason.UnexpectedTargetFrame)
         }
         val targetAnchor = request.targetAnchor
         val directIndex = frame.ordinalIndex.itemIndexByAssetId[targetAnchor.assetId]
@@ -223,7 +235,7 @@ internal class MediaGridMorphGridHandoffCoordinator {
             resolvedItemIndex = directIndex
         } else {
             val ordinals = frame.ordinalIndex.assetIdByMediaOrdinal.indices
-            if (ordinals.isEmpty()) return beginRollback("target frame has no media ordinal")
+            if (ordinals.isEmpty()) return beginRollback(MediaGridMorphGridHandoffFailureReason.TargetMediaUnavailable)
             resolvedOrdinal = targetAnchor.mediaOrdinal.coerceIn(ordinals.first, ordinals.last)
             resolvedAssetId = frame.ordinalIndex.assetIdByMediaOrdinal[resolvedOrdinal]
             resolvedItemIndex = frame.ordinalIndex.itemIndexByMediaOrdinal[resolvedOrdinal]
@@ -258,16 +270,13 @@ internal class MediaGridMorphGridHandoffCoordinator {
         val rollingBack = current.phase == MediaGridMorphGridHandoffPhase.RollingBack
         val expectedKey = if (rollingBack) request.sourceFrameKey else request.expectedTargetFrameKey
         if (frame.key != expectedKey) {
-            return if (rollingBack) null else beginRollback("layout frame ${frame.key} != $expectedKey")
+            return if (rollingBack) null else beginRollback(MediaGridMorphGridHandoffFailureReason.UnexpectedTargetFrame)
         }
         if (viewportWidth != request.viewportWidth || viewportHeight != request.viewportHeight) {
             return if (rollingBack) {
                 finishRollback()
             } else {
-                beginRollback(
-                    "viewport ${viewportWidth}x$viewportHeight != " +
-                        "${request.viewportWidth}x${request.viewportHeight}",
-                )
+                beginRollback(MediaGridMorphGridHandoffFailureReason.ViewportMismatch)
             }
         }
         val target = current.resolvedTarget ?: return null
@@ -280,7 +289,7 @@ internal class MediaGridMorphGridHandoffCoordinator {
                 if (current.rollbackScrollIssued) return finishRollback()
                 current = current.copy(rollbackScrollIssued = true)
             } else {
-                return beginRollback("target ${target.assetId} remained invisible after scroll")
+                return beginRollback(MediaGridMorphGridHandoffFailureReason.TargetInvisible)
             }
             return MediaGridMorphGridHandoffCommand.ScrollToItem(target.itemIndex)
         }
@@ -298,10 +307,7 @@ internal class MediaGridMorphGridHandoffCoordinator {
             return if (rollingBack) {
                 finishRollback()
             } else {
-                beginRollback(
-                    "geometry rect=$rect expectedSize=${target.expectedCellSize} " +
-                        "square=$square sizeMatch=$expectedSize deltaX=$deltaX deltaY=$deltaY",
-                )
+                beginRollback(MediaGridMorphGridHandoffFailureReason.GeometryMismatch)
             }
         }
         if (abs(deltaY) > GeometryTolerancePx) {
@@ -309,7 +315,7 @@ internal class MediaGridMorphGridHandoffCoordinator {
                 return if (rollingBack) {
                     finishRollback()
                 } else {
-                    beginRollback("Y correction exhausted deltaY=$deltaY rect=$rect")
+                    beginRollback(MediaGridMorphGridHandoffFailureReason.GeometryCorrectionExhausted)
                 }
             }
             current = current.copy(correctionAttempts = current.correctionAttempts + 1)
@@ -336,7 +342,7 @@ internal class MediaGridMorphGridHandoffCoordinator {
         return MediaGridMorphGridHandoffCommand.Complete(request.interactionGeneration)
     }
 
-    fun failCurrent(): MediaGridMorphGridHandoffCommand? = beginRollback("explicit failure")
+    fun failCurrent(): MediaGridMorphGridHandoffCommand? = beginRollback(MediaGridMorphGridHandoffFailureReason.ExplicitFailure)
 
     fun cancelForStaleDisplay() {
         if (
@@ -346,7 +352,7 @@ internal class MediaGridMorphGridHandoffCoordinator {
         current = current.copy(
             phase = MediaGridMorphGridHandoffPhase.Cancelled,
             finalAnchorCheckpointPending = false,
-            failureReason = "request disappeared with stale display",
+            failureReason = MediaGridMorphGridHandoffFailureReason.RequestDisappeared,
         )
     }
 
@@ -356,7 +362,7 @@ internal class MediaGridMorphGridHandoffCoordinator {
         return true
     }
 
-    private fun beginRollback(reason: String): MediaGridMorphGridHandoffCommand? {
+    private fun beginRollback(reason: MediaGridMorphGridHandoffFailureReason): MediaGridMorphGridHandoffCommand? {
         val request = current.request ?: return null
         if (!current.columnChangeIssued) return finishRollback()
         if (current.rollbackColumnChangeIssued) return null
@@ -384,6 +390,7 @@ internal class MediaGridMorphGridHandoffCoordinator {
         current = current.copy(
             phase = MediaGridMorphGridHandoffPhase.Cancelled,
             finalAnchorCheckpointPending = false,
+            failureReason = MediaGridMorphGridHandoffFailureReason.StaleData,
         )
         return MediaGridMorphGridHandoffCommand.Cancel(request.interactionGeneration)
     }

@@ -3,6 +3,7 @@
 ## 2026-07-31 production handoff correction coverage
 
 - Handoff cases cover both column directions, header bucket changes, delayed target frames, target draw-before-Canvas-removal, rollback, fallback release, and one-grid scroll suppression.
+- Source identity changes assert explicit `Failed + IdentityMismatch` and Canvas removal without invoking the column callback.
 
 TEST_HARNESSの一枚の実`LazyVerticalGrid`でhandoffを検証するCompose Test。
 

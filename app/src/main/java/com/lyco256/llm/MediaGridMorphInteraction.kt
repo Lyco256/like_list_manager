@@ -358,7 +358,7 @@ internal class MediaGridMorphInteractionController(
             currentIdentity = identity
             gesture = null
             settle = null
-            resetToIdle(
+            publishFailure(
                 identity.currentColumnCount,
                 snapshot.interactionGeneration,
                 MediaGridMorphFailureReason.IdentityMismatch,
@@ -378,7 +378,7 @@ internal class MediaGridMorphInteractionController(
         ) {
             gesture = null
             settle = null
-            resetToIdle(
+            publishFailure(
                 identity.currentColumnCount,
                 snapshot.interactionGeneration,
                 MediaGridMorphFailureReason.IdentityMismatch,
@@ -440,18 +440,11 @@ internal class MediaGridMorphInteractionController(
             fixedFocalCenter = activeSettle.fixedPinchCenter,
         )
         if (targetAnchor == null) {
-            publish(
-                phase = MediaGridMorphPhase.Failed,
-                direction = currentSnapshot.direction,
-                plan = plan,
-                progress = 1f,
-                correction = nextCorrection,
-                center = activeSettle.fixedPinchCenter,
-                identity = identity,
-                toColumnCount = plan.toColumnCount,
-                handoffRequest = null,
+            publishFailure(
+                currentColumnCount = identity.currentColumnCount,
                 generation = generation,
                 failureReason = MediaGridMorphFailureReason.TargetAnchorUnavailable,
+                toColumnCount = plan.toColumnCount,
             )
             return
         }
@@ -564,6 +557,36 @@ internal class MediaGridMorphInteractionController(
             frameKey = currentIdentity?.frameKey,
             handoffRequest = null,
             interactionGeneration = generation,
+            failureReason = failureReason,
+        )
+    }
+
+    /**
+     * Keep a diagnosable terminal failure without leaving a stale Canvas or
+     * interaction lock over the current LazyGrid. A subsequent valid gesture
+     * may start a new generation through beginPointers().
+     */
+    private fun publishFailure(
+        currentColumnCount: Int,
+        generation: Long,
+        failureReason: MediaGridMorphFailureReason,
+        toColumnCount: Int = currentColumnCount,
+    ) {
+        _activePlan.value = null
+        gesture = null
+        settle = null
+        val identity = currentIdentity ?: return
+        publish(
+            phase = MediaGridMorphPhase.Failed,
+            direction = currentSnapshot.direction,
+            plan = null,
+            progress = 0f,
+            correction = Offset.Zero,
+            center = null,
+            identity = identity,
+            toColumnCount = toColumnCount,
+            handoffRequest = null,
+            generation = generation,
             failureReason = failureReason,
         )
     }

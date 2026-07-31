@@ -702,7 +702,8 @@ class MediaGridMorphTest {
         val staleGeneration = stale.snapshot().interactionGeneration
         stale.advanceSettleElapsed(staleGeneration, 180L)
         stale.updateIdentity(identity.copy(frameKey = identity.frameKey.copy(columnCount = 9)))
-        assertEquals(MediaGridMorphPhase.Idle, stale.snapshot().phase)
+        assertEquals(MediaGridMorphPhase.Failed, stale.snapshot().phase)
+        assertEquals(MediaGridMorphFailureReason.IdentityMismatch, stale.snapshot().failureReason)
         assertNull(stale.snapshot().handoffRequest)
     }
 
@@ -719,7 +720,8 @@ class MediaGridMorphTest {
         controller.updateIdentity(identity.copy(sourceRevision = 11L))
         controller.advanceSettleElapsed(oldGeneration, 180L)
 
-        assertEquals(MediaGridMorphPhase.Idle, controller.snapshot().phase)
+        assertEquals(MediaGridMorphPhase.Failed, controller.snapshot().phase)
+        assertEquals(MediaGridMorphFailureReason.IdentityMismatch, controller.snapshot().failureReason)
         assertEquals(0f, controller.snapshot().progress, 0.001f)
         assertTrue(requests.isEmpty())
     }

@@ -85,7 +85,7 @@ class MediaGridMorphHandoffTest {
                 dataKey = targetIdentity.frameKey.dataKey.copy(hierarchyRevision = 99L),
             ),
         ))
-        assertEquals(MediaGridMorphPhase.Idle, controller.snapshot().phase)
+        assertEquals(MediaGridMorphPhase.Failed, controller.snapshot().phase)
         assertEquals(MediaGridMorphFailureReason.IdentityMismatch, controller.snapshot().failureReason)
         assertNull(controller.snapshot().handoffRequest)
     }
@@ -97,7 +97,8 @@ class MediaGridMorphHandoffTest {
             val request = controller.snapshot().handoffRequest!!
             val target = identity(request.expectedTargetFrameKey, request.toColumnCount, request)
             controller.updateIdentity(transform(target))
-            assertEquals(MediaGridMorphPhase.Idle, controller.snapshot().phase)
+            assertEquals(MediaGridMorphPhase.Failed, controller.snapshot().phase)
+            assertEquals(MediaGridMorphFailureReason.IdentityMismatch, controller.snapshot().failureReason)
             assertNull(controller.snapshot().handoffRequest)
         }
 
@@ -280,6 +281,7 @@ class MediaGridMorphHandoffTest {
             stale.observeFrame(frame(staleKey, longArrayOf(11L))),
         )
         assertEquals(MediaGridMorphGridHandoffPhase.Cancelled, stale.snapshot().phase)
+        assertEquals(MediaGridMorphGridHandoffFailureReason.StaleData, stale.snapshot().failureReason)
         assertFalse(stale.snapshot().finalAnchorCheckpointPending)
 
         val invalid = MediaGridMorphGridHandoffCoordinator()
@@ -288,6 +290,10 @@ class MediaGridMorphHandoffTest {
         assertEquals(
             MediaGridMorphGridHandoffCommand.RollbackColumnCount(2),
             invalid.observeFrame(frame(unexpectedKey, longArrayOf(11L))),
+        )
+        assertEquals(
+            MediaGridMorphGridHandoffFailureReason.UnexpectedTargetFrame,
+            invalid.snapshot().failureReason,
         )
         assertNull(invalid.observeFrame(frame(unexpectedKey, longArrayOf(11L))))
     }

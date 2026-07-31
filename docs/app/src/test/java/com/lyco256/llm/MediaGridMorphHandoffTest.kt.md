@@ -1,5 +1,7 @@
 # `MediaGridMorphHandoffTest.kt`
 
+Identity mismatch assertions require the controller to remain in explicit `Failed` with `IdentityMismatch`, rather than silently returning to `Idle`; the stale Morph plan and lock are cleared so recovery remains possible.
+
 ## 2026-07-31 production handoff correction coverage
 
 - Unit coverage keeps target settle/request/callback exactly-once behavior, identity mismatch diagnostics, target visibility correction, and rollback semantics explicit.

@@ -587,7 +587,11 @@ class MediaGridMorphLazyGridHandoffComposeTest {
                 )
             }
             composeRule.waitForIdle()
-            assertEquals(MediaGridMorphPhase.Idle, hostState.controller.snapshot().phase)
+            assertEquals(MediaGridMorphPhase.Failed, hostState.controller.snapshot().phase)
+            assertEquals(
+                MediaGridMorphFailureReason.IdentityMismatch,
+                hostState.controller.snapshot().failureReason,
+            )
             assertEquals(0, columnChanges)
             composeRule.onAllNodesWithTag("media_grid_morph_canvas").assertCountEquals(0)
         } finally {

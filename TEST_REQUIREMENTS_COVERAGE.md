@@ -11,6 +11,8 @@
 | One-finger scroll/candidate arbitration remains intact | `realLazyGridKeepsScrollAndPanUntilPinchClaimThenStopsOnce` | covered |
 | Live display toggle, repeated pinch round trips, recreation, filter/sort changes, dialogs, and no double display | `MainActivityComposeTest.classifiedDisplayToggleSwitchesBetweenCardAndMediaGridAndSurvivesActivityRecreation` | covered |
 
+Failure states are explicit: identity mismatch and target-anchor failure publish `MediaGridMorphPhase.Failed` with a reason, clear the stale Morph Canvas/lock, and leave the current LazyGrid available for recovery. Handoff target-frame/geometry/rollback failures use `MediaGridMorphGridHandoffFailureReason` enum values. They do not silently reset to `Idle`.
+
 The live test waits for the source/target `columnCount`, `requestedColumnCount`, and frame key to agree. It does not infer column changes from a clipped cell `boundsInRoot` width while handoff visual correction is active.
 
 ## 2026-07-31 gesture arbitration fix
