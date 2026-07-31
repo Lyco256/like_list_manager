@@ -2,6 +2,8 @@
 
 Instrumentation commands are treated as failed when their output contains a JUnit failure or process-crash marker, even if `adb shell am instrument` exits with code 0. Android's normal successful result can use `INSTRUMENTATION_CODE: -1`, so that code is not itself treated as failure.
 
+`TimeoutSeconds = 0` is the no-timeout mode. The normal debug and integration entry points use it so a slow build, lint, install, or instrumentation run is not terminated only because elapsed time crossed a fixed limit. Other safety entry points may retain explicit timeout values where their own contract requires one.
+
 ## 対応ソース
 
 `scripts/SafeScriptCommon.ps1`
@@ -15,7 +17,7 @@ Instrumentation commands are treated as failed when their output contains a JUni
 - `build/safe-script-logs/<script-name>/` にtimestampログと `latest.log` を保存する
 - フェーズ開始時だけ標準出力へフェーズ名を表示する
 - 外部コマンドの標準出力・標準エラーをログファイルへ保存し、通常の標準出力へ流さない
-- フェーズごとのtimeout、終了コード確認、失敗時要約抽出を行う
+- 呼び出し側が指定したtimeout（`0`なら無効）、終了コード確認、失敗時要約抽出を行う
 - 失敗時は `Failed:`、`Error:`、必要に応じて `Impact:`、`Log:` を表示する
 - 指定されたソース・Gradle設定・安全スクリプトを内容hashでfingerprint化する
 - 前回成功時のfingerprintと成果物SHA-256を`build/safe-script-state/`へ保存し、完全一致時だけ検証フェーズを省略できるようにする
@@ -25,4 +27,4 @@ Instrumentation commands are treated as failed when their output contains a JUni
 
 ## 変更時の確認事項
 
-成功時に詳細ログを読む必要がないこと、失敗時にログパスが必ず表示されること、timeout時に該当フェーズが分かることを確認します。validation cacheを変更する場合は、成功したフェーズだけが記録され、入力または成果物が変われば必要なphaseが再実行されることを確認します。main source・設定変更、test削除、class抽出不能、9ファイル以上のtest変更はUnitTest全体へ戻します。
+成功時に詳細ログを読む必要がないこと、失敗時にログパスが必ず表示されること、明示的timeoutを使う入口ではtimeout時に該当フェーズが分かることを確認します。validation cacheを変更する場合は、成功したフェーズだけが記録され、入力または成果物が変われば必要なphaseが再実行されることを確認します。main source・設定変更、test削除、class抽出不能、9ファイル以上のtest変更はUnitTest全体へ戻します。

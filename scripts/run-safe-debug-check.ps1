@@ -11,11 +11,11 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $timeouts = @{
-    Preflight = 300
-    Build = 1800
-    UnitTest = 1800
-    Lint = 1800
-    Install = 600
+    Preflight = 0
+    Build = 0
+    UnitTest = 0
+    Lint = 0
+    Install = 0
 }
 $validationConfigInputs = @(
     "app\build.gradle.kts",

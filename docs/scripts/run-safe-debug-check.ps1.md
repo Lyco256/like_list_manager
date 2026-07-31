@@ -26,7 +26,8 @@ Gradle taskはすべて `:app:` へ明示的に限定し、macrobenchmarkなど�
 - 同じ物理端末の重複wireless entryは選択した1件を残して`adb disconnect`し、後続実行へ持ち越さない
 - `.cmd`入口はADB serverのmDNS自動接続を無効化し、wireless接続が必要な場合だけ安全resolverが許可端末の候補1件へ明示接続する
 - 選択serialを全ADB操作へ明示し、`adb install -r` だけを使ってdebug APKを上書きし、前後の `uid`、`appId`、`firstInstallTime` が維持されていることを確認する
-- フェーズごとのtimeoutを持ち、失敗時は `Failed:`、`Error:`、`Log:` だけを標準出力へ表示する
+- フェーズごとの失敗を識別し、失敗時は `Failed:`、`Error:`、`Log:` だけを標準出力へ表示する
+- 通常debug入口のnative command timeoutは無効で、経過時間だけを理由にbuild・unit test・lint・installを強制終了しない
 
 ## 関連ファイル
 

@@ -8,6 +8,8 @@ USB接続とワイヤレスデバッグで同じ入口を使います。`testDev
 
 Buildは`assembleDebug`、隔離設定検証、integration target APK、androidTest APK生成をまとめ、`run-safe-debug-check`とtask・成功stateを共有します。Build、UnitTest、Lintはphase別の入力fingerprintを使い、無関係なtest source setの変更では他phaseを無効化しません。Buildが必要な場合も通常は`clean`せずGradle incremental buildを使います。UnitTestとLintもdebug入口と成功stateを共有し、main入力が不変で変更unit test classを安全に抽出できる場合だけ変更classへ限定します。それ以外はUnitTest全体へ戻ります。Build省略にはdebug APK、integrationTest APK、androidTest APKのSHA-256一致が必要です。Install、IntegrationTest、実機前後チェックは毎回実行します。
 
+Build、UnitTest、Lint、Install、Instrumentationのnative command timeoutは無効です。経過時間だけを理由に途中終了せず、実際のcommand終了またはテスト結果まで待ちます。Codexなど外側のrunnerもtimeoutを無効にし、有限値が必須なら24時間以上を設定します。
+
 `-FullRebuildTest`オプションが存在します。Codexはユーザーからその実行を明示指示された場合だけ使用します。
 
 前後チェックでは、実機上の本番 package metadata が変わっていないこと、そして本番 package とテスト package の Android UID が別々であることを確認します。

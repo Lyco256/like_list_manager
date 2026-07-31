@@ -418,7 +418,9 @@ function Invoke-SafeNativeCommand {
             throw "Could not start command: $displayCommand"
         }
 
-        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+        if ($TimeoutSeconds -eq 0) {
+            $process.WaitForExit()
+        } elseif (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
             try {
                 $process.Kill()
             } catch {
