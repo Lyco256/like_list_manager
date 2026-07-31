@@ -260,7 +260,7 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 
 ## Current production Morph contract
 
-The normal classified `LazyVerticalGrid` remains the only grid. `MediaGridMorphProductionHost` places the `ProductionVisible` Canvas above that grid and below the toolbar layer, verifies the target geometry, then removes the Canvas after the target frame is drawn. Selection/progress modes do not enable production Morph; identity and lifecycle changes cancel stale work.
+The normal classified `LazyVerticalGrid` remains the only grid. `MediaGridMorphProductionHost` places the `ProductionVisible` Canvas above that grid and below the toolbar layer, verifies the target geometry, then removes the Canvas after the target frame is drawn. Selection/progress modes do not enable production Morph; identity and lifecycle changes cancel stale work. While Morph is active, toolbar actions and cell metadata overlays are suppressed and restored afterward.
 
 ## 2026-07-30 bounded Morph prepared pair foundation
 

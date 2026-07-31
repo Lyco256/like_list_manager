@@ -71,7 +71,7 @@ Current media-grid rendering is owned by `MediaGridSessionCoordinator` under `Ma
 ## 2026-07-31 production Morph integration
 
 - `TagHierarchyUiV2.kt` connects the normal classified `LazyVerticalGrid` to the shared `MediaGridMorphGestureMode.Production` input and `MediaGridMorphProductionHost`; selection/progress paths remain disabled.
-- `MediaGridMorphProductionHost.kt` owns the bounded production request/command handoff, target geometry verification, rollback/cancel paths, checkpoint suppression, lifecycle invalidation, and temporary retained-image protection. It renders one `ProductionVisible` Canvas above the existing grid and removes it on terminal completion.
+- `MediaGridMorphProductionHost.kt` owns the bounded production request/command handoff, target geometry verification, rollback/cancel paths, checkpoint suppression, lifecycle invalidation, and temporary retained-image protection. It renders one `ProductionVisible` Canvas above the existing grid and removes it on terminal completion; Morph lock also suppresses toolbar actions and hides grid metadata overlays.
 - `MediaGridMorphInteraction.kt` uses direct initial-to-release scale for the one-step fallback when a prepared pair or resident viewport asset is unavailable. Production mode remains enabled on the normal grid even when the Canvas host cannot be created, so this fallback remains reachable. The old `mediaGridPinchToResize` modifier is no longer part of the production source.
 - Production acceptance coverage is in `MediaGridMorphLazyGridHandoffComposeTest` and `MediaGridRenderingContractTest`; the existing queue, publication, resident draw, and scroll-anchor paths remain separate.
 

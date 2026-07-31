@@ -125,6 +125,9 @@ class MediaGridRenderingContractTest {
         assertTrue(uiSource.contains("MediaGridMorphGestureMode.Production"))
         assertTrue(uiSource.contains("val productionMorphEnabled = !selectionMode && !showProgress"))
         assertTrue(uiSource.contains("enabled = productionMorphEnabled && residentPreparedIndex != null"))
+        assertTrue(uiSource.contains("interactionEnabled = !morphCheckpointSuppressed"))
+        assertTrue(uiSource.contains("metadataOverlaysVisible = !morphInteractionLocked"))
+        assertTrue(uiSource.contains("enabled = interactionEnabled && filters.hasActiveFilters"))
         assertTrue(uiSource.contains("MediaGridMorphProductionHostState"))
         assertTrue(!uiSource.contains("mediaGridPinchToResize"))
     }

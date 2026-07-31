@@ -564,6 +564,7 @@ internal fun EnhancedClassifiedScreen(
                 onOpenSort = { sortDialogOpen = true },
                 onToggleDisplayMode = onToggleDisplayMode,
                 onClear = { clearConfirmationOpen = true },
+                interactionEnabled = !morphCheckpointSuppressed,
             )
         }
         Spacer(Modifier.height(10.dp))
@@ -1398,6 +1399,7 @@ private fun TagFilterSummaryRow(
     onOpenSort: () -> Unit,
     onToggleDisplayMode: () -> Unit,
     onClear: () -> Unit,
+    interactionEnabled: Boolean,
 ) {
     val filters = uiState.filters
     Row(
@@ -1444,7 +1446,8 @@ private fun TagFilterSummaryRow(
             )
         }
         FilledTonalButton(
-            onClick = onOpen,
+            onClick = { if (interactionEnabled) onOpen() },
+            enabled = interactionEnabled,
             modifier = Modifier.width(36.dp).height(32.dp).testTag("filter_open"),
             contentPadding = PaddingValues(0.dp),
         ) {
@@ -1455,7 +1458,8 @@ private fun TagFilterSummaryRow(
             )
         }
         FilledTonalButton(
-            onClick = onOpenSort,
+            onClick = { if (interactionEnabled) onOpenSort() },
+            enabled = interactionEnabled,
             modifier = Modifier.width(36.dp).height(32.dp).testTag("sort_open"),
             contentPadding = PaddingValues(0.dp),
         ) {
@@ -1466,7 +1470,8 @@ private fun TagFilterSummaryRow(
             )
         }
         FilledTonalButton(
-            onClick = onToggleDisplayMode,
+            onClick = { if (interactionEnabled) onToggleDisplayMode() },
+            enabled = interactionEnabled,
             modifier = Modifier.width(36.dp).height(32.dp).testTag("classified_display_toggle"),
             contentPadding = PaddingValues(0.dp),
         ) {
@@ -1477,8 +1482,8 @@ private fun TagFilterSummaryRow(
             )
         }
         TextButton(
-            onClick = onClear,
-            enabled = filters.hasActiveFilters,
+            onClick = { if (interactionEnabled) onClear() },
+            enabled = interactionEnabled && filters.hasActiveFilters,
             modifier = Modifier.width(44.dp).height(32.dp).testTag("filter_clear"),
             contentPadding = PaddingValues(0.dp),
         ) {
@@ -3779,6 +3784,7 @@ private fun ClassifiedMediaGridContent(
                         onClick = onCellClick,
                         onToggleSelection = onToggleSelection,
                         interactionEnabled = !morphInteractionLocked,
+                        metadataOverlaysVisible = !morphInteractionLocked,
                         imageLoader = appContainer.mediaGridImageLoader,
                         loadState = effectiveControllerState.cells[item.entry.assetId] ?: MediaGridCellLoadState(),
                         residentDrawAvailable = retainedImageStore?.hasEligibleDrawHandle(item.entry.assetId) == true && residentCanvasMode != MediaGridResidentCanvasMode.Disabled,
@@ -3883,6 +3889,7 @@ private fun ClassifiedMediaGridCell(
     onClick: (Long) -> Unit,
     onToggleSelection: (Long) -> Unit,
     interactionEnabled: Boolean,
+    metadataOverlaysVisible: Boolean,
     imageLoader: coil.ImageLoader,
     loadState: MediaGridCellLoadState,
     residentDrawAvailable: Boolean,
@@ -3969,13 +3976,13 @@ private fun ClassifiedMediaGridCell(
                     modifier = Modifier.fillMaxSize().testTag("media_grid_image_${entry.assetId}"),
                 )
         }
-        if (!selectionMode && sort.baseOrder == ClassifiedSortBase.LikeCount && entry.likeCount != null) {
+        if (metadataOverlaysVisible && !selectionMode && sort.baseOrder == ClassifiedSortBase.LikeCount && entry.likeCount != null) {
             Surface(
                 modifier = Modifier.align(Alignment.TopStart).padding(4.dp).testTag("media_grid_like_count_${entry.assetId}"),
                 shape = RoundedCornerShape(8.dp), color = Color.Black.copy(alpha = 0.68f),
             ) { Text(formatLikeCount(entry.likeCount), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold) }
         }
-        if (entry.type == "video_thumbnail") {
+        if (metadataOverlaysVisible && entry.type == "video_thumbnail") {
             Box(
                 modifier = Modifier.align(Alignment.TopEnd).padding(overlayPadding).size(videoIconSize).testTag("media_grid_video_badge_${entry.assetId}"),
             ) { Icon(Icons.Filled.PlayArrow, contentDescription = "再生", tint = Color.White, modifier = Modifier.fillMaxSize()) }
