@@ -91,6 +91,8 @@ class MediaGridMorphLazyGridHandoffComposeTest {
         val displayedFrame = mutableStateOf(fixture.sourceFrame)
         val displayedColumns = mutableStateOf(fixture.fromColumns)
         var columnChanges = 0
+        val checkpointSuppression = CopyOnWriteArrayList<Boolean>()
+        val anchorCheckpoints = CopyOnWriteArrayList<ClassifiedMediaGridScrollAnchor>()
         val gridState = LazyGridState(
             firstVisibleItemIndex = fixture.initialItemIndex,
             firstVisibleItemScrollOffset = fixture.initialItemScrollOffset,
@@ -165,8 +167,8 @@ class MediaGridMorphLazyGridHandoffComposeTest {
                                 displayedColumns.value = next
                                 displayedFrame.value = if (next == fixture.toColumns) fixture.targetFrame else fixture.sourceFrame
                             },
-                            onAnchorCheckpoint = { _, _ -> },
-                            onCheckpointSuppressed = { },
+                            onAnchorCheckpoint = { _, anchor -> anchorCheckpoints += anchor },
+                            onCheckpointSuppressed = { checkpointSuppression += it },
                             modifier = Modifier.fillMaxSize().testTag("production_morph_canvas_layer"),
                         )
                     }
@@ -207,6 +209,9 @@ class MediaGridMorphLazyGridHandoffComposeTest {
             assertEquals(1, columnChanges)
             assertEquals(MediaGridMorphPhase.Idle, hostState.controller.snapshot().phase)
             composeRule.onAllNodesWithTag("media_grid_morph_canvas").assertCountEquals(0)
+            assertTrue(checkpointSuppression.contains(true))
+            assertEquals(false, checkpointSuppression.last())
+            assertEquals(1, anchorCheckpoints.size)
         } finally {
             composeRule.runOnIdle { store.close() }
             bitmaps.values.forEach(Bitmap::recycle)
@@ -281,6 +286,96 @@ class MediaGridMorphLazyGridHandoffComposeTest {
         assertEquals(1, callbackCount)
         assertEquals(3, fallbackColumnCount)
         assertEquals(MediaGridMorphPhase.Idle, controller.snapshot().phase)
+    }
+
+    @Test
+    fun productionHostRemovesTrackingCanvasOnSourceChangeWithoutColumnCallback() {
+        val fixture = fixture(2, 3, ClassifiedSortBase.Default)
+        val bitmaps = fixture.entries.associate { it.assetId to assetBitmap(it.assetId) }
+        val preparedIndex = preparedIndex(bitmaps)
+        val store = MediaGridRetainedImageStore(null)
+        lateinit var hostState: MediaGridMorphProductionHostState
+        val displayedFrame = mutableStateOf(fixture.sourceFrame)
+        var columnChanges = 0
+        val gridState = LazyGridState()
+        try {
+            composeRule.setContent {
+                val frame = displayedFrame.value
+                hostState = rememberMediaGridMorphProductionHostState(
+                    state = gridState,
+                    sessionKey = mediaGridSessionKey(frame.key.dataKey),
+                    retainedImageStore = store,
+                    enabled = true,
+                )!!
+                val identity = MediaGridMorphInteractionIdentity(
+                    sourceRevision = frame.key.dataKey.sourceRevision,
+                    frameKey = frame.key,
+                    currentColumnCount = fixture.fromColumns,
+                    viewportSignature = fixture.pair.viewportSignature.copy(renderKey = frame.key),
+                )
+                Box(
+                    Modifier
+                        .requiredSize(WidthPx.dp / LocalDensity.current.density)
+                        .testTag("production_source_change_root"),
+                ) {
+                    MediaGridMorphProductionHost(
+                        host = hostState,
+                        frame = frame,
+                        sessionKey = mediaGridSessionKey(frame.key.dataKey),
+                        identity = identity,
+                        preparedPairsSnapshot = { mapOf(fixture.direction to fixture.pair) },
+                        preparedIndex = preparedIndex,
+                        state = gridState,
+                        onColumnCountChange = { columnChanges++ },
+                        onAnchorCheckpoint = { _, _ -> },
+                        onCheckpointSuppressed = { },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
+            composeRule.waitForIdle()
+            composeRule.runOnIdle {
+                val center = fixtureAnchorSlot(fixture.pair, fixture.toColumns).startRect.center
+                val identity = MediaGridMorphInteractionIdentity(
+                    fixture.dataKey.sourceRevision,
+                    fixture.sourceFrame.key,
+                    fixture.fromColumns,
+                    fixture.pair.viewportSignature,
+                )
+                assertTrue(
+                    hostState.controller.beginPointers(
+                        identity,
+                        mapOf(fixture.direction to fixture.pair),
+                        1L,
+                        2L,
+                        center - Offset(20f, 0f),
+                        center + Offset(20f, 0f),
+                    ),
+                )
+                hostState.controller.updatePointers(
+                    center - Offset(5f, 0f),
+                    center + Offset(5f, 0f),
+                )
+            }
+            composeRule.waitForIdle()
+            assertEquals(MediaGridMorphPhase.Tracking, hostState.controller.snapshot().phase)
+            composeRule.onAllNodesWithTag("media_grid_morph_canvas").assertCountEquals(1)
+
+            composeRule.runOnIdle {
+                displayedFrame.value = fixture.sourceFrame.copy(
+                    key = fixture.sourceFrame.key.copy(
+                        dataKey = fixture.sourceFrame.key.dataKey.copy(sourceRevision = 99L),
+                    ),
+                )
+            }
+            composeRule.waitForIdle()
+            assertEquals(MediaGridMorphPhase.Idle, hostState.controller.snapshot().phase)
+            assertEquals(0, columnChanges)
+            composeRule.onAllNodesWithTag("media_grid_morph_canvas").assertCountEquals(0)
+        } finally {
+            composeRule.runOnIdle { store.close() }
+            bitmaps.values.forEach(Bitmap::recycle)
+        }
     }
 
     @Test
