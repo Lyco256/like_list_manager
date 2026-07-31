@@ -31,6 +31,7 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -233,6 +234,53 @@ class MediaGridMorphLazyGridHandoffComposeTest {
         )
         assertTrue(fixture.pair.matchesIdentity(identity))
         assertFalse(isMediaGridMorphProductionReady(fixture.pair, incompleteIndex))
+    }
+
+    @Test
+    fun productionGestureFallsBackOnceWhenPreparedPairIsUnavailable() {
+        val fixture = fixture(2, 3, ClassifiedSortBase.Default)
+        val identity = MediaGridMorphInteractionIdentity(
+            sourceRevision = fixture.dataKey.sourceRevision,
+            frameKey = fixture.sourceFrame.key,
+            currentColumnCount = fixture.fromColumns,
+            viewportSignature = fixture.pair.viewportSignature,
+        )
+        val controller = MediaGridMorphInteractionController()
+        var callbackCount = 0
+        var fallbackColumnCount = -1
+        composeRule.setContent {
+            val density = LocalDensity.current
+            Box(
+                Modifier
+                    .requiredSize(120.dp / density.density)
+                    .testTag("production_fallback_root")
+                    .mediaGridMorphGestureInput(
+                        mode = MediaGridMorphGestureMode.Production,
+                        controller = controller,
+                        identity = identity,
+                        preparedPairsSnapshot = { emptyMap() },
+                        isScrollInProgress = { false },
+                        onFallbackPinchFinished = { _, next ->
+                            callbackCount++
+                            fallbackColumnCount = next
+                        },
+                        fallbackColumnCount = { fixture.fromColumns },
+                    ),
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("production_fallback_root").performTouchInput {
+            down(0, Offset(30f, 60f))
+            down(1, Offset(90f, 60f))
+            moveTo(0, Offset(40f, 60f))
+            moveTo(1, Offset(80f, 60f))
+            up(0)
+            up(1)
+        }
+        composeRule.waitForIdle()
+        assertEquals(1, callbackCount)
+        assertEquals(3, fallbackColumnCount)
+        assertEquals(MediaGridMorphPhase.Idle, controller.snapshot().phase)
     }
 
     @Test
