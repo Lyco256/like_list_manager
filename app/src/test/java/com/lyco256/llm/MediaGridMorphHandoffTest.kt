@@ -21,7 +21,7 @@ class MediaGridMorphHandoffTest {
         val target = selectMediaGridMorphTargetAnchor(
             plan = plan,
             finalCorrection = Offset(125f, 0f),
-            finalPinchCenter = Offset(150f, 50f),
+            fixedFocalCenter = Offset(150f, 50f),
         )!!
 
         assertEquals(11L, target.assetId)
@@ -45,14 +45,14 @@ class MediaGridMorphHandoffTest {
         val containing = selectMediaGridMorphTargetAnchor(
             plan,
             finalCorrection = Offset.Zero,
-            finalPinchCenter = Offset(150f, 50f),
+            fixedFocalCenter = Offset(150f, 50f),
         )!!
         assertEquals(13L, containing.assetId)
 
         val nearest = selectMediaGridMorphTargetAnchor(
             plan,
             finalCorrection = Offset.Zero,
-            finalPinchCenter = Offset(260f, 50f),
+            fixedFocalCenter = Offset(260f, 50f),
         )!!
         assertEquals(13L, nearest.assetId)
         assertEquals(1f, nearest.focalU, 0.001f)
@@ -86,6 +86,7 @@ class MediaGridMorphHandoffTest {
             ),
         ))
         assertEquals(MediaGridMorphPhase.Idle, controller.snapshot().phase)
+        assertEquals(MediaGridMorphFailureReason.IdentityMismatch, controller.snapshot().failureReason)
         assertNull(controller.snapshot().handoffRequest)
     }
 
@@ -152,7 +153,8 @@ class MediaGridMorphHandoffTest {
         controller.releasePointers()
         controller.advanceSettleElapsed(controller.snapshot().interactionGeneration, 180L)
 
-        assertEquals(MediaGridMorphPhase.Idle, controller.snapshot().phase)
+        assertEquals(MediaGridMorphPhase.Failed, controller.snapshot().phase)
+        assertEquals(MediaGridMorphFailureReason.TargetAnchorUnavailable, controller.snapshot().failureReason)
         assertNull(controller.snapshot().handoffRequest)
         assertEquals(0, requestCount)
     }
@@ -184,6 +186,18 @@ class MediaGridMorphHandoffTest {
             ),
         )
         assertEquals(MediaGridMorphGridHandoffPhase.PositioningTarget, coordinator.snapshot().phase)
+        assertTrue(
+            coordinator.observeLayout(
+                frame(request.expectedTargetFrameKey, longArrayOf(11L, 12L)),
+                visibleTarget = MediaGridMorphVisibleItemGeometry(
+                    assetId = 11L,
+                    itemIndex = 0,
+                    rect = Rect(0f, 0f, 100f, 100f),
+                ),
+                viewportWidth = 300,
+                viewportHeight = 300,
+            ) is MediaGridMorphGridHandoffCommand.ScrollToItem,
+        )
         assertNull(
             coordinator.observeLayout(
                 frame(request.expectedTargetFrameKey, longArrayOf(11L, 12L)),
@@ -220,6 +234,14 @@ class MediaGridMorphHandoffTest {
         assertEquals(22L, coordinator.snapshot().resolvedTarget?.assetId)
         assertEquals(1, coordinator.snapshot().resolvedTarget?.mediaOrdinal)
 
+        assertTrue(
+            coordinator.observeLayout(
+                targetFrame,
+                MediaGridMorphVisibleItemGeometry(22L, 1, Rect(0f, 10f, 100f, 110f)),
+                300,
+                300,
+            ) is MediaGridMorphGridHandoffCommand.ScrollToItem,
+        )
         repeat(3) { attempt ->
             assertEquals(
                 MediaGridMorphGridHandoffCommand.ScrollBy(10f),
@@ -279,6 +301,14 @@ class MediaGridMorphHandoffTest {
         assertTrue(success.snapshot().suppressesAnchorCheckpoint)
         success.observeFrame(frame(successRequest.expectedTargetFrameKey, longArrayOf(11L)))
         assertTrue(success.snapshot().suppressesAnchorCheckpoint)
+        assertTrue(
+            success.observeLayout(
+                frame(successRequest.expectedTargetFrameKey, longArrayOf(11L)),
+                MediaGridMorphVisibleItemGeometry(11L, 0, Rect(0f, 0f, 100f, 100f)),
+                300,
+                300,
+            ) is MediaGridMorphGridHandoffCommand.ScrollToItem,
+        )
         success.observeLayout(
             frame(successRequest.expectedTargetFrameKey, longArrayOf(11L)),
             MediaGridMorphVisibleItemGeometry(11L, 0, Rect(0f, 0f, 100f, 100f)),
@@ -422,7 +452,7 @@ class MediaGridMorphHandoffTest {
                 targetItemIndexHint = 0,
             ),
             finalCorrection = Offset.Zero,
-            finalPinchCenter = Offset.Zero,
+            fixedFocalCenter = Offset.Zero,
             viewportWidth = 300,
             viewportHeight = 300,
         )

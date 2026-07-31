@@ -1,5 +1,9 @@
 # `MediaGridMorphCanvasComposeTest.kt`
 
+## 2026-07-31 production Morph correction coverage
+
+- Compose coverage verifies one Canvas, hidden normal visuals, fixed-focal pan behavior, explicit Placeholder edge crossfade, and resident-miss rendering.
+
 ## 2026-07-30 interactive TEST_HARNESS
 
 - 実multi-touch sequenceで一本指非consume、二本指tracking、dead zoneへの復帰、反対方向切替、固定pointer ID、三本目無視、2次元中心移動、release後Awaitingと一回のhandoffを検証する。

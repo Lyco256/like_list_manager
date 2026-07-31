@@ -1,5 +1,10 @@
 # `MediaGridMorphCanvas.kt`
 
+## 2026-07-31 UI・handoff correction
+
+- The production Canvas is the sole Morph visual surface while an active plan is displayed; normal LazyGrid visuals remain layout/semantics only.
+- Media slots paint an opaque Placeholder base, then crossfade explicit start/end content in the same interpolated rect. Edge image drawing rects stay fixed and are clipped by the current rect.
+
 ## 対応ソース
 
 `app/src/main/java/com/lyco256/llm/MediaGridMorphCanvas.kt`

@@ -1,5 +1,18 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-07-31 Morph UI・handoff correction
+
+| Requirement | Evidence | Status |
+|---|---|---|
+| One production Morph Canvas, with normal cell/header/resident visuals suppressed only after claim | `TagHierarchyUiV2.kt`, `MediaGridMorphCanvas.kt`, `MainActivityComposeTest.normalClassifiedGridComposesProductionCanvasDuringLivePinch` | covered |
+| Fixed initial pinch focal point; no current-centroid translation | `mediaGridMorphFocalCorrection`, controller settle tests, fixed-pointer Compose coverage | covered |
+| Explicit Image/Placeholder endpoints, resident miss rendered as Placeholder, edge reveal clipped in current rect | `MediaGridMorphSlotContent`, Canvas tests, production-readiness Compose tests | covered |
+| Normal release, pointer disappearance, fallback, target settle, and exactly-once column callback | `mediaGridMorphGestureInput`, handoff coordinator/controller tests, production host Compose tests | covered |
+| One-finger scroll/candidate arbitration remains intact | `realLazyGridKeepsScrollAndPanUntilPinchClaimThenStopsOnce` | covered |
+| Live display toggle, repeated pinch round trips, recreation, filter/sort changes, dialogs, and no double display | `MainActivityComposeTest.classifiedDisplayToggleSwitchesBetweenCardAndMediaGridAndSurvivesActivityRecreation` | covered |
+
+The live test waits for the source/target `columnCount`, `requestedColumnCount`, and frame key to agree. It does not infer column changes from a clipped cell `boundsInRoot` width while handoff visual correction is active.
+
 ## 2026-07-31 gesture arbitration fix
 
 | 要件 | 証跡 | 状態 |

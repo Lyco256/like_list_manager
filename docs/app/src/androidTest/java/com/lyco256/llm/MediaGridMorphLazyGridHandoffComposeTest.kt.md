@@ -1,5 +1,9 @@
 # `MediaGridMorphLazyGridHandoffComposeTest.kt`
 
+## 2026-07-31 production handoff correction coverage
+
+- Handoff cases cover both column directions, header bucket changes, delayed target frames, target draw-before-Canvas-removal, rollback, fallback release, and one-grid scroll suppression.
+
 TEST_HARNESSの一枚の実`LazyVerticalGrid`でhandoffを検証するCompose Test。
 
 - 2↔3、4↔5、8↔9、11↔12

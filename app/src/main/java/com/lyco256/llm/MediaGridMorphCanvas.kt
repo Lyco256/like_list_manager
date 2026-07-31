@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -39,8 +40,11 @@ internal data class MediaGridMorphRenderSlot(
     val column: Int,
     val startRect: Rect,
     val endRect: Rect,
-    val startAssetId: Long?,
-    val endAssetId: Long?,
+    val startContent: MediaGridMorphSlotContent,
+    val endContent: MediaGridMorphSlotContent,
+    val startImageDrawingRect: Rect,
+    val endImageDrawingRect: Rect,
+    val edge: MediaGridMorphSlotEdge,
     val startImage: MediaGridResidentCanvasPreparedImage?,
     val endImage: MediaGridResidentCanvasPreparedImage?,
 )
@@ -66,6 +70,8 @@ internal data class MediaGridMorphRenderModel(
     val headers: List<MediaGridMorphRenderHeader>,
     val surfaceColor: Color,
     val textColor: Color,
+    val placeholderColor: Color,
+    val fillViewportBackground: Boolean,
     val horizontalTextPaddingPx: Float,
     val verticalTextPaddingPx: Float,
 )
@@ -76,6 +82,8 @@ internal fun buildMediaGridMorphRenderModel(
     textLayoutsByTitle: Map<String, TextLayoutResult>,
     surfaceColor: Color,
     textColor: Color,
+    placeholderColor: Color,
+    fillViewportBackground: Boolean = false,
     horizontalTextPaddingPx: Float,
     verticalTextPaddingPx: Float,
     onImageResolved: ((Long) -> Unit)? = null,
@@ -92,21 +100,31 @@ internal fun buildMediaGridMorphRenderModel(
         }
     }
 
+    fun resolveContent(content: MediaGridMorphSlotContent): Pair<MediaGridMorphSlotContent, MediaGridResidentCanvasPreparedImage?> =
+        when (content) {
+            MediaGridMorphSlotContent.Placeholder -> content to null
+            is MediaGridMorphSlotContent.Image -> {
+                val image = resolve(content.assetId)
+                if (image == null) MediaGridMorphSlotContent.Placeholder to null else content to image
+            }
+        }
+
     val slots = ArrayList<MediaGridMorphRenderSlot>(pair.slots.size)
     for (slot in pair.slots) {
+        val (startContent, startImage) = resolveContent(slot.startContent)
+        val (endContent, endImage) = resolveContent(slot.endContent)
         slots += MediaGridMorphRenderSlot(
             row = slot.row,
             column = slot.column,
             startRect = slot.startRect,
             endRect = slot.endRect,
-            startAssetId = slot.startAssetId,
-            endAssetId = slot.endAssetId,
-            startImage = resolve(slot.startAssetId),
-            endImage = if (slot.endAssetId == slot.startAssetId) {
-                resolve(slot.startAssetId)
-            } else {
-                resolve(slot.endAssetId)
-            },
+            startContent = startContent,
+            endContent = endContent,
+            startImageDrawingRect = slot.startImageDrawingRect,
+            endImageDrawingRect = slot.endImageDrawingRect,
+            edge = slot.edge,
+            startImage = startImage,
+            endImage = endImage,
         )
     }
     val headers = ArrayList<MediaGridMorphRenderHeader>(pair.headers.size)
@@ -132,6 +150,8 @@ internal fun buildMediaGridMorphRenderModel(
         headers = Collections.unmodifiableList(headers),
         surfaceColor = surfaceColor.copy(alpha = 1f),
         textColor = textColor,
+        placeholderColor = placeholderColor.copy(alpha = 1f),
+        fillViewportBackground = fillViewportBackground,
         horizontalTextPaddingPx = horizontalTextPaddingPx,
         verticalTextPaddingPx = verticalTextPaddingPx,
     )
@@ -204,6 +224,7 @@ internal fun MediaGridMorphCanvasLayer(
         textLayouts,
         colors.surface,
         colors.onSurface,
+        mode,
         horizontalPaddingPx,
         verticalPaddingPx,
     ) {
@@ -213,18 +234,17 @@ internal fun MediaGridMorphCanvasLayer(
             textLayoutsByTitle = textLayouts,
             surfaceColor = colors.surface,
             textColor = colors.onSurface,
+            placeholderColor = colors.surfaceVariant,
+            fillViewportBackground = mode == MediaGridMorphCanvasMode.ProductionVisible,
             horizontalTextPaddingPx = horizontalPaddingPx,
             verticalTextPaddingPx = verticalPaddingPx,
             onImageResolved = onImageResolved,
         ).also { onRenderModelBuilt?.invoke() }
     }
-    val imageLayerPaint = remember { Paint() }
-
     MediaGridMorphCanvas(
         renderModel = renderModel,
         progress = progress,
         correction = correction,
-        imageLayerPaint = imageLayerPaint,
         modifier = modifier,
     )
 }
@@ -234,7 +254,6 @@ private fun MediaGridMorphCanvas(
     renderModel: MediaGridMorphRenderModel,
     progress: State<Float>,
     correction: State<Offset>,
-    imageLayerPaint: Paint,
     modifier: Modifier,
 ) {
     Canvas(
@@ -250,76 +269,96 @@ private fun MediaGridMorphCanvas(
         val currentCorrection = correction.value
         val viewportLeft = renderModel.viewport.left
         val viewportTop = renderModel.viewport.top
+
+        fun DrawScope.drawPreparedImage(
+            image: MediaGridResidentCanvasPreparedImage,
+            rect: Rect,
+            alpha: Float,
+            blendMode: BlendMode = BlendMode.SrcOver,
+        ) {
+            val width = rect.width.roundToInt()
+            val height = rect.height.roundToInt()
+            if (width <= 0 || height <= 0 || alpha <= 0f) return
+            drawImage(
+                image = image.image,
+                srcOffset = image.srcOffset,
+                srcSize = image.srcSize,
+                dstOffset = IntOffset(rect.left.roundToInt(), rect.top.roundToInt()),
+                dstSize = IntSize(width, height),
+                alpha = alpha,
+                blendMode = blendMode,
+            )
+        }
+
+        fun toCanvasRect(rect: Rect): Rect = Rect(
+            rect.left - viewportLeft + currentCorrection.x,
+            rect.top - viewportTop + currentCorrection.y,
+            rect.right - viewportLeft + currentCorrection.x,
+            rect.bottom - viewportTop + currentCorrection.y,
+        )
+
         clipRect(left = 0f, top = 0f, right = size.width, bottom = size.height) {
-            drawIntoCanvas { canvas ->
-                canvas.saveLayer(
-                    renderModel.localViewportRect,
-                    imageLayerPaint,
+            if (renderModel.fillViewportBackground) {
+                drawRect(
+                    color = renderModel.surfaceColor,
+                    topLeft = renderModel.localViewportRect.topLeft,
+                    size = renderModel.localViewportRect.size,
                 )
             }
             for (slot in renderModel.slots) {
-                val left = lerpMorphEdge(slot.startRect.left, slot.endRect.left, p) -
-                    viewportLeft + currentCorrection.x
-                val top = lerpMorphEdge(slot.startRect.top, slot.endRect.top, p) -
-                    viewportTop + currentCorrection.y
-                val right = lerpMorphEdge(slot.startRect.right, slot.endRect.right, p) -
-                    viewportLeft + currentCorrection.x
-                val bottom = lerpMorphEdge(slot.startRect.bottom, slot.endRect.bottom, p) -
-                    viewportTop + currentCorrection.y
-                if (right <= left || bottom <= top) continue
-                val dstLeft = left.roundToInt()
-                val dstTop = top.roundToInt()
-                val dstRight = right.roundToInt()
-                val dstBottom = bottom.roundToInt()
-                val dstWidth = dstRight - dstLeft
-                val dstHeight = dstBottom - dstTop
-                if (dstWidth <= 0 || dstHeight <= 0) continue
-                clipRect(left = left, top = top, right = right, bottom = bottom) {
-                    val sameAsset = slot.startAssetId != null && slot.startAssetId == slot.endAssetId
-                    if (sameAsset) {
-                        slot.startImage?.let { image ->
-                            drawImage(
-                                image = image.image,
-                                srcOffset = image.srcOffset,
-                                srcSize = image.srcSize,
-                                dstOffset = IntOffset(dstLeft, dstTop),
-                                dstSize = IntSize(dstWidth, dstHeight),
-                                alpha = 1f,
-                                blendMode = BlendMode.Plus,
-                            )
+                val currentRect = Rect(
+                    lerpMorphEdge(slot.startRect.left, slot.endRect.left, p) - viewportLeft + currentCorrection.x,
+                    lerpMorphEdge(slot.startRect.top, slot.endRect.top, p) - viewportTop + currentCorrection.y,
+                    lerpMorphEdge(slot.startRect.right, slot.endRect.right, p) - viewportLeft + currentCorrection.x,
+                    lerpMorphEdge(slot.startRect.bottom, slot.endRect.bottom, p) - viewportTop + currentCorrection.y,
+                )
+                if (currentRect.width <= 0f || currentRect.height <= 0f) continue
+                val hasPlaceholderEndpoint =
+                    slot.startContent is MediaGridMorphSlotContent.Placeholder ||
+                        slot.endContent is MediaGridMorphSlotContent.Placeholder
+                if (hasPlaceholderEndpoint) {
+                    drawRect(renderModel.placeholderColor, currentRect.topLeft, currentRect.size)
+                }
+                clipRect(
+                    left = currentRect.left,
+                    top = currentRect.top,
+                    right = currentRect.right,
+                    bottom = currentRect.bottom,
+                ) {
+                    val sameImage = slot.startContent is MediaGridMorphSlotContent.Image &&
+                        slot.endContent is MediaGridMorphSlotContent.Image &&
+                        slot.startContent == slot.endContent
+                    if (sameImage) {
+                        slot.startImage?.let { drawPreparedImage(it, currentRect, 1f) }
+                    } else if (!hasPlaceholderEndpoint) {
+                        drawIntoCanvas { canvas ->
+                            canvas.saveLayer(currentRect, Paint())
                         }
-                    } else {
-                        val startAlpha = 1f - p
-                        if (startAlpha > 0f) {
-                            slot.startImage?.let { image ->
-                                drawImage(
-                                    image = image.image,
-                                    srcOffset = image.srcOffset,
-                                    srcSize = image.srcSize,
-                                    dstOffset = IntOffset(dstLeft, dstTop),
-                                    dstSize = IntSize(dstWidth, dstHeight),
-                                    alpha = startAlpha,
-                                    blendMode = BlendMode.Plus,
-                                )
+                        if (p < 1f) {
+                            slot.startImage?.let {
+                                drawPreparedImage(it, currentRect, 1f - p, BlendMode.Plus)
                             }
                         }
                         if (p > 0f) {
-                            slot.endImage?.let { image ->
-                                drawImage(
-                                    image = image.image,
-                                    srcOffset = image.srcOffset,
-                                    srcSize = image.srcSize,
-                                    dstOffset = IntOffset(dstLeft, dstTop),
-                                    dstSize = IntSize(dstWidth, dstHeight),
-                                    alpha = p,
-                                    blendMode = BlendMode.Plus,
-                                )
+                            slot.endImage?.let {
+                                drawPreparedImage(it, currentRect, p, BlendMode.Plus)
                             }
                         }
+                        drawIntoCanvas { it.restore() }
+                    } else {
+                        val startRect = when (slot.edge) {
+                            MediaGridMorphSlotEdge.Decrease -> toCanvasRect(slot.startImageDrawingRect)
+                            else -> currentRect
+                        }
+                        val endRect = when (slot.edge) {
+                            MediaGridMorphSlotEdge.Increase -> toCanvasRect(slot.endImageDrawingRect)
+                            else -> currentRect
+                        }
+                        if (p < 1f) slot.startImage?.let { drawPreparedImage(it, startRect, 1f - p) }
+                        if (p > 0f) slot.endImage?.let { drawPreparedImage(it, endRect, p) }
                     }
                 }
             }
-            drawIntoCanvas { it.restore() }
 
             for (header in renderModel.headers) {
                 val left = lerpMorphEdge(header.startRect.left, header.endRect.left, p) -

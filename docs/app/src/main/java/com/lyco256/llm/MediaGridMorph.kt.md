@@ -1,5 +1,11 @@
 # MediaGridMorph.kt
 
+## 2026-07-31 UI・handoff correction
+
+- Morph slots use explicit `Image`/`Placeholder` endpoints and resolve resident misses to Placeholder during render-model construction.
+- Production readiness validates bounded geometry and identity without rejecting the entire pair for a missing resident image.
+- Focal correction is based on the fixed initial pinch center and is zero at progress 0.
+
 `MediaGridMorph.kt`は、列数Morphの描画前に使用する局所計画基盤、2次元focal anchor、release判定を保持する。
 
 ## 事前計画

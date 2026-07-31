@@ -171,7 +171,7 @@ internal fun MediaGridMorphProductionHost(
     if (activePlan != null) {
         val protectedAssetIds = remember(activePlan) {
             activePlan!!.slots.asSequence()
-                .flatMap { sequenceOf(it.startAssetId, it.endAssetId) }
+                .flatMap { sequenceOf(it.startContent.assetIdOrNull(), it.endContent.assetIdOrNull()) }
                 .filterNotNull()
                 .distinct()
                 .toList()
@@ -199,6 +199,57 @@ internal fun MediaGridMorphProductionHost(
             host.commandChannel.trySend(MediaGridMorphProductionCommand(generation, command))
         }
         host.publishHandoffSnapshot()
+    }
+
+    suspend fun observeCurrentHandoffLayout(
+        request: MediaGridMorphHandoffRequest,
+        currentFrame: MediaGridFrameData,
+    ) {
+        val snapshot = coordinator.snapshot()
+        if (
+            snapshot.phase != MediaGridMorphGridHandoffPhase.PositioningTarget &&
+            snapshot.phase != MediaGridMorphGridHandoffPhase.RollingBack
+        ) return
+        val layout = state.layoutInfo
+        val targetTranslationX = request.finalCorrection.x.takeIf {
+            snapshot.phase == MediaGridMorphGridHandoffPhase.PositioningTarget
+        } ?: 0f
+        val targetTranslationY = request.finalCorrection.y.takeIf {
+            snapshot.phase == MediaGridMorphGridHandoffPhase.PositioningTarget
+        } ?: 0f
+        val target = snapshot.resolvedTarget?.let { resolved ->
+            layout.visibleItemsInfo.firstNotNullOfOrNull { info ->
+                val key = info.key as? String ?: return@firstNotNullOfOrNull null
+                val assetId = currentFrame.assetIdByItemKey[key] ?: return@firstNotNullOfOrNull null
+                if (assetId != resolved.assetId) return@firstNotNullOfOrNull null
+                MediaGridMorphVisibleItemGeometry(
+                    assetId = assetId,
+                    itemIndex = info.index,
+                    rect = Rect(
+                        left = info.offset.x.toFloat() + targetTranslationX,
+                        top = (info.offset.y - layout.viewportStartOffset).toFloat() + targetTranslationY,
+                        right = (info.offset.x + info.size.width).toFloat() + targetTranslationX,
+                        bottom = (info.offset.y - layout.viewportStartOffset + info.size.height).toFloat() + targetTranslationY,
+                    ),
+                )
+            }
+        }
+        enqueue(
+            coordinator.observeLayout(
+                frame = currentFrame,
+                visibleTarget = target,
+                viewportWidth = layout.viewportSize.width,
+                viewportHeight = (layout.viewportEndOffset - layout.viewportStartOffset).coerceAtLeast(0),
+            ),
+            request.interactionGeneration,
+        )
+        if (coordinator.snapshot().phase == MediaGridMorphGridHandoffPhase.VerifyingTarget) {
+            withFrameNanos { }
+            enqueue(
+                coordinator.underlyingTargetGridDrawn(),
+                request.interactionGeneration,
+            )
+        }
     }
 
     LaunchedEffect(host) {
@@ -235,6 +286,13 @@ internal fun MediaGridMorphProductionHost(
         snapshotFlow {
             val layout = state.layoutInfo
             val target = coordinator.snapshot().resolvedTarget
+            val phase = coordinator.snapshot().phase
+            val targetTranslationX = request.finalCorrection.x.takeIf {
+                phase == MediaGridMorphGridHandoffPhase.PositioningTarget
+            } ?: 0f
+            val targetTranslationY = request.finalCorrection.y.takeIf {
+                phase == MediaGridMorphGridHandoffPhase.PositioningTarget
+            } ?: 0f
             val visibleTarget = target?.let { resolved ->
                 layout.visibleItemsInfo.firstNotNullOfOrNull { info ->
                     val key = info.key as? String ?: return@firstNotNullOfOrNull null
@@ -244,10 +302,10 @@ internal fun MediaGridMorphProductionHost(
                         assetId = assetId,
                         itemIndex = info.index,
                         rect = Rect(
-                            left = info.offset.x.toFloat(),
-                            top = (info.offset.y - layout.viewportStartOffset).toFloat(),
-                            right = (info.offset.x + info.size.width).toFloat(),
-                            bottom = (info.offset.y - layout.viewportStartOffset + info.size.height).toFloat(),
+                            left = info.offset.x.toFloat() + targetTranslationX,
+                            top = (info.offset.y - layout.viewportStartOffset).toFloat() + targetTranslationY,
+                            right = (info.offset.x + info.size.width).toFloat() + targetTranslationX,
+                            bottom = (info.offset.y - layout.viewportStartOffset + info.size.height).toFloat() + targetTranslationY,
                         ),
                     )
                 }
@@ -257,23 +315,8 @@ internal fun MediaGridMorphProductionHost(
                 viewportWidth = layout.viewportSize.width,
                 viewportHeight = (layout.viewportEndOffset - layout.viewportStartOffset).coerceAtLeast(0),
             )
-        }.distinctUntilChanged().collect { sample ->
-            enqueue(
-                coordinator.observeLayout(
-                    frame = frame,
-                    visibleTarget = sample.target,
-                    viewportWidth = sample.viewportWidth,
-                    viewportHeight = sample.viewportHeight,
-                ),
-                request.interactionGeneration,
-            )
-            if (coordinator.snapshot().phase == MediaGridMorphGridHandoffPhase.VerifyingTarget) {
-                withFrameNanos { }
-                enqueue(
-                    coordinator.underlyingTargetGridDrawn(),
-                    request.interactionGeneration,
-                )
-            }
+        }.distinctUntilChanged().collect {
+            observeCurrentHandoffLayout(request, frame)
         }
     }
 
@@ -296,10 +339,16 @@ internal fun MediaGridMorphProductionHost(
                 is MediaGridMorphGridHandoffCommand.ScrollToItem -> {
                     state.scrollToItem(command.itemIndex, command.scrollOffset)
                     withFrameNanos { }
+                    coordinator.snapshot().request?.let { request ->
+                        observeCurrentHandoffLayout(request, latestFrame)
+                    }
                 }
                 is MediaGridMorphGridHandoffCommand.ScrollBy -> {
                     state.scrollBy(command.pixels)
                     withFrameNanos { }
+                    coordinator.snapshot().request?.let { request ->
+                        observeCurrentHandoffLayout(request, latestFrame)
+                    }
                 }
                 is MediaGridMorphGridHandoffCommand.Complete -> {
                     controller.completeHandoff(command.interactionGeneration)

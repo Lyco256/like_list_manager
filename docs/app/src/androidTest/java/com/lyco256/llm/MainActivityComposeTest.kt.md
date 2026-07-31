@@ -1,5 +1,10 @@
 # `app/src/androidTest/java/com/lyco256/llm/MainActivityComposeTest.kt`
 
+## 2026-07-31 production Morph correction coverage
+
+- The real Activity test covers production Canvas-only visuals during pinch, repeated increase/decrease round trips, threshold no-op, dialog interaction, recreation, and filter/sort changes.
+- Column changes are synchronized against the session's `columnCount`, `requestedColumnCount`, and frame key; clipped cell bounds are not used as a column-count oracle during handoff translation.
+
 ## 2026-07-19 direct preview coverage
 
 - The grid fixture now lets the shared Coil loader read local image files directly; it does not pre-generate or hydrate custom thumbnail files.

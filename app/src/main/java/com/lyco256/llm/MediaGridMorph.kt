@@ -26,6 +26,7 @@ internal enum class MediaGridMorphPhase {
     SettlingToCurrent,
     SettlingToTarget,
     AwaitingGridHandoff,
+    Failed,
 }
 
 /** The only per-media input copied from the current frame for morph preparation. */
@@ -97,6 +98,23 @@ internal data class MediaGridMorphLayoutSnapshot(
     val mediaOrdinalRange: IntRange,
 )
 
+internal sealed interface MediaGridMorphSlotContent {
+    data class Image(val assetId: Long) : MediaGridMorphSlotContent
+    data object Placeholder : MediaGridMorphSlotContent
+}
+
+internal fun MediaGridMorphSlotContent.assetIdOrNull(): Long? =
+    (this as? MediaGridMorphSlotContent.Image)?.assetId
+
+internal enum class MediaGridMorphSlotEdge {
+    None,
+    Increase,
+    Decrease,
+}
+
+private fun Long?.toMorphSlotContent(): MediaGridMorphSlotContent =
+    this?.let(MediaGridMorphSlotContent::Image) ?: MediaGridMorphSlotContent.Placeholder
+
 /** Position-based correspondence for one local row/column slot. */
 internal data class MediaGridMorphSlot(
     val row: Int,
@@ -107,6 +125,15 @@ internal data class MediaGridMorphSlot(
     val endAssetId: Long?,
     val startMediaOrdinal: Int?,
     val endMediaOrdinal: Int?,
+    val startContent: MediaGridMorphSlotContent = startAssetId.toMorphSlotContent(),
+    val endContent: MediaGridMorphSlotContent = endAssetId.toMorphSlotContent(),
+    val startImageDrawingRect: Rect = startRect,
+    val endImageDrawingRect: Rect = endRect,
+    val edge: MediaGridMorphSlotEdge = when {
+        startAssetId == null && endAssetId != null -> MediaGridMorphSlotEdge.Increase
+        startAssetId != null && endAssetId == null -> MediaGridMorphSlotEdge.Decrease
+        else -> MediaGridMorphSlotEdge.None
+    },
 )
 
 /** One non-duplicated header background plus its title crossfade inputs. */
@@ -253,26 +280,21 @@ internal fun isMediaGridMorphProductionReady(
     pair: MediaGridMorphPreparedPair,
     preparedIndex: MediaGridResidentCanvasPreparedIndex,
 ): Boolean {
-    val required = HashSet<Long>()
-    for (slot in pair.slots) {
+    return pair.slots.any { slot ->
         val startHasSize = slot.startRect.width > 0f && slot.startRect.height > 0f
         val endHasSize = slot.endRect.width > 0f && slot.endRect.height > 0f
-        if (!startHasSize && !endHasSize) continue
+        if (!startHasSize && !endHasSize) return@any false
         val left = minOf(slot.startRect.left, slot.endRect.left)
         val top = minOf(slot.startRect.top, slot.endRect.top)
         val right = maxOf(slot.startRect.right, slot.endRect.right)
         val bottom = maxOf(slot.startRect.bottom, slot.endRect.bottom)
-        if (
+        !(
             right <= pair.viewport.left ||
             left >= pair.viewport.right ||
             bottom <= pair.viewport.top ||
             top >= pair.viewport.bottom
-        ) continue
-        if (startHasSize) slot.startAssetId?.let(required::add)
-        if (endHasSize) slot.endAssetId?.let(required::add)
+        )
     }
-    if (required.isEmpty()) return false
-    return required.all { it in preparedIndex.preparedImageByAssetId }
 }
 
 internal object MediaGridMorphDefaults {
@@ -557,6 +579,8 @@ private fun buildMediaGridMorphSlots(
                 endAssetId = endMedia?.assetId,
                 startMediaOrdinal = startMedia?.mediaOrdinal,
                 endMediaOrdinal = endMedia?.mediaOrdinal,
+                startImageDrawingRect = if (startMedia == null) endRect else startRect,
+                endImageDrawingRect = if (endMedia == null) startRect else endRect,
             )
         }
     }

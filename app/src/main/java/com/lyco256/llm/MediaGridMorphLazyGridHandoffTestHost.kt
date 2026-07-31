@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -73,6 +74,26 @@ internal fun MediaGridMorphLazyGridHandoffTestHost(
     var handoffSnapshot by remember { mutableStateOf(coordinator.snapshot()) }
     val request = controller.handoffRequest.value
     val userScrollEnabled = !handoffSnapshot.suppressesUserScroll
+    val handoffVisualTranslationX = handoffSnapshot.request
+        ?.finalCorrection
+        ?.x
+        ?.takeIf {
+            handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.PositioningTarget ||
+                handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.VerifyingTarget ||
+                handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.ReadyToComplete ||
+                handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.Idle
+        }
+        ?: 0f
+    val handoffVisualTranslationY = handoffSnapshot.request
+        ?.finalCorrection
+        ?.y
+        ?.takeIf {
+            handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.PositioningTarget ||
+                handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.VerifyingTarget ||
+                handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.ReadyToComplete ||
+                handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.Idle
+        }
+        ?: 0f
 
     SideEffect {
         onUserScrollEnabledChanged?.invoke(userScrollEnabled)
@@ -112,20 +133,31 @@ internal fun MediaGridMorphLazyGridHandoffTestHost(
     }
 
     fun visibleTargetGeometry(): MediaGridMorphVisibleItemGeometry? {
-        val target = coordinator.snapshot().resolvedTarget ?: return null
+        val snapshot = coordinator.snapshot()
+        val target = snapshot.resolvedTarget ?: return null
+        val targetTranslationX = snapshot.request
+            ?.finalCorrection
+            ?.x
+            ?.takeIf { snapshot.phase == MediaGridMorphGridHandoffPhase.PositioningTarget }
+            ?: 0f
+        val targetTranslationY = snapshot.request
+            ?.finalCorrection
+            ?.y
+            ?.takeIf { snapshot.phase == MediaGridMorphGridHandoffPhase.PositioningTarget }
+            ?: 0f
         val layout = state.layoutInfo
         for (info in layout.visibleItemsInfo) {
             val key = info.key as? String ?: continue
             val assetId = displayedFrame.assetIdByItemKey[key] ?: continue
             if (assetId != target.assetId) continue
             return MediaGridMorphVisibleItemGeometry(
-                assetId = assetId,
-                itemIndex = info.index,
-                rect = Rect(
-                    left = info.offset.x.toFloat(),
-                    top = (info.offset.y - layout.viewportStartOffset).toFloat(),
-                    right = (info.offset.x + info.size.width).toFloat(),
-                    bottom = (info.offset.y - layout.viewportStartOffset + info.size.height).toFloat(),
+                    assetId = assetId,
+                    itemIndex = info.index,
+                    rect = Rect(
+                        left = info.offset.x.toFloat() + targetTranslationX,
+                        top = (info.offset.y - layout.viewportStartOffset).toFloat() + targetTranslationY,
+                        right = (info.offset.x + info.size.width).toFloat() + targetTranslationX,
+                        bottom = (info.offset.y - layout.viewportStartOffset + info.size.height).toFloat() + targetTranslationY,
                 ),
             ).also(onVisibleTargetGeometry)
         }
@@ -226,7 +258,21 @@ internal fun MediaGridMorphLazyGridHandoffTestHost(
             columns = GridCells.Fixed(columnCount),
             state = state,
             userScrollEnabled = userScrollEnabled,
-            modifier = Modifier.fillMaxSize().testTag("media_grid_handoff_lazy_grid"),
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    if (handoffVisualTranslationX != 0f) {
+                        Modifier.graphicsLayer {
+                            translationX = handoffVisualTranslationX
+                            translationY = handoffVisualTranslationY
+                        }
+                    } else if (handoffVisualTranslationY != 0f) {
+                        Modifier.graphicsLayer { translationY = handoffVisualTranslationY }
+                    } else {
+                        Modifier
+                    },
+                )
+                .testTag("media_grid_handoff_lazy_grid"),
         ) {
             items(
                 displayedFrame.items,

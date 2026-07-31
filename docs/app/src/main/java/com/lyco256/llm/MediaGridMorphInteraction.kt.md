@@ -1,5 +1,11 @@
 # `MediaGridMorphInteraction.kt`
 
+## 2026-07-31 UI・handoff correction
+
+- Pointer release accepts the first normal loss of a tracked pointer, including pointer disappearance, and calls Morph release or fallback exactly once.
+- Settle timing starts from the Compose frame clock; Android pointer uptime is not mixed with `withFrameNanos`.
+- `Failed`/identity mismatch states retain a diagnostic reason instead of silently treating a target failure as Idle.
+
 ## Current production contract
 
 The TEST_HARNESS and production paths share the pointer arbitration state machine through `MediaGridMorphGestureMode`. A two-pointer candidate starts when the second pointer first appears regardless of current scroll state. It does not consume, stop scroll, set `pointerInProgress`, or lock interaction. The first event satisfying the existing direction dead zone, `touchSlop * 0.35`, and `centroid movement * 0.5` claims either Morph or the one-shot fallback. Production uses bounded pair/readiness checks; when they fail, release performs one direct column-count fallback. The former `mediaGridPinchToResize` modifier is removed.

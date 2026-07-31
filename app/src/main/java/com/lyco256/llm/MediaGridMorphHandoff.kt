@@ -23,16 +23,16 @@ internal data class MediaGridMorphTargetAnchor(
 internal fun selectMediaGridMorphTargetAnchor(
     plan: MediaGridMorphPlan,
     finalCorrection: Offset,
-    finalPinchCenter: Offset,
+    fixedFocalCenter: Offset,
 ): MediaGridMorphTargetAnchor? {
     val targetPointInViewport =
-        finalPinchCenter - finalCorrection + plan.viewport.topLeft
+        fixedFocalCenter - finalCorrection + plan.viewport.topLeft
     val interactionSlot = plan.anchor?.slot
     var selected: MediaGridMorphSlot? = null
     var selectedDistance = Float.POSITIVE_INFINITY
 
     if (
-        interactionSlot?.endAssetId != null &&
+        interactionSlot?.endContent is MediaGridMorphSlotContent.Image &&
         interactionSlot.endMediaOrdinal != null &&
         interactionSlot.endRect.width > 0f &&
         interactionSlot.endRect.height > 0f
@@ -42,7 +42,7 @@ internal fun selectMediaGridMorphTargetAnchor(
         for (slot in plan.slots) {
             val rect = slot.endRect
             if (
-                slot.endAssetId == null ||
+                slot.endContent !is MediaGridMorphSlotContent.Image ||
                 slot.endMediaOrdinal == null ||
                 rect.width <= 0f ||
                 rect.height <= 0f
@@ -60,7 +60,7 @@ internal fun selectMediaGridMorphTargetAnchor(
     }
 
     val slot = selected ?: return null
-    val assetId = slot.endAssetId ?: return null
+    val assetId = (slot.endContent as? MediaGridMorphSlotContent.Image)?.assetId ?: return null
     val mediaOrdinal = slot.endMediaOrdinal ?: return null
     val rect = slot.endRect
     val focalU = ((targetPointInViewport.x - rect.left) / rect.width).coerceIn(0f, 1f)
@@ -271,15 +271,16 @@ internal class MediaGridMorphGridHandoffCoordinator {
             }
         }
         val target = current.resolvedTarget ?: return null
+        if (!rollingBack && !current.targetScrollIssued) {
+            current = current.copy(targetScrollIssued = true)
+            return MediaGridMorphGridHandoffCommand.ScrollToItem(target.itemIndex)
+        }
         if (visibleTarget == null || visibleTarget.assetId != target.assetId) {
             if (rollingBack) {
                 if (current.rollbackScrollIssued) return finishRollback()
                 current = current.copy(rollbackScrollIssued = true)
             } else {
-                if (current.targetScrollIssued) {
-                    return beginRollback("target ${target.assetId} remained invisible after scroll")
-                }
-                current = current.copy(targetScrollIssued = true)
+                return beginRollback("target ${target.assetId} remained invisible after scroll")
             }
             return MediaGridMorphGridHandoffCommand.ScrollToItem(target.itemIndex)
         }

@@ -1,5 +1,10 @@
 # MediaGridMorphProductionHost.kt
 
+## 2026-07-31 UI・handoff correction
+
+- Production host observes the latest LazyGrid layout after every target scroll command, applies the fixed focal correction only during target positioning, and removes the Canvas after the underlying target frame is drawn.
+- Active plan assets are protected through the handoff; stale commands and lifecycle cancellation remain generation-scoped.
+
 `ClassifiedMediaGridContent`からだけ明示的に作成されるproduction Morph host。
 
 - `MediaGridMorphProductionHostState`はLazyGridState・session単位でinteraction controller、handoff coordinator、request/command channel、Morph owner tokenを一つずつ保持する。

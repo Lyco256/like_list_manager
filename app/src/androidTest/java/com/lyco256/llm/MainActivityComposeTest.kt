@@ -314,38 +314,47 @@ class MainActivityComposeTest {
         waitDisplayed(errorTag)
         assertTrue(composeRule.onAllNodesWithTag("media_grid_placeholder_${assetIds.getValue("grid-error")}").fetchSemanticsNodes().isEmpty())
 
-        val beforePinch = gridItemBounds(photoTag)
+        waitForGridColumnCount(ClassifiedMediaGridDefaultColumnCount)
+        val beforePinchColumns = mainViewModel().mediaGridSessionState.value.columnCount
         pinchOnGrid("classified_media_grid", centerSpan = 260f, endSpan = 180f)
-        composeRule.waitForIdle()
-        val afterPinchIn = gridItemBounds(photoTag)
-        assertTrue(afterPinchIn.width < beforePinch.width)
-        assertTrue(kotlin.math.abs(afterPinchIn.top - beforePinch.top) < 8f)
+        waitForMorphCanvasRemoval()
+        val afterPinchInColumns = mediaGridMorphTargetColumnCount(
+            beforePinchColumns,
+            MediaGridMorphDirection.IncreaseColumns,
+        )
+        waitForGridColumnCount(afterPinchInColumns)
         assertTrue(composeRule.onAllNodesWithTag("media_grid_morph_overlay", useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
 
         pinchOnGrid("classified_media_grid", centerSpan = 180f, endSpan = 260f)
-        composeRule.waitForIdle()
-        val afterPinchOut = gridItemBounds(photoTag)
-        assertTrue(afterPinchOut.width > afterPinchIn.width)
-        assertTrue(kotlin.math.abs(afterPinchOut.top - beforePinch.top) < 8f)
+        waitForMorphCanvasRemoval()
+        val afterPinchOutColumns = mediaGridMorphTargetColumnCount(
+            afterPinchInColumns,
+            MediaGridMorphDirection.DecreaseColumns,
+        )
+        waitForGridColumnCount(afterPinchOutColumns)
         assertTrue(composeRule.onAllNodesWithTag("media_grid_morph_overlay", useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
 
         pinchOnGrid("classified_media_grid", centerSpan = 260f, endSpan = 258f)
-        composeRule.waitForIdle()
-        assertTrue(kotlin.math.abs(gridItemBounds(photoTag).width - afterPinchOut.width) < 1f)
+        waitForMorphCanvasRemoval()
+        waitForGridColumnCount(afterPinchOutColumns)
 
         composeRule.onNodeWithTag(photoTag, useUnmergedTree = true).performClick()
         waitDisplayed("media_grid_tweet_dialog")
         composeRule.onNodeWithTag("media_grid_tweet_dialog_close").performClick()
         waitDisplayed("classified_media_grid")
 
+        val beforeSecondPinchInColumns = mainViewModel().mediaGridSessionState.value.columnCount
         pinchOnGrid("classified_media_grid", centerSpan = 260f, endSpan = 180f)
-        composeRule.waitForIdle()
-        val secondPinchIn = gridItemBounds(photoTag)
-        assertTrue(secondPinchIn.width < afterPinchOut.width)
+        waitForMorphCanvasRemoval()
+        val secondPinchInColumns = mediaGridMorphTargetColumnCount(
+            beforeSecondPinchInColumns,
+            MediaGridMorphDirection.IncreaseColumns,
+        )
+        waitForGridColumnCount(secondPinchInColumns)
         assertTrue(composeRule.onAllNodesWithTag("media_grid_morph_overlay", useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
         pinchOnGrid("classified_media_grid", centerSpan = 180f, endSpan = 260f)
-        composeRule.waitForIdle()
-        assertTrue(kotlin.math.abs(gridItemBounds(photoTag).width - afterPinchOut.width) < 1f)
+        waitForMorphCanvasRemoval()
+        waitForGridColumnCount(beforeSecondPinchInColumns)
         composeRule.onNodeWithTag("classified_media_grid").performScrollToIndex(2)
         waitDisplayed(errorTag)
 
@@ -357,15 +366,13 @@ class MainActivityComposeTest {
         }
         waitDisplayed("classified_media_grid")
         waitDisplayed(photoTag)
-        val afterRecreate = gridItemBounds(photoTag)
-        assertTrue(kotlin.math.abs(afterRecreate.width - afterPinchOut.width) < 1f)
+        waitForGridColumnCount(beforeSecondPinchInColumns)
 
         composeRule.onNodeWithTag("classified_display_toggle").performClick()
         waitDisplayed("clip_card_$clipId")
         composeRule.onNodeWithTag("classified_display_toggle").performClick()
         waitDisplayed("classified_media_grid")
-        val afterToggleBack = gridItemBounds(photoTag)
-        assertTrue(kotlin.math.abs(afterToggleBack.width - afterRecreate.width) < 1f)
+        waitForGridColumnCount(beforeSecondPinchInColumns)
 
         // A source-revision change from filter and sort must also produce its first viewport
         // without a compensating scroll or a user tap on the grid.
@@ -385,7 +392,7 @@ class MainActivityComposeTest {
         waitDisplayed("clip_card_$clipId")
         composeRule.onNodeWithTag("media_grid_tweet_dialog_close").performClick()
         waitDisplayed("classified_media_grid")
-        assertTrue(kotlin.math.abs(gridItemBounds(photoTag).width - afterToggleBack.width) < 1f)
+        waitForGridColumnCount(beforeSecondPinchInColumns)
 
         val videoTag = "media_grid_item_${assetIds.getValue("grid-video")}"
         composeRule.onNodeWithTag(videoTag, useUnmergedTree = true).performClick()
@@ -515,6 +522,7 @@ class MainActivityComposeTest {
         }
 
         var canvasSeenDuringGesture = false
+        var normalCellVisualSeenDuringGesture = false
         pinchOnGrid(
             gridTag = "classified_media_grid",
             centerSpan = 260f,
@@ -524,9 +532,22 @@ class MainActivityComposeTest {
                     composeRule.onAllNodesWithTag("media_grid_morph_canvas", useUnmergedTree = true)
                         .fetchSemanticsNodes()
                         .isNotEmpty()
+                normalCellVisualSeenDuringGesture = assetIds.any { assetId ->
+                    listOf(
+                        "media_grid_image_$assetId",
+                        "media_grid_placeholder_$assetId",
+                        "media_grid_error_$assetId",
+                        "media_grid_resident_image_$assetId",
+                    ).any { tag ->
+                        composeRule.onAllNodesWithTag(tag, useUnmergedTree = true)
+                            .fetchSemanticsNodes()
+                            .isNotEmpty()
+                    }
+                }
             },
         )
         assertTrue(canvasSeenDuringGesture)
+        assertFalse(normalCellVisualSeenDuringGesture)
     }
 
     @Test
@@ -2416,6 +2437,23 @@ class MainActivityComposeTest {
 
     private fun gridItemBounds(tag: String): androidx.compose.ui.geometry.Rect =
         composeRule.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+
+    private fun waitForMorphCanvasRemoval() {
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("media_grid_morph_canvas", useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .isEmpty()
+        }
+    }
+
+    private fun waitForGridColumnCount(expected: Int) {
+        composeRule.waitUntil(30_000) {
+            val session = mainViewModel().mediaGridSessionState.value
+            session.columnCount == expected &&
+                session.requestedColumnCount == expected &&
+                session.frame?.key?.columnCount == expected
+        }
+    }
 
     private fun pinchOnGrid(
         gridTag: String,

@@ -1,5 +1,9 @@
 # `MediaGridMorphTest.kt`
 
+## 2026-07-31 production Morph correction coverage
+
+- Unit coverage includes explicit content endpoints, fixed initial focal correction, progress-zero correction, frame-clock settle timing, pointer-release fallback, and bounded target column behavior.
+
 ## 2026-07-30 gesture tracking／settle
 
 - 初期距離÷現在距離、無効距離、既存dead zone／progressの0／0.25／0.5／0.75／1を検証する。

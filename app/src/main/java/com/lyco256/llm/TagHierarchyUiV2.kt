@@ -3655,6 +3655,31 @@ private fun ClassifiedMediaGridContent(
     val morphInteractionLocked = productionMorphHost?.let {
         it.controller.interactionLocked.value || it.handoffSnapshot.value.suppressesUserScroll
     } == true
+    val morphVisualActive = productionMorphHost?.controller?.activePlan?.value != null
+    val handoffSnapshot = productionMorphHost?.handoffSnapshot?.value
+    val handoffVisualTranslationX = handoffSnapshot?.let { snapshot ->
+        val phase = snapshot.phase
+        val targetVisualPhase =
+            phase == MediaGridMorphGridHandoffPhase.PositioningTarget ||
+                phase == MediaGridMorphGridHandoffPhase.VerifyingTarget ||
+                phase == MediaGridMorphGridHandoffPhase.ReadyToComplete ||
+                phase == MediaGridMorphGridHandoffPhase.Idle
+        snapshot.request?.finalCorrection?.x?.takeIf { targetVisualPhase } ?: 0f
+    } ?: 0f
+    val handoffVisualTranslationY = handoffSnapshot?.let { snapshot ->
+        val phase = snapshot.phase
+        val targetVisualPhase =
+            phase == MediaGridMorphGridHandoffPhase.PositioningTarget ||
+                phase == MediaGridMorphGridHandoffPhase.VerifyingTarget ||
+                phase == MediaGridMorphGridHandoffPhase.ReadyToComplete ||
+                phase == MediaGridMorphGridHandoffPhase.Idle
+        snapshot.request?.finalCorrection?.y?.takeIf { targetVisualPhase } ?: 0f
+    } ?: 0f
+    val effectiveResidentCanvasMode = if (morphVisualActive) {
+        MediaGridResidentCanvasMode.Disabled
+    } else {
+        residentCanvasMode
+    }
     if (fallbackController != null) DisposableEffect(fallbackController) { onDispose { fallbackController.dispose() } }
     LaunchedEffect(state, frame.key, effectiveController) {
         kotlinx.coroutines.coroutineScope {
@@ -3751,9 +3776,19 @@ private fun ClassifiedMediaGridContent(
                             state = state,
                             assetIdByItemKey = frame.assetIdByItemKey,
                             preparedIndex = residentPreparedIndex,
-                            mode = residentCanvasMode,
+                            mode = effectiveResidentCanvasMode,
                         )
                     } else Modifier,
+                )
+                .then(
+                    if (handoffVisualTranslationX != 0f || handoffVisualTranslationY != 0f) {
+                        Modifier.graphicsLayer {
+                            translationX = handoffVisualTranslationX
+                            translationY = handoffVisualTranslationY
+                        }
+                    } else {
+                        Modifier
+                    },
                 ),
             horizontalArrangement = Arrangement.spacedBy(0.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
@@ -3771,7 +3806,7 @@ private fun ClassifiedMediaGridContent(
                 },
             ) { item ->
                 when (item) {
-                    is MediaGridHeaderItem -> ClassifiedMediaGridHeader(item)
+                    is MediaGridHeaderItem -> ClassifiedMediaGridHeader(item, visualsVisible = !morphVisualActive)
                     is MediaGridCellItem -> ClassifiedMediaGridCell(
                         modifier = Modifier,
                         entry = item.entry,
@@ -3783,10 +3818,11 @@ private fun ClassifiedMediaGridContent(
                         onClick = onCellClick,
                         onToggleSelection = onToggleSelection,
                         interactionEnabled = !morphInteractionLocked,
-                        metadataOverlaysVisible = !morphInteractionLocked,
+                        metadataOverlaysVisible = !morphInteractionLocked && !morphVisualActive,
+                        visualsVisible = !morphVisualActive,
                         imageLoader = appContainer.mediaGridImageLoader,
                         loadState = effectiveControllerState.cells[item.entry.assetId] ?: MediaGridCellLoadState(),
-                        residentDrawAvailable = retainedImageStore?.hasEligibleDrawHandle(item.entry.assetId) == true && residentCanvasMode != MediaGridResidentCanvasMode.Disabled,
+                        residentDrawAvailable = retainedImageStore?.hasEligibleDrawHandle(item.entry.assetId) == true && effectiveResidentCanvasMode != MediaGridResidentCanvasMode.Disabled,
                     )
                 }
             }
@@ -3857,7 +3893,16 @@ internal fun captureClassifiedMediaGridScrollAnchor(
 }
 
 @Composable
-private fun ClassifiedMediaGridHeader(item: MediaGridHeaderItem) {
+private fun ClassifiedMediaGridHeader(item: MediaGridHeaderItem, visualsVisible: Boolean) {
+    if (!visualsVisible) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(40.dp)
+                .testTag(item.key),
+        )
+        return
+    }
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -3889,6 +3934,7 @@ private fun ClassifiedMediaGridCell(
     onToggleSelection: (Long) -> Unit,
     interactionEnabled: Boolean,
     metadataOverlaysVisible: Boolean,
+    visualsVisible: Boolean,
     imageLoader: coil.ImageLoader,
     loadState: MediaGridCellLoadState,
     residentDrawAvailable: Boolean,
@@ -3935,12 +3981,12 @@ private fun ClassifiedMediaGridCell(
                 )
             }
             .testTag("media_grid_item_${entry.assetId}")
-            .then(if (residentDrawAvailable) Modifier.testTag("media_grid_resident_image_${entry.assetId}") else Modifier)
-            .background(cellBackground),
+            .then(if (visualsVisible && residentDrawAvailable) Modifier.testTag("media_grid_resident_image_${entry.assetId}") else Modifier)
+            .then(if (visualsVisible) Modifier.background(cellBackground) else Modifier),
     ) {
-        if (residentDrawAvailable) {
+        if (visualsVisible && residentDrawAvailable) {
             // The LazyGrid draw modifier supplies the image below this cell content.
-        } else if (visualState == MediaGridCellVisualState.Error) {
+        } else if (visualsVisible && visualState == MediaGridCellVisualState.Error) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -3954,7 +4000,7 @@ private fun ClassifiedMediaGridCell(
                     modifier = Modifier.size(24.dp),
                 )
             }
-        } else {
+        } else if (visualsVisible) {
             if (visualState == MediaGridCellVisualState.Placeholder) {
                 Box(
                     modifier = Modifier
@@ -3975,18 +4021,18 @@ private fun ClassifiedMediaGridCell(
                     modifier = Modifier.fillMaxSize().testTag("media_grid_image_${entry.assetId}"),
                 )
         }
-        if (metadataOverlaysVisible && !selectionMode && sort.baseOrder == ClassifiedSortBase.LikeCount && entry.likeCount != null) {
+        if (visualsVisible && metadataOverlaysVisible && !selectionMode && sort.baseOrder == ClassifiedSortBase.LikeCount && entry.likeCount != null) {
             Surface(
                 modifier = Modifier.align(Alignment.TopStart).padding(4.dp).testTag("media_grid_like_count_${entry.assetId}"),
                 shape = RoundedCornerShape(8.dp), color = Color.Black.copy(alpha = 0.68f),
             ) { Text(formatLikeCount(entry.likeCount), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold) }
         }
-        if (metadataOverlaysVisible && entry.type == "video_thumbnail") {
+        if (visualsVisible && metadataOverlaysVisible && entry.type == "video_thumbnail") {
             Box(
                 modifier = Modifier.align(Alignment.TopEnd).padding(overlayPadding).size(videoIconSize).testTag("media_grid_video_badge_${entry.assetId}"),
             ) { Icon(Icons.Filled.PlayArrow, contentDescription = "再生", tint = Color.White, modifier = Modifier.fillMaxSize()) }
         }
-        if (selectionMode) {
+        if (visualsVisible && selectionMode) {
             Surface(
                 modifier = Modifier
                     .align(Alignment.TopStart)
@@ -4020,7 +4066,7 @@ private fun ClassifiedMediaGridCell(
                 }
             }
         }
-        if (selectionMode && columnCount <= 6) {
+        if (visualsVisible && selectionMode && columnCount <= 6) {
             IconButton(
                 onClick = { if (interactionEnabled) onClick(entry.clipId) },
                 modifier = Modifier

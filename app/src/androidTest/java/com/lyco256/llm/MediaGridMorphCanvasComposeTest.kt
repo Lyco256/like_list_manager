@@ -247,7 +247,7 @@ class MediaGridMorphCanvasComposeTest {
     }
 
     @Test
-    fun sameAssetDrawsOnceSingleSidedAssetsFadeAndResidentMissIsTransparent() {
+    fun sameAssetDrawsOnceSingleSidedAssetsFadeAndResidentMissIsPlaceholder() {
         val red = solidBitmap(AndroidColor.RED)
         val green = solidBitmap(AndroidColor.GREEN)
         val blue = solidBitmap(AndroidColor.BLUE)
@@ -258,8 +258,10 @@ class MediaGridMorphCanvasComposeTest {
             slot(Rect(100f, 0f, 150f, 50f), null, 3L),
             slot(Rect(150f, 0f, 200f, 50f), 99L, 100L),
         )
+        lateinit var progress: MutableState<Float>
         try {
             composeRule.setContent {
+                progress = remember { mutableStateOf(0.5f) }
                 Box(
                     Modifier
                         .requiredSize(
@@ -272,7 +274,7 @@ class MediaGridMorphCanvasComposeTest {
                     MediaGridMorphCanvasLayer(
                         plan = MediaGridMorphPlan(pair(Rect(0f, 0f, 200f, 50f), slots), null),
                         preparedIndex = prepared,
-                        progress = mutableStateOf(0.5f),
+                        progress = progress,
                         correction = mutableStateOf(Offset.Zero),
                         mode = MediaGridMorphCanvasMode.TestVisible,
                     )
@@ -286,9 +288,12 @@ class MediaGridMorphCanvasComposeTest {
             val endOnly = pixels[centers[2], 25]
             val miss = pixels[centers[3], 25]
             assertChannel(1f, same.red)
-            assertChannel(0.5f, startOnly.green)
-            assertChannel(0.5f, endOnly.blue)
-            assertTrue(miss.red < 0.03f && miss.green < 0.03f && miss.blue < 0.03f)
+            // Edge slots crossfade against the opaque Placeholder background;
+            // they must not fade against transparent black.
+            assertTrue(startOnly.blue > 0.1f)
+            assertTrue(endOnly.red > 0.1f)
+            assertTrue(miss.alpha > 0.99f)
+            assertTrue(miss.red > 0.03f || miss.green > 0.03f || miss.blue > 0.03f)
         } finally {
             red.recycle()
             green.recycle()
@@ -392,6 +397,7 @@ class MediaGridMorphCanvasComposeTest {
                 textLayoutsByTitle = emptyMap(),
                 surfaceColor = Color.White,
                 textColor = Color.Black,
+                placeholderColor = Color.Gray,
                 horizontalTextPaddingPx = 12f,
                 verticalTextPaddingPx = 8f,
                 onImageResolved = { resolved.incrementAndGet() },

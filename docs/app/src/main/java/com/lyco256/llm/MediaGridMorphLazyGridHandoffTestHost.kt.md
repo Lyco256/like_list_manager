@@ -1,5 +1,9 @@
 # `MediaGridMorphLazyGridHandoffTestHost.kt`
 
+## 2026-07-31 UI・handoff correction
+
+- The TEST_HARNESS host mirrors production target visual translation and re-observes layout after `ScrollToItem`/`ScrollBy`, while remaining separate from production UI.
+
 ## Current production contract
 
 This remains a TEST_HARNESS-only one-grid host. Production `ClassifiedMediaGridContent` uses `MediaGridMorphProductionHost` and does not call this test host.

@@ -1,5 +1,10 @@
 # `MediaGridMorphHandoff.kt`
 
+## 2026-07-31 UI・handoff correction
+
+- Target handoff is event-driven: target frame, visible geometry, optional bounded correction, underlying draw, and next-frame completion are distinct phases.
+- Production target scroll uses `ScrollToItem` for visibility and re-observes the current layout after each command; no polling or timeout was added.
+
 ## 役割
 
 TEST_HARNESSの実LazyGrid handoffで使うtarget anchor選択と、Composeから分離したevent-driven coordinatorを保持する。production UIには接続しない。

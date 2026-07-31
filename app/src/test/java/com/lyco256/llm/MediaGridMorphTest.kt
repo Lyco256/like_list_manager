@@ -99,6 +99,23 @@ class MediaGridMorphTest {
     }
 
     @Test
+    fun edgeSlotsHaveExplicitPlaceholderEndpointsAndFixedImageRects() {
+        val increase = pair(4, capture(columns = 4, count = 10))
+            .slots.first { it.startAssetId == null && it.endAssetId != null }
+        assertEquals(MediaGridMorphSlotContent.Placeholder, increase.startContent)
+        assertEquals(MediaGridMorphSlotContent.Image(increase.endAssetId!!), increase.endContent)
+        assertEquals(MediaGridMorphSlotEdge.Increase, increase.edge)
+        assertEquals(increase.endRect, increase.endImageDrawingRect)
+
+        val decrease = pair(5, capture(columns = 5, count = 10), MediaGridMorphDirection.DecreaseColumns)
+            .slots.first { it.startAssetId != null && it.endAssetId == null }
+        assertEquals(MediaGridMorphSlotContent.Image(decrease.startAssetId!!), decrease.startContent)
+        assertEquals(MediaGridMorphSlotContent.Placeholder, decrease.endContent)
+        assertEquals(MediaGridMorphSlotEdge.Decrease, decrease.edge)
+        assertEquals(decrease.startRect, decrease.startImageDrawingRect)
+    }
+
+    @Test
     fun adjacentColumnPairsKeepPositionOrderAtRepresentativeBounds() {
         listOf(2 to 3, 4 to 5, 8 to 9, 11 to 12).forEach { (from, to) ->
             val prepared = pair(from, capture(columns = from, count = to * 2))
@@ -509,24 +526,42 @@ class MediaGridMorphTest {
     }
 
     @Test
-    fun focalAnchorKeepsNormalizedPointAndTracksCenterInTwoDimensions() {
-        val pair = pair(4, capture(columns = 4, count = 24))
-        val initialCenter = Offset(80f, 60f)
-        val plan = MediaGridMorphPlan.select(pair, initialCenter)
-        val anchor = plan.anchor!!
-
-        val initialCorrection = mediaGridMorphFocalCorrection(plan, 0f, initialCenter)
-        assertEquals(0f, initialCorrection.x, 0.001f)
-        assertEquals(0f, initialCorrection.y, 0.001f)
-        val progress = 0.6f
-        val fixedCorrection = mediaGridMorphFocalCorrection(plan, progress, initialCenter)
-        val movedCorrection = mediaGridMorphFocalCorrection(
-            plan,
-            progress,
-            initialCenter + Offset(23f, -17f),
+    fun focalAnchorUsesFixedInitialCenterWithoutCentroidTranslation() {
+        val capture = capture(columns = 4, count = 24)
+        val pair = pair(4, capture)
+        val identity = capture.identity.toInteractionIdentity()
+        val initialCenter = Offset(100f, 80f)
+        val controller = MediaGridMorphInteractionController()
+        assertTrue(
+            controller.beginPointers(
+                identity = identity,
+                preparedPairsSnapshot = mapOf(MediaGridMorphDirection.IncreaseColumns to pair),
+                firstPointerId = 1L,
+                secondPointerId = 2L,
+                firstPosition = initialCenter - Offset(50f, 0f),
+                secondPosition = initialCenter + Offset(50f, 0f),
+            ),
         )
-        assertEquals(23f, movedCorrection.x - fixedCorrection.x, 0.001f)
-        assertEquals(-17f, movedCorrection.y - fixedCorrection.y, 0.001f)
+        val progress = 0.6f
+        val deadZone = MediaGridMorphDefaults.DeadZoneScale
+        val scale = deadZone + progress * deadZone * (deadZone - 1f)
+        val distance = 100f / scale
+        controller.updatePointers(
+            initialCenter - Offset(distance / 2f, 0f),
+            initialCenter + Offset(distance / 2f, 0f),
+        )
+        val plan = controller.snapshot().plan!!
+        val anchor = plan.anchor!!
+        val fixedCorrection = controller.snapshot().correction
+
+        val movedCenter = initialCenter + Offset(240f, -130f)
+        controller.updatePointers(
+            movedCenter - Offset(distance / 2f, 0f),
+            movedCenter + Offset(distance / 2f, 0f),
+        )
+        assertEquals(movedCenter, controller.snapshot().currentPinchCenter)
+        assertEquals(fixedCorrection.x, controller.snapshot().correction.x, 0.001f)
+        assertEquals(fixedCorrection.y, controller.snapshot().correction.y, 0.001f)
 
         val rect = mediaGridMorphRect(anchor.slot, progress)
         val focal = Offset(
@@ -535,6 +570,29 @@ class MediaGridMorphTest {
         ) - plan.viewport.topLeft + fixedCorrection
         assertEquals(initialCenter.x, focal.x, 0.001f)
         assertEquals(initialCenter.y, focal.y, 0.001f)
+    }
+
+    @Test
+    fun candidateTrackingDoesNotResetBeforeAPlanIsSelected() {
+        val capture = capture(columns = 4, count = 24)
+        val identity = capture.identity.toInteractionIdentity()
+        val controller = MediaGridMorphInteractionController()
+        assertTrue(
+            controller.beginPointers(
+                identity = identity,
+                preparedPairsSnapshot = buildMediaGridMorphPreparedPairs(capture),
+                firstPointerId = 1L,
+                secondPointerId = 2L,
+                firstPosition = Offset(50f, 80f),
+                secondPosition = Offset(150f, 80f),
+            ),
+        )
+
+        controller.updateIdentity(identity)
+
+        assertEquals(MediaGridMorphPhase.Tracking, controller.snapshot().phase)
+        assertNull(controller.snapshot().plan)
+        assertEquals(0f, controller.snapshot().progress, 0.001f)
     }
 
     @Test
@@ -605,6 +663,21 @@ class MediaGridMorphTest {
         current.advanceSettleElapsed(currentGeneration, 180L)
         assertEquals(MediaGridMorphPhase.Idle, current.snapshot().phase)
         assertEquals(Offset.Zero, current.snapshot().correction)
+    }
+
+    @Test
+    fun frameSettleUsesTheComposeFrameClockAfterPointerRelease() {
+        val capture = capture(columns = 4, count = 24)
+        val pairs = buildMediaGridMorphPreparedPairs(capture)
+        val identity = capture.identity.toInteractionIdentity()
+        val controller = MediaGridMorphInteractionController()
+        beginAtProgress(controller, identity, pairs, 0.75f)
+        controller.releasePointers()
+
+        controller.advanceSettleFrame(10_000_000_000L)
+        assertEquals(MediaGridMorphPhase.SettlingToTarget, controller.snapshot().phase)
+        controller.advanceSettleFrame(10_180_000_000L)
+        assertEquals(MediaGridMorphPhase.AwaitingGridHandoff, controller.snapshot().phase)
     }
 
     @Test

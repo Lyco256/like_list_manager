@@ -264,6 +264,12 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 旧操作状態と生成停止方式の詳細はGit履歴だけに残します。現行の直接表示とpreloadの証跡は、冒頭のdirect preview節と`MediaGridDirectPreviewTest`にあります。
 # `TagHierarchyUiV2.kt`
 
+## 2026-07-31 UI・handoff correction
+
+- `ClassifiedMediaGridContent` keeps one LazyGrid for layout, keys, spans, semantics, and scroll state while an active Morph plan hides its normal visual content.
+- Production Morph is enabled only for the normal non-selection/non-progress grid; fallback column changes remain available when prepared pairs are unavailable.
+- Handoff correction is applied as a grid-level visual translation during target positioning rather than per-cell movement.
+
 ## Current production Morph contract
 
 The normal classified `LazyVerticalGrid` remains the only grid. `MediaGridMorphProductionHost` places the `ProductionVisible` Canvas above that grid and below the toolbar layer, verifies the target geometry, then removes the Canvas after the target frame is drawn. Selection/progress modes do not enable production Morph; identity and lifecycle changes cancel stale work. While Morph is active, toolbar actions and cell metadata overlays are suppressed and restored afterward.
