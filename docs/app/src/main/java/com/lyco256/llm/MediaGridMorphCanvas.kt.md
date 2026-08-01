@@ -1,8 +1,10 @@
 # `MediaGridMorphCanvas.kt`
 
+Current production contract: `MediaGridMorphCanvasMode` has only `Disabled` and TEST_HARNESS-only `TestVisible`. Production Morph is rendered by the LazyGrid single-surface modifier; no `ProductionVisible` mode or production Canvas host remains. Missing required `Media` images are incomplete inputs and are not converted to Placeholder by the production row renderer.
+
 ## 2026-07-31 UI・handoff correction
 
-- The production Canvas is the sole Morph visual surface while an active plan is displayed; normal LazyGrid visuals remain layout/semantics only.
+- The TEST_HARNESS Canvas is a compatibility visual surface for isolated tests; production Morph is drawn by the unified LazyGrid single-surface modifier.
 - Media slots paint an opaque Placeholder base, then crossfade explicit start/end content in the same interpolated rect. Edge image drawing rects stay fixed and are clipped by the current rect.
 
 ## 対応ソース

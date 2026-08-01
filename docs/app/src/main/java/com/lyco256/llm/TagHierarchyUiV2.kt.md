@@ -289,7 +289,9 @@ The classified filter/count/sort toolbar and selection toolbar are each wrapped 
 
 ## Current production Morph contract
 
-The normal classified `LazyVerticalGrid` remains the only grid. `MediaGridMorphProductionHost` places the `ProductionVisible` Canvas above that grid and below the toolbar layer, verifies the target geometry, then removes the Canvas after the target frame is drawn. Selection/progress modes do not enable production Morph; identity and lifecycle changes cancel stale work. While Morph is active, toolbar actions and cell metadata overlays are suppressed and restored afterward.
+The normal classified `LazyVerticalGrid` remains the only grid. Production Morph is drawn by the same `mediaGridSingleSurface` modifier; `MediaGridMorphProductionHandoffEffects` only coordinates column change, target row verification, reveal, rollback, and checkpoints. There is no production `ProductionVisible` Canvas or second visual host. Selection/progress modes do not enable production Morph; identity and lifecycle changes cancel stale work. While Morph is active, toolbar actions and cell metadata overlays are suppressed and restored afterward.
+
+The toolbar is a full-width opaque background container with the unchanged Row bodies inset by 12dp, a 10dp spacer inside that background, and a body inset of start/end/bottom 12dp. The background remains in front of the grid for every single-surface phase.
 
 ## 2026-07-30 bounded Morph prepared pair foundation
 

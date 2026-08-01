@@ -140,6 +140,9 @@ internal data class MediaGridMorphLayoutSnapshot(
 
 internal sealed interface MediaGridMorphSlotContent {
     data class Image(val assetId: Long) : MediaGridMorphSlotContent
+    /** A dataset slot with no media; it is the only row-plan endpoint allowed to be empty. */
+    data object NoMedia : MediaGridMorphSlotContent
+    /** Compatibility endpoint used by the legacy pure slot tests. */
     data object Placeholder : MediaGridMorphSlotContent
 }
 
@@ -330,26 +333,115 @@ internal fun MediaGridMorphPreparedPair.matchesIdentity(
 internal fun isMediaGridMorphProductionReady(
     pair: MediaGridMorphPreparedPair,
     preparedIndex: MediaGridResidentCanvasPreparedIndex,
-): Boolean {
-    if (pair.viewportPlanTemplate != null) {
-        return pair.viewportPlanTemplate.sourceRows.isNotEmpty() && pair.viewportPlanTemplate.targetRows.isNotEmpty()
+): Boolean = mediaGridMorphImageCompleteness(pair, preparedIndex).isComplete
+
+internal fun MediaGridMorphPreparedPair.requiredMorphAssetIds(): LongArray {
+    val ids = LinkedHashSet<Long>()
+    viewportPlanTemplate?.sourceRows?.flatMap { it.cells }?.forEach { ids += it.assetId }
+    viewportPlanTemplate?.targetRows?.flatMap { it.cells }?.forEach { ids += it.assetId }
+    if (viewportPlanTemplate == null) {
+        slots.forEach { slot ->
+            slot.startContent.assetIdOrNull()?.let(ids::add)
+            slot.endContent.assetIdOrNull()?.let(ids::add)
+        }
     }
-    return pair.slots.any { slot ->
-        val startHasSize = slot.startRect.width > 0f && slot.startRect.height > 0f
-        val endHasSize = slot.endRect.width > 0f && slot.endRect.height > 0f
-        if (!startHasSize && !endHasSize) return@any false
-        val left = minOf(slot.startRect.left, slot.endRect.left)
-        val top = minOf(slot.startRect.top, slot.endRect.top)
-        val right = maxOf(slot.startRect.right, slot.endRect.right)
-        val bottom = maxOf(slot.startRect.bottom, slot.endRect.bottom)
-        !(
-            right <= pair.viewport.left ||
-            left >= pair.viewport.right ||
-            bottom <= pair.viewport.top ||
-            top >= pair.viewport.bottom
-        )
-    }
+    return ids.toLongArray()
 }
+
+internal data class MediaGridMorphImageCompleteness(
+    val requiredSourceImageCount: Int,
+    val resolvedSourceImageCount: Int,
+    val requiredTargetImageCount: Int,
+    val resolvedTargetImageCount: Int,
+    val unresolvedRequiredAssetId: Long?,
+    val headerTextComplete: Boolean,
+    val geometryComplete: Boolean,
+) {
+    val isComplete: Boolean
+        get() = geometryComplete &&
+            headerTextComplete &&
+            requiredSourceImageCount == resolvedSourceImageCount &&
+            requiredTargetImageCount == resolvedTargetImageCount
+}
+
+/**
+ * Checks dataset media endpoints separately from resident prepared images.
+ * A Media endpoint with no prepared image is incomplete, never a placeholder.
+ */
+internal fun mediaGridMorphImageCompleteness(
+    pair: MediaGridMorphPreparedPair,
+    preparedIndex: MediaGridResidentCanvasPreparedIndex,
+): MediaGridMorphImageCompleteness {
+    val sourceIds: Set<Long>
+    val targetIds: Set<Long>
+    val headerTextComplete: Boolean
+    val geometryComplete: Boolean
+    val viewportPlan = pair.viewportPlanTemplate
+    if (viewportPlan != null) {
+        val candidateCenters = listOf(0.25f, 0.5f, 0.75f).map { fraction ->
+            Offset(
+                x = pair.viewport.width * 0.5f,
+                y = pair.viewport.height * fraction,
+            )
+        }
+        val selectedPlans = candidateCenters.map(viewportPlan::select)
+        val sourceAssets = LinkedHashSet<Long>()
+        val targetAssets = LinkedHashSet<Long>()
+        selectedPlans.forEach { selected ->
+            selected.rowPlans.forEach { row ->
+                row.cells.forEach { cell ->
+                    val startRect = mediaGridMorphRowCellRect(selected, cell, 0f)
+                    val endRect = mediaGridMorphRowCellRect(selected, cell, 1f)
+                    val swept = Rect(
+                        left = minOf(startRect.left, endRect.left),
+                        top = minOf(startRect.top, endRect.top),
+                        right = maxOf(startRect.right, endRect.right),
+                        bottom = maxOf(startRect.bottom, endRect.bottom),
+                    )
+                    if (!swept.intersectsViewport(pair.viewport)) return@forEach
+                    (cell.startContent as? MediaGridMorphSlotContent.Image)?.assetId?.let(sourceAssets::add)
+                    (cell.endContent as? MediaGridMorphSlotContent.Image)?.assetId?.let(targetAssets::add)
+                }
+            }
+        }
+        sourceIds = sourceAssets
+        targetIds = targetAssets
+        headerTextComplete = viewportPlan.sourceHeaders.all { it.title.isNotBlank() } &&
+            viewportPlan.targetHeaders.all { it.title.isNotBlank() }
+        geometryComplete = viewportPlan.viewport.width > 0f && viewportPlan.viewport.height > 0f &&
+            viewportPlan.sourceRows.isNotEmpty() && viewportPlan.targetRows.isNotEmpty() &&
+            selectedPlans.any { it.rowPlans.isNotEmpty() }
+    } else {
+        val visibleSlots = pair.slots.filter { slot ->
+            val left = minOf(slot.startRect.left, slot.endRect.left)
+            val top = minOf(slot.startRect.top, slot.endRect.top)
+            val right = maxOf(slot.startRect.right, slot.endRect.right)
+            val bottom = maxOf(slot.startRect.bottom, slot.endRect.bottom)
+            right > pair.viewport.left && left < pair.viewport.right &&
+                bottom > pair.viewport.top && top < pair.viewport.bottom
+        }
+        sourceIds = visibleSlots.mapNotNull { it.startContent.assetIdOrNull() }.toSet()
+        targetIds = visibleSlots.mapNotNull { it.endContent.assetIdOrNull() }.toSet()
+        headerTextComplete = pair.headers.all { it.startTitle == null || it.startTitle.isNotBlank() } &&
+            pair.headers.all { it.endTitle == null || it.endTitle.isNotBlank() }
+        geometryComplete = pair.viewport.width > 0f && pair.viewport.height > 0f && visibleSlots.isNotEmpty()
+    }
+    val prepared = preparedIndex.preparedImageByAssetId
+    val unresolved = (sourceIds + targetIds).firstOrNull { it !in prepared }
+    return MediaGridMorphImageCompleteness(
+        requiredSourceImageCount = sourceIds.size,
+        resolvedSourceImageCount = sourceIds.count { it in prepared },
+        requiredTargetImageCount = targetIds.size,
+        resolvedTargetImageCount = targetIds.count { it in prepared },
+        unresolvedRequiredAssetId = unresolved,
+        headerTextComplete = headerTextComplete,
+        geometryComplete = geometryComplete,
+    )
+}
+
+private fun Rect.intersectsViewport(viewport: Rect): Boolean =
+    right > viewport.left && left < viewport.right &&
+        bottom > viewport.top && top < viewport.bottom
 
 internal object MediaGridMorphDefaults {
     const val DeadZoneScale: Float = 1.02f

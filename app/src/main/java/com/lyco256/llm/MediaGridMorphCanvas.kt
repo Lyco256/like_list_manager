@@ -32,7 +32,6 @@ import kotlin.math.roundToInt
 internal enum class MediaGridMorphCanvasMode {
     Disabled,
     TestVisible,
-    ProductionVisible,
 }
 
 internal data class MediaGridMorphRenderSlot(
@@ -102,6 +101,7 @@ internal fun buildMediaGridMorphRenderModel(
 
     fun resolveContent(content: MediaGridMorphSlotContent): Pair<MediaGridMorphSlotContent, MediaGridResidentCanvasPreparedImage?> =
         when (content) {
+            MediaGridMorphSlotContent.NoMedia -> content to null
             MediaGridMorphSlotContent.Placeholder -> content to null
             is MediaGridMorphSlotContent.Image -> {
                 val image = resolve(content.assetId)
@@ -235,7 +235,7 @@ internal fun MediaGridMorphCanvasLayer(
             surfaceColor = colors.surface,
             textColor = colors.onSurface,
             placeholderColor = colors.surfaceVariant,
-            fillViewportBackground = mode == MediaGridMorphCanvasMode.ProductionVisible,
+            fillViewportBackground = false,
             horizontalTextPaddingPx = horizontalPaddingPx,
             verticalTextPaddingPx = verticalPaddingPx,
             onImageResolved = onImageResolved,
@@ -315,7 +315,9 @@ private fun MediaGridMorphCanvas(
                 if (currentRect.width <= 0f || currentRect.height <= 0f) continue
                 val hasPlaceholderEndpoint =
                     slot.startContent is MediaGridMorphSlotContent.Placeholder ||
-                        slot.endContent is MediaGridMorphSlotContent.Placeholder
+                        slot.startContent is MediaGridMorphSlotContent.NoMedia ||
+                        slot.endContent is MediaGridMorphSlotContent.Placeholder ||
+                        slot.endContent is MediaGridMorphSlotContent.NoMedia
                 if (hasPlaceholderEndpoint) {
                     drawRect(renderModel.placeholderColor, currentRect.topLeft, currentRect.size)
                 }

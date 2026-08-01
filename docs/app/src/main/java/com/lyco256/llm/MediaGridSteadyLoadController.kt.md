@@ -1,5 +1,9 @@
 # `MediaGridSteadyLoadController.kt`
 
+## 2026-08-01 Morph target priority
+
+`requestMorphUrgentAssets()` promotes only the bounded Morph source/target Asset IDs while the grid is idle. It reuses the existing metadata/bitmap workers and wakes them through the normal scheduler; pointer input never starts IO or decoding. Existing active-window rows, background loading, publication pacing, and retained protection remain unchanged.
+
 ## 2026-07-29 viewport boundary and active window optimization
 
 - `MediaGridFrameData.ordinalIndex` owns `assetIdByMediaOrdinal`、`itemIndexByMediaOrdinal`、`mediaOrdinalByItemIndex`、asset ID mapsをframe構築中のitems一回走査で作り、UIとcontrollerが共有する。controllerはframe更新時に再構築しない。

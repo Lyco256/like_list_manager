@@ -160,6 +160,18 @@ internal data class MediaGridMorphVisibleRowGeometry(
 )
 
 internal enum class MediaGridMorphGridHandoffFailureReason {
+    CaptureUnavailable,
+    PairUnavailable,
+    IdentityMismatch,
+    MissingVisibleSourceImage,
+    MissingTargetImage,
+    MissingHeaderText,
+    RenderModelIncomplete,
+    HandoffRequestMissing,
+    ColumnCommandNotIssued,
+    TargetFrameMismatch,
+    TargetRowMismatch,
+    RollbackCompleted,
     StaleData,
     UnexpectedTargetFrame,
     TargetMediaUnavailable,

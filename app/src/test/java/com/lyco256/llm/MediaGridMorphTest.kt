@@ -12,22 +12,11 @@ import org.junit.Test
 
 class MediaGridMorphTest {
     @Test
-    fun candidateClaimUsesDeadZoneTouchSlopAndCentroidArbitration() {
+    fun candidateClaimUsesDeadZoneAndSpanSlopWithoutCentroidRatio() {
         assertNull(
             mediaGridMorphCandidateDirection(
                 initialDistance = 100f,
                 currentDistance = 98f,
-                initialCentroid = Offset.Zero,
-                currentCentroid = Offset.Zero,
-                touchSlop = 10f,
-            ),
-        )
-        assertNull(
-            mediaGridMorphCandidateDirection(
-                initialDistance = 100f,
-                currentDistance = 94f,
-                initialCentroid = Offset.Zero,
-                currentCentroid = Offset(0f, 20f),
                 touchSlop = 10f,
             ),
         )
@@ -36,8 +25,6 @@ class MediaGridMorphTest {
             mediaGridMorphCandidateDirection(
                 initialDistance = 100f,
                 currentDistance = 94f,
-                initialCentroid = Offset.Zero,
-                currentCentroid = Offset(0f, 2f),
                 touchSlop = 10f,
             ),
         )
@@ -46,8 +33,13 @@ class MediaGridMorphTest {
             mediaGridMorphCandidateDirection(
                 initialDistance = 100f,
                 currentDistance = 106f,
-                initialCentroid = Offset.Zero,
-                currentCentroid = Offset.Zero,
+                touchSlop = 10f,
+            ),
+        )
+        assertNull(
+            mediaGridMorphCandidateDirection(
+                initialDistance = 100f,
+                currentDistance = 100f,
                 touchSlop = 10f,
             ),
         )
@@ -877,7 +869,7 @@ class MediaGridMorphTest {
                 }
             }
             val added = plan.rowPlans.first { it.relativeRow == 0 }.cells.last()
-            assertTrue(added.startContent is MediaGridMorphSlotContent.Placeholder)
+            assertTrue(added.startContent is MediaGridMorphSlotContent.NoMedia)
         }
         listOf(3 to 2, 5 to 4, 9 to 8, 12 to 11).forEach { (from, to) ->
             val pair = buildMediaGridMorphRowPreparedPairs(withSourceRows(capture(from, from * 3), from))
@@ -885,7 +877,7 @@ class MediaGridMorphTest {
             val plan = requireNotNull(pair.viewportPlanTemplate).select(Offset(600f, 150f))
             val removed = plan.rowPlans.first { it.relativeRow == 0 }.cells.last()
             assertEquals(from, plan.rowPlans.first { it.relativeRow == 0 }.cells.size)
-            assertTrue(removed.endContent is MediaGridMorphSlotContent.Placeholder)
+            assertTrue(removed.endContent is MediaGridMorphSlotContent.NoMedia)
             listOf(0f, 0.5f, 1f).forEach { progress ->
                 val cellSize = mediaGridMorphCurrentCellSize(plan, progress)
                 plan.rowPlans.flatMap { it.cells }.forEach { cell ->
@@ -978,7 +970,7 @@ class MediaGridMorphTest {
         val half = mediaGridMorphRowCellRect(plan, newRight, 0.5f)
         assertEquals(mediaGridMorphCurrentCellSize(plan, 0.5f), half.width, 0.0001f)
         assertTrue(half.left >= plan.viewport.right - half.width)
-        assertTrue(newRight.startContent is MediaGridMorphSlotContent.Placeholder)
+        assertTrue(newRight.startContent is MediaGridMorphSlotContent.NoMedia)
         assertTrue(newRight.endContent is MediaGridMorphSlotContent.Image)
     }
 
@@ -1004,7 +996,7 @@ class MediaGridMorphTest {
         val end = mediaGridMorphRowCellRect(plan, removed, 1f)
         assertEquals(plan.viewport.right, end.left, 0.0001f)
         assertTrue(end.right > plan.viewport.right)
-        assertTrue(removed.endContent is MediaGridMorphSlotContent.Placeholder)
+        assertTrue(removed.endContent is MediaGridMorphSlotContent.NoMedia)
     }
 
     @Test

@@ -189,7 +189,7 @@ class MediaGridMorphLazyGridHandoffComposeTest {
                                 }
                             }
                         }
-                        MediaGridMorphProductionHost(
+                        MediaGridMorphTestHandoffHost(
                             host = hostState,
                             frame = frame,
                             sessionKey = mediaGridSessionKey(fixture.dataKey),
@@ -254,7 +254,7 @@ class MediaGridMorphLazyGridHandoffComposeTest {
     }
 
     @Test
-    fun productionReadinessAllowsResidentMissAsPlaceholderEndpoint() {
+    fun productionReadinessRejectsMissingRequiredResidentImage() {
         val fixture = fixture(2, 3, ClassifiedSortBase.Default)
         val bitmaps = fixture.entries.associate { it.assetId to assetBitmap(it.assetId) }
         val completeIndex = preparedIndex(bitmaps)
@@ -273,7 +273,8 @@ class MediaGridMorphLazyGridHandoffComposeTest {
             preparedImageByAssetId = completeIndex.preparedImageByAssetId - requiredAssetId,
         )
         assertTrue(fixture.pair.matchesIdentity(identity))
-        assertTrue(isMediaGridMorphProductionReady(fixture.pair, incompleteIndex))
+        assertFalse(isMediaGridMorphProductionReady(fixture.pair, incompleteIndex))
+        assertEquals(requiredAssetId, mediaGridMorphImageCompleteness(fixture.pair, incompleteIndex).unresolvedRequiredAssetId)
     }
 
     @Test
@@ -536,7 +537,7 @@ class MediaGridMorphLazyGridHandoffComposeTest {
                         .requiredSize(WidthPx.dp / LocalDensity.current.density)
                         .testTag("production_source_change_root"),
                 ) {
-                    MediaGridMorphProductionHost(
+                    MediaGridMorphTestHandoffHost(
                         host = hostState,
                         frame = frame,
                         sessionKey = mediaGridSessionKey(frame.key.dataKey),

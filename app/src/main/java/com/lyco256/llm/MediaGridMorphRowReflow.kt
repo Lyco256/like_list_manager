@@ -263,9 +263,9 @@ internal data class MediaGridMorphViewportPlanTemplate(
                 relativeRow = relativeRow,
                 column = column,
                 startContent = captured?.let { MediaGridMorphSlotContent.Image(it.assetId) }
-                    ?: MediaGridMorphSlotContent.Placeholder,
+                    ?: MediaGridMorphSlotContent.NoMedia,
                 endContent = targetCell?.let { MediaGridMorphSlotContent.Image(it.assetId) }
-                    ?: MediaGridMorphSlotContent.Placeholder,
+                    ?: MediaGridMorphSlotContent.NoMedia,
                 targetMediaOrdinal = targetCell?.mediaOrdinal,
                 startHeaderOffsetPx = startHeaderOffsetPx,
                 endHeaderOffsetPx = endHeaderOffsetPx,
@@ -377,15 +377,18 @@ private fun fallbackCapturedRows(capture: MediaGridMorphCapture): List<MediaGrid
                 visibleRow = rowIndex,
                 top = rects.minOf { it.rect.top },
                 bottom = rects.maxOf { it.rect.bottom },
-                cells = rects.sortedBy { it.rect.left }.mapIndexed { column, rect ->
+                cells = rects.sortedBy { it.rect.left }.mapIndexedNotNull { column, rect ->
+                    val assetId = rect.assetId
+                        ?: capture.media.firstOrNull { it.mediaOrdinal == rect.mediaOrdinal }?.assetId
+                        ?: return@mapIndexedNotNull null
                     MediaGridMorphCapturedCell(
                         column = column,
                         mediaOrdinal = rect.mediaOrdinal,
-                        assetId = rect.assetId ?: capture.media.firstOrNull { it.mediaOrdinal == rect.mediaOrdinal }?.assetId ?: -1L,
+                        assetId = assetId,
                         rect = rect.rect,
                         isPartiallyVisible = rect.isPartiallyVisible,
                     )
-                }.filter { it.assetId >= 0L },
+                },
                 isPartiallyVisible = rects.any { it.isPartiallyVisible },
             )
         }

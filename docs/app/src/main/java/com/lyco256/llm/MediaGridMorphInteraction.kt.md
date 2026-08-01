@@ -25,7 +25,9 @@
 
 ## Current production contract
 
-The TEST_HARNESS and production paths share the pointer arbitration state machine through `MediaGridMorphGestureMode`. A two-pointer candidate starts when the second pointer first appears regardless of current scroll state. It does not consume, stop scroll, set `pointerInProgress`, or lock interaction. The first event satisfying the existing direction dead zone, `touchSlop * 0.35`, and `centroid movement * 0.5` claims either Morph or the one-shot fallback. Production uses bounded pair/readiness checks; when they fail, release performs one direct column-count fallback. The former `mediaGridPinchToResize` modifier is removed.
+The TEST_HARNESS and production paths share the pointer arbitration state machine through `MediaGridMorphGestureMode`. A two-pointer candidate starts when the second pointer first appears regardless of current scroll state. It does not consume, stop scroll, set `pointerInProgress`, or lock interaction. The first event satisfying direction dead zone and `touchSlop * 0.35` claims either Morph or the one-shot fallback; centroid displacement is not a claim gate. Production uses bounded pair/readiness checks, records a failure reason when claim preparation is unavailable, and performs one direct column-count fallback. The former `mediaGridPinchToResize` modifier is removed.
+
+Current handoff correction: normal pointer-up/disappearance updates the last tracked positions once before release, while explicit cancellation remains cancellation. Morph and fallback both use the same distance-derived progress and `0.5` release threshold. Required source/target prepared images and header layouts must be complete before Morph activation.
 
 ## 役割
 

@@ -533,7 +533,18 @@ internal fun EnhancedClassifiedScreen(
         mediaGridSelectionMode = false
         selectedMediaGridClipIds = emptySet()
     }
-    Column(modifier.fillMaxSize().padding(12.dp)) {
+    Column(modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .zIndex(ClassifiedMediaGridToolbarZIndex),
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp, start = 12.dp, end = 12.dp),
+            ) {
         if (displayMode == ClassifiedDisplayMode.MediaGrid && mediaGridSelectionMode) {
             MediaGridSelectionToolbar(
                 selectedCount = selectedVisibleMediaGridClipIds.size,
@@ -569,6 +580,14 @@ internal fun EnhancedClassifiedScreen(
             )
         }
         Spacer(Modifier.height(10.dp))
+            }
+        }
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+        ) {
         if (displayMode == ClassifiedDisplayMode.MediaGrid) {
             when {
                 mediaGridSessionState.frame?.items?.isEmpty() == true && mediaGridState.status == MediaGridLoadStatus.Ready && mediaGridState.isEmptyByFilter -> HierarchyEmptyState("条件に合うツイートはありません")
@@ -637,6 +656,7 @@ internal fun EnhancedClassifiedScreen(
                 ScrollToTopButton(listState, hasItems = uiState.classified.isNotEmpty())
             }
         }
+    }
     }
     if (filterDialogOpen) {
         SearchFilterDialog(
@@ -1403,15 +1423,11 @@ private fun TagFilterSummaryRow(
     interactionEnabled: Boolean,
 ) {
     val filters = uiState.filters
-    Surface(
-        modifier = Modifier.fillMaxWidth().zIndex(ClassifiedMediaGridToolbarZIndex),
-        color = MaterialTheme.colorScheme.surface,
+    Row(
+        Modifier.fillMaxWidth().zIndex(ClassifiedMediaGridToolbarZIndex),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
             Row(
                 Modifier
                     .weight(1f)
@@ -1493,7 +1509,6 @@ private fun TagFilterSummaryRow(
             contentPadding = PaddingValues(0.dp),
         ) {
             Text("クリア", style = MaterialTheme.typography.labelMedium, maxLines = 1)
-        }
         }
     }
 }
@@ -3359,18 +3374,14 @@ private fun MediaGridSelectionToolbar(
     editTagsEnabled: Boolean,
     onClose: () -> Unit,
 ) {
-    Surface(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .zIndex(ClassifiedMediaGridToolbarZIndex)
             .testTag("media_grid_selection_toolbar"),
-        color = MaterialTheme.colorScheme.surface,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
             IconButton(onClick = onClose, modifier = Modifier.testTag("media_grid_selection_close")) {
                 Icon(Icons.Filled.Close, contentDescription = "選択を終了")
             }
@@ -3389,7 +3400,6 @@ private fun MediaGridSelectionToolbar(
             ) {
                 Text("タグ編集")
             }
-        }
     }
 }
 
@@ -3693,6 +3703,7 @@ private fun ClassifiedMediaGridContent(
     LaunchedEffect(morphController, morphActivePlan, morphRowRenderModel) {
         val controller = morphController ?: return@LaunchedEffect
         val model = morphRowRenderModel ?: return@LaunchedEffect
+        if (!model.isComplete) return@LaunchedEffect
         val generation = controller.snapshot().interactionGeneration
         if (controller.markRenderModelReady(generation)) {
             singleSurfaceMode.value = MediaGridSingleSurfaceMode.Morph
@@ -3778,6 +3789,9 @@ private fun ClassifiedMediaGridContent(
             val pairs = withContext(Dispatchers.Default) {
                 buildMediaGridMorphRowPreparedPairs(capture)
             }
+            effectiveController?.requestMorphUrgentAssets(
+                pairs.values.flatMap { it.requiredMorphAssetIds().asIterable() }.toLongArray(),
+            )
             morphPreparationCache.publish(token, pairs)
         }
     }
@@ -3802,6 +3816,37 @@ private fun ClassifiedMediaGridContent(
                                 onPinchFinished(null, nextColumnCount)
                             },
                             pointerInProgress = morphPointerInProgress,
+                            isPairReady = if (residentPreparedIndex != null) {
+                                { pair -> isMediaGridMorphProductionReady(pair, residentPreparedIndex) }
+                            } else {
+                                { false }
+                            },
+                            claimFailureReason = if (residentPreparedIndex != null) {
+                                { pair ->
+                                    val completeness = pair?.let {
+                                        mediaGridMorphImageCompleteness(it, residentPreparedIndex)
+                                    }
+                                    when {
+                                        completeness == null -> null
+                                        completeness.requiredSourceImageCount != completeness.resolvedSourceImageCount ->
+                                            MediaGridMorphFailureReason.MissingVisibleSourceImage
+                                        completeness.requiredTargetImageCount != completeness.resolvedTargetImageCount ->
+                                            MediaGridMorphFailureReason.MissingTargetImage
+                                        !completeness.headerTextComplete -> MediaGridMorphFailureReason.MissingHeaderText
+                                        !completeness.geometryComplete -> MediaGridMorphFailureReason.RenderModelIncomplete
+                                        else -> null
+                                    }
+                                }
+                            } else {
+                                { null }
+                            },
+                            onMorphClaimAssets = { assetIds ->
+                                morphHost?.let { host -> host.retainedImageStore.updateProtection(
+                                    ownerToken = host.ownerToken,
+                                    visibleAssetIds = LongArray(0),
+                                    activeAssetIds = assetIds,
+                                ) }
+                            },
                             captureOnClaim = if (morphEnabled) {
                                 {
                                     captureMediaGridMorphInput(

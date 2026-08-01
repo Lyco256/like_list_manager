@@ -483,6 +483,19 @@ internal class MediaGridSteadyLoadController(
         }
     }
 
+    /**
+     * Promotes the bounded Morph target candidates while the grid is idle.
+     * Pointer input never calls this method; it only changes queue priority so
+     * the existing workers can prepare the images before a claim.
+     */
+    fun requestMorphUrgentAssets(assetIds: LongArray) {
+        if (disposed || assetIds.isEmpty()) return
+        synchronized(lock) {
+            assetIds.asSequence().distinct().forEach(::promoteMorphAssetLocked)
+        }
+        signalAll()
+    }
+
     fun start() {
         if (started || disposed) return
         started = true
@@ -954,6 +967,38 @@ internal class MediaGridSteadyLoadController(
         snapshot.activeAssetIds.forEach { assetId ->
             val state = states[assetId] ?: return@forEach
             val prepared = state.prepared ?: metadata[assetId] ?: return@forEach
+            reconcileAssetWorkLocked(assetId, LoadLane.Urgent)
+        }
+    }
+
+    private fun promoteMorphAssetLocked(assetId: Long) {
+        val itemIndex = ordinalIndex.itemIndexByAssetId[assetId] ?: return
+        val record = queueRecords.getOrPut(assetId) { AssetQueueRecord(generation = generation) }
+        if (record.generation != generation) return
+        if (metadata[assetId] == null) {
+            when (record.metadataStatus) {
+                QueueTaskStatus.BackgroundQueued -> {
+                    record.metadataToken++
+                    record.metadataStatus = QueueTaskStatus.UrgentQueued
+                    val ordinal = ordinalIndex.mediaOrdinalByAssetId[assetId] ?: return
+                    metadataPending.remove(ordinal)
+                    urgentMetadataQueue.addLast(LoadTask(assetId, itemIndex, LoadLane.Urgent, generation, record.metadataToken))
+                }
+                QueueTaskStatus.Unregistered -> enqueueMetadataLocked(assetId, itemIndex, LoadLane.Urgent)
+                else -> Unit
+            }
+            return
+        }
+        if (record.bitmapStatus == QueueTaskStatus.BackgroundQueued) {
+            val prepared = metadata[assetId] ?: return
+            record.bitmapToken++
+            record.bitmapStatus = QueueTaskStatus.UrgentQueued
+            val ordinal = ordinalIndex.mediaOrdinalByAssetId[assetId] ?: return
+            bitmapPending.remove(ordinal)
+            urgentBitmapQueue.addLast(
+                BitmapTask(assetId, prepared, record.candidateIndex, LoadLane.Urgent, generation, record.bitmapToken),
+            )
+        } else if (record.bitmapStatus !in setOf(QueueTaskStatus.Running, QueueTaskStatus.UrgentQueued, QueueTaskStatus.Complete)) {
             reconcileAssetWorkLocked(assetId, LoadLane.Urgent)
         }
     }

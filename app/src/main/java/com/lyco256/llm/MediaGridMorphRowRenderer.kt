@@ -43,6 +43,13 @@ internal data class MediaGridMorphRowRenderModel(
     val horizontalTextPaddingPx: Float,
     val verticalTextPaddingPx: Float,
     val protectedAssetIds: LongArray,
+    val requiredSourceImageCount: Int,
+    val resolvedSourceImageCount: Int,
+    val requiredTargetImageCount: Int,
+    val resolvedTargetImageCount: Int,
+    val unresolvedRequiredAssetId: Long?,
+    val headerTextComplete: Boolean,
+    val isComplete: Boolean,
 )
 
 /**
@@ -88,6 +95,7 @@ internal fun rememberMediaGridMorphRowRenderModel(
     return remember(plan, textLayouts, colors.surface, colors.surfaceVariant, colors.onSurface) {
         viewportPlan?.let { selected ->
             val imageByAsset = preparedIndex.preparedImageByAssetId
+            val completeness = mediaGridMorphImageCompleteness(plan!!.preparedPair, preparedIndex)
             val cells = selected.rowPlans.flatMap { row ->
                 row.cells.map { cell ->
                     MediaGridMorphRowRenderCell(
@@ -102,6 +110,13 @@ internal fun rememberMediaGridMorphRowRenderModel(
                 cell.plan.startContent.assetIdOrNull()?.let(protected::add)
                 cell.plan.endContent.assetIdOrNull()?.let(protected::add)
             }
+            val renderHeaders = selected.headerPlans.map { header ->
+                MediaGridMorphRowRenderHeader(
+                    plan = header,
+                    startText = header.startTitle?.let(textLayouts::get),
+                    endText = header.endTitle?.let(textLayouts::get),
+                )
+            }
             MediaGridMorphRowRenderModel(
                 viewport = selected.viewport,
                 sourceCellSize = selected.sourceCellSize,
@@ -110,19 +125,26 @@ internal fun rememberMediaGridMorphRowRenderModel(
                 focalV = selected.focalV,
                 rows = selected.rowPlans,
                 cells = cells,
-                headers = selected.headerPlans.map { header ->
-                    MediaGridMorphRowRenderHeader(
-                        plan = header,
-                        startText = header.startTitle?.let(textLayouts::get),
-                        endText = header.endTitle?.let(textLayouts::get),
-                    )
-                },
+                headers = renderHeaders,
                 surfaceColor = colors.surface.copy(alpha = 1f),
                 placeholderColor = colors.surfaceVariant.copy(alpha = 1f),
                 textColor = colors.onSurface,
                 horizontalTextPaddingPx = horizontalPadding,
                 verticalTextPaddingPx = verticalPadding,
                 protectedAssetIds = protected.toLongArray(),
+                requiredSourceImageCount = completeness.requiredSourceImageCount,
+                resolvedSourceImageCount = completeness.resolvedSourceImageCount,
+                requiredTargetImageCount = completeness.requiredTargetImageCount,
+                resolvedTargetImageCount = completeness.resolvedTargetImageCount,
+                unresolvedRequiredAssetId = completeness.unresolvedRequiredAssetId,
+                headerTextComplete = completeness.headerTextComplete && renderHeaders.all {
+                    (it.plan.startTitle == null || it.startText != null) &&
+                        (it.plan.endTitle == null || it.endText != null)
+                },
+                isComplete = completeness.isComplete && renderHeaders.all {
+                    (it.plan.startTitle == null || it.startText != null) &&
+                        (it.plan.endTitle == null || it.endText != null)
+                },
             )
         }
     }
@@ -152,11 +174,18 @@ internal fun DrawScope.drawMediaGridMorphRow(
             val bottom = top + currentCellSize
             val width = currentCellSize.roundToInt().coerceAtLeast(1)
             val height = width
-            drawRect(
-                model.placeholderColor,
-                androidx.compose.ui.geometry.Offset(left, top),
-                androidx.compose.ui.geometry.Size(currentCellSize, currentCellSize),
-            )
+            val hasPlaceholderEndpoint =
+                cell.plan.startContent is MediaGridMorphSlotContent.NoMedia ||
+                    cell.plan.startContent is MediaGridMorphSlotContent.Placeholder ||
+                    cell.plan.endContent is MediaGridMorphSlotContent.NoMedia ||
+                    cell.plan.endContent is MediaGridMorphSlotContent.Placeholder
+            if (hasPlaceholderEndpoint) {
+                drawRect(
+                    model.placeholderColor,
+                    androidx.compose.ui.geometry.Offset(left, top),
+                    androidx.compose.ui.geometry.Size(currentCellSize, currentCellSize),
+                )
+            }
             clipRect(left, top, right, bottom) {
                 val sameAsset = cell.plan.startContent is MediaGridMorphSlotContent.Image &&
                     cell.plan.startContent == cell.plan.endContent

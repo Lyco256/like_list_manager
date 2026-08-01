@@ -84,8 +84,12 @@ private data class MediaGridMorphProductionLayoutSample(
     val viewportHeight: Int,
 )
 
+/**
+ * TEST_HARNESS-only visual compatibility host. Production uses
+ * MediaGridMorphProductionHandoffEffects and the unified LazyGrid surface.
+ */
 @Composable
-internal fun MediaGridMorphProductionHost(
+internal fun MediaGridMorphTestHandoffHost(
     host: MediaGridMorphProductionHostState,
     frame: MediaGridFrameData,
     sessionKey: MediaGridSessionKey?,
@@ -99,7 +103,7 @@ internal fun MediaGridMorphProductionHost(
     modifier: Modifier = Modifier,
 ) {
     check(BuildConfig.TEST_HARNESS) {
-        "MediaGridMorphProductionHost is retained only for legacy TEST_HARNESS coverage; production uses MediaGridMorphProductionHandoffEffects"
+        "MediaGridMorphTestHandoffHost is restricted to TEST_HARNESS"
     }
     val lifecycleOwner = LocalContext.current as? LifecycleOwner
     val latestFrame by rememberUpdatedState(frame)
@@ -169,25 +173,6 @@ internal fun MediaGridMorphProductionHost(
         }
         lockedGeneration = null
         lockedDataKey = null
-    }
-
-    if (activePlan != null) {
-        val protectedAssetIds = remember(activePlan) {
-            activePlan!!.slots.asSequence()
-                .flatMap { sequenceOf(it.startContent.assetIdOrNull(), it.endContent.assetIdOrNull()) }
-                .filterNotNull()
-                .distinct()
-                .toList()
-                .toLongArray()
-        }
-        DisposableEffect(host, activePlan) {
-            host.retainedImageStore.updateProtection(
-                ownerToken = host.ownerToken,
-                visibleAssetIds = LongArray(0),
-                activeAssetIds = protectedAssetIds,
-            )
-            onDispose { host.retainedImageStore.removeOwner(host.ownerToken) }
-        }
     }
 
     LaunchedEffect(controller, settleGeneration) {
@@ -390,7 +375,7 @@ internal fun MediaGridMorphProductionHost(
             preparedIndex = preparedIndex,
             progress = controller.progress,
             correction = controller.correction,
-            mode = MediaGridMorphCanvasMode.ProductionVisible,
+            mode = MediaGridMorphCanvasMode.TestVisible,
             modifier = modifier,
         )
     }

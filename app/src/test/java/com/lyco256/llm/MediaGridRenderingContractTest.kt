@@ -35,12 +35,16 @@ class MediaGridRenderingContractTest {
     fun productionGridOwnsTheOnlyOverscrollOptOutAndToolbarsSharePositiveLayer() {
         val source = locateSource("src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt").readText()
         assertEquals(1, Regex("LocalOverscrollConfiguration\\s+provides\\s+null").findAll(source).count())
-        assertEquals(2, Regex("zIndex\\(ClassifiedMediaGridToolbarZIndex\\)").findAll(source).count())
+        assertEquals(3, Regex("zIndex\\(ClassifiedMediaGridToolbarZIndex\\)").findAll(source).count())
         val filterToolbar = source.substringAfter("private fun TagFilterSummaryRow").substringBefore("internal fun filterConditionSummary")
         val selectionToolbar = source.substringAfter("private fun MediaGridSelectionToolbar").substringBefore("internal enum class BulkTagAggregate")
-        assertTrue(filterToolbar.contains("color = MaterialTheme.colorScheme.surface"))
-        assertTrue(selectionToolbar.contains("color = MaterialTheme.colorScheme.surface"))
-        assertTrue(filterToolbar.contains("Surface(") && selectionToolbar.contains("Surface("))
+        assertTrue(filterToolbar.contains("Row("))
+        assertTrue(selectionToolbar.contains("Row("))
+        assertTrue(!filterToolbar.contains("Surface(") && !selectionToolbar.contains("Surface("))
+        assertTrue(source.contains("background(MaterialTheme.colorScheme.surface)"))
+        assertTrue(source.contains("padding(top = 12.dp, start = 12.dp, end = 12.dp)"))
+        assertTrue(source.contains("Spacer(Modifier.height(10.dp))"))
+        assertTrue(source.contains("padding(start = 12.dp, end = 12.dp, bottom = 12.dp)"))
         assertTrue(source.contains("testTag(\"media_grid_selection_toolbar\")"))
         assertTrue(source.indexOf("TagFilterSummaryRow") < source.indexOf("ClassifiedMediaGridContent"))
     }
@@ -89,6 +93,8 @@ class MediaGridRenderingContractTest {
         assertTrue(uiSource.contains("if (state.isScrollInProgress)"))
         assertTrue(pointer.contains("mediaGridColumnCountAfterPinchRelease"))
         assertTrue(pointer.contains("MediaGridMorphGestureMode"))
+        assertTrue(!pointer.contains("centroidMovement"))
+        assertTrue(!pointer.contains("currentCentroid * 0.5f"))
         assertTrue(morphSource.contains("buildMediaGridMorphRowPreparedPairs"))
         assertTrue(pointer.contains("buildMediaGridMorphRowPreparedPairs"))
         assertTrue(!uiSource.contains("mediaGridPinchToResize"))
@@ -104,6 +110,9 @@ class MediaGridRenderingContractTest {
 
         assertTrue(rendererSource.contains("rememberMediaGridMorphRowRenderModel"))
         assertTrue(rendererSource.contains("protectedAssetIds"))
+        assertTrue(rendererSource.contains("requiredSourceImageCount"))
+        assertTrue(rendererSource.contains("requiredTargetImageCount"))
+        assertTrue(rendererSource.contains("unresolvedRequiredAssetId"))
         assertTrue(rendererSource.contains("val p = progress.coerceIn(0f, 1f)"))
         assertTrue(!rendererSource.contains("progress.value"))
         assertTrue(surfaceSource.contains("MediaGridSingleSurfaceMode.Normal"))
@@ -206,6 +215,24 @@ class MediaGridRenderingContractTest {
         assertTrue(!coordinatorSource.contains("MediaGridResident"))
         assertTrue(!uiSource.contains("MediaGridMorphLazyGridHandoffTestHost"))
         assertTrue(!uiSource.contains("MediaGridMorphGridHandoffCoordinator"))
+    }
+
+    @Test
+    fun productionUsesOnlyUnifiedSurfaceAndTestHostHasNoProductionCanvasMode() {
+        val uiSource = locateSource("src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt").readText()
+        val hostSource = locateSource(
+            "src/main/java/com/lyco256/llm/MediaGridMorphProductionHost.kt",
+        ).readText()
+        val canvasSource = locateSource(
+            "src/main/java/com/lyco256/llm/MediaGridMorphCanvas.kt",
+        ).readText()
+        assertTrue(uiSource.contains("MediaGridMorphProductionHandoffEffects("))
+        assertTrue(!uiSource.contains("MediaGridMorphCanvasLayer"))
+        assertTrue(hostSource.contains("MediaGridMorphTestHandoffHost"))
+        assertTrue(hostSource.contains("check(BuildConfig.TEST_HARNESS)"))
+        assertTrue(!hostSource.contains("MediaGridMorphCanvasMode.ProductionVisible"))
+        assertTrue(!hostSource.contains("activePlan!!.slots"))
+        assertTrue(!canvasSource.contains("ProductionVisible"))
     }
 
     private fun locateSource(relativePath: String): File = sequenceOf(

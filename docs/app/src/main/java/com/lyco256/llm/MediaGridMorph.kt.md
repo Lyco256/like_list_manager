@@ -4,7 +4,9 @@
 
 - Production claim captures the real `LazyGridLayoutInfo` first, then builds a bounded viewport/row plan and immutable render model before Morph becomes visible.
 - Adjacent column changes use cell-width-ratio progress and preserve the right-edge Placeholder/Image transitions for both increase and decrease.
-- The bounded plan carries source/target asset IDs and target row metadata for reveal-time protection and real-grid handoff; missing resident images remain Placeholder endpoints.
+- The bounded plan carries source/target asset IDs and target row metadata for reveal-time protection and real-grid handoff. `NoMedia` is the only row-plan empty endpoint; a required `Media` endpoint with no prepared image makes the pair incomplete and prevents Morph claim.
+
+The current readiness model reports required/resolved source and target image counts, the first unresolved Asset ID, header text completeness, and geometry completeness. Idle preparation promotes the bounded source/target candidate assets to the urgent lane without starting IO from pointer input. Claim protection is registered before the active single-surface draw and is cleared on complete, cancel, fallback, or dispose.
 
 ## 2026-08-01 Phase 1 row reflow
 
