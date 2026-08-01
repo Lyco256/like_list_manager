@@ -418,17 +418,41 @@ function Invoke-SafeNativeCommand {
             throw "Could not start command: $displayCommand"
         }
 
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $heartbeatMilliseconds = 30000
+        $printedHeartbeat = $false
+        $timedOut = $false
         if ($TimeoutSeconds -eq 0) {
-            $process.WaitForExit()
-        } elseif (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-            try {
-                $process.Kill()
-            } catch {
-                Write-SafeLog "Could not kill timed out process: $($_.Exception.Message)"
+            while (-not $process.WaitForExit($heartbeatMilliseconds)) {
+                Write-Host "." -NoNewline
+                $printedHeartbeat = $true
             }
-            $script:SafeLastErrorSummary = "timeout"
-            throw "timeout"
+        } else {
+            $timeoutMilliseconds = $TimeoutSeconds * 1000
+            while (-not $process.HasExited) {
+                $remainingMilliseconds = $timeoutMilliseconds - [int]$stopwatch.Elapsed.TotalMilliseconds
+                if ($remainingMilliseconds -le 0) {
+                    $timedOut = $true
+                    break
+                }
+                $waitMilliseconds = [Math]::Min($heartbeatMilliseconds, $remainingMilliseconds)
+                if (-not $process.WaitForExit($waitMilliseconds)) {
+                    Write-Host "." -NoNewline
+                    $printedHeartbeat = $true
+                }
+            }
+            if ($timedOut) {
+                if ($printedHeartbeat) { Write-Host "" }
+                try {
+                    $process.Kill()
+                } catch {
+                    Write-SafeLog "Could not kill timed out process: $($_.Exception.Message)"
+                }
+                $script:SafeLastErrorSummary = "timeout"
+                throw "timeout"
+            }
         }
+        if ($printedHeartbeat) { Write-Host "" }
         $process.WaitForExit()
 
         $lines = @()
@@ -491,15 +515,17 @@ function Invoke-SafePhase {
     )
 
     Clear-SafePhaseState
-    Write-Host $Name
+    Write-Host $Name -NoNewline
     Write-SafeLog ""
     Write-SafeLog "## $Name"
     Write-SafeLog "Started: $(Get-Date -Format o)"
 
     try {
         & $Action
+        Write-Host ""
         Write-SafeLog "Completed: $(Get-Date -Format o)"
     } catch {
+        Write-Host ""
         if ($script:SafeLastErrorSummary -eq "timeout" -or $_.Exception.Message -eq "timeout") {
             $summary = "$Name timeout"
         } elseif (-not [string]::IsNullOrWhiteSpace($script:SafeLastErrorSummary)) {

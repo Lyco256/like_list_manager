@@ -66,7 +66,7 @@ Snapshot互換テスト:
 
 長時間コマンドは外側timeoutを無効にして一度だけ実行し、終了まで待つ。実行APIが有限値を必須とする場合は、通常運用で到達しない24時間以上を設定する。10分以下の外側timeoutでintegrationを起動しない。短いtimeoutで何度も状態確認しない。
 
-通常debug入口とintegration入口はnative commandを時間で打ち切らない。テスト失敗、commandの非ゼロ終了、ADB接続エラーなど、実際の終了結果で成否を決める。
+通常debug入口とintegration入口はnative commandを時間で打ち切らない。長いGradle／instrumentation工程では30秒ごとに同じ行へ`.`を追加して進行中であることを通知し、工程終了時に改行する。テスト失敗、commandの非ゼロ終了、ADB接続エラーなど、実際の終了結果で成否を決める。呼び出し側が固定のwall-clock上限で切る場合は入口側から延長できないため、外側timeoutを十分長くする。
 
 禁止:
 
