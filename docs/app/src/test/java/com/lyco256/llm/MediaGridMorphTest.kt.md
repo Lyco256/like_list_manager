@@ -1,5 +1,10 @@
 # `MediaGridMorphTest.kt`
 
+## 2026-08-01 uniform lattice coverage
+
+- Unit coverage checks 2↔3, 4↔5, 5↔4, 8↔9, and 11↔12 at representative progress values for equal square cell size and grid-left X coordinates.
+- Dedicated assertions keep the removed 5th column square and offscreen in 5→4, keep edge additions Placeholder-backed, and verify that header interpolation does not alter media-cell height or create an interior zero-height row.
+
 ## 2026-08-01 Phase 2 coverage
 
 - Row-plan geometry covers 2↔3, 4↔5, 5↔4, 8↔9, and 11↔12, including right-edge Placeholder transitions, focal-row clamping, header bands, and distance/cell-width progress.

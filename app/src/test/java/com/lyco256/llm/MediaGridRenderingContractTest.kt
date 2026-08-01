@@ -36,6 +36,12 @@ class MediaGridRenderingContractTest {
         val source = locateSource("src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt").readText()
         assertEquals(1, Regex("LocalOverscrollConfiguration\\s+provides\\s+null").findAll(source).count())
         assertEquals(2, Regex("zIndex\\(ClassifiedMediaGridToolbarZIndex\\)").findAll(source).count())
+        val filterToolbar = source.substringAfter("private fun TagFilterSummaryRow").substringBefore("internal fun filterConditionSummary")
+        val selectionToolbar = source.substringAfter("private fun MediaGridSelectionToolbar").substringBefore("internal enum class BulkTagAggregate")
+        assertTrue(filterToolbar.contains("color = MaterialTheme.colorScheme.surface"))
+        assertTrue(selectionToolbar.contains("color = MaterialTheme.colorScheme.surface"))
+        assertTrue(filterToolbar.contains("Surface(") && selectionToolbar.contains("Surface("))
+        assertTrue(source.contains("testTag(\"media_grid_selection_toolbar\")"))
         assertTrue(source.indexOf("TagFilterSummaryRow") < source.indexOf("ClassifiedMediaGridContent"))
     }
 
@@ -105,7 +111,10 @@ class MediaGridRenderingContractTest {
         assertTrue(surfaceSource.contains("MediaGridSingleSurfaceMode.RevealCurrent"))
         assertTrue(surfaceSource.contains("MediaGridSingleSurfaceMode.RevealTarget"))
         assertTrue(surfaceSource.contains("drawMediaGridMorphRow(model, progress.value)"))
-        assertTrue(rowSource.contains("startNormalizedLeft"))
+        assertTrue(rowSource.contains("sourceCellSize"))
+        assertTrue(rowSource.contains("targetCellSize"))
+        assertTrue(rowSource.contains("fixedFocalCenterY"))
+        assertTrue(rowSource.contains("relativeRowRange"))
         assertTrue(rowSource.contains("startContent"))
         assertTrue(rowSource.contains("endContent"))
         assertTrue(uiSource.contains("morphEnabled = !selectionMode && !showProgress"))
@@ -115,6 +124,23 @@ class MediaGridRenderingContractTest {
         assertTrue(!uiSource.contains("mediaGridMorphRowReflowCanvas"))
         assertTrue(!uiSource.contains("mediaGridLegacyPinchToResize"))
         assertTrue(!uiSource.contains("handoffVisualTranslation"))
+    }
+
+    @Test
+    fun productionRowRendererUsesUniformLatticeInsteadOfEndpointRectLerp() {
+        val rowSource = locateSource("src/main/java/com/lyco256/llm/MediaGridMorphRowReflow.kt").readText()
+        val rendererSource = locateSource("src/main/java/com/lyco256/llm/MediaGridMorphRowRenderer.kt").readText()
+        assertTrue(rowSource.contains("mediaGridMorphCurrentCellSize"))
+        assertTrue(rowSource.contains("gridLeft + cell.column * currentCellSize"))
+        assertTrue(rowSource.contains("fixedFocalCenterY - focalV * cellSize"))
+        assertTrue(!rendererSource.contains("cell.plan.startRect"))
+        assertTrue(!rendererSource.contains("cell.plan.endRect"))
+        assertTrue(!rendererSource.contains("sourceTop"))
+        assertTrue(!rendererSource.contains("targetTop"))
+        assertTrue(rendererSource.contains("cell.plan.column * currentCellSize"))
+        assertTrue(rendererSource.contains("cell.plan.relativeRow * currentCellSize"))
+        assertTrue(rendererSource.contains("fixedFocalCenterY - model.focalV * currentCellSize"))
+        assertTrue(rendererSource.contains("clipRect(0f, 0f, viewportWidth, viewportHeight)"))
     }
 
     @Test

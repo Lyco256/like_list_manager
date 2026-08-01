@@ -1,5 +1,10 @@
 # `app/src/androidTest/java/com/lyco256/llm/MainActivityComposeTest.kt`
 
+## 2026-08-01 production uniform-lattice and toolbar coverage
+
+- The real classified Activity flow continues to exercise normal grid rendering, production same-surface Morph input, reveal/handoff round trips, filter/sort changes, and the absence of the historical overlay.
+- The production rendering contract verifies one clipped LazyGrid surface and opaque positive-layer containers for both the filter/count/sort toolbar and selection toolbar. No second grid or overlay is introduced.
+
 `imageViewerSwipeMovesBetweenSavedPhotosWithoutChangingDatabase` sends the horizontal swipe through the Compose `image_viewer` node instead of relying on raw full-screen coordinates; the viewer parent drag handler leaves horizontal movement available to `HorizontalPager`.
 
 ## 2026-07-31 production Morph correction coverage

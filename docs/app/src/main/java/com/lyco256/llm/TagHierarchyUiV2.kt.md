@@ -264,6 +264,10 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 旧操作状態と生成停止方式の詳細はGit履歴だけに残します。現行の直接表示とpreloadの証跡は、冒頭のdirect preview節と`MediaGridDirectPreviewTest`にあります。
 # `TagHierarchyUiV2.kt`
 
+## 2026-08-01 media-grid toolbar layer
+
+The classified filter/count/sort toolbar and selection toolbar are each wrapped in an opaque `MaterialTheme.colorScheme.surface` `Surface` carrying `ClassifiedMediaGridToolbarZIndex`. Their inner rows keep the existing spacing and controls; the grid remains below them and the single-surface Morph renderer clips to the grid viewport.
+
 ## 2026-08-01 Phase 2 production Morph
 
 - The classified production grid enables the shared `MediaGridMorphGestureMode.Production` path when selection/progress UI is inactive, captures the real grid at claim, and uses the unified resident/Morph surface.

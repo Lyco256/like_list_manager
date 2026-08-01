@@ -1403,49 +1403,53 @@ private fun TagFilterSummaryRow(
     interactionEnabled: Boolean,
 ) {
     val filters = uiState.filters
-    Row(
-        Modifier.fillMaxWidth().zIndex(ClassifiedMediaGridToolbarZIndex),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    Surface(
+        modifier = Modifier.fillMaxWidth().zIndex(ClassifiedMediaGridToolbarZIndex),
+        color = MaterialTheme.colorScheme.surface,
     ) {
         Row(
-            Modifier
-                .weight(1f)
-                .clip(RoundedCornerShape(4.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 6.dp, vertical = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text(
-                "一致件数:${if (displayMode == ClassifiedDisplayMode.MediaGrid) matchingClipCount?.toString() ?: "計算中" else uiState.classified.size}件",
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.labelSmall,
-            )
-            Text(
-                filterConditionSummary(filters, hierarchy, uiState.authorOptions),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                "｜",
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                sortConditionSummary(uiState.sort),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+            Row(
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "一致件数:${if (displayMode == ClassifiedDisplayMode.MediaGrid) matchingClipCount?.toString() ?: "計算中" else uiState.classified.size}件",
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                Text(
+                    filterConditionSummary(filters, hierarchy, uiState.authorOptions),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "｜",
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    sortConditionSummary(uiState.sort),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         FilledTonalButton(
             onClick = { if (interactionEnabled) onOpen() },
             enabled = interactionEnabled,
@@ -1489,6 +1493,7 @@ private fun TagFilterSummaryRow(
             contentPadding = PaddingValues(0.dp),
         ) {
             Text("クリア", style = MaterialTheme.typography.labelMedium, maxLines = 1)
+        }
         }
     }
 }
@@ -3354,31 +3359,36 @@ private fun MediaGridSelectionToolbar(
     editTagsEnabled: Boolean,
     onClose: () -> Unit,
 ) {
-    Row(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
             .zIndex(ClassifiedMediaGridToolbarZIndex)
             .testTag("media_grid_selection_toolbar"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        color = MaterialTheme.colorScheme.surface,
     ) {
-        IconButton(onClick = onClose, modifier = Modifier.testTag("media_grid_selection_close")) {
-            Icon(Icons.Filled.Close, contentDescription = "選択を終了")
-        }
-        Text(
-            text = "${selectedCount}件選択中",
-            modifier = Modifier.weight(1f).testTag("media_grid_selection_count"),
-            fontWeight = FontWeight.SemiBold,
-        )
-        TextButton(onClick = onToggleAll, modifier = Modifier.testTag("media_grid_select_all")) {
-            Text(if (allSelected) "全解除" else "全選択")
-        }
-        Button(
-            onClick = onEditTags,
-            enabled = editTagsEnabled,
-            modifier = Modifier.testTag("media_grid_bulk_tag_open"),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text("タグ編集")
+            IconButton(onClick = onClose, modifier = Modifier.testTag("media_grid_selection_close")) {
+                Icon(Icons.Filled.Close, contentDescription = "選択を終了")
+            }
+            Text(
+                text = "${selectedCount}件選択中",
+                modifier = Modifier.weight(1f).testTag("media_grid_selection_count"),
+                fontWeight = FontWeight.SemiBold,
+            )
+            TextButton(onClick = onToggleAll, modifier = Modifier.testTag("media_grid_select_all")) {
+                Text(if (allSelected) "全解除" else "全選択")
+            }
+            Button(
+                onClick = onEditTags,
+                enabled = editTagsEnabled,
+                modifier = Modifier.testTag("media_grid_bulk_tag_open"),
+            ) {
+                Text("タグ編集")
+            }
         }
     }
 }

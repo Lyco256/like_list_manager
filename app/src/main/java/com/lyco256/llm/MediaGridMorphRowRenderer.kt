@@ -30,6 +30,10 @@ internal data class MediaGridMorphRowRenderHeader(
 /** Immutable claim-time data consumed by the single LazyGrid draw surface. */
 internal data class MediaGridMorphRowRenderModel(
     val viewport: Rect,
+    val sourceCellSize: Float,
+    val targetCellSize: Float,
+    val fixedFocalCenterY: Float,
+    val focalV: Float,
     val rows: List<MediaGridMorphRowPlan>,
     val cells: List<MediaGridMorphRowRenderCell>,
     val headers: List<MediaGridMorphRowRenderHeader>,
@@ -100,6 +104,10 @@ internal fun rememberMediaGridMorphRowRenderModel(
             }
             MediaGridMorphRowRenderModel(
                 viewport = selected.viewport,
+                sourceCellSize = selected.sourceCellSize,
+                targetCellSize = selected.targetCellSize,
+                fixedFocalCenterY = selected.fixedFocalCenterY,
+                focalV = selected.focalV,
                 rows = selected.rowPlans,
                 cells = cells,
                 headers = selected.headerPlans.map { header ->
@@ -127,69 +135,61 @@ internal fun DrawScope.drawMediaGridMorphRow(
 ) {
     val p = progress.coerceIn(0f, 1f)
     val viewport = model.viewport
-    clipRect(0f, 0f, size.width, size.height) {
+    val gridLeft = viewport.left
+    val viewportWidth = viewport.width.coerceAtMost(size.width)
+    val viewportHeight = viewport.height.coerceAtMost(size.height)
+    val currentCellSize = lerp(model.sourceCellSize, model.targetCellSize, p)
+    val focalRowTop = model.fixedFocalCenterY - model.focalV * currentCellSize
+    clipRect(0f, 0f, viewportWidth, viewportHeight) {
         var cellIndex = 0
         while (cellIndex < model.cells.size) {
             val cell = model.cells[cellIndex]
-            val start = cell.plan.startRect
-            val end = cell.plan.endRect
-            val left = lerp(start.left, end.left, p) - viewport.left
-            val top = lerp(start.top, end.top, p) - viewport.top
-            val right = lerp(start.right, end.right, p) - viewport.left
-            val bottom = lerp(start.bottom, end.bottom, p) - viewport.top
-            if (right > left && bottom > top) {
-                val width = (right - left).roundToInt()
-                val height = (bottom - top).roundToInt()
-                drawRect(
-                    model.placeholderColor,
-                    androidx.compose.ui.geometry.Offset(left, top),
-                    androidx.compose.ui.geometry.Size(right - left, bottom - top),
-                )
-                clipRect(left, top, right, bottom) {
-                    val same = cell.plan.startContent is MediaGridMorphSlotContent.Image &&
-                        cell.plan.startContent == cell.plan.endContent
-                    if (same) {
-                        cell.startImage?.let { image ->
-                            drawImage(
-                                image.image,
-                                image.srcOffset,
-                                image.srcSize,
-                                androidx.compose.ui.unit.IntOffset(left.roundToInt(), top.roundToInt()),
-                                androidx.compose.ui.unit.IntSize(width, height),
-                                alpha = 1f - p,
-                            )
-                        }
-                        cell.endImage?.let { image ->
-                            drawImage(
-                                image.image,
-                                image.srcOffset,
-                                image.srcSize,
-                                androidx.compose.ui.unit.IntOffset(left.roundToInt(), top.roundToInt()),
-                                androidx.compose.ui.unit.IntSize(width, height),
-                                alpha = p,
-                            )
-                        }
-                    } else {
-                        cell.startImage?.let { image ->
-                            drawImage(
-                                image.image,
-                                image.srcOffset,
-                                image.srcSize,
-                                androidx.compose.ui.unit.IntOffset(left.roundToInt(), top.roundToInt()),
-                                androidx.compose.ui.unit.IntSize(width, height),
-                                alpha = 1f - p,
-                            )
-                        }
-                        cell.endImage?.let { image ->
-                            drawImage(
-                                image.image,
-                                image.srcOffset,
-                                image.srcSize,
-                                androidx.compose.ui.unit.IntOffset(left.roundToInt(), top.roundToInt()),
-                                androidx.compose.ui.unit.IntSize(width, height),
-                                alpha = p,
-                            )
-                        }
+            val left = gridLeft + cell.plan.column * currentCellSize - viewport.left
+            val top = focalRowTop +
+                cell.plan.relativeRow * currentCellSize +
+                lerp(cell.plan.startHeaderOffsetPx, cell.plan.endHeaderOffsetPx, p) - viewport.top
+            val right = left + currentCellSize
+            val bottom = top + currentCellSize
+            val width = currentCellSize.roundToInt().coerceAtLeast(1)
+            val height = width
+            drawRect(
+                model.placeholderColor,
+                androidx.compose.ui.geometry.Offset(left, top),
+                androidx.compose.ui.geometry.Size(currentCellSize, currentCellSize),
+            )
+            clipRect(left, top, right, bottom) {
+                val sameAsset = cell.plan.startContent is MediaGridMorphSlotContent.Image &&
+                    cell.plan.startContent == cell.plan.endContent
+                if (sameAsset) {
+                    (cell.startImage ?: cell.endImage)?.let { image ->
+                        drawImage(
+                            image.image,
+                            image.srcOffset,
+                            image.srcSize,
+                            androidx.compose.ui.unit.IntOffset(left.roundToInt(), top.roundToInt()),
+                            androidx.compose.ui.unit.IntSize(width, height),
+                        )
+                    }
+                } else {
+                    cell.startImage?.let { image ->
+                        drawImage(
+                            image.image,
+                            image.srcOffset,
+                            image.srcSize,
+                            androidx.compose.ui.unit.IntOffset(left.roundToInt(), top.roundToInt()),
+                            androidx.compose.ui.unit.IntSize(width, height),
+                            alpha = 1f - p,
+                        )
+                    }
+                    cell.endImage?.let { image ->
+                        drawImage(
+                            image.image,
+                            image.srcOffset,
+                            image.srcSize,
+                            androidx.compose.ui.unit.IntOffset(left.roundToInt(), top.roundToInt()),
+                            androidx.compose.ui.unit.IntSize(width, height),
+                            alpha = p,
+                        )
                     }
                 }
             }
@@ -198,12 +198,13 @@ internal fun DrawScope.drawMediaGridMorphRow(
         var headerIndex = 0
         while (headerIndex < model.headers.size) {
             val header = model.headers[headerIndex]
-            val start = header.plan.startRect
-            val end = header.plan.endRect
-            val left = lerp(start.left, end.left, p) - viewport.left
-            val top = lerp(start.top, end.top, p) - viewport.top
-            val right = lerp(start.right, end.right, p) - viewport.left
-            val bottom = lerp(start.bottom, end.bottom, p) - viewport.top
+            val height = lerp(header.plan.startHeightPx, header.plan.endHeightPx, p)
+            val rowTop = focalRowTop + header.plan.relativeRow * currentCellSize
+            val top = rowTop +
+                lerp(header.plan.startOffsetBeforePx, header.plan.endOffsetBeforePx, p) - viewport.top
+            val left = gridLeft - viewport.left
+            val right = left + viewportWidth
+            val bottom = top + height
             if (right > left && bottom > top) {
                 drawRect(
                     model.surfaceColor,

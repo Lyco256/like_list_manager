@@ -42,7 +42,7 @@ internal fun selectMediaGridMorphTargetAnchor(
         val targetAssetId = viewportPlan.targetFocalAssetId
             ?: (targetCell.endContent as? MediaGridMorphSlotContent.Image)?.assetId
             ?: return null
-        val rect = targetCell.endRect
+        val rect = mediaGridMorphRowCellRect(viewportPlan, targetCell, 1f)
         if (rect.width <= 0f || rect.height <= 0f) return null
         val targetItemIndexHint = plan.preparedPair.targetLayout.media
             .firstOrNull { it.assetId == targetAssetId && it.mediaOrdinal == targetOrdinal }

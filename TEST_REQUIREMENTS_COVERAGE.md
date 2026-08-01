@@ -2,6 +2,17 @@
 
 ## 2026-08-01 Phase 2 production row Morph
 
+### Uniform lattice and toolbar correction
+
+| Requirement | Evidence | Status |
+|---|---|---|
+| Uniform source/target cell lattice for adjacent column changes | `MediaGridMorphViewportPlan` stores source/target cell size, fixed focal Y, `focalV`, relative rows; `MediaGridMorphTest.rowReflowUsesUniformLatticeForRequiredAdjacentColumnPairs` | unit covered; safe debug passed |
+| Full-size offscreen right-edge cells and independent header bands | `rowReflowKeepsRemovedRightEdgeCellSquareAndOutsideViewport`, `rowReflowHeaderHeightDoesNotChangeMediaCellSizeOrInsertInteriorZeroRow` | unit covered; safe debug passed |
+| Single LazyGrid surface clipped to its viewport | `MediaGridResidentCanvas.mediaGridSingleSurface`, `MediaGridRenderingContractTest.productionRowRendererUsesUniformLatticeInsteadOfEndpointRectLerp` | static/unit covered |
+| Opaque foreground filter and selection toolbars | `TagFilterSummaryRow`, `MediaGridSelectionToolbar`, and `MediaGridRenderingContractTest.productionGridOwnsTheOnlyOverscrollOptOutAndToolbarsSharePositiveLayer` | static covered |
+
+The required safe integration and device-install gates completed successfully after this implementation update: `run-safe-integration-check.cmd` reached `Preflight / Build / UnitTest / Lint / Install / IntegrationTest / Success`, and `run-safe-debug-check.cmd -InstallToDevice` reached `Preflight / Build / UnitTest / Lint / Install / Success`.
+
 | Requirement | Evidence | Status |
 |---|---|---|
 | real LazyGrid claim capture before visual activation | `TagHierarchyUiV2.kt`, `MediaGridMorphInteraction.kt`, `MediaGridMorphRowRenderer.kt` | Implemented; unit/static contracts passed |
