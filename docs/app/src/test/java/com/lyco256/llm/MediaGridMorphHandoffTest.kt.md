@@ -1,5 +1,10 @@
 # `MediaGridMorphHandoffTest.kt`
 
+## 2026-08-01 Phase 2 coverage
+
+- Coordinator tests cover target ordinal/row/header/cell geometry verification, one-pixel correction, rollback, stale data, viewport mismatch, and checkpoint suppression.
+- Controller tests cover target identity during `RevealTarget` and exactly-once reveal acknowledgement.
+
 Identity mismatch assertions require the controller to remain in explicit `Failed` with `IdentityMismatch`, rather than silently returning to `Idle`; the stale Morph plan and lock are cleared so recovery remains possible.
 
 ## 2026-07-31 production handoff correction coverage

@@ -1,6 +1,7 @@
 package com.lyco256.llm
 
 import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.runtime.State
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.ImageBitmap
@@ -18,6 +19,14 @@ internal enum class MediaGridResidentCanvasMode {
     Disabled,
     Enabled,
     TestVisible,
+}
+
+/** One exclusive draw surface for Normal, Morph, and the two reveal frames. */
+internal enum class MediaGridSingleSurfaceMode {
+    Normal,
+    Morph,
+    RevealCurrent,
+    RevealTarget,
 }
 
 internal data class MediaGridResidentCanvasImage(
@@ -176,6 +185,74 @@ internal fun Modifier.mediaGridResidentCanvas(
                 }
             }
             drawContent()
+        }
+    }
+}
+
+private data class MediaGridResidentDrawCommand(
+    val image: MediaGridResidentCanvasPreparedImage,
+    val offset: IntOffset,
+    val size: IntSize,
+)
+
+/**
+ * Unified production surface. Resident commands are prepared in the
+ * drawWithCache phase; the draw phase only iterates immutable commands or the
+ * frozen Morph model. There is no overlay, second grid, zIndex, or translation.
+ */
+internal fun Modifier.mediaGridSingleSurface(
+    state: LazyGridState,
+    assetIdByItemKey: Map<String, Long>,
+    preparedIndex: MediaGridResidentCanvasPreparedIndex,
+    mode: State<MediaGridSingleSurfaceMode>,
+    morphModel: MediaGridMorphRowRenderModel?,
+    progress: State<Float>,
+): Modifier = drawWithCache {
+    val layout = state.layoutInfo
+    val commands = ArrayList<MediaGridResidentDrawCommand>(layout.visibleItemsInfo.size)
+    for (info in layout.visibleItemsInfo) {
+        val key = info.key as? String ?: continue
+        val assetId = assetIdByItemKey[key] ?: continue
+        val image = preparedIndex.preparedImageByAssetId[assetId] ?: continue
+        if (info.size.width <= 0 || info.size.height <= 0) continue
+        val left = info.offset.x
+        val top = info.offset.y - layout.viewportStartOffset
+        if (left + info.size.width <= 0 || top + info.size.height <= 0 || left >= size.width || top >= size.height) continue
+        commands += MediaGridResidentDrawCommand(
+            image = image,
+            offset = IntOffset(left, top),
+            size = IntSize(info.size.width, info.size.height),
+        )
+    }
+    onDrawWithContent {
+        when (mode.value) {
+            MediaGridSingleSurfaceMode.Morph -> {
+                val model = morphModel
+                if (model == null) {
+                    drawContent()
+                } else {
+                    drawRect(model.surfaceColor)
+                    drawMediaGridMorphRow(model, progress.value)
+                }
+            }
+            MediaGridSingleSurfaceMode.Normal,
+            MediaGridSingleSurfaceMode.RevealCurrent,
+            MediaGridSingleSurfaceMode.RevealTarget,
+            -> {
+                var index = 0
+                while (index < commands.size) {
+                    val command = commands[index]
+                    drawImage(
+                        image = command.image.image,
+                        srcOffset = command.image.srcOffset,
+                        srcSize = command.image.srcSize,
+                        dstOffset = command.offset,
+                        dstSize = command.size,
+                    )
+                    index++
+                }
+                drawContent()
+            }
         }
     }
 }

@@ -3634,17 +3634,14 @@ private fun ClassifiedMediaGridContent(
         currentColumnCount = columnCount,
         viewportSignature = morphViewportSignature,
     )
-    // Phase 1 keeps the broken production Morph completely out of the product
-    // path. Only the isolated TEST_HARNESS receives the new same-surface row
-    // reflow renderer; production stays on the legacy release-time pinch.
-    val testMorphEnabled = BuildConfig.TEST_HARNESS && !selectionMode && !showProgress
-    val testMorphController = if (testMorphEnabled) {
-        remember(state) {
-            MediaGridMorphInteractionController { request ->
-                onMediaGridColumnCountChange(request.toColumnCount)
-            }
-        }
-    } else null
+    val morphEnabled = !selectionMode && !showProgress
+    val morphHost = rememberMediaGridMorphProductionHostState(
+        state = state,
+        sessionKey = null,
+        retainedImageStore = retainedImageStore,
+        enabled = morphEnabled,
+    )
+    val morphController = morphHost?.controller
     val morphPreparedPairsSnapshot: () -> Map<MediaGridMorphDirection, MediaGridMorphPreparedPair> = {
         val preparedIndex = residentPreparedIndex
         if (preparedIndex == null) {
@@ -3656,60 +3653,63 @@ private fun ClassifiedMediaGridContent(
             }
         }
     }
-    val morphInteractionLocked = testMorphController?.interactionLocked?.value == true
-    val morphVisualActive = testMorphController?.activePlan?.value != null
-    val morphRowRenderModel = if (testMorphController != null && residentPreparedIndex != null) {
-        rememberMediaGridMorphRowRenderModel(testMorphController.activePlan, residentPreparedIndex)
-    } else {
-        remember { mutableStateOf<MediaGridMorphRowRenderModel?>(null) }
-    }
-    val morphProgress = testMorphController?.progress ?: remember { mutableStateOf(0f) }
-    val effectiveResidentCanvasMode = if (morphVisualActive) {
-        MediaGridResidentCanvasMode.Disabled
-    } else {
-        residentCanvasMode
-    }
-    LaunchedEffect(testMorphController, morphIdentity) {
-        testMorphController?.updateIdentity(morphIdentity)
-    }
-    val morphSettleGeneration = testMorphController?.settleSignal?.value ?: 0L
-    LaunchedEffect(testMorphController, morphSettleGeneration) {
-        val controller = testMorphController ?: return@LaunchedEffect
-        if (morphSettleGeneration == 0L) return@LaunchedEffect
-        while (controller.isSettling(morphSettleGeneration)) {
-            withFrameNanos(controller::advanceSettleFrame)
+    val morphInteractionLocked = morphController?.interactionLocked?.value == true
+    val morphActivePlan = morphController?.activePlan?.value
+    val morphRowRenderModel = if (morphActivePlan != null && residentPreparedIndex != null) {
+        rememberMediaGridMorphRowRenderModel(morphActivePlan, residentPreparedIndex)
+    } else null
+    val morphVisualActive = morphController?.drawMode?.value == MediaGridMorphDrawMode.Morph && morphRowRenderModel != null
+    val morphProgress = morphController?.progress ?: remember { mutableStateOf(0f) }
+    val singleSurfaceMode = remember(morphController, morphRowRenderModel) { mutableStateOf(MediaGridSingleSurfaceMode.Normal) }
+    DisposableEffect(morphHost, morphRowRenderModel) {
+        if (morphHost != null) {
+            morphHost.retainedImageStore.updateProtection(
+                ownerToken = morphHost.ownerToken,
+                visibleAssetIds = LongArray(0),
+                activeAssetIds = morphRowRenderModel?.protectedAssetIds ?: LongArray(0),
+            )
+        }
+        onDispose {
+            morphHost?.retainedImageStore?.updateProtection(
+                ownerToken = morphHost.ownerToken,
+                visibleAssetIds = LongArray(0),
+                activeAssetIds = LongArray(0),
+            )
         }
     }
-    LaunchedEffect(testMorphController, frame.key, columnCount) {
-        val controller = testMorphController ?: return@LaunchedEffect
+    LaunchedEffect(morphController, morphIdentity) {
+        morphController?.updateIdentity(morphIdentity)
+    }
+    LaunchedEffect(morphController, morphActivePlan, morphRowRenderModel) {
+        val controller = morphController ?: return@LaunchedEffect
+        val model = morphRowRenderModel ?: return@LaunchedEffect
+        val generation = controller.snapshot().interactionGeneration
+        if (controller.markRenderModelReady(generation)) {
+            singleSurfaceMode.value = MediaGridSingleSurfaceMode.Morph
+        }
+    }
+    LaunchedEffect(morphController, morphController?.drawMode?.value, morphController?.snapshot()?.interactionGeneration) {
+        val controller = morphController ?: return@LaunchedEffect
         val snapshot = controller.snapshot()
-        val request = snapshot.handoffRequest
-        if (
-                snapshot.phase == MediaGridMorphPhase.AwaitingGridHandoff &&
-                request != null &&
-                frame.key == request.expectedTargetFrameKey
-        ) {
-            val targetOrdinal = request.plan.viewportPlan?.targetFocalMediaOrdinal
-            val targetIndex = targetOrdinal
-                ?.let { frame.ordinalIndex.itemIndexByMediaOrdinal.getOrNull(it) }
-                ?: frame.ordinalIndex.itemIndexByAssetId[request.targetAnchor.assetId]
-            if (targetIndex != null) {
-                val desiredRowTop = request.plan.viewportPlan?.targetAnchorRowTop
-                repeat(3) {
-                    withFrameNanos { }
-                    state.scrollToItem(targetIndex)
-                    withFrameNanos { }
-                    val targetInfo = state.layoutInfo.visibleItemsInfo
-                        .firstOrNull { it.index == targetIndex }
-                    if (targetInfo != null && desiredRowTop != null) {
-                        val delta = targetInfo.offset.y.toFloat() - desiredRowTop
-                        if (abs(delta) > 1f) state.scrollBy(delta)
-                    }
-                }
-                withFrameNanos { }
-            }
-            controller.completeHandoff(request.interactionGeneration)
+        val mode = when (snapshot.drawMode) {
+            MediaGridMorphDrawMode.Normal -> MediaGridSingleSurfaceMode.Normal
+            MediaGridMorphDrawMode.Morph -> if (morphRowRenderModel != null) MediaGridSingleSurfaceMode.Morph else MediaGridSingleSurfaceMode.Normal
+            MediaGridMorphDrawMode.RevealCurrent -> MediaGridSingleSurfaceMode.RevealCurrent
+            MediaGridMorphDrawMode.RevealTarget -> MediaGridSingleSurfaceMode.RevealTarget
         }
+        singleSurfaceMode.value = mode
+    }
+    if (morphHost != null && morphController != null) {
+        MediaGridMorphProductionHandoffEffects(
+            host = morphHost,
+            frame = frame,
+            sessionKey = null,
+            identity = morphIdentity,
+            state = state,
+            onColumnCountChange = onMediaGridColumnCountChange,
+            onAnchorCheckpoint = onMediaGridAnchorCheckpoint,
+            onCheckpointSuppressed = onMorphCheckpointSuppressed,
+        )
     }
     if (fallbackController != null) DisposableEffect(fallbackController) { onDispose { fallbackController.dispose() } }
     LaunchedEffect(state, frame.key, effectiveController) {
@@ -3781,48 +3781,39 @@ private fun ClassifiedMediaGridContent(
                 .fillMaxSize()
                 .testTag("classified_media_grid")
                 .then(
-                    if (testMorphController != null) {
+                    if (morphController != null || !morphEnabled || retainedImageStore == null) {
                         Modifier.mediaGridMorphGestureInput(
-                            mode = MediaGridMorphGestureMode.Test,
-                            controller = testMorphController,
+                            mode = MediaGridMorphGestureMode.Production,
+                            controller = morphController,
                             identity = morphIdentity,
                             preparedPairsSnapshot = morphPreparedPairsSnapshot,
-                            stopScroll = { state.stopScroll() },
+                            stopScroll = suspend { state.stopScroll() },
                             onFallbackPinchFinished = { _, nextColumnCount ->
-                                onMediaGridColumnCountChange(nextColumnCount)
+                                onPinchFinished(null, nextColumnCount)
                             },
                             pointerInProgress = morphPointerInProgress,
-                            captureOnClaim = {
-                                captureMediaGridMorphInput(
-                                    frame = frame,
-                                    layoutInfo = state.layoutInfo,
-                                    columnCount = columnCount,
-                                    fallbackHeaderHeightPx = fallbackMorphHeaderHeightPx,
-                                )
-                            },
+                            captureOnClaim = if (morphEnabled) {
+                                {
+                                    captureMediaGridMorphInput(
+                                        frame = frame,
+                                        layoutInfo = state.layoutInfo,
+                                        columnCount = columnCount,
+                                        fallbackHeaderHeightPx = fallbackMorphHeaderHeightPx,
+                                    )
+                                }
+                            } else null,
                         )
-                    } else if (!BuildConfig.TEST_HARNESS) {
-                        Modifier.mediaGridLegacyPinchToResize(columnCount) { nextColumnCount ->
-                            onPinchFinished(null, nextColumnCount)
-                        }
                     } else Modifier,
                 )
                 .then(
                     if (residentPreparedIndex != null) {
-                        Modifier.mediaGridResidentCanvas(
+                        Modifier.mediaGridSingleSurface(
                             state = state,
                             assetIdByItemKey = frame.assetIdByItemKey,
                             preparedIndex = residentPreparedIndex,
-                            mode = effectiveResidentCanvasMode,
-                        )
-                    } else Modifier,
-                )
-                .then(
-                    if (testMorphController != null && residentPreparedIndex != null) {
-                        Modifier.mediaGridMorphRowReflowCanvas(
-                            renderModel = morphRowRenderModel,
+                            mode = singleSurfaceMode,
+                            morphModel = morphRowRenderModel,
                             progress = morphProgress,
-                            enabled = morphVisualActive,
                         )
                     } else Modifier,
                 ),
@@ -3858,7 +3849,7 @@ private fun ClassifiedMediaGridContent(
                         visualsVisible = !morphVisualActive,
                         imageLoader = appContainer.mediaGridImageLoader,
                         loadState = effectiveControllerState.cells[item.entry.assetId] ?: MediaGridCellLoadState(),
-                        residentDrawAvailable = retainedImageStore?.hasEligibleDrawHandle(item.entry.assetId) == true && effectiveResidentCanvasMode != MediaGridResidentCanvasMode.Disabled,
+                         residentDrawAvailable = retainedImageStore?.hasEligibleDrawHandle(item.entry.assetId) == true && residentPreparedIndex != null,
                     )
                 }
             }

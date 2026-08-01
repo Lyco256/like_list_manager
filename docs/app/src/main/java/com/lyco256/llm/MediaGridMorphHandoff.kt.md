@@ -1,5 +1,10 @@
 # `MediaGridMorphHandoff.kt`
 
+## 2026-08-01 Phase 2 production handoff
+
+- The real `LazyGridState` is verified by target media ordinal plus visible row ordinals, row top, cell size, and header title; each geometric correction remains within the one-pixel tolerance and bounded retry count.
+- `VerifyingTarget` is followed by one underlying-grid draw and only then `RevealTarget`; mismatches and stale frames issue rollback/cancel without applying the target row contract to the source rollback path.
+
 ## 2026-07-31 UI・handoff correction
 
 - Target handoff is event-driven: target frame, visible geometry, optional bounded correction, underlying draw, and next-frame completion are distinct phases.

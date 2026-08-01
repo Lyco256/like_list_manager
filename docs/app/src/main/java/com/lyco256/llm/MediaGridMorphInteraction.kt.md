@@ -1,5 +1,11 @@
 # `MediaGridMorphInteraction.kt`
 
+## 2026-08-01 Phase 2 production interaction
+
+- Production claim order is `stopScroll -> capture real LazyGrid -> build/validate row pair`; a claim-preparation failure reaches only the one-step release fallback.
+- The controller exposes `Normal`, `Morph`, `RevealCurrent`, and `RevealTarget` draw modes. Current settle renders one reveal frame before unlock; target settle stays at progress 1 until real-grid handoff verification completes.
+- Target requests retain focal ordinal, target row top, row ordinals, cell size, and header title. Source/target identity changes are allowed only in the matching handoff/reveal phase.
+
 ## 2026-08-01 Phase 1 row reflow
 
 - Production Morph overlay/handoff is disabled for this phase. Release builds use the legacy one-step pinch resize with a fixed initial pointer distance.

@@ -264,6 +264,12 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 旧操作状態と生成停止方式の詳細はGit履歴だけに残します。現行の直接表示とpreloadの証跡は、冒頭のdirect preview節と`MediaGridDirectPreviewTest`にあります。
 # `TagHierarchyUiV2.kt`
 
+## 2026-08-01 Phase 2 production Morph
+
+- The classified production grid enables the shared `MediaGridMorphGestureMode.Production` path when selection/progress UI is inactive, captures the real grid at claim, and uses the unified resident/Morph surface.
+- Morph protection is updated from the complete frozen row model endpoint set. Reveal modes return to the underlying grid only after the production handoff effects acknowledge the required frame.
+- The production path no longer installs the legacy pinch modifier, a separate row-reflow canvas, or a translated overlay.
+
 ## 2026-08-01 Phase 1 Morph boundary
 
 - The normal classified `LazyVerticalGrid` remains the only grid surface. In `TEST_HARNESS`, the row reflow renderer is attached to that grid's draw modifier; no second grid, overlay Box, or z-index Morph host is composed.

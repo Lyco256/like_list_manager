@@ -149,6 +149,16 @@ internal data class MediaGridMorphVisibleItemGeometry(
     val rect: Rect,
 )
 
+internal data class MediaGridMorphVisibleRowGeometry(
+    val rowIndex: Int,
+    val rowTop: Float,
+    val cellWidth: Float,
+    val cellHeight: Float,
+    val mediaOrdinals: List<Int>,
+    val headerKey: String? = null,
+    val headerTitle: String? = null,
+)
+
 internal enum class MediaGridMorphGridHandoffFailureReason {
     StaleData,
     UnexpectedTargetFrame,
@@ -169,6 +179,8 @@ internal data class MediaGridMorphResolvedTarget(
     val focalV: Float,
     val desiredCanvasPosition: Offset,
     val expectedCellSize: Float,
+    val targetRowIndex: Int? = null,
+    val targetRowTop: Float? = null,
 )
 
 internal data class MediaGridMorphGridHandoffSnapshot(
@@ -261,7 +273,9 @@ internal class MediaGridMorphGridHandoffCoordinator {
             return beginRollback(MediaGridMorphGridHandoffFailureReason.UnexpectedTargetFrame)
         }
         val targetAnchor = request.targetAnchor
-        val directIndex = frame.ordinalIndex.itemIndexByAssetId[targetAnchor.assetId]
+        val targetOrdinal = request.targetFocalMediaOrdinal ?: targetAnchor.mediaOrdinal
+        val directIndex = request.targetFocalMediaOrdinal?.let { frame.ordinalIndex.itemIndexByMediaOrdinal.getOrNull(it) }
+            ?: frame.ordinalIndex.itemIndexByAssetId[targetAnchor.assetId]
         val resolvedOrdinal: Int
         val resolvedAssetId: Long
         val resolvedItemIndex: Int
@@ -272,7 +286,7 @@ internal class MediaGridMorphGridHandoffCoordinator {
         } else {
             val ordinals = frame.ordinalIndex.assetIdByMediaOrdinal.indices
             if (ordinals.isEmpty()) return beginRollback(MediaGridMorphGridHandoffFailureReason.TargetMediaUnavailable)
-            resolvedOrdinal = targetAnchor.mediaOrdinal.coerceIn(ordinals.first, ordinals.last)
+            resolvedOrdinal = targetOrdinal.coerceIn(ordinals.first, ordinals.last)
             resolvedAssetId = frame.ordinalIndex.assetIdByMediaOrdinal[resolvedOrdinal]
             resolvedItemIndex = frame.ordinalIndex.itemIndexByMediaOrdinal[resolvedOrdinal]
         }
@@ -285,7 +299,9 @@ internal class MediaGridMorphGridHandoffCoordinator {
                 focalU = targetAnchor.focalU,
                 focalV = targetAnchor.focalV,
                 desiredCanvasPosition = targetAnchor.maintainedCanvasPosition,
-                expectedCellSize = targetAnchor.endRect.width,
+                expectedCellSize = request.targetCellSizePx ?: targetAnchor.endRect.width,
+                targetRowIndex = request.targetAnchorRowIndex,
+                targetRowTop = request.targetAnchorRowTop,
             ),
         )
         return null
@@ -296,6 +312,7 @@ internal class MediaGridMorphGridHandoffCoordinator {
         visibleTarget: MediaGridMorphVisibleItemGeometry?,
         viewportWidth: Int,
         viewportHeight: Int,
+        visibleTargetRow: MediaGridMorphVisibleRowGeometry? = null,
     ): MediaGridMorphGridHandoffCommand? {
         if (
             current.phase != MediaGridMorphGridHandoffPhase.PositioningTarget &&
@@ -329,6 +346,33 @@ internal class MediaGridMorphGridHandoffCoordinator {
             }
             return MediaGridMorphGridHandoffCommand.ScrollToItem(target.itemIndex)
         }
+        if (!rollingBack && request.targetRowMediaOrdinals.isNotEmpty()) {
+            val row = visibleTargetRow
+            if (row == null || row.mediaOrdinals != request.targetRowMediaOrdinals) {
+                return beginRollback(MediaGridMorphGridHandoffFailureReason.TargetInvisible)
+            }
+            if (request.targetHeaderTitle != null && row.headerTitle != request.targetHeaderTitle) {
+                return beginRollback(MediaGridMorphGridHandoffFailureReason.GeometryMismatch)
+            }
+            val expectedRowTop = request.targetAnchorRowTop ?: row.rowTop
+            val expectedSize = request.targetCellSizePx ?: row.cellWidth
+            val rowSizeMatches = abs(row.cellWidth - expectedSize) <= GeometryTolerancePx &&
+                abs(row.cellHeight - expectedSize) <= GeometryTolerancePx
+            if (!rowSizeMatches) {
+                return beginRollback(MediaGridMorphGridHandoffFailureReason.GeometryMismatch)
+            }
+            val rowDelta = row.rowTop - expectedRowTop
+            if (abs(rowDelta) > GeometryTolerancePx) {
+                if (current.correctionAttempts >= MaxCorrectionAttempts) {
+                    return beginRollback(MediaGridMorphGridHandoffFailureReason.GeometryCorrectionExhausted)
+                }
+                current = current.copy(correctionAttempts = current.correctionAttempts + 1)
+                return MediaGridMorphGridHandoffCommand.ScrollBy(rowDelta)
+            }
+            current = current.copy(phase = MediaGridMorphGridHandoffPhase.VerifyingTarget)
+            return null
+        }
+
         val rect = visibleTarget.rect
         val square = abs(rect.width - rect.height) <= GeometryTolerancePx
         val expectedSize = abs(rect.width - target.expectedCellSize) <= GeometryTolerancePx &&

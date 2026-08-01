@@ -1,5 +1,10 @@
 # MediaGridMorphProductionHost.kt
 
+## 2026-08-01 Phase 2 production integration
+
+- `MediaGridMorphProductionHandoffEffects` is the production handoff coordinator for the existing `LazyVerticalGrid`; it has no visual layer and drives scroll, verification, reveal, rollback, checkpoint suppression, and retained-image ownership.
+- The old `MediaGridMorphProductionHost` visual host is guarded by `BuildConfig.TEST_HARNESS` for compatibility tests only. Production UI uses the unified resident/Morph surface plus the event-driven effects.
+
 ## 2026-07-31 UI・handoff correction
 
 - Production host observes the latest LazyGrid layout after every target scroll command, applies the fixed focal correction only during target positioning, and removes the Canvas after the underlying target frame is drawn.

@@ -1,5 +1,10 @@
 # `MediaGridMorphTest.kt`
 
+## 2026-08-01 Phase 2 coverage
+
+- Row-plan geometry covers 2↔3, 4↔5, 5↔4, 8↔9, and 11↔12, including right-edge Placeholder transitions, focal-row clamping, header bands, and distance/cell-width progress.
+- Controller tests cover the one-frame `RevealCurrent` barrier and exactly-once handoff request behavior.
+
 ## 2026-08-01 claim identity coverage
 
 - Unit coverage rejects a stale Compose viewport identity at claim and accepts the identity from the real capture snapshot.

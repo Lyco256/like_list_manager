@@ -1,5 +1,11 @@
 # MediaGridMorph.kt
 
+## 2026-08-01 Phase 2 production row morph
+
+- Production claim captures the real `LazyGridLayoutInfo` first, then builds a bounded viewport/row plan and immutable render model before Morph becomes visible.
+- Adjacent column changes use cell-width-ratio progress and preserve the right-edge Placeholder/Image transitions for both increase and decrease.
+- The bounded plan carries source/target asset IDs and target row metadata for reveal-time protection and real-grid handoff; missing resident images remain Placeholder endpoints.
+
 ## 2026-08-01 Phase 1 row reflow
 
 - Claim-time preparation now exposes one immutable interaction identity derived from the same LazyGrid capture; the row reflow target plan remains bounded to captured rows and target ordinals.

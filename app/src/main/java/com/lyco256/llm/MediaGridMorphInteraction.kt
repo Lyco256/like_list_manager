@@ -49,6 +49,14 @@ internal data class MediaGridMorphHandoffRequest(
     val fixedFocalCenter: Offset,
     val viewportWidth: Int,
     val viewportHeight: Int,
+    val sourceFocalMediaOrdinal: Int? = null,
+    val targetFocalMediaOrdinal: Int? = null,
+    val targetAnchorRowIndex: Int? = null,
+    val targetAnchorRowTop: Float? = null,
+    val targetRowMediaOrdinals: List<Int> = emptyList(),
+    val targetCellSizePx: Float? = null,
+    val targetHeaderTitle: String? = null,
+    val frozenViewportPlan: MediaGridMorphViewportPlan? = plan.viewportPlan,
 )
 
 internal enum class MediaGridMorphFailureReason {
@@ -70,6 +78,7 @@ internal data class MediaGridMorphInteractionSnapshot(
     val handoffRequest: MediaGridMorphHandoffRequest?,
     val interactionGeneration: Long,
     val failureReason: MediaGridMorphFailureReason? = null,
+    val drawMode: MediaGridMorphDrawMode = MediaGridMorphDrawMode.Normal,
 )
 
 internal enum class MediaGridMorphGestureMode {
@@ -195,12 +204,14 @@ internal class MediaGridMorphInteractionController(
     private val _correction = mutableStateOf(Offset.Zero)
     private val _handoffRequest = mutableStateOf<MediaGridMorphHandoffRequest?>(null)
     private val _interactionLocked = mutableStateOf(false)
+    private val _drawMode = mutableStateOf(MediaGridMorphDrawMode.Normal)
     internal val settleSignal: MutableState<Long> = mutableLongStateOf(0L)
     val activePlan: State<MediaGridMorphPlan?> get() = _activePlan
     val progress: State<Float> get() = _progress
     val correction: State<Offset> get() = _correction
     val handoffRequest: State<MediaGridMorphHandoffRequest?> get() = _handoffRequest
     val interactionLocked: State<Boolean> get() = _interactionLocked
+    val drawMode: State<MediaGridMorphDrawMode> get() = _drawMode
 
     fun snapshot(): MediaGridMorphInteractionSnapshot = currentSnapshot
 
@@ -230,6 +241,7 @@ internal class MediaGridMorphInteractionController(
         )
         settle = null
         _activePlan.value = null
+        _drawMode.value = MediaGridMorphDrawMode.Normal
         publish(
             phase = MediaGridMorphPhase.Tracking,
             direction = null,
@@ -241,6 +253,7 @@ internal class MediaGridMorphInteractionController(
             toColumnCount = identity.currentColumnCount,
             handoffRequest = null,
             generation = generation,
+            drawMode = MediaGridMorphDrawMode.Normal,
         )
         return true
     }
@@ -267,6 +280,7 @@ internal class MediaGridMorphInteractionController(
                 }
                 direction = nextDirection
                 _activePlan.value = plan
+                _drawMode.value = MediaGridMorphDrawMode.Normal
             }
         }
         val nextProgress = if (nextDirection == null || plan == null) {
@@ -347,7 +361,10 @@ internal class MediaGridMorphInteractionController(
             currentIdentity = identity
             return
         }
-        if (snapshot.phase == MediaGridMorphPhase.AwaitingGridHandoff) {
+        if (
+            snapshot.phase == MediaGridMorphPhase.AwaitingGridHandoff ||
+            snapshot.phase == MediaGridMorphPhase.RevealingTarget
+        ) {
             val request = snapshot.handoffRequest ?: run {
                 currentIdentity = identity
                 resetToIdle(identity.currentColumnCount, snapshot.interactionGeneration)
@@ -366,7 +383,7 @@ internal class MediaGridMorphInteractionController(
                 identity.currentColumnCount == request.toColumnCount &&
                     identity.frameKey == request.expectedTargetFrameKey
             if (sameData && sameViewport && (sourceIdentity || expectedTargetIdentity)) {
-                if (expectedTargetIdentity) currentIdentity = identity
+                if (expectedTargetIdentity || snapshot.phase == MediaGridMorphPhase.RevealingTarget) currentIdentity = identity
                 return
             }
             currentIdentity = identity
@@ -378,6 +395,16 @@ internal class MediaGridMorphInteractionController(
                 MediaGridMorphFailureReason.IdentityMismatch,
             )
             return
+        }
+        if (snapshot.phase == MediaGridMorphPhase.RevealingCurrent) {
+            val sameSource =
+                identity.sourceRevision == snapshot.sourceRevision &&
+                    identity.frameKey == snapshot.frameKey &&
+                    identity.currentColumnCount == snapshot.fromColumnCount
+            if (sameSource) {
+                currentIdentity = identity
+                return
+            }
         }
         currentIdentity = identity
         if (
@@ -443,7 +470,19 @@ internal class MediaGridMorphInteractionController(
         }
         settle = null
         if (!activeSettle.toTarget) {
-            resetToIdle(plan.fromColumnCount, generation)
+            publish(
+                phase = MediaGridMorphPhase.RevealingCurrent,
+                direction = currentSnapshot.direction,
+                plan = plan,
+                progress = 0f,
+                correction = Offset.Zero,
+                center = activeSettle.fixedPinchCenter,
+                identity = currentIdentity ?: return,
+                toColumnCount = plan.fromColumnCount,
+                handoffRequest = null,
+                generation = generation,
+                drawMode = MediaGridMorphDrawMode.RevealCurrent,
+            )
             return
         }
         val identity = currentIdentity ?: return
@@ -479,6 +518,20 @@ internal class MediaGridMorphInteractionController(
             fixedFocalCenter = activeSettle.fixedPinchCenter,
             viewportWidth = identity.viewportSignature.viewportWidthPx,
             viewportHeight = identity.viewportSignature.viewportHeightPx,
+            sourceFocalMediaOrdinal = plan.viewportPlan?.focalMediaOrdinal,
+            targetFocalMediaOrdinal = plan.viewportPlan?.targetFocalMediaOrdinal,
+            targetAnchorRowIndex = plan.viewportPlan?.targetAnchorRowIndex,
+            targetAnchorRowTop = plan.viewportPlan?.targetAnchorRowTop,
+            targetRowMediaOrdinals = plan.viewportPlan?.rowPlans
+                ?.firstOrNull { it.relativeRow == 0 }
+                ?.cells
+                ?.mapNotNull { it.targetMediaOrdinal }
+                .orEmpty(),
+            targetCellSizePx = plan.viewportPlan?.let { it.viewport.width / plan.toColumnCount.coerceAtLeast(1) },
+            targetHeaderTitle = plan.viewportPlan?.headerPlans
+                ?.firstOrNull { it.relativeRow == 0 }
+                ?.endTitle,
+            frozenViewportPlan = plan.viewportPlan,
         )
         publish(
             phase = MediaGridMorphPhase.AwaitingGridHandoff,
@@ -491,8 +544,48 @@ internal class MediaGridMorphInteractionController(
             toColumnCount = plan.toColumnCount,
             handoffRequest = request,
             generation = generation,
+            drawMode = MediaGridMorphDrawMode.Morph,
         )
         onHandoffRequest(request)
+    }
+
+    fun markRenderModelReady(generation: Long): Boolean {
+        if (currentSnapshot.interactionGeneration != generation || currentSnapshot.plan == null) return false
+        if (currentSnapshot.phase != MediaGridMorphPhase.Tracking &&
+            currentSnapshot.phase != MediaGridMorphPhase.SettlingToCurrent &&
+            currentSnapshot.phase != MediaGridMorphPhase.SettlingToTarget
+        ) return false
+        _drawMode.value = MediaGridMorphDrawMode.Morph
+        currentSnapshot = currentSnapshot.copy(drawMode = MediaGridMorphDrawMode.Morph)
+        return true
+    }
+
+    fun acknowledgeCurrentReveal(generation: Long) {
+        if (currentSnapshot.phase != MediaGridMorphPhase.RevealingCurrent || currentSnapshot.interactionGeneration != generation) return
+        resetToIdle(currentSnapshot.fromColumnCount, generation)
+    }
+
+    fun beginTargetReveal(generation: Long): Boolean {
+        if (currentSnapshot.phase != MediaGridMorphPhase.AwaitingGridHandoff || currentSnapshot.interactionGeneration != generation) return false
+        publish(
+            phase = MediaGridMorphPhase.RevealingTarget,
+            direction = currentSnapshot.direction,
+            plan = currentSnapshot.plan,
+            progress = 1f,
+            correction = Offset.Zero,
+            center = currentSnapshot.currentPinchCenter,
+            identity = currentIdentity ?: return false,
+            toColumnCount = currentSnapshot.toColumnCount,
+            handoffRequest = currentSnapshot.handoffRequest,
+            generation = generation,
+            drawMode = MediaGridMorphDrawMode.RevealTarget,
+        )
+        return true
+    }
+
+    fun acknowledgeTargetReveal(generation: Long) {
+        if (currentSnapshot.phase != MediaGridMorphPhase.RevealingTarget || currentSnapshot.interactionGeneration != generation) return
+        resetToIdle(currentSnapshot.toColumnCount, generation)
     }
 
     fun completeHandoff(generation: Long) {
@@ -525,11 +618,19 @@ internal class MediaGridMorphInteractionController(
         handoffRequest: MediaGridMorphHandoffRequest?,
         generation: Long,
         failureReason: MediaGridMorphFailureReason? = null,
+        drawMode: MediaGridMorphDrawMode? = null,
     ) {
         _progress.value = progress
         _correction.value = correction
         _handoffRequest.value = handoffRequest
         _interactionLocked.value = phase != MediaGridMorphPhase.Idle && plan != null
+        val resolvedDrawMode = drawMode ?: when (phase) {
+            MediaGridMorphPhase.AwaitingGridHandoff -> MediaGridMorphDrawMode.Morph
+            MediaGridMorphPhase.RevealingCurrent -> MediaGridMorphDrawMode.RevealCurrent
+            MediaGridMorphPhase.RevealingTarget -> MediaGridMorphDrawMode.RevealTarget
+            else -> MediaGridMorphDrawMode.Normal
+        }
+        _drawMode.value = resolvedDrawMode
         currentSnapshot = MediaGridMorphInteractionSnapshot(
             phase = phase,
             direction = direction,
@@ -544,6 +645,7 @@ internal class MediaGridMorphInteractionController(
             handoffRequest = handoffRequest,
             interactionGeneration = generation,
             failureReason = failureReason,
+            drawMode = resolvedDrawMode,
         )
     }
 
@@ -557,6 +659,7 @@ internal class MediaGridMorphInteractionController(
         _correction.value = Offset.Zero
         _handoffRequest.value = null
         _interactionLocked.value = false
+        _drawMode.value = MediaGridMorphDrawMode.Normal
         currentSnapshot = MediaGridMorphInteractionSnapshot(
             phase = MediaGridMorphPhase.Idle,
             direction = null,
@@ -571,6 +674,7 @@ internal class MediaGridMorphInteractionController(
             handoffRequest = null,
             interactionGeneration = generation,
             failureReason = failureReason,
+            drawMode = MediaGridMorphDrawMode.Normal,
         )
     }
 
@@ -796,12 +900,27 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                     touchSlop = touchSlop,
                                 )
                                 if (direction != null && mode != MediaGridMorphGestureMode.Disabled) {
+                                    // Claim ordering is intentional: stop the
+                                    // real LazyGrid before taking the one
+                                    // stable layout capture used by the plan.
+                                    launchStopScrollOnce()
                                     val claimCapture = latestCaptureOnClaim?.invoke()
                                     val claimIdentity = claimCapture?.identity?.toInteractionIdentity() ?: latestIdentity
-                                    val currentPairs = claimCapture
-                                        ?.let(::buildMediaGridMorphRowPreparedPairs)
-                                        ?.takeIf { it.isNotEmpty() }
-                                        ?: latestPairs()
+                                    val currentPairs = if (mode == MediaGridMorphGestureMode.Production) {
+                                        if (latestCaptureOnClaim == null) {
+                                            latestPairs()
+                                        } else {
+                                            claimCapture
+                                                ?.let(::buildMediaGridMorphRowPreparedPairs)
+                                                ?.takeIf { it.isNotEmpty() }
+                                                ?: emptyMap()
+                                        }
+                                    } else {
+                                        claimCapture
+                                            ?.let(::buildMediaGridMorphRowPreparedPairs)
+                                            ?.takeIf { it.isNotEmpty() }
+                                            ?: latestPairs()
+                                    }
                                     val currentPair = currentPairs[direction]
                                     val morphAccepted = controller != null && claimIdentity != null &&
                                         currentPair != null && currentPair.matchesIdentity(claimIdentity) &&
@@ -817,12 +936,10 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                         controller.updatePointers(currentFirstPosition, currentSecondPosition)
                                         pointerInProgress?.value = true
                                         arbitrationState = MediaGridMorphGestureArbitrationState.MorphClaimed
-                                        launchStopScrollOnce()
                                     } else {
                                         fallbackAnchor = latestFallbackAnchor(currentCentroid)
                                         pointerInProgress?.value = true
                                         arbitrationState = MediaGridMorphGestureArbitrationState.FallbackClaimed
-                                        launchStopScrollOnce()
                                     }
                                     consumeClaimEvent(first, second)
                                 }

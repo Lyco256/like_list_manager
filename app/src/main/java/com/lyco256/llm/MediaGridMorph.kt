@@ -26,8 +26,17 @@ internal enum class MediaGridMorphPhase {
     Tracking,
     SettlingToCurrent,
     SettlingToTarget,
+    RevealingCurrent,
     AwaitingGridHandoff,
+    RevealingTarget,
     Failed,
+}
+
+internal enum class MediaGridMorphDrawMode {
+    Normal,
+    Morph,
+    RevealCurrent,
+    RevealTarget,
 }
 
 /** The only per-media input copied from the current frame for morph preparation. */

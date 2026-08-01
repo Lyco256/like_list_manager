@@ -55,15 +55,17 @@ class MediaGridRenderingContractTest {
     }
 
     @Test
-    fun preparedIndexIsKeyedByFrameStoreAdapterAndDrawIndexVersion() {
+    fun preparedIndexFeedsTheSingleSurfaceBeforeDraw() {
         val source = locateSource("src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt").readText()
         val prepared = source.indexOf("val residentPreparedIndex")
-        val draw = source.indexOf("Modifier.mediaGridResidentCanvas")
+        val draw = source.indexOf("Modifier.mediaGridSingleSurface")
         assertTrue(prepared >= 0)
         assertTrue(draw > prepared)
         assertTrue(source.substring(prepared, draw).contains("remember(frame.key, retainedImageStore, residentCanvasAdapter, residentDrawIndexVersion)"))
         assertTrue(source.substring(prepared, draw).contains("drawIndexSnapshot()"))
         assertTrue(source.substring(prepared, draw).contains("residentCanvasMode != MediaGridResidentCanvasMode.Disabled"))
+        assertTrue(source.substring(draw).contains("morphModel = morphRowRenderModel"))
+        assertTrue(source.substring(draw).contains("mode = singleSurfaceMode"))
     }
 
     @Test
@@ -88,20 +90,30 @@ class MediaGridRenderingContractTest {
     }
 
     @Test
-    fun morphCanvasHasExplicitTestAndProductionModes() {
+    fun morphCanvasHasOneProductionSurfaceAndFrozenDrawModel() {
         val uiSource = locateSource("src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt").readText()
         val rendererSource = locateSource("src/main/java/com/lyco256/llm/MediaGridMorphRowRenderer.kt").readText()
         val rowSource = locateSource("src/main/java/com/lyco256/llm/MediaGridMorphRowReflow.kt").readText()
+        val surfaceSource = locateSource("src/main/java/com/lyco256/llm/MediaGridResidentCanvas.kt").readText()
 
-        assertTrue(rendererSource.contains("drawWithCache"))
-        assertTrue(rendererSource.contains("onDrawWithContent"))
-        assertTrue(rendererSource.contains("val p = progress.value.coerceIn(0f, 1f)"))
+        assertTrue(rendererSource.contains("rememberMediaGridMorphRowRenderModel"))
+        assertTrue(rendererSource.contains("protectedAssetIds"))
+        assertTrue(rendererSource.contains("val p = progress.coerceIn(0f, 1f)"))
+        assertTrue(!rendererSource.contains("progress.value"))
+        assertTrue(surfaceSource.contains("MediaGridSingleSurfaceMode.Normal"))
+        assertTrue(surfaceSource.contains("MediaGridSingleSurfaceMode.Morph"))
+        assertTrue(surfaceSource.contains("MediaGridSingleSurfaceMode.RevealCurrent"))
+        assertTrue(surfaceSource.contains("MediaGridSingleSurfaceMode.RevealTarget"))
+        assertTrue(surfaceSource.contains("drawMediaGridMorphRow(model, progress.value)"))
         assertTrue(rowSource.contains("startNormalizedLeft"))
         assertTrue(rowSource.contains("startContent"))
         assertTrue(rowSource.contains("endContent"))
-        assertTrue(uiSource.contains("testMorphEnabled = BuildConfig.TEST_HARNESS"))
-        assertTrue(uiSource.contains("mediaGridMorphRowReflowCanvas"))
-        assertTrue(!uiSource.contains("MediaGridMorphProductionHost("))
+        assertTrue(uiSource.contains("morphEnabled = !selectionMode && !showProgress"))
+        assertTrue(uiSource.contains("MediaGridMorphProductionHandoffEffects("))
+        assertTrue(uiSource.contains("mediaGridSingleSurface"))
+        assertTrue(!uiSource.contains("testMorphEnabled"))
+        assertTrue(!uiSource.contains("mediaGridMorphRowReflowCanvas"))
+        assertTrue(!uiSource.contains("mediaGridLegacyPinchToResize"))
         assertTrue(!uiSource.contains("handoffVisualTranslation"))
     }
 
@@ -115,17 +127,34 @@ class MediaGridRenderingContractTest {
         assertTrue(interactionSource.contains("MediaGridMorphGestureMode.Test"))
         assertTrue(interactionSource.contains("withFrameNanos(controller::advanceSettleFrame)"))
         assertTrue(uiSource.contains("mediaGridMorphGestureInput"))
-        assertTrue(uiSource.contains("val testMorphEnabled = BuildConfig.TEST_HARNESS"))
+        assertTrue(uiSource.contains("mode = MediaGridMorphGestureMode.Production"))
         assertTrue(uiSource.contains("captureOnClaim"))
         assertTrue(uiSource.contains("buildMediaGridMorphRowPreparedPairs"))
         assertTrue(uiSource.contains("onFallbackPinchFinished = { _, nextColumnCount ->"))
-        assertTrue(uiSource.contains("mediaGridLegacyPinchToResize"))
-        assertTrue(uiSource.contains("mediaGridMorphRowReflowCanvas"))
+        assertTrue(uiSource.contains("MediaGridMorphProductionHandoffEffects("))
+        assertTrue(uiSource.contains("mediaGridSingleSurface"))
         assertTrue(uiSource.contains("interactionEnabled = !morphCheckpointSuppressed"))
         assertTrue(uiSource.contains("metadataOverlaysVisible = !morphInteractionLocked"))
         assertTrue(uiSource.contains("enabled = interactionEnabled && filters.hasActiveFilters"))
-        assertTrue(!uiSource.contains("MediaGridMorphProductionHost("))
-        assertTrue(!uiSource.contains("graphicsLayer {\n                            translationX"))
+        assertTrue(!uiSource.contains("mediaGridLegacyPinchToResize"))
+        assertTrue(!uiSource.contains("mediaGridMorphRowReflowCanvas"))
+    }
+
+    @Test
+    fun productionMorphProtectsFullRowEndpointsAndKeepsDrawHotPathPure() {
+        val uiSource = locateSource("src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt").readText()
+        val rendererSource = locateSource("src/main/java/com/lyco256/llm/MediaGridMorphRowRenderer.kt").readText()
+        val surfaceSource = locateSource("src/main/java/com/lyco256/llm/MediaGridResidentCanvas.kt").readText()
+        assertTrue(uiSource.contains("activeAssetIds = morphRowRenderModel?.protectedAssetIds"))
+        assertTrue(rendererSource.contains("cell.plan.startContent.assetIdOrNull()"))
+        assertTrue(rendererSource.contains("cell.plan.endContent.assetIdOrNull()"))
+        assertTrue(surfaceSource.contains("val commands = ArrayList<MediaGridResidentDrawCommand>"))
+        val singleSurfaceDraw = surfaceSource
+            .substringAfter("internal fun Modifier.mediaGridSingleSurface")
+            .substringAfter("onDrawWithContent")
+        assertTrue(singleSurfaceDraw.contains("while (index < commands.size)"))
+        assertTrue(!singleSurfaceDraw.contains("layout.visibleItemsInfo"))
+        assertTrue(!singleSurfaceDraw.contains("preparedImageByAssetId["))
     }
 
     @Test

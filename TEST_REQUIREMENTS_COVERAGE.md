@@ -1,5 +1,18 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-08-01 Phase 2 production row Morph
+
+| Requirement | Evidence | Status |
+|---|---|---|
+| real LazyGrid claim capture before visual activation | `TagHierarchyUiV2.kt`, `MediaGridMorphInteraction.kt`, `MediaGridMorphRowRenderer.kt` | Implemented; unit/static contracts passed |
+| one resident/Morph/reveal draw surface | `MediaGridResidentCanvas.mediaGridSingleSurface`, `MediaGridRenderingContractTest` | Implemented; draw-path contract passed |
+| row reflow and right-edge Placeholder/Image behavior | `MediaGridMorphRowReflow.kt`, `MediaGridMorphTest` | Implemented; 2↔3, 4↔5, 5↔4, 8↔9, 11↔12 covered |
+| current/target reveal barriers and identity handoff | `MediaGridMorphInteraction.kt`, `MediaGridMorphHandoffTest` | Implemented; exactly-once reveal tests passed |
+| full source/end endpoint protection | `MediaGridMorphRowRenderer.kt`, `TagHierarchyUiV2.kt`, rendering contract test | Implemented |
+| row/ordinal/header/cell geometry within one pixel with rollback | `MediaGridMorphHandoff.kt`, `MediaGridMorphHandoffTest` | Implemented; event-driven coordinator coverage passed |
+| no draw-phase collections/lookups/text/crop/state work | `MediaGridResidentCanvas.kt`, `MediaGridMorphRowRenderer.kt`, rendering contract test | Implemented; static contract passed |
+| safe integration/debug verification | `scripts/run-safe-integration-check.cmd`, `scripts/run-safe-debug-check.cmd -InstallToDevice` | Implemented; final safe runs passed |
+
 ## 2026-08-01 Phase 1 row reflow
 
 | Requirement | Evidence | Status |

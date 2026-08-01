@@ -671,8 +671,11 @@ class MediaGridMorphTest {
         assertEquals(releaseCorrection.x / 2f, current.snapshot().correction.x, 0.001f)
         assertEquals(releaseCorrection.y / 2f, current.snapshot().correction.y, 0.001f)
         current.advanceSettleElapsed(currentGeneration, 180L)
-        assertEquals(MediaGridMorphPhase.Idle, current.snapshot().phase)
+        assertEquals(MediaGridMorphPhase.RevealingCurrent, current.snapshot().phase)
+        assertEquals(MediaGridMorphDrawMode.RevealCurrent, current.snapshot().drawMode)
         assertEquals(Offset.Zero, current.snapshot().correction)
+        current.acknowledgeCurrentReveal(currentGeneration)
+        assertEquals(MediaGridMorphPhase.Idle, current.snapshot().phase)
     }
 
     @Test

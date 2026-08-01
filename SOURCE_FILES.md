@@ -74,6 +74,13 @@ Current media-grid rendering is owned by `MediaGridSessionCoordinator` under `Ma
 - The retired generator, store, scheduling state, cache restore, and viewport coordinator have no source, wrapper, test, or runtime reference. Existing retired cache files are left to Android's normal cache management.
 - `MediaGridMorph.kt` remains only for the existing pinch calculation/tests; no morph overlay is part of the product path.
 
+# 2026-08-01 Phase 2 production row Morph
+
+- `TagHierarchyUiV2.kt` uses the production gesture path on the real classified `LazyVerticalGrid`; claim order is stop-scroll, real-layout capture, then bounded row-plan/model preparation. The production path has no legacy pinch modifier, second grid, overlay, z-index, or translation.
+- `MediaGridResidentCanvas.kt` owns the single `Normal`/`Morph`/`RevealCurrent`/`RevealTarget` draw surface. Resident commands are prepared in cache phase; the draw phase consumes only prepared commands, the frozen row model, and progress.
+- `MediaGridMorphRowRenderer.kt` freezes row cells, headers, image endpoints, text layouts, and full source/end protection IDs before visual activation. Same slots crossfade `1-p/p`; new/disappearing right-edge slots use Placeholder endpoints.
+- `MediaGridMorphProductionHost.kt` production effects observe the actual target ordinal/row/header geometry, apply bounded one-pixel corrections, perform one underlying-grid draw, and gate reveal/rollback/checkpoint completion. The old visual host is TEST_HARNESS-guarded compatibility code.
+
 # Source Files Guide
 
 ## 2026-07-31 production Morph integration

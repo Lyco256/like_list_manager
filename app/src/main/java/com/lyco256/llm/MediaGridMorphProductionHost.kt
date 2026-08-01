@@ -98,6 +98,9 @@ internal fun MediaGridMorphProductionHost(
     onCheckpointSuppressed: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    check(BuildConfig.TEST_HARNESS) {
+        "MediaGridMorphProductionHost is retained only for legacy TEST_HARNESS coverage; production uses MediaGridMorphProductionHandoffEffects"
+    }
     val lifecycleOwner = LocalContext.current as? LifecycleOwner
     val latestFrame by rememberUpdatedState(frame)
     val latestSessionKey by rememberUpdatedState(sessionKey)
@@ -391,4 +394,202 @@ internal fun MediaGridMorphProductionHost(
             modifier = modifier,
         )
     }
+}
+
+/**
+ * Production handoff effects for the real LazyGrid. This function has no
+ * visual output: the grid's unified draw surface remains the only renderer.
+ */
+@Composable
+internal fun MediaGridMorphProductionHandoffEffects(
+    host: MediaGridMorphProductionHostState,
+    frame: MediaGridFrameData,
+    sessionKey: MediaGridSessionKey?,
+    identity: MediaGridMorphInteractionIdentity,
+    state: LazyGridState,
+    onColumnCountChange: (Int) -> Unit,
+    onAnchorCheckpoint: (MediaGridSessionKey, ClassifiedMediaGridScrollAnchor) -> Unit,
+    onCheckpointSuppressed: (Boolean) -> Unit,
+) {
+    val controller = host.controller
+    val coordinator = host.coordinator
+    val handoffSnapshot by host.handoffSnapshot
+    val latestFrame by rememberUpdatedState(frame)
+    val latestSessionKey by rememberUpdatedState(sessionKey)
+    val latestColumnChange by rememberUpdatedState(onColumnCountChange)
+    val latestCheckpoint by rememberUpdatedState(onAnchorCheckpoint)
+    val latestSuppression by rememberUpdatedState(onCheckpointSuppressed)
+    controller.updateIdentity(identity)
+
+    val morphLocked = controller.interactionLocked.value || handoffSnapshot.suppressesUserScroll
+    SideEffect { latestSuppression(morphLocked) }
+    DisposableEffect(host) { onDispose { latestSuppression(false) } }
+
+    fun publish(command: MediaGridMorphGridHandoffCommand?, generation: Long) {
+        if (command != null) host.commandChannel.trySend(MediaGridMorphProductionCommand(generation, command))
+        host.publishHandoffSnapshot()
+    }
+
+    fun checkpointIfAllowed() {
+        if (!coordinator.consumeFinalAnchorCheckpointPermission()) return
+        val key = latestSessionKey ?: return
+        captureClassifiedMediaGridScrollAnchor(state, latestFrame.assetIdByItemKey)?.let { latestCheckpoint(key, it) }
+    }
+
+    LaunchedEffect(host) {
+        for (request in host.requestChannel) {
+            val current = controller.snapshot().handoffRequest
+            if (current?.interactionGeneration != request.interactionGeneration) continue
+            publish(coordinator.start(request), request.interactionGeneration)
+        }
+    }
+
+    LaunchedEffect(host, frame.key, controller.handoffRequest.value) {
+        val request = controller.handoffRequest.value
+        if (request == null) {
+            coordinator.cancelForStaleDisplay()
+            host.publishHandoffSnapshot()
+        } else if (frame.key.dataKey != request.sourceDataKey) {
+            coordinator.cancelForStaleDisplay()
+            host.publishHandoffSnapshot()
+        } else {
+            publish(coordinator.observeFrame(frame), request.interactionGeneration)
+        }
+    }
+
+    LaunchedEffect(host, handoffSnapshot.phase, controller.handoffRequest.value, frame.key) {
+        val request = controller.handoffRequest.value ?: return@LaunchedEffect
+        if (
+            handoffSnapshot.phase != MediaGridMorphGridHandoffPhase.PositioningTarget &&
+            handoffSnapshot.phase != MediaGridMorphGridHandoffPhase.RollingBack
+        ) return@LaunchedEffect
+        snapshotFlow {
+            val layout = state.layoutInfo
+            val resolved = coordinator.snapshot().resolvedTarget
+            val visibleTarget = resolved?.let { target ->
+                layout.visibleItemsInfo.firstNotNullOfOrNull { info ->
+                    val key = info.key as? String ?: return@firstNotNullOfOrNull null
+                    val assetId = latestFrame.assetIdByItemKey[key] ?: return@firstNotNullOfOrNull null
+                    if (assetId != target.assetId) return@firstNotNullOfOrNull null
+                    MediaGridMorphVisibleItemGeometry(
+                        assetId = assetId,
+                        itemIndex = info.index,
+                        rect = Rect(
+                            info.offset.x.toFloat(),
+                            (info.offset.y - layout.viewportStartOffset).toFloat(),
+                            (info.offset.x + info.size.width).toFloat(),
+                            (info.offset.y - layout.viewportStartOffset + info.size.height).toFloat(),
+                        ),
+                    )
+                }
+            }
+            val visibleRow = captureMediaGridMorphVisibleTargetRow(
+                state = state,
+                frame = latestFrame,
+                targetOrdinal = request.targetFocalMediaOrdinal ?: request.targetAnchor.mediaOrdinal,
+                targetRowIndex = request.targetAnchorRowIndex,
+            )
+            Triple(
+                visibleTarget,
+                visibleRow,
+                layout.viewportSize.width to (layout.viewportEndOffset - layout.viewportStartOffset).coerceAtLeast(0),
+            )
+        }.distinctUntilChanged().collect { (visibleTarget, visibleRow, viewport) ->
+            val command = coordinator.observeLayout(
+                frame = latestFrame,
+                visibleTarget = visibleTarget,
+                visibleTargetRow = visibleRow,
+                viewportWidth = viewport.first,
+                viewportHeight = viewport.second,
+            )
+            publish(command, request.interactionGeneration)
+            if (coordinator.snapshot().phase == MediaGridMorphGridHandoffPhase.VerifyingTarget) {
+                coordinator.underlyingTargetGridDrawn()
+                controller.beginTargetReveal(request.interactionGeneration)
+                host.publishHandoffSnapshot()
+            }
+        }
+    }
+
+    val settleGeneration = controller.settleSignal.value
+    LaunchedEffect(host, settleGeneration) {
+        if (settleGeneration == 0L) return@LaunchedEffect
+        while (controller.isSettling(settleGeneration)) withFrameNanos(controller::advanceSettleFrame)
+    }
+
+    LaunchedEffect(host, controller.drawMode.value, controller.snapshot().interactionGeneration) {
+        val snapshot = controller.snapshot()
+        when (snapshot.drawMode) {
+            MediaGridMorphDrawMode.RevealCurrent -> {
+                withFrameNanos { }
+                controller.acknowledgeCurrentReveal(snapshot.interactionGeneration)
+                checkpointIfAllowed()
+            }
+            MediaGridMorphDrawMode.RevealTarget -> {
+                withFrameNanos { }
+                controller.acknowledgeTargetReveal(snapshot.interactionGeneration)
+                coordinator.nextFrame()
+                checkpointIfAllowed()
+                host.publishHandoffSnapshot()
+            }
+            else -> Unit
+        }
+    }
+
+    LaunchedEffect(host) {
+        for (envelope in host.commandChannel) {
+            val request = coordinator.snapshot().request
+            if (request?.interactionGeneration != envelope.generation) continue
+            when (val command = envelope.command) {
+                is MediaGridMorphGridHandoffCommand.ChangeColumnCount -> latestColumnChange(command.columnCount)
+                is MediaGridMorphGridHandoffCommand.RollbackColumnCount -> latestColumnChange(command.columnCount)
+                is MediaGridMorphGridHandoffCommand.ScrollToItem -> {
+                    state.scrollToItem(command.itemIndex, command.scrollOffset)
+                    withFrameNanos { }
+                }
+                is MediaGridMorphGridHandoffCommand.ScrollBy -> {
+                    state.scrollBy(command.pixels)
+                    withFrameNanos { }
+                }
+                is MediaGridMorphGridHandoffCommand.Complete -> checkpointIfAllowed()
+                is MediaGridMorphGridHandoffCommand.Cancel -> {
+                    controller.cancelHandoff(command.interactionGeneration)
+                    checkpointIfAllowed()
+                }
+            }
+            host.publishHandoffSnapshot()
+        }
+    }
+}
+
+private fun captureMediaGridMorphVisibleTargetRow(
+    state: LazyGridState,
+    frame: MediaGridFrameData,
+    targetOrdinal: Int,
+    targetRowIndex: Int?,
+): MediaGridMorphVisibleRowGeometry? {
+    val layout = state.layoutInfo
+    val media = layout.visibleItemsInfo.mapNotNull { info ->
+        val ordinal = frame.ordinalIndex.mediaOrdinalByItemIndex.getOrNull(info.index) ?: return@mapNotNull null
+        if (ordinal < 0) return@mapNotNull null
+        Triple(info, ordinal, info.offset.y.toFloat())
+    }
+    val target = media.firstOrNull { it.second == targetOrdinal } ?: return null
+    val row = media.filter { kotlin.math.abs(it.third - target.third) <= 1f }
+        .sortedBy { it.first.offset.x }
+    if (row.isEmpty()) return null
+    val firstIndex = row.minOf { it.first.index }
+    val header = layout.visibleItemsInfo
+        .filter { it.index < firstIndex }
+        .sortedByDescending { it.index }
+        .firstNotNullOfOrNull { info -> frame.items.getOrNull(info.index) as? MediaGridHeaderItem }
+    return MediaGridMorphVisibleRowGeometry(
+        rowIndex = targetRowIndex ?: target.third.toInt(),
+        rowTop = row.minOf { it.third },
+        cellWidth = row.first().first.size.width.toFloat(),
+        cellHeight = row.first().first.size.height.toFloat(),
+        mediaOrdinals = row.map { it.second },
+        headerKey = header?.key,
+        headerTitle = header?.label,
+    )
 }

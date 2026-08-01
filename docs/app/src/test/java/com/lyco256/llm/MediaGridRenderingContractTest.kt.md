@@ -1,5 +1,9 @@
 # `MediaGridRenderingContractTest.kt`
 
+## 2026-08-01 Phase 2 coverage
+
+- Static contracts assert one production gesture path, one resident/Morph surface, cache-phase resident command preparation, frozen row rendering, full endpoint protection, and removal of the legacy production pinch/overlay route.
+
 ## 2026-08-01 Phase 1 renderer contract
 
 - The production source path is checked for legacy one-step pinch and absence of the old production Morph host/translation.

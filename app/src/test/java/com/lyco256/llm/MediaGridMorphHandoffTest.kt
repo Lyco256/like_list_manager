@@ -224,6 +224,62 @@ class MediaGridMorphHandoffTest {
     }
 
     @Test
+    fun targetRowHandoffRequiresOrdinalsHeaderAndOnePixelGeometryBeforeReveal() {
+        val request = request().copy(
+            targetRowMediaOrdinals = listOf(0),
+            targetAnchorRowTop = 12f,
+            targetCellSizePx = 100f,
+            targetHeaderTitle = "Section",
+        )
+        val targetFrame = frame(request.expectedTargetFrameKey, longArrayOf(11L, 12L))
+        val visibleTarget = MediaGridMorphVisibleItemGeometry(11L, 0, Rect(0f, 12f, 100f, 112f))
+        val visibleRow = MediaGridMorphVisibleRowGeometry(
+            rowIndex = 0,
+            rowTop = 12f,
+            cellWidth = 100f,
+            cellHeight = 100f,
+            mediaOrdinals = listOf(0),
+            headerTitle = "Section",
+        )
+        val coordinator = MediaGridMorphGridHandoffCoordinator()
+        coordinator.start(request)
+        coordinator.observeFrame(targetFrame)
+        assertTrue(coordinator.observeLayout(targetFrame, visibleTarget, 300, 300) is MediaGridMorphGridHandoffCommand.ScrollToItem)
+        assertNull(coordinator.observeLayout(targetFrame, visibleTarget, 300, 300, visibleRow))
+        assertEquals(MediaGridMorphGridHandoffPhase.VerifyingTarget, coordinator.snapshot().phase)
+
+        val mismatchedHeader = MediaGridMorphGridHandoffCoordinator()
+        mismatchedHeader.start(request)
+        mismatchedHeader.observeFrame(targetFrame)
+        mismatchedHeader.observeLayout(targetFrame, visibleTarget, 300, 300)
+        assertEquals(
+            MediaGridMorphGridHandoffCommand.RollbackColumnCount(2),
+            mismatchedHeader.observeLayout(
+                targetFrame,
+                visibleTarget,
+                300,
+                300,
+                visibleRow.copy(headerTitle = "Other"),
+            ),
+        )
+    }
+
+    @Test
+    fun targetRevealAcceptsTargetIdentityAndAcknowledgesExactlyOnce() {
+        val controller = awaitingController()
+        val request = controller.snapshot().handoffRequest!!
+        val generation = request.interactionGeneration
+        assertTrue(controller.beginTargetReveal(generation))
+        assertEquals(MediaGridMorphPhase.RevealingTarget, controller.snapshot().phase)
+        controller.updateIdentity(identity(request.expectedTargetFrameKey, request.toColumnCount, request))
+        assertEquals(MediaGridMorphPhase.RevealingTarget, controller.snapshot().phase)
+        controller.acknowledgeTargetReveal(generation)
+        controller.acknowledgeTargetReveal(generation)
+        assertEquals(MediaGridMorphPhase.Idle, controller.snapshot().phase)
+        assertEquals(request.toColumnCount, controller.snapshot().fromColumnCount)
+    }
+
+    @Test
     fun coordinatorUsesOrdinalFallbackAndLimitsYCorrectionToThreeAttempts() {
         val request = request().copy(
             targetAnchor = request().targetAnchor.copy(assetId = 99L, mediaOrdinal = 1),
