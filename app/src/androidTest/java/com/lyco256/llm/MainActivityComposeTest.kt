@@ -314,6 +314,9 @@ class MainActivityComposeTest {
         waitDisplayed(errorTag)
         assertTrue(composeRule.onAllNodesWithTag("media_grid_placeholder_${assetIds.getValue("grid-error")}").fetchSemanticsNodes().isEmpty())
 
+        composeRule.waitUntil(30_000) {
+            !mainViewModel().mediaGridSessionState.value.showInitialProgress
+        }
         waitForGridColumnCount(ClassifiedMediaGridDefaultColumnCount)
         val beforePinchColumns = mainViewModel().mediaGridSessionState.value.columnCount
         pinchOnGrid("classified_media_grid", centerSpan = 260f, endSpan = 180f)
@@ -402,7 +405,7 @@ class MainActivityComposeTest {
     }
 
     @Test
-    fun normalClassifiedGridComposesProductionCanvasDuringLivePinch() {
+    fun testHarnessMediaGridUsesSameSurfaceRendererWithoutLegacyMorphCanvas() {
         val now = Instant.now().toString()
         val colors = listOf(android.graphics.Color.MAGENTA, android.graphics.Color.CYAN)
         val paths = colors.mapIndexed { index, color ->
@@ -478,6 +481,9 @@ class MainActivityComposeTest {
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithTag("media_grid_item_${assetIds.first()}").fetchSemanticsNodes().isNotEmpty()
         }
+        composeRule.waitUntil(30_000) {
+            !mainViewModel().mediaGridSessionState.value.showInitialProgress
+        }
         val mainViewModel = mainViewModel()
         val residentStore = mainViewModel.mediaGridSessionState.value.retainedImageStore
             ?: error("Main activity did not expose its production retained image store")
@@ -522,7 +528,6 @@ class MainActivityComposeTest {
         }
 
         var canvasSeenDuringGesture = false
-        var normalCellVisualSeenDuringGesture = false
         pinchOnGrid(
             gridTag = "classified_media_grid",
             centerSpan = 260f,
@@ -532,22 +537,14 @@ class MainActivityComposeTest {
                     composeRule.onAllNodesWithTag("media_grid_morph_canvas", useUnmergedTree = true)
                         .fetchSemanticsNodes()
                         .isNotEmpty()
-                normalCellVisualSeenDuringGesture = assetIds.any { assetId ->
-                    listOf(
-                        "media_grid_image_$assetId",
-                        "media_grid_placeholder_$assetId",
-                        "media_grid_error_$assetId",
-                        "media_grid_resident_image_$assetId",
-                    ).any { tag ->
-                        composeRule.onAllNodesWithTag(tag, useUnmergedTree = true)
-                            .fetchSemanticsNodes()
-                            .isNotEmpty()
-                    }
-                }
             },
         )
-        assertTrue(canvasSeenDuringGesture)
-        assertFalse(normalCellVisualSeenDuringGesture)
+        assertFalse(canvasSeenDuringGesture)
+        assertTrue(
+            composeRule.onAllNodesWithTag("media_grid_morph_same_surface", useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .isEmpty(),
+        )
     }
 
     @Test
@@ -2447,11 +2444,22 @@ class MainActivityComposeTest {
     }
 
     private fun waitForGridColumnCount(expected: Int) {
-        composeRule.waitUntil(30_000) {
+        try {
+            composeRule.waitUntil(30_000) {
+                val session = mainViewModel().mediaGridSessionState.value
+                session.columnCount == expected &&
+                    session.requestedColumnCount == expected &&
+                    session.frame?.key?.columnCount == expected
+            }
+        } catch (cause: Throwable) {
             val session = mainViewModel().mediaGridSessionState.value
-            session.columnCount == expected &&
-                session.requestedColumnCount == expected &&
-                session.frame?.key?.columnCount == expected
+            throw AssertionError(
+                    "Timed out waiting for grid columns=$expected; " +
+                    "actual=${session.columnCount}, requested=${session.requestedColumnCount}, " +
+                    "frame=${session.frame?.key?.columnCount}, status=${session.controllerState.startup}, " +
+                    "showInitialProgress=${session.showInitialProgress}",
+                cause,
+            )
         }
     }
 

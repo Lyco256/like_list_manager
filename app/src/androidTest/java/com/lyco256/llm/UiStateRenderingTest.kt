@@ -395,6 +395,10 @@ class UiStateRenderingTest {
         composeRule.onNodeWithTag("media_grid_item_24").fetchSemanticsNode()
         composeRule.onNodeWithTag("media_grid_item_25").fetchSemanticsNode()
         composeRule.onNodeWithTag("media_grid_video_badge_22").fetchSemanticsNode()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("media_grid_error_23").fetchSemanticsNodes().isNotEmpty() &&
+                composeRule.onAllNodesWithTag("media_grid_error_24").fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithTag("media_grid_error_23").fetchSemanticsNode()
         composeRule.onNodeWithTag("media_grid_error_24").fetchSemanticsNode()
 

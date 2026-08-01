@@ -88,27 +88,19 @@ class MediaGridRenderingContractTest {
     @Test
     fun morphCanvasHasExplicitTestAndProductionModes() {
         val uiSource = locateSource("src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt").readText()
-        val canvasSource = locateSource("src/main/java/com/lyco256/llm/MediaGridMorphCanvas.kt").readText()
-        val hostSource = locateSource("src/main/java/com/lyco256/llm/MediaGridMorphProductionHost.kt").readText()
-        val canvasDraw = canvasSource.substringAfter("private fun MediaGridMorphCanvas(")
-            .substringBefore("private fun lerpMorphEdge")
+        val rendererSource = locateSource("src/main/java/com/lyco256/llm/MediaGridMorphRowRenderer.kt").readText()
+        val rowSource = locateSource("src/main/java/com/lyco256/llm/MediaGridMorphRowReflow.kt").readText()
 
-        assertTrue(canvasSource.contains("if (mode == MediaGridMorphCanvasMode.Disabled) return"))
-        assertTrue(canvasSource.contains("ProductionVisible"))
-        assertTrue(canvasSource.contains("mode != MediaGridMorphCanvasMode.TestVisible || BuildConfig.TEST_HARNESS"))
-        assertTrue(canvasSource.contains("rememberTextMeasurer()"))
-        assertTrue(uiSource.contains("MediaGridMorphProductionHost"))
-        assertTrue(hostSource.contains("MediaGridMorphCanvasMode.ProductionVisible"))
-        assertTrue(canvasDraw.contains("val p = progress.value.coerceIn(0f, 1f)"))
-        assertTrue(canvasDraw.contains("val currentCorrection = correction.value"))
-        assertTrue(!canvasDraw.contains("preparedImageByAssetId"))
-        assertTrue(!canvasDraw.contains("mediaGridCropSourceRect"))
-        assertTrue(!canvasDraw.contains("TextMeasurer"))
-        assertTrue(!canvasDraw.contains(".map {"))
-        assertTrue(!canvasDraw.contains(".filter {"))
-        assertTrue(!canvasDraw.contains(".sortedBy"))
-        assertTrue(!canvasDraw.contains("ImageRequest"))
-        assertTrue(!canvasDraw.contains("drawIndex"))
+        assertTrue(rendererSource.contains("drawWithCache"))
+        assertTrue(rendererSource.contains("onDrawWithContent"))
+        assertTrue(rendererSource.contains("val p = progress.value.coerceIn(0f, 1f)"))
+        assertTrue(rowSource.contains("startNormalizedLeft"))
+        assertTrue(rowSource.contains("startContent"))
+        assertTrue(rowSource.contains("endContent"))
+        assertTrue(uiSource.contains("testMorphEnabled = BuildConfig.TEST_HARNESS"))
+        assertTrue(uiSource.contains("mediaGridMorphRowReflowCanvas"))
+        assertTrue(!uiSource.contains("MediaGridMorphProductionHost("))
+        assertTrue(!uiSource.contains("handoffVisualTranslation"))
     }
 
     @Test
@@ -120,16 +112,16 @@ class MediaGridRenderingContractTest {
 
         assertTrue(interactionSource.contains("MediaGridMorphGestureMode.Test"))
         assertTrue(interactionSource.contains("withFrameNanos(controller::advanceSettleFrame)"))
-        assertTrue(interactionSource.contains("MediaGridMorphCanvasMode.TestVisible"))
         assertTrue(uiSource.contains("mediaGridMorphGestureInput"))
-        assertTrue(uiSource.contains("MediaGridMorphGestureMode.Production"))
-        assertTrue(uiSource.contains("val productionMorphEnabled = !selectionMode && !showProgress"))
-        assertTrue(uiSource.contains("enabled = productionMorphEnabled && residentPreparedIndex != null"))
+        assertTrue(uiSource.contains("val testMorphEnabled = BuildConfig.TEST_HARNESS"))
+        assertTrue(uiSource.contains("captureOnClaim"))
+        assertTrue(uiSource.contains("mediaGridLegacyPinchToResize"))
+        assertTrue(uiSource.contains("mediaGridMorphRowReflowCanvas"))
         assertTrue(uiSource.contains("interactionEnabled = !morphCheckpointSuppressed"))
         assertTrue(uiSource.contains("metadataOverlaysVisible = !morphInteractionLocked"))
         assertTrue(uiSource.contains("enabled = interactionEnabled && filters.hasActiveFilters"))
-        assertTrue(uiSource.contains("MediaGridMorphProductionHostState"))
-        assertTrue(!uiSource.contains("mediaGridPinchToResize"))
+        assertTrue(!uiSource.contains("MediaGridMorphProductionHost("))
+        assertTrue(!uiSource.contains("graphicsLayer {\n                            translationX"))
     }
 
     @Test

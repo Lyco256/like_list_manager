@@ -1,5 +1,14 @@
 # `MediaGridMorphInteraction.kt`
 
+## 2026-08-01 Phase 1 row reflow
+
+- Production Morph overlay/handoff is disabled for this phase. Release builds use the legacy one-step pinch resize with a fixed initial pointer distance.
+- TEST_HARNESS captures the real grid at claim, derives progress from current distance divided by the initial distance, and hands off to the actual target `LazyVerticalGrid` row.
+- The row plan keeps the initial pinch center fixed; current-centroid translation is not applied.
+- Claim-time pairs use the identity captured from that same `LazyGridLayoutInfo` snapshot, so a stale pre-recomposition viewport signature cannot silently downgrade the TEST_HARNESS gesture to a no-op fallback.
+- During active Tracking/settle, the captured plan remains valid across LazyGrid offset/signature updates caused by stopping a scroll; source revision, frame key, and current column count remain strict identity guards.
+- Target anchor selection retains a row-plan path when the target focal metadata is incomplete, using the bounded target cell content before falling back to the legacy bounded slot selector.
+
 ## 2026-07-31 UI・handoff correction
 
 - Pointer release accepts the first normal loss of a tracked pointer, including pointer disappearance, and calls Morph release or fallback exactly once.

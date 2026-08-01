@@ -1,5 +1,13 @@
 # MediaGridMorph.kt
 
+## 2026-08-01 Phase 1 row reflow
+
+- Claim-time preparation now exposes one immutable interaction identity derived from the same LazyGrid capture; the row reflow target plan remains bounded to captured rows and target ordinals.
+
+- Claim-time capture copies visible media rows and header rectangles once from the real `LazyGridLayoutInfo`; the prepared pair keeps this bounded source snapshot.
+- TEST_HARNESS row plans reflow existing screen columns between adjacent counts. Increase reveals only the rightmost slot from zero width; decrease collapses only the rightmost old slot to zero width.
+- The row renderer uses source/target viewport content with Placeholder endpoints and does not build generic dataset-item start/end correspondences.
+
 ## 2026-07-31 UI・handoff correction
 
 - Morph slots use explicit `Image`/`Placeholder` endpoints and resolve resident misses to Placeholder during render-model construction.

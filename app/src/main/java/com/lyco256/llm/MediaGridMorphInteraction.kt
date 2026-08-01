@@ -136,6 +136,7 @@ internal fun mediaGridMorphFocalCorrection(
     progress: Float,
     fixedInitialPinchCenter: Offset,
 ): Offset {
+    if (plan.viewportPlan != null) return Offset.Zero
     val p = progress.coerceIn(0f, 1f)
     if (p <= 0f) return Offset.Zero
     val anchor = plan.anchor ?: return Offset.Zero
@@ -267,7 +268,16 @@ internal class MediaGridMorphInteractionController(
         val nextProgress = if (nextDirection == null || plan == null) {
             0f
         } else {
-            mediaGridMorphProgressForScale(scale, nextDirection)
+            if (plan.viewportPlan != null) {
+                mediaGridMorphProgressForDistance(
+                    initialDistance = activeGesture.initialDistance,
+                    currentDistance = currentDistance,
+                    fromColumnCount = plan.fromColumnCount,
+                    toColumnCount = plan.toColumnCount,
+                )
+            } else {
+                mediaGridMorphProgressForScale(scale, nextDirection)
+            }
         }
         val nextCorrection = plan?.let {
             mediaGridMorphFocalCorrection(it, nextProgress, activeGesture.initialCenter)
@@ -366,16 +376,15 @@ internal class MediaGridMorphInteractionController(
             return
         }
         currentIdentity = identity
-        val plan = snapshot.plan
-        val planViewportMismatch = plan?.preparedPair?.viewportSignature
-            ?.let { it != identity.viewportSignature }
-            ?: false
         if (
             snapshot.sourceRevision != identity.sourceRevision ||
             snapshot.frameKey != identity.frameKey ||
-            snapshot.fromColumnCount != identity.currentColumnCount ||
-            planViewportMismatch
+            snapshot.fromColumnCount != identity.currentColumnCount
         ) {
+            // The plan is intentionally frozen from the claim-time grid
+            // snapshot. Stopping an in-flight scroll may change visible item
+            // offsets/signatures without changing the source frame; that is
+            // not a reason to discard the captured Morph geometry.
             gesture = null
             settle = null
             publishFailure(
@@ -603,6 +612,7 @@ internal fun Modifier.mediaGridMorphGestureInput(
     fallbackColumnCount: () -> Int = { identity?.currentColumnCount ?: 0 },
     fallbackAnchorAtCenter: (Offset) -> ClassifiedMediaGridScrollAnchor? = { null },
     pointerInProgress: MutableStateFlow<Boolean>? = null,
+    captureOnClaim: (() -> MediaGridMorphCapture?)? = null,
 ): Modifier {
     check(mode != MediaGridMorphGestureMode.Test || BuildConfig.TEST_HARNESS) {
         "mediaGridMorphGestureInput Test mode is restricted to TEST_HARNESS"
@@ -613,6 +623,7 @@ internal fun Modifier.mediaGridMorphGestureInput(
     val latestFallback by rememberUpdatedState(onFallbackPinchFinished)
     val latestColumnCount by rememberUpdatedState(fallbackColumnCount)
     val latestFallbackAnchor by rememberUpdatedState(fallbackAnchorAtCenter)
+    val latestCaptureOnClaim by rememberUpdatedState(captureOnClaim)
     val touchSlop = LocalViewConfiguration.current.touchSlop
     return pointerInput(mode, controller) {
         coroutineScope {
@@ -781,13 +792,17 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                     touchSlop = touchSlop,
                                 )
                                 if (direction != null && mode != MediaGridMorphGestureMode.Disabled) {
-                                    val currentIdentity = latestIdentity
-                                    val currentPairs = latestPairs()
+                                    val claimCapture = latestCaptureOnClaim?.invoke()
+                                    val claimIdentity = claimCapture?.identity?.toInteractionIdentity() ?: latestIdentity
+                                    val currentPairs = claimCapture
+                                        ?.let(::buildMediaGridMorphPreparedPairs)
+                                        ?.takeIf { it.isNotEmpty() }
+                                        ?: latestPairs()
                                     val currentPair = currentPairs[direction]
-                                    val morphAccepted = controller != null && currentIdentity != null &&
-                                        currentPair != null && currentPair.matchesIdentity(currentIdentity) &&
+                                    val morphAccepted = controller != null && claimIdentity != null &&
+                                        currentPair != null && currentPair.matchesIdentity(claimIdentity) &&
                                         controller.beginPointers(
-                                            identity = currentIdentity,
+                                            identity = claimIdentity,
                                             preparedPairsSnapshot = currentPairs,
                                             firstPointerId = activeCandidate.firstPointerId,
                                             secondPointerId = activeCandidate.secondPointerId,

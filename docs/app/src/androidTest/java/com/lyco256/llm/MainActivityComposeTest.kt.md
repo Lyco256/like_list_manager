@@ -2,7 +2,9 @@
 
 ## 2026-07-31 production Morph correction coverage
 
-- The real Activity test covers production Canvas-only visuals during pinch, repeated increase/decrease round trips, threshold no-op, dialog interaction, recreation, and filter/sort changes.
+The Phase 1 production test now asserts the legacy one-step pinch path and the absence of both the old production Morph Canvas and TEST_HARNESS same-surface tag. Production normal grid rendering remains connected during the gesture.
+
+- The real Activity test covers production release-time column changes, repeated increase/decrease round trips, threshold no-op, dialog interaction, recreation, and filter/sort changes.
 - Column changes are synchronized against the session's `columnCount`, `requestedColumnCount`, and frame key; clipped cell bounds are not used as a column-count oracle during handoff translation.
 
 ## 2026-07-19 direct preview coverage
@@ -114,3 +116,9 @@
 - The classified display-toggle flow waits for the first local media cell to display without scrolling or tapping, covering the ordered initial prepared-image path and card-to-grid transition.
 - The large-media flow keeps the normal paced drag, fast fling, immediate retouch, final visible-range selection, and post-filter cell action as the integration regression coverage for operation-state suppression and latest-viewport following.
 - Placeholder tags, existing image success/error behavior, column changes, selection, dialogs, and Macrobenchmark behavior remain covered by their existing tests and are not changed by this implementation.
+
+## 2026-08-01 Phase 1 row reflow coverage
+
+- The integration build uses `TEST_HARNESS=true`; `testHarnessMediaGridUsesSameSurfaceRendererWithoutLegacyMorphCanvas` drives the TEST_HARNESS pinch and explicitly rejects the historical Morph canvas, while the rendering contract test verifies the same-surface modifier statically.
+- The classified display-toggle flow exercises the real LazyVerticalGrid pinch handoff after the claim-time capture, including column changes through the actual target frame.
+- Before pinch assertions, the flow waits for `showInitialProgress == false`; a visible media item alone does not prove that the TEST_HARNESS Morph controller is enabled.

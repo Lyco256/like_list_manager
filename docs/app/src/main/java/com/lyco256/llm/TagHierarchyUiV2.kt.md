@@ -264,6 +264,13 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 旧操作状態と生成停止方式の詳細はGit履歴だけに残します。現行の直接表示とpreloadの証跡は、冒頭のdirect preview節と`MediaGridDirectPreviewTest`にあります。
 # `TagHierarchyUiV2.kt`
 
+## 2026-08-01 Phase 1 Morph boundary
+
+- The normal classified `LazyVerticalGrid` remains the only grid surface. In `TEST_HARNESS`, the row reflow renderer is attached to that grid's draw modifier; no second grid, overlay Box, or z-index Morph host is composed.
+- Production builds keep the existing resident canvas and use the legacy release-time one-step pinch resize. The former production Morph host is not connected.
+- TEST_HARNESS target handoff selects the focal media ordinal from the target frame and corrects the real `LazyGridState` row position before completing the handoff.
+- TEST_HARNESS advances the controller's release settle frames from `settleSignal` before issuing the real-grid handoff, so a completed pinch cannot remain indefinitely in `SettlingToTarget`.
+
 ## 2026-07-31 UI・handoff correction
 
 - `ClassifiedMediaGridContent` keeps one LazyGrid for layout, keys, spans, semantics, and scroll state while an active Morph plan hides its normal visual content.

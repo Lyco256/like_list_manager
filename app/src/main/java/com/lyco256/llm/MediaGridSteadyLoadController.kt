@@ -715,8 +715,15 @@ internal class MediaGridSteadyLoadController(
                             states[task.assetId] = MediaGridCellLoadState(MediaGridCellLoadStatus.Pending, task.prepared, next)
                             addBitmapTaskLocked(task.assetId, task.prepared, next, task.lane)
                         } else {
-                            states[task.assetId] = if (task.lane == LoadLane.Background) MediaGridCellLoadState(MediaGridCellLoadStatus.Pending, task.prepared, next)
-                            else MediaGridCellLoadState(MediaGridCellLoadStatus.Failed, task.prepared, next)
+                            // No candidate remains. Keeping a background task in
+                            // Pending here leaves it with no queue entry and no
+                            // future wake-up; terminal failure must be explicit
+                            // for both urgent and background lanes.
+                            states[task.assetId] = MediaGridCellLoadState(
+                                MediaGridCellLoadStatus.Failed,
+                                task.prepared,
+                                next,
+                            )
                         }
                     }
                 }

@@ -4,6 +4,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -70,6 +71,15 @@ class MediaGridMorphTest {
         assertEquals(3, mediaGridColumnCountAfterPinchRelease(4, 0.25f))
         assertEquals(12, mediaGridColumnCountAfterPinchRelease(12, 2f))
         assertEquals(2, mediaGridColumnCountAfterPinchRelease(2, 0.25f))
+    }
+
+    @Test
+    fun legacyReleasePinchUsesOneAdjacentColumnAndClampsBounds() {
+        assertEquals(5, mediaGridLegacyColumnCountForScale(4, 1.2f))
+        assertEquals(3, mediaGridLegacyColumnCountForScale(4, 0.8f))
+        assertEquals(4, mediaGridLegacyColumnCountForScale(4, 1.05f))
+        assertEquals(12, mediaGridLegacyColumnCountForScale(12, 2f))
+        assertEquals(2, mediaGridLegacyColumnCountForScale(2, 0.2f))
     }
 
     @Test
@@ -841,6 +851,246 @@ class MediaGridMorphTest {
         assertEquals(76f, local.bottom, 0.001f)
     }
 
+    @Test
+    fun rowReflowCoversRequiredAdjacentColumnPairsWithRightEdgeOnlyChange() {
+        listOf(2 to 3, 4 to 5, 8 to 9, 11 to 12).forEach { (from, to) ->
+            val pair = buildMediaGridMorphPreparedPairs(withSourceRows(capture(from, to * 3), from))
+                .getValue(MediaGridMorphDirection.IncreaseColumns)
+            val plan = requireNotNull(pair.viewportPlanTemplate).select(Offset(600f, 150f))
+            val row = plan.rowPlans.first { it.relativeRow == 0 }
+            assertEquals(to, row.cells.size)
+            row.cells.take(from).forEachIndexed { column, cell ->
+                assertEquals(column.toFloat() / from, cell.startNormalizedLeft, 0.0001f)
+                assertEquals(column.toFloat() / to, cell.endNormalizedLeft, 0.0001f)
+            }
+            val added = row.cells.last()
+            assertEquals(1f, added.startNormalizedLeft, 0.0001f)
+            assertEquals(from.toFloat() / to, added.endNormalizedLeft, 0.0001f)
+            assertTrue(added.startContent is MediaGridMorphSlotContent.Placeholder)
+        }
+        listOf(3 to 2, 5 to 4, 9 to 8, 12 to 11).forEach { (from, to) ->
+            val pair = buildMediaGridMorphPreparedPairs(withSourceRows(capture(from, from * 3), from))
+                .getValue(MediaGridMorphDirection.DecreaseColumns)
+            val plan = requireNotNull(pair.viewportPlanTemplate).select(Offset(600f, 150f))
+            val row = plan.rowPlans.first { it.relativeRow == 0 }
+            val removed = row.cells.last()
+            assertEquals(from, row.cells.size)
+            assertEquals(to.toFloat() / from, removed.startNormalizedLeft, 0.0001f)
+            assertEquals(1f, removed.endNormalizedLeft, 0.0001f)
+            assertTrue(removed.endContent is MediaGridMorphSlotContent.Placeholder)
+        }
+    }
+
+    @Test
+    fun rowReflowUsesCapturedRectsAndFixedFocalRowWithoutCentroidTranslation() {
+        val capture = withSourceRows(capture(4, 20), 4)
+        val pair = buildMediaGridMorphPreparedPairs(capture).getValue(MediaGridMorphDirection.IncreaseColumns)
+        val plan = requireNotNull(pair.viewportPlanTemplate).select(Offset(600f, 150f))
+        val sourceFocal = capture.sourceRows[1]
+        val focal = plan.rowPlans.first { it.relativeRow == 0 }
+        assertEquals(sourceFocal.top, focal.sourceTop, 0.0001f)
+        assertEquals(sourceFocal.bottom, focal.sourceBottom, 0.0001f)
+        assertEquals(0.5f, plan.focalV, 0.0001f)
+        assertEquals(150f, plan.targetAnchorRowTop + plan.focalV * (1200f / 5f), 0.0001f)
+        assertEquals(0f, mediaGridMorphFocalCorrection(MediaGridMorphPlan(pair, MediaGridMorphAnchor(
+            assetId = plan.focalAssetId!!,
+            slot = pair.slots.first(),
+            focalU = 0.5f,
+            focalV = plan.focalV,
+            initialPinchCenter = Offset(600f, 150f),
+        )), 0.5f, Offset(620f, 400f)).x, 0.0001f)
+    }
+
+    @Test
+    fun rowReflowProgressUsesOnlyDistanceAndCellWidthRatio() {
+        listOf(
+            Triple(2, 3, 2f / 3f),
+            Triple(4, 5, 4f / 5f),
+            Triple(5, 4, 5f / 4f),
+            Triple(8, 9, 8f / 9f),
+            Triple(11, 12, 11f / 12f),
+        ).forEach { (from, to, targetRatio) ->
+            assertEquals(0f, mediaGridMorphProgressForDistance(100f, 100f, from, to), 0.0001f)
+            assertEquals(1f, mediaGridMorphProgressForDistance(100f, 100f * targetRatio, from, to), 0.0001f)
+            assertEquals(0.5f, mediaGridMorphProgressForDistance(100f, 100f * (1f + targetRatio) / 2f, from, to), 0.0001f)
+        }
+        assertEquals(1f, mediaGridMorphProgressForDistance(100f, 80f, 4, 5), 0.0001f)
+        assertEquals(1f, mediaGridMorphProgressForDistance(100f, 125f, 5, 4), 0.0001f)
+    }
+
+    @Test
+    fun rowReflowSelectsFocalOrdinalFirstAndUsesFractionOnlyWhenMissing() {
+        val directCapture = withSourceRows(capture(4, 24), 4)
+        val directPair = buildMediaGridMorphPreparedPairs(directCapture)
+            .getValue(MediaGridMorphDirection.IncreaseColumns)
+        val direct = requireNotNull(directPair.viewportPlanTemplate).select(Offset(750f, 150f))
+        assertFalse(direct.usedOrdinalFractionFallback)
+        assertEquals(directCapture.sourceRows[1].cells[2].mediaOrdinal, direct.focalMediaOrdinal)
+
+        val missingSourceRow = directCapture.sourceRows[1].copy(
+            cells = directCapture.sourceRows[1].cells.map { it.copy(mediaOrdinal = 99, assetId = 999) },
+        )
+        val fallbackCapture = directCapture.copy(sourceRows = directCapture.sourceRows.mapIndexed { index, row ->
+            if (index == 1) missingSourceRow else row
+        })
+        val fallbackPair = buildMediaGridMorphPreparedPairs(fallbackCapture)
+            .getValue(MediaGridMorphDirection.IncreaseColumns)
+        val fallback = requireNotNull(fallbackPair.viewportPlanTemplate).select(Offset(750f, 150f))
+        assertTrue(fallback.usedOrdinalFractionFallback)
+        assertTrue(fallback.targetAnchorRowIndex >= 0)
+    }
+
+    @Test
+    fun rowReflowHeaderPlansAreIndependentBandsAndBoundedToRows() {
+        val dates = List(24) { index -> "2026-07-${(index + 1).toString().padStart(2, '0')}T00:00:00Z" }
+        val capture = withSourceRows(capture(4, dates.size, sortBase = ClassifiedSortBase.PostTime, dates = dates), 4)
+        val pair = buildMediaGridMorphPreparedPairs(capture).getValue(MediaGridMorphDirection.IncreaseColumns)
+        val plan = requireNotNull(pair.viewportPlanTemplate).select(Offset(600f, 150f))
+        assertTrue(plan.headerPlans.isNotEmpty())
+        plan.headerPlans.forEach { header ->
+            assertEquals(pair.viewport.left, header.startRect.left, 0.0001f)
+            assertEquals(pair.viewport.right, header.startRect.right, 0.0001f)
+            assertEquals(pair.viewport.left, header.endRect.left, 0.0001f)
+            assertEquals(pair.viewport.right, header.endRect.right, 0.0001f)
+        }
+        assertTrue(plan.rowPlans.size <= capture.sourceRows.size + 5)
+    }
+
+    @Test
+    fun rowReflowCrossfadeKeepsRightEdgeContentInCurrentCell() {
+        val capture = withSourceRows(capture(4, 10), 4)
+        val pair = buildMediaGridMorphPreparedPairs(capture).getValue(MediaGridMorphDirection.IncreaseColumns)
+        val plan = requireNotNull(pair.viewportPlanTemplate).select(Offset(600f, 150f))
+        val newRight = plan.rowPlans.first { it.relativeRow == 0 }.cells.last()
+        val half = mediaGridMorphRowCellRect(newRight, 0.5f)
+        assertTrue(half.left < newRight.startRect.right)
+        assertEquals(newRight.endRect.right, half.right, 0.0001f)
+        assertTrue(newRight.startContent is MediaGridMorphSlotContent.Placeholder)
+        assertTrue(newRight.endContent is MediaGridMorphSlotContent.Image)
+    }
+
+    @Test
+    fun claimIdentityMustMatchTheCaptureViewportRatherThanAStaleComposeSnapshot() {
+        val capture = withSourceRows(capture(4, 20), 4)
+        val pair = buildMediaGridMorphPreparedPairs(capture).getValue(MediaGridMorphDirection.IncreaseColumns)
+        val pairs = mapOf(MediaGridMorphDirection.IncreaseColumns to pair)
+        val capturedIdentity = capture.identity.toInteractionIdentity()
+        val staleIdentity = capturedIdentity.copy(
+            viewportSignature = capturedIdentity.viewportSignature.copy(firstVisibleItemIndex = 1),
+        )
+
+        val staleController = MediaGridMorphInteractionController()
+        assertFalse(
+            staleController.beginPointers(
+                identity = staleIdentity,
+                preparedPairsSnapshot = pairs,
+                firstPointerId = 1L,
+                secondPointerId = 2L,
+                firstPosition = Offset(100f, 150f),
+                secondPosition = Offset(300f, 150f),
+            ),
+        )
+
+        val capturedController = MediaGridMorphInteractionController()
+        assertTrue(
+            capturedController.beginPointers(
+                identity = capturedIdentity,
+                preparedPairsSnapshot = pairs,
+                firstPointerId = 1L,
+                secondPointerId = 2L,
+                firstPosition = Offset(100f, 150f),
+                secondPosition = Offset(300f, 150f),
+            ),
+        )
+    }
+
+    @Test
+    fun capturedRowPlanReachesTargetHandoffAfterReleaseSettle() {
+        val capture = withSourceRows(capture(4, 20), 4)
+        val pair = buildMediaGridMorphPreparedPairs(capture).getValue(MediaGridMorphDirection.IncreaseColumns)
+        var handoffRequests = 0
+        val controller = MediaGridMorphInteractionController { handoffRequests++ }
+        val identity = capture.identity.toInteractionIdentity()
+        assertTrue(
+            controller.beginPointers(
+                identity = identity,
+                preparedPairsSnapshot = mapOf(MediaGridMorphDirection.IncreaseColumns to pair),
+                firstPointerId = 1L,
+                secondPointerId = 2L,
+                firstPosition = Offset(100f, 150f),
+                secondPosition = Offset(300f, 150f),
+            ),
+        )
+        controller.updatePointers(Offset(100f, 150f), Offset(120f, 150f))
+        assertEquals(MediaGridMorphDirection.IncreaseColumns, controller.snapshot().direction)
+        assertTrue(controller.snapshot().progress >= MediaGridMorphDefaults.ReleaseThreshold)
+
+        val generation = controller.snapshot().interactionGeneration
+        controller.releasePointers()
+        controller.advanceSettleElapsed(generation, MediaGridMorphDefaults.SettleDurationMillis)
+
+        assertEquals(MediaGridMorphPhase.AwaitingGridHandoff, controller.snapshot().phase)
+        assertEquals(1, handoffRequests)
+        assertEquals(
+            controller.snapshot().plan?.viewportPlan?.targetFocalMediaOrdinal,
+            controller.snapshot().handoffRequest?.targetAnchor?.mediaOrdinal,
+        )
+    }
+
+    @Test
+    fun activeClaimKeepsCapturedPlanWhenLazyGridViewportSignatureMoves() {
+        val capture = withSourceRows(capture(4, 20), 4)
+        val identity = capture.identity.toInteractionIdentity()
+        val controller = MediaGridMorphInteractionController()
+        assertTrue(
+            controller.beginPointers(
+                identity = identity,
+                preparedPairsSnapshot = buildMediaGridMorphPreparedPairs(capture),
+                firstPointerId = 1L,
+                secondPointerId = 2L,
+                firstPosition = Offset(100f, 150f),
+                secondPosition = Offset(300f, 150f),
+            ),
+        )
+        controller.updatePointers(Offset(100f, 150f), Offset(120f, 150f))
+        controller.updateIdentity(
+            identity.copy(
+                viewportSignature = identity.viewportSignature.copy(
+                    firstVisibleItemIndex = identity.viewportSignature.firstVisibleItemIndex + 1,
+                    firstVisibleMediaOrdinal = identity.viewportSignature.firstVisibleMediaOrdinal + 1,
+                ),
+            ),
+        )
+        assertEquals(MediaGridMorphPhase.Tracking, controller.snapshot().phase)
+        assertNotNull(controller.snapshot().plan)
+    }
+
+    @Test
+    fun capturedRowPlanAtDatasetEndStillProducesTargetAnchor() {
+        val capture = withSourceRows(capture(4, 3, firstVisibleOrdinal = 2), 4)
+        val pair = buildMediaGridMorphPreparedPairs(capture).getValue(MediaGridMorphDirection.IncreaseColumns)
+        var handoffRequests = 0
+        val controller = MediaGridMorphInteractionController { handoffRequests++ }
+        val identity = capture.identity.toInteractionIdentity()
+        assertTrue(
+            controller.beginPointers(
+                identity = identity,
+                preparedPairsSnapshot = mapOf(MediaGridMorphDirection.IncreaseColumns to pair),
+                firstPointerId = 1L,
+                secondPointerId = 2L,
+                firstPosition = Offset(100f, 300f),
+                secondPosition = Offset(300f, 300f),
+            ),
+        )
+        controller.updatePointers(Offset(100f, 300f), Offset(120f, 300f))
+        controller.releasePointers()
+        val generation = controller.snapshot().interactionGeneration
+        controller.advanceSettleElapsed(generation, MediaGridMorphDefaults.SettleDurationMillis)
+
+        assertEquals(MediaGridMorphPhase.AwaitingGridHandoff, controller.snapshot().phase)
+        assertEquals(1, handoffRequests)
+    }
+
     private fun pair(
         columns: Int,
         capture: MediaGridMorphCapture,
@@ -849,6 +1099,35 @@ class MediaGridMorphTest {
         buildMediaGridMorphPreparedPairs(capture).getValue(direction).also {
             assertEquals(columns, it.fromColumnCount)
         }
+
+    private fun withSourceRows(capture: MediaGridMorphCapture, columns: Int): MediaGridMorphCapture {
+        val byOrdinal = capture.media.associateBy { it.mediaOrdinal }
+        val rows = capture.visibleMediaRects
+            .groupBy { it.rect.top to it.rect.bottom }
+            .entries
+            .sortedBy { it.key.first }
+            .mapIndexedNotNull outer@{ rowIndex, (_, rects) ->
+                val cells = rects.sortedBy { it.rect.left }.mapIndexedNotNull { column, rect ->
+                    val media = byOrdinal[rect.mediaOrdinal] ?: return@mapIndexedNotNull null
+                    MediaGridMorphCapturedCell(
+                        column = column,
+                        mediaOrdinal = rect.mediaOrdinal,
+                        assetId = media.assetId,
+                        rect = rect.rect,
+                        isPartiallyVisible = rect.isPartiallyVisible,
+                    )
+                }
+                if (cells.isEmpty()) return@outer null
+                MediaGridMorphCapturedRow(
+                    visibleRow = rowIndex,
+                    top = rects.minOf { it.rect.top },
+                    bottom = rects.maxOf { it.rect.bottom },
+                    cells = cells,
+                    isPartiallyVisible = rects.any { it.isPartiallyVisible },
+                )
+            }
+        return capture.copy(sourceRows = rows, totalMediaCount = maxOf(capture.totalMediaCount, capture.mediaOrdinalRange.last + 1))
+    }
 
     private fun MediaGridMorphPreparationIdentity.toInteractionIdentity() =
         MediaGridMorphInteractionIdentity(

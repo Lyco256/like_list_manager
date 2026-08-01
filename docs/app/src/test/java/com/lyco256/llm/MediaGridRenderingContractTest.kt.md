@@ -1,5 +1,10 @@
 # `MediaGridRenderingContractTest.kt`
 
+## 2026-08-01 Phase 1 renderer contract
+
+- The production source path is checked for legacy one-step pinch and absence of the old production Morph host/translation.
+- TEST_HARNESS is checked for the same-surface row renderer on the real `LazyVerticalGrid`, with no separate Morph overlay surface or second grid.
+
 ## Current production contract
 
 The contract test fixes the Production gesture/host connection, explicit `ProductionVisible` Canvas mode, absence of `mediaGridPinchToResize`, and isolation of the TEST_HARNESS host while preserving resident draw, scheduler, queue, and publication contracts.

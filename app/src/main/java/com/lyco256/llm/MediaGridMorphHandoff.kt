@@ -25,6 +25,42 @@ internal fun selectMediaGridMorphTargetAnchor(
     finalCorrection: Offset,
     fixedFocalCenter: Offset,
 ): MediaGridMorphTargetAnchor? {
+    val viewportPlan = plan.viewportPlan
+    if (viewportPlan != null && viewportPlan.rowPlans.isNotEmpty()) {
+        val targetOrdinal = viewportPlan.targetFocalMediaOrdinal
+            ?: viewportPlan.focalMediaOrdinal
+            ?: return null
+        val targetCell = viewportPlan.rowPlans
+            .firstOrNull { it.relativeRow == 0 }
+            ?.cells
+            ?.firstOrNull { it.targetMediaOrdinal == targetOrdinal }
+            ?: viewportPlan.rowPlans
+                .firstOrNull { it.relativeRow == 0 }
+                ?.cells
+                ?.firstOrNull { it.endContent is MediaGridMorphSlotContent.Image }
+            ?: return null
+        val targetAssetId = viewportPlan.targetFocalAssetId
+            ?: (targetCell.endContent as? MediaGridMorphSlotContent.Image)?.assetId
+            ?: return null
+        val rect = targetCell.endRect
+        if (rect.width <= 0f || rect.height <= 0f) return null
+        val targetItemIndexHint = plan.preparedPair.targetLayout.media
+            .firstOrNull { it.assetId == targetAssetId && it.mediaOrdinal == targetOrdinal }
+            ?.itemIndex
+            ?: targetOrdinal
+        return MediaGridMorphTargetAnchor(
+            assetId = targetAssetId,
+            mediaOrdinal = targetOrdinal,
+            slotRow = viewportPlan.targetAnchorRowIndex,
+            slotColumn = targetCell.column,
+            endRect = rect,
+            focalU = ((fixedFocalCenter.x - finalCorrection.x - plan.viewport.left - rect.left) / rect.width)
+                .coerceIn(0f, 1f),
+            focalV = viewportPlan.focalV,
+            maintainedCanvasPosition = fixedFocalCenter - plan.viewport.topLeft,
+            targetItemIndexHint = targetItemIndexHint,
+        )
+    }
     val targetPointInViewport =
         fixedFocalCenter - finalCorrection + plan.viewport.topLeft
     val interactionSlot = plan.anchor?.slot

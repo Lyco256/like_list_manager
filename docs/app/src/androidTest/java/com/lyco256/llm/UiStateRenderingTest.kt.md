@@ -1,5 +1,9 @@
 # `UiStateRenderingTest.kt`
 
+## 2026-08-01 async error-state assertion
+
+- `classifiedMediaGridShowsDateHeadersVideoBadgeAndErrorCells` waits for both terminal error tags before asserting them. The missing-local/remote candidate path is asynchronous and must not be asserted synchronously after `setContent`.
+
 ## 2026-07-10 media-grid selection coverage
 
 - Covers long-press tweet-level selection, shared selection across multiple assets, selected count, selection indicators, like-count suppression, and the 2–6 column card-dialog action boundary.

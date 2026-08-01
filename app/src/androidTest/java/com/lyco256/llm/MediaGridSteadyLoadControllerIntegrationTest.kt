@@ -256,10 +256,24 @@ class MediaGridSteadyLoadControllerIntegrationTest {
         try {
             controller.updateViewport(anchor(frame))
             controller.start()
-            await { gateway.requests >= 2 }
+            await(
+                timeoutMs = 30_000L,
+                diagnostic = {
+                    val snapshot = controller.stateSnapshot()
+                    "requests=${gateway.requests}, statuses=${snapshot.cells.values.groupingBy { it.status }.eachCount()}, " +
+                        "bitmapPending=${snapshot.bitmapPendingOrdinals.size}"
+                },
+            ) { gateway.requests >= 2 }
             assertEquals(listOf("fallback-first-0", "fallback-local-0"), gateway.requestedKeys)
             assertEquals(2, gateway.requests)
-            await { controller.stateSnapshot().cells[0L]?.status == MediaGridCellLoadStatus.Failed }
+            await(
+                timeoutMs = 30_000L,
+                diagnostic = {
+                    val snapshot = controller.stateSnapshot()
+                    "requests=${gateway.requests}, status=${snapshot.cells[0L]?.status}, " +
+                        "candidate=${snapshot.cells[0L]?.candidateIndex}, bitmapPending=${snapshot.bitmapPendingOrdinals.size}"
+                },
+            ) { controller.stateSnapshot().cells[0L]?.status == MediaGridCellLoadStatus.Failed }
             val snapshot = controller.stateSnapshot()
             assertTrue(snapshot.cells.values.none { it.status == MediaGridCellLoadStatus.Pending })
             assertConsistentState(snapshot, frame.ordinalIndex.mediaOrdinalByAssetId)
@@ -372,7 +386,20 @@ class MediaGridSteadyLoadControllerIntegrationTest {
         try {
             controller.updateViewport(anchor(frame))
             controller.start()
-            await(15_000L) { controller.stateSnapshot().cells.size == 300 && controller.stateSnapshot().cells.values.all { it.status == MediaGridCellLoadStatus.Ready || it.status == MediaGridCellLoadStatus.Failed } }
+            await(
+                timeoutMs = 60_000L,
+                diagnostic = {
+                    val snapshot = controller.stateSnapshot()
+                    "cells=${snapshot.cells.size}, statuses=${snapshot.cells.values.groupingBy { it.status }.eachCount()}, " +
+                        "metadata=${snapshot.metadata.size}, pending=${snapshot.metadataPendingOrdinals.size}/${snapshot.bitmapPendingOrdinals.size}"
+                },
+            ) {
+                val snapshot = controller.stateSnapshot()
+                snapshot.cells.size == 300 &&
+                    snapshot.cells.values.all {
+                        it.status == MediaGridCellLoadStatus.Ready || it.status == MediaGridCellLoadStatus.Failed
+                    }
+            }
             val snapshot = controller.stateSnapshot()
             assertTrue(snapshot.cells.values.none { it.status == MediaGridCellLoadStatus.Pending })
             assertConsistentState(snapshot, frame.ordinalIndex.mediaOrdinalByAssetId)

@@ -1,5 +1,13 @@
 # `MediaGridMorphTest.kt`
 
+## 2026-08-01 claim identity coverage
+
+- Unit coverage rejects a stale Compose viewport identity at claim and accepts the identity from the real capture snapshot.
+
+## 2026-08-01 Phase 1 row reflow coverage
+
+- Unit coverage covers 2↔3, 4↔5, 5↔4, 8↔9, and 11↔12 reflow, right-edge Placeholder behavior, fixed focal row/Y, distance-ratio progress, header bands, and ordinal-first target selection with ordinal-fraction fallback.
+
 ## 2026-07-31 production Morph correction coverage
 
 - Unit coverage includes explicit content endpoints, fixed initial focal correction, progress-zero correction, frame-clock settle timing, pointer-release fallback, and bounded target column behavior.

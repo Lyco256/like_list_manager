@@ -2,6 +2,12 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 
 この文書は、全体構成、現状の実装、変更目的別入口、個別docs一覧だけを担当する。禁止事項、完了報告、検証手順は置かない。
 
+## 2026-08-01 Phase 1 row reflow
+
+- `TagHierarchyUiV2.kt` keeps production Morph overlay/handoff disconnected and uses `MediaGridLegacyPinch.kt` for one release-time adjacent-column step.
+- `MediaGridMorph.kt` captures visible media rows/header rects once at TEST_HARNESS claim. `MediaGridMorphRowReflow.kt` plans fixed-screen-column row geometry, focal-row selection, header bands, Placeholder endpoints, and distance-ratio progress.
+- `MediaGridMorphRowRenderer.kt` is a same-surface draw modifier on the real `LazyVerticalGrid`; target handoff corrects the real `LazyGridState` row before completion.
+
 ## 2026-07-30 TEST_HARNESS 実LazyGrid handoff基盤
 
 - `MediaGridMorphHandoff.kt`はbounded planから一回だけ選ぶtarget anchorと、列変更、target frame採用、item表示、最大3回のY補正、geometry確認、次frame完了、rollbackを管理する純粋coordinatorを所有する。

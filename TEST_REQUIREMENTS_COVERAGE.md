@@ -1,5 +1,16 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-08-01 Phase 1 row reflow
+
+| Requirement | Evidence | Status |
+|---|---|---|
+| Production Morph is disabled; release path is one-step legacy pinch | `TagHierarchyUiV2.kt`, `MediaGridLegacyPinch.kt`, rendering contract | covered |
+| Claim-time real rows/header rects and fixed focal row/Y | `captureMediaGridMorphInput`, `MediaGridMorphRowReflow.kt`, row-reflow unit tests | covered |
+| Adjacent N↔N±1 right-edge-only geometry and distance-ratio progress | `MediaGridMorphRowReflow.kt`, 2↔3/4↔5/5↔4/8↔9/11↔12 unit tests | covered |
+| Same current rect content crossfade with Placeholder endpoints | `MediaGridMorphRowRenderer.kt`, row-reflow unit tests | covered |
+| Real target Grid row selection and correction | `TagHierarchyUiV2.kt`, `itemIndexByMediaOrdinal`, target handoff effect | covered |
+| Same-surface TEST_HARNESS renderer without overlay/two-grid host | `TagHierarchyUiV2.kt`, `MediaGridRenderingContractTest` | covered |
+
 ## 2026-07-31 Morph UI・handoff correction
 
 | Requirement | Evidence | Status |
