@@ -3766,7 +3766,7 @@ private fun ClassifiedMediaGridContent(
                 fallbackHeaderHeightPx = fallbackMorphHeaderHeightPx,
             ) ?: return@collectLatest
             val pairs = withContext(Dispatchers.Default) {
-                buildMediaGridMorphPreparedPairs(capture)
+                buildMediaGridMorphRowPreparedPairs(capture)
             }
             morphPreparationCache.publish(token, pairs)
         }
@@ -3788,6 +3788,9 @@ private fun ClassifiedMediaGridContent(
                             identity = morphIdentity,
                             preparedPairsSnapshot = morphPreparedPairsSnapshot,
                             stopScroll = { state.stopScroll() },
+                            onFallbackPinchFinished = { _, nextColumnCount ->
+                                onMediaGridColumnCountChange(nextColumnCount)
+                            },
                             pointerInProgress = morphPointerInProgress,
                             captureOnClaim = {
                                 captureMediaGridMorphInput(

@@ -22,8 +22,10 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.swipeLeft
 import com.lyco256.llm.data.AssetEntity
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipTagEntity
@@ -1641,7 +1643,7 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("media_asset_${assetIds.first()}").performClick()
         composeRule.onNodeWithTag("image_viewer").assertIsDisplayed()
         composeRule.onNodeWithText("1 / 2").assertIsDisplayed()
-        swipeLeftOnScreen()
+        composeRule.onNodeWithTag("image_viewer").performTouchInput { swipeLeft() }
         composeRule.waitUntil(10_000) {
             composeRule.onAllNodesWithText("2 / 2").fetchSemanticsNodes().isNotEmpty()
         }
@@ -2334,33 +2336,6 @@ class MainActivityComposeTest {
             event.recycle()
         }
         instrumentation.waitForIdleSync()
-    }
-
-    private fun swipeLeftOnScreen() {
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
-        val metrics = composeRule.activity.resources.displayMetrics
-        val downTime = SystemClock.uptimeMillis()
-        val y = metrics.heightPixels * 0.55f
-        val startX = metrics.widthPixels * 0.82f
-        val endX = metrics.widthPixels * 0.18f
-        val steps = 12
-        val events = buildList {
-            add(MotionEvent.ACTION_DOWN to startX)
-            for (step in 1 until steps) {
-                val fraction = step.toFloat() / steps
-                add(MotionEvent.ACTION_MOVE to (startX + (endX - startX) * fraction))
-            }
-            add(MotionEvent.ACTION_UP to endX)
-        }
-        events.forEachIndexed { index, (action, x) ->
-            val event = MotionEvent.obtain(downTime, downTime + index * 16L, action, x, y, 0).apply {
-                source = InputDevice.SOURCE_TOUCHSCREEN
-            }
-            check(instrumentation.uiAutomation.injectInputEvent(event, true))
-            event.recycle()
-        }
-        instrumentation.waitForIdleSync()
-        composeRule.waitForIdle()
     }
 
     private fun slowDragDownOnScreen() {

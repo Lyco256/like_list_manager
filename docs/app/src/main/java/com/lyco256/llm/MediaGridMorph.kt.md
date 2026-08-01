@@ -7,6 +7,8 @@
 - Claim-time capture copies visible media rows and header rectangles once from the real `LazyGridLayoutInfo`; the prepared pair keeps this bounded source snapshot.
 - TEST_HARNESS row plans reflow existing screen columns between adjacent counts. Increase reveals only the rightmost slot from zero width; decrease collapses only the rightmost old slot to zero width.
 - The row renderer uses source/target viewport content with Placeholder endpoints and does not build generic dataset-item start/end correspondences.
+- TEST_HARNESS uses `buildMediaGridMorphRowPreparedPairs()` and `MediaGridMorphPlan.selectRowReflow()`; the legacy `buildMediaGridMorphPreparedPairs()` remains isolated to compatibility tests and does not feed the real grid renderer.
+- The target row top is clamped to the scrollable LazyGrid range, so a short dataset cannot be planned at a viewport position the actual target grid cannot realize.
 
 ## 2026-07-31 UI・handoff correction
 

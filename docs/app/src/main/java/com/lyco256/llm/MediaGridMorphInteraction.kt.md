@@ -5,6 +5,7 @@
 - Production Morph overlay/handoff is disabled for this phase. Release builds use the legacy one-step pinch resize with a fixed initial pointer distance.
 - TEST_HARNESS captures the real grid at claim, derives progress from current distance divided by the initial distance, and hands off to the actual target `LazyVerticalGrid` row.
 - The row plan keeps the initial pinch center fixed; current-centroid translation is not applied.
+- The TEST_HARNESS claim path uses row-only prepared pairs and `selectRowReflow`; it does not create or select legacy dataset slots.
 - Claim-time pairs use the identity captured from that same `LazyGridLayoutInfo` snapshot, so a stale pre-recomposition viewport signature cannot silently downgrade the TEST_HARNESS gesture to a no-op fallback.
 - During active Tracking/settle, the captured plan remains valid across LazyGrid offset/signature updates caused by stopping a scroll; source revision, frame key, and current column count remain strict identity guards.
 - Target anchor selection retains a row-plan path when the target focal metadata is incomplete, using the bounded target cell content before falling back to the legacy bounded slot selector.
@@ -44,6 +45,7 @@ The TEST_HARNESS and production paths share the pointer arbitration state machin
 - candidateは最初に揃った二pointerのID、initial positions、initial distance、centroid、generationをgesture中一回だけ固定する。scroll中でもcandidateを開始し、candidate中はconsume、`pointerInProgress`、stopScroll、anchor checkpointを行わない。
 - claim判定は既存`mediaGridMorphDirectionForScale()`、span change `>= touchSlop * 0.35f`、span change `>= centroid movement * 0.5f`の全条件で行う。claim時だけcandidate positionsでcontrollerをbeginし、同じeventの現在positionsをupdateしてからstopScrollを一回起動し、tracked pointerだけをconsumeする。
 - stale／画像不足／pairなし／hostなしは同じcandidate基準距離を使うFallbackClaimedへ進み、release時の列数変更callbackを一回だけ呼ぶ。三本目が追加されてもtracked IDは変えない。
+- TEST_HARNESS でも準備pairが利用できない場合は、同じ固定初期距離の一段fallback callbackへ接続し、列数を4のまま取り残さない。
 - 追跡pointerの一方が離れた時だけreleaseを一回処理する。pointer cancelはcurrent側へ戻し、handoffを生成しない。
 
 ## settleとhandoff

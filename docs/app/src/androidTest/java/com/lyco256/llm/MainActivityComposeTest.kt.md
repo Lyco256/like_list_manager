@@ -1,5 +1,7 @@
 # `app/src/androidTest/java/com/lyco256/llm/MainActivityComposeTest.kt`
 
+`imageViewerSwipeMovesBetweenSavedPhotosWithoutChangingDatabase` sends the horizontal swipe through the Compose `image_viewer` node instead of relying on raw full-screen coordinates; the viewer parent drag handler leaves horizontal movement available to `HorizontalPager`.
+
 ## 2026-07-31 production Morph correction coverage
 
 The Phase 1 production test now asserts the legacy one-step pinch path and the absence of both the old production Morph Canvas and TEST_HARNESS same-surface tag. Production normal grid rendering remains connected during the gesture.

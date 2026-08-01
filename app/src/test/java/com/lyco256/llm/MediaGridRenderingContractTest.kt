@@ -81,6 +81,8 @@ class MediaGridRenderingContractTest {
         assertTrue(uiSource.contains("if (state.isScrollInProgress)"))
         assertTrue(pointer.contains("mediaGridColumnCountAfterPinchRelease"))
         assertTrue(pointer.contains("MediaGridMorphGestureMode"))
+        assertTrue(morphSource.contains("buildMediaGridMorphRowPreparedPairs"))
+        assertTrue(pointer.contains("buildMediaGridMorphRowPreparedPairs"))
         assertTrue(!uiSource.contains("mediaGridPinchToResize"))
         assertTrue(uiSource.contains("withContext(Dispatchers.Default)"))
     }
@@ -115,6 +117,8 @@ class MediaGridRenderingContractTest {
         assertTrue(uiSource.contains("mediaGridMorphGestureInput"))
         assertTrue(uiSource.contains("val testMorphEnabled = BuildConfig.TEST_HARNESS"))
         assertTrue(uiSource.contains("captureOnClaim"))
+        assertTrue(uiSource.contains("buildMediaGridMorphRowPreparedPairs"))
+        assertTrue(uiSource.contains("onFallbackPinchFinished = { _, nextColumnCount ->"))
         assertTrue(uiSource.contains("mediaGridLegacyPinchToResize"))
         assertTrue(uiSource.contains("mediaGridMorphRowReflowCanvas"))
         assertTrue(uiSource.contains("interactionEnabled = !morphCheckpointSuppressed"))

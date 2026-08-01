@@ -260,7 +260,11 @@ internal class MediaGridMorphInteractionController(
         if (nextDirection != null && nextDirection != direction) {
             val pair = activeGesture.pairs[nextDirection]
             if (pair != null) {
-                plan = MediaGridMorphPlan.select(pair, activeGesture.initialCenter)
+                plan = if (pair.viewportPlanTemplate != null) {
+                    MediaGridMorphPlan.selectRowReflow(pair, activeGesture.initialCenter)
+                } else {
+                    MediaGridMorphPlan.select(pair, activeGesture.initialCenter)
+                }
                 direction = nextDirection
                 _activePlan.value = plan
             }
@@ -795,7 +799,7 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                     val claimCapture = latestCaptureOnClaim?.invoke()
                                     val claimIdentity = claimCapture?.identity?.toInteractionIdentity() ?: latestIdentity
                                     val currentPairs = claimCapture
-                                        ?.let(::buildMediaGridMorphPreparedPairs)
+                                        ?.let(::buildMediaGridMorphRowPreparedPairs)
                                         ?.takeIf { it.isNotEmpty() }
                                         ?: latestPairs()
                                     val currentPair = currentPairs[direction]

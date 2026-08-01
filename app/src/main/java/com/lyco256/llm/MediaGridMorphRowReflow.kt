@@ -3,6 +3,7 @@ package com.lyco256.llm
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
 
@@ -65,6 +66,7 @@ internal data class MediaGridMorphViewportPlanTemplate(
     val targetRows: List<MediaGridMorphTargetRow>,
     val targetHeaders: List<MediaGridMorphTargetHeader>,
     val sourceHeaders: List<MediaGridMorphCapturedHeaderRect>,
+    val sortBase: ClassifiedSortBase,
     val totalMediaCount: Int,
     val mediaOrdinalRange: IntRange,
     val headerHeightPx: Float,
@@ -108,7 +110,13 @@ internal data class MediaGridMorphViewportPlanTemplate(
         val targetFocalCell = targetRows.getOrNull(targetRowIndex)?.cells
             ?.firstOrNull { it.mediaOrdinal == targetOrdinal }
         val idealTargetRowTop = initialPinchCenter.y - focalV * targetCellHeight
-        val targetTopShift = idealTargetRowTop - (targetRowTopByIndex[targetRowIndex] ?: idealTargetRowTop)
+        val achievableTargetRowTop = targetAnchorRowTopWithinScrollBounds(
+            targetOrdinal = targetOrdinal,
+            targetRowIndex = targetRowIndex,
+            targetCellHeight = targetCellHeight,
+            idealTargetRowTop = idealTargetRowTop,
+        )
+        val targetTopShift = achievableTargetRowTop - (targetRowTopByIndex[targetRowIndex] ?: achievableTargetRowTop)
         val shiftedTargetTops = targetRowTopByIndex.mapValues { it.value + targetTopShift }
 
         val minRelative = min(-sourceRowIndex, -targetRowIndex)
@@ -160,7 +168,7 @@ internal data class MediaGridMorphViewportPlanTemplate(
             targetFocalAssetId = targetFocalCell?.assetId,
             focalV = focalV,
             targetAnchorRowIndex = targetRowIndex,
-            targetAnchorRowTop = shiftedTargetTops[targetRowIndex] ?: idealTargetRowTop,
+            targetAnchorRowTop = shiftedTargetTops[targetRowIndex] ?: achievableTargetRowTop,
             usedOrdinalFractionFallback = directTargetRowIndex < 0,
             rowPlans = rowPlans,
             headerPlans = headerPlans,
@@ -182,6 +190,34 @@ internal data class MediaGridMorphViewportPlanTemplate(
             result[index] = upper + cellHeight + (headerHeightPx.takeIf { header != null } ?: 0f)
         }
         return result
+    }
+
+    /**
+     * Converts the ideal focal-row top into a top that a real LazyGrid can
+     * actually realize. Default ordering has no full-span headers, so its
+     * global row index and total content height are exact. Header-based sorts
+     * use the bounded target window plus the media ordinal prefix as the
+     * conservative geometry available to this immutable capture.
+     */
+    private fun targetAnchorRowTopWithinScrollBounds(
+        targetOrdinal: Int,
+        targetRowIndex: Int,
+        targetCellHeight: Float,
+        idealTargetRowTop: Float,
+    ): Float {
+        val rowPrefix = if (sortBase == ClassifiedSortBase.Default) {
+            targetOrdinal / toColumnCount.coerceAtLeast(1)
+        } else {
+            mediaOrdinalRange.first / toColumnCount.coerceAtLeast(1) + targetRowIndex
+        }
+        val totalMediaRows = ceil(totalMediaCount.toFloat() / toColumnCount.coerceAtLeast(1)).toInt()
+        val estimatedHeaderCount = if (sortBase == ClassifiedSortBase.Default) 0 else targetHeaders.size
+        val contentHeight = totalMediaRows * targetCellHeight + estimatedHeaderCount * headerHeightPx
+        val maxScroll = (contentHeight - viewport.height).coerceAtLeast(0f)
+        val rowTopAtScrollZero = viewport.top + rowPrefix * targetCellHeight
+        val minimumTop = rowTopAtScrollZero - maxScroll
+        val maximumTop = rowTopAtScrollZero
+        return idealTargetRowTop.coerceIn(minimumTop, maximumTop)
     }
 
     private fun emptyPlan(center: Offset): MediaGridMorphViewportPlan = MediaGridMorphViewportPlan(
@@ -330,6 +366,7 @@ internal fun buildMediaGridMorphViewportPlanTemplate(
         targetRows = targetLayout.first,
         targetHeaders = targetLayout.second,
         sourceHeaders = capture.visibleHeaderRects,
+        sortBase = capture.sortBase,
         totalMediaCount = capture.totalMediaCount,
         mediaOrdinalRange = capture.mediaOrdinalRange,
         headerHeightPx = capture.headerHeightPx,

@@ -5,7 +5,9 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 ## 2026-08-01 Phase 1 row reflow
 
 - `TagHierarchyUiV2.kt` keeps production Morph overlay/handoff disconnected and uses `MediaGridLegacyPinch.kt` for one release-time adjacent-column step.
-- `MediaGridMorph.kt` captures visible media rows/header rects once at TEST_HARNESS claim. `MediaGridMorphRowReflow.kt` plans fixed-screen-column row geometry, focal-row selection, header bands, Placeholder endpoints, and distance-ratio progress.
+- `MediaGridMorph.kt` captures visible media rows/header rects once at TEST_HARNESS claim. `buildMediaGridMorphRowPreparedPairs()` is the real TEST_HARNESS builder; `MediaGridMorphRowReflow.kt` plans fixed-screen-column row geometry, focal-row selection, header bands, Placeholder endpoints, target scroll clamping, and distance-ratio progress.
+- `MediaGridMorphInteraction.kt` selects the row-only plan at direction changes and claim-time recapture; the legacy slot builder remains isolated for compatibility tests.
+- TEST_HARNESS のpair未準備時は同じgesture modifierのrelease-time fallbackで列数変更を完了させる。
 - `MediaGridMorphRowRenderer.kt` is a same-surface draw modifier on the real `LazyVerticalGrid`; target handoff corrects the real `LazyGridState` row before completion.
 
 ## 2026-07-30 TEST_HARNESS 実LazyGrid handoff基盤

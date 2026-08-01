@@ -8,8 +8,10 @@
 | Claim-time real rows/header rects and fixed focal row/Y | `captureMediaGridMorphInput`, `MediaGridMorphRowReflow.kt`, row-reflow unit tests | covered |
 | Adjacent N↔N±1 right-edge-only geometry and distance-ratio progress | `MediaGridMorphRowReflow.kt`, 2↔3/4↔5/5↔4/8↔9/11↔12 unit tests | covered |
 | Same current rect content crossfade with Placeholder endpoints | `MediaGridMorphRowRenderer.kt`, row-reflow unit tests | covered |
-| Real target Grid row selection and correction | `TagHierarchyUiV2.kt`, `itemIndexByMediaOrdinal`, target handoff effect | covered |
+| Real target Grid row selection and correction | `TagHierarchyUiV2.kt`, `itemIndexByMediaOrdinal`, target handoff effect, target viewport clamp unit test | covered |
 | Same-surface TEST_HARNESS renderer without overlay/two-grid host | `TagHierarchyUiV2.kt`, `MediaGridRenderingContractTest` | covered |
+| TEST_HARNESS path is row-only and does not build legacy dataset slots | `buildMediaGridMorphRowPreparedPairs`, `MediaGridMorphPlan.selectRowReflow`, `MediaGridMorphTest.rowReflowPairDoesNotBuildLegacyDatasetSlots` | covered |
+| TEST_HARNESS prepared-pair miss still completes adjacent fallback | `TagHierarchyUiV2.kt` shared gesture modifier fallback callback | covered |
 
 ## 2026-07-31 Morph UI・handoff correction
 
