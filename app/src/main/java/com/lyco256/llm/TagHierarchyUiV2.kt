@@ -3785,6 +3785,7 @@ private fun ClassifiedMediaGridContent(
                 layoutInfo = state.layoutInfo,
                 columnCount = columnCount,
                 fallbackHeaderHeightPx = fallbackMorphHeaderHeightPx,
+                preparedIndex = residentPreparedIndex,
             ) ?: return@collectLatest
             val pairs = withContext(Dispatchers.Default) {
                 buildMediaGridMorphRowPreparedPairs(capture)
@@ -3824,6 +3825,7 @@ private fun ClassifiedMediaGridContent(
                                         layoutInfo = state.layoutInfo,
                                         columnCount = columnCount,
                                         fallbackHeaderHeightPx = fallbackMorphHeaderHeightPx,
+                                        preparedIndex = residentPreparedIndex,
                                     )
                                     capture?.let {
                                         buildMediaGridMorphClaimBundle(
@@ -3835,6 +3837,10 @@ private fun ClassifiedMediaGridContent(
                                             secondPointerId = candidate.secondPointerId,
                                             firstPosition = candidate.firstInitialPosition,
                                             secondPosition = candidate.secondInitialPosition,
+                                            sourceViewportAnchor = MediaGridMorphSourceViewportAnchor(
+                                                firstVisibleItemIndex = state.firstVisibleItemIndex,
+                                                firstVisibleItemScrollOffset = state.firstVisibleItemScrollOffset,
+                                            ),
                                         )
                                     }
                                 }
@@ -3855,6 +3861,8 @@ private fun ClassifiedMediaGridContent(
                                             MediaGridMorphFailureReason.MissingVisibleSourceImage
                                         completeness.requiredTargetImageCount != completeness.resolvedTargetImageCount ->
                                             MediaGridMorphFailureReason.MissingTargetImage
+                                        !completeness.sourceViewportComplete ->
+                                            MediaGridMorphFailureReason.SourceViewportMismatch
                                         !completeness.headerTextComplete -> MediaGridMorphFailureReason.MissingHeaderText
                                         !completeness.geometryComplete -> MediaGridMorphFailureReason.RenderModelIncomplete
                                         else -> null

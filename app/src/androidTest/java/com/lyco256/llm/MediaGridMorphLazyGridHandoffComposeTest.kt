@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -16,6 +17,8 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.gestures.stopScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,6 +31,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -249,6 +253,180 @@ class MediaGridMorphLazyGridHandoffComposeTest {
             assertEquals(1, anchorCheckpoints.size)
         } finally {
             composeRule.runOnIdle { store.close() }
+            bitmaps.values.forEach(Bitmap::recycle)
+        }
+    }
+
+    @Test
+    fun productionClaimStartsMorphAtTheExactNormalRowsForAPartialBoundedViewport() {
+        val fixture = fixture(4, 5, ClassifiedSortBase.PostTime, ViewportMode.Partial)
+        val bitmaps = fixture.entries.associate { it.assetId to assetBitmap(it.assetId) }
+        val preparedIndex = preparedIndex(bitmaps)
+        val gridState = LazyGridState(
+            firstVisibleItemIndex = fixture.initialItemIndex,
+            firstVisibleItemScrollOffset = fixture.initialItemScrollOffset,
+        )
+        val surfaceMode = mutableStateOf(MediaGridSingleSurfaceMode.Normal)
+        val progress = mutableStateOf(0f)
+        val morphModel = mutableStateOf<MediaGridMorphRowRenderModel?>(null)
+        lateinit var textResources: MediaGridMorphTextResourceIndex
+        var captured: MediaGridMorphCapture? = null
+        var selectedPlan: MediaGridMorphPlan? = null
+        try {
+            composeRule.setContent {
+                val density = LocalDensity.current
+                MaterialTheme {
+                    textResources = rememberMediaGridMorphTextResourceIndex(
+                        pairs = mapOf(fixture.direction to fixture.pair),
+                        viewportWidthPx = WidthPx,
+                    )
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(fixture.fromColumns),
+                        state = gridState,
+                        modifier = Modifier
+                            .requiredSize(
+                                WidthPx.dp / density.density,
+                                HeightPx.dp / density.density,
+                            )
+                            .testTag("production_source_viewport_surface")
+                            .mediaGridSingleSurface(
+                                state = gridState,
+                                assetIdByItemKey = fixture.sourceFrame.assetIdByItemKey,
+                                preparedIndex = preparedIndex,
+                                mode = surfaceMode,
+                                morphModel = morphModel.value,
+                                progress = progress,
+                            ),
+                        userScrollEnabled = false,
+                    ) {
+                        gridItems(
+                            fixture.sourceFrame.items,
+                            key = { it.key },
+                            span = { item ->
+                                when (item) {
+                                    is MediaGridHeaderItem -> GridItemSpan(maxLineSpan)
+                                    is MediaGridCellItem -> GridItemSpan(1)
+                                }
+                            },
+                        ) { item ->
+                            when (item) {
+                                is MediaGridHeaderItem -> Surface(
+                                    modifier = Modifier.fillMaxWidth().height(40.dp),
+                                    color = MaterialTheme.colorScheme.surface,
+                                ) {
+                                    Text(
+                                        text = item.label,
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
+                                is MediaGridCellItem -> Box(
+                                    Modifier.fillMaxWidth().aspectRatio(1f),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            composeRule.waitForIdle()
+            val normalPixels = composeRule
+                .onNodeWithTag("production_source_viewport_surface")
+                .captureToImage()
+                .toPixelMap()
+
+            composeRule.runOnIdle {
+                val capture = captureMediaGridMorphInput(
+                    frame = fixture.sourceFrame,
+                    layoutInfo = gridState.layoutInfo,
+                    columnCount = fixture.fromColumns,
+                    fallbackHeaderHeightPx = 40f,
+                    preparedIndex = preparedIndex,
+                ) ?: error("production claim capture was empty")
+                val claim = buildMediaGridMorphClaimBundle(
+                    capture = capture,
+                    preparedIndex = preparedIndex,
+                    textResources = textResources,
+                    generation = 1L,
+                    firstPointerId = 10L,
+                    secondPointerId = 20L,
+                    firstPosition = capture.viewport.center - Offset(40f, 0f),
+                    secondPosition = capture.viewport.center + Offset(40f, 0f),
+                ) ?: error("production claim bundle was empty")
+                val direction = claim.directions[MediaGridMorphDirection.IncreaseColumns]
+                    ?: error("production increase-column claim was empty")
+                assertTrue(direction.isComplete)
+                captured = capture
+                selectedPlan = direction.plan
+                morphModel.value = direction.renderModel
+                surfaceMode.value = MediaGridSingleSurfaceMode.Morph
+            }
+            composeRule.waitForIdle()
+            val morphPixels = composeRule
+                .onNodeWithTag("production_source_viewport_surface")
+                .captureToImage()
+                .toPixelMap()
+            val capture = captured ?: error("capture was not retained")
+            val plan = selectedPlan ?: error("plan was not retained")
+            val viewportPlan = plan.viewportPlan ?: error("viewport plan was not retained")
+            val model = morphModel.value ?: error("render model was not retained")
+            val capturedCells = capture.sourceRows.flatMap { row ->
+                row.cells.sortedBy { it.column }
+            }
+            val modelCells = model.cells
+                .filter { it.plan.startContent is MediaGridMorphSlotContent.Image }
+                .sortedWith(compareBy({ it.plan.relativeRow }, { it.plan.column }))
+            val modelByAsset = modelCells.associateBy {
+                (it.plan.startContent as MediaGridMorphSlotContent.Image).assetId
+            }
+            assertEquals(
+                capturedCells.map { it.assetId },
+                capturedCells.map { cell ->
+                    modelByAsset[cell.assetId]?.let {
+                        (it.plan.startContent as MediaGridMorphSlotContent.Image).assetId
+                    }
+                },
+            )
+            capturedCells.forEach { capturedCell ->
+                val modelCell = modelByAsset[capturedCell.assetId]
+                    ?: error("asset ${capturedCell.assetId} missing from Morph source")
+                assertEquals(capturedCell.column, modelCell.plan.column)
+                val morphRect = mediaGridMorphRowCellRect(viewportPlan, modelCell.plan, 0f)
+                assertEquals(capturedCell.rect.left, morphRect.left, 1f)
+                assertEquals(capturedCell.rect.top, morphRect.top, 1f)
+                assertEquals(capturedCell.rect.right, morphRect.right, 1f)
+                assertEquals(capturedCell.rect.bottom, morphRect.bottom, 1f)
+                assertEquals(
+                    preparedIndex.preparedImageByAssetId[capturedCell.assetId]?.identity,
+                    capturedCell.preparedImageIdentity,
+                )
+            }
+            capture.visibleHeaderRects.forEach { capturedHeader ->
+                val modelHeader = model.headers.firstOrNull { header ->
+                    header.plan.startTitle == capturedHeader.title
+                } ?: error("header ${capturedHeader.title} missing from Morph source")
+                val sourceRect = modelHeader.plan.sourceRect
+                    ?: error("header ${capturedHeader.title} has no captured source rect")
+                assertEquals(capturedHeader.rect.top, sourceRect.top, 1f)
+                assertEquals(capturedHeader.rect.bottom, sourceRect.bottom, 1f)
+            }
+            var differingCellPixels = 0
+            for (y in 0 until minOf(normalPixels.height, morphPixels.height)) {
+                for (x in 0 until minOf(normalPixels.width, morphPixels.width)) {
+                    val before = normalPixels[x, y]
+                    val after = morphPixels[x, y]
+                    val distance = abs(before.red - after.red) +
+                        abs(before.green - after.green) +
+                        abs(before.blue - after.blue)
+                    if (distance > 0.08f && capturedCells.any { cell ->
+                            x.toFloat() >= cell.rect.left && x.toFloat() < cell.rect.right &&
+                                y.toFloat() >= cell.rect.top && y.toFloat() < cell.rect.bottom
+                        }
+                    ) differingCellPixels++
+                }
+            }
+            assertEquals("claim Normal and first Morph frame differ inside source cells", 0, differingCellPixels)
+        } finally {
             bitmaps.values.forEach(Bitmap::recycle)
         }
     }

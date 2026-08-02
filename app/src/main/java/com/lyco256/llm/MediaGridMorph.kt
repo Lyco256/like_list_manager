@@ -47,6 +47,8 @@ internal data class MediaGridMorphCapturedMedia(
     val itemIndex: Int,
     val xCreatedAt: String,
     val likeCount: Long?,
+    val itemKey: String? = null,
+    val preparedImageIdentity: MediaGridResidentImageIdentity? = null,
 )
 
 internal data class MediaGridMorphCapturedRect(
@@ -54,6 +56,8 @@ internal data class MediaGridMorphCapturedRect(
     val rect: Rect,
     val assetId: Long? = null,
     val isPartiallyVisible: Boolean = false,
+    val itemIndex: Int = -1,
+    val itemKey: String? = null,
 )
 
 internal data class MediaGridMorphCapturedHeaderRect(
@@ -61,6 +65,7 @@ internal data class MediaGridMorphCapturedHeaderRect(
     val key: String,
     val rect: Rect,
     val title: String = key,
+    val itemIndex: Int = -1,
 )
 
 internal data class MediaGridMorphCapturedCell(
@@ -69,6 +74,23 @@ internal data class MediaGridMorphCapturedCell(
     val assetId: Long,
     val rect: Rect,
     val isPartiallyVisible: Boolean,
+    val itemIndex: Int = -1,
+    val itemKey: String? = null,
+    val preparedImageIdentity: MediaGridResidentImageIdentity? = null,
+)
+
+/** Identity of one current-column row in the real frame item sequence. */
+internal data class MediaGridMorphSourceRowKey(
+    val canonicalStartItemIndex: Int,
+    val canonicalStartMediaOrdinal: Int,
+    val headerOrBucketKey: String?,
+    val currentColumnCount: Int,
+)
+
+/** Claim-time LazyGrid scroll state used to verify the current reveal. */
+internal data class MediaGridMorphSourceViewportAnchor(
+    val firstVisibleItemIndex: Int,
+    val firstVisibleItemScrollOffset: Int,
 )
 
 /** One actual source row captured from LazyGridLayoutInfo at Morph claim. */
@@ -78,6 +100,8 @@ internal data class MediaGridMorphCapturedRow(
     val bottom: Float,
     val cells: List<MediaGridMorphCapturedCell>,
     val isPartiallyVisible: Boolean,
+    val rowKey: MediaGridMorphSourceRowKey? = null,
+    val isActualVisibleSourceRow: Boolean = false,
 )
 
 internal data class MediaGridMorphPreparationIdentity(
@@ -371,9 +395,11 @@ internal data class MediaGridMorphImageCompleteness(
     val unresolvedRequiredAssetId: Long?,
     val headerTextComplete: Boolean,
     val geometryComplete: Boolean,
+    val sourceViewportComplete: Boolean = true,
 ) {
     val isComplete: Boolean
         get() = geometryComplete &&
+            sourceViewportComplete &&
             headerTextComplete &&
             requiredSourceImageCount == resolvedSourceImageCount &&
             requiredTargetImageCount == resolvedTargetImageCount
@@ -474,6 +500,7 @@ internal fun captureMediaGridMorphInput(
     layoutInfo: LazyGridLayoutInfo,
     columnCount: Int,
     fallbackHeaderHeightPx: Float,
+    preparedIndex: MediaGridResidentCanvasPreparedIndex? = null,
 ): MediaGridMorphCapture? {
     val signature = buildMediaGridViewportSignature(layoutInfo, frame, columnCount)
     if (
@@ -500,11 +527,15 @@ internal fun captureMediaGridMorphInput(
         val itemIndex = ordinalIndex.itemIndexByMediaOrdinal.getOrNull(ordinal) ?: return null
         val item = frame.items.getOrNull(itemIndex) as? MediaGridCellItem ?: return null
         return MediaGridMorphCapturedMedia(
-            assetId = ordinalIndex.assetIdByMediaOrdinal[ordinal],
+            assetId = item.entry.assetId,
             mediaOrdinal = ordinal,
             itemIndex = itemIndex,
             xCreatedAt = item.entry.xCreatedAt,
             likeCount = item.entry.likeCount,
+            itemKey = item.key,
+            preparedImageIdentity = preparedIndex?.preparedImageByAssetId
+                ?.get(item.entry.assetId)
+                ?.identity,
         )
     }
 
@@ -535,19 +566,30 @@ internal fun captureMediaGridMorphInput(
         )
         if (ordinal >= 0) {
             if (ordinal in startOrdinal..endOrdinal) {
+                val itemKey = info.key as? String
+                val assetId = itemKey?.let(frame.assetIdByItemKey::get)
+                    ?: ordinalIndex.assetIdByMediaOrdinal[ordinal]
                 visibleMediaRects += MediaGridMorphCapturedRect(
                     mediaOrdinal = ordinal,
                     rect = rect,
-                    assetId = ordinalIndex.assetIdByMediaOrdinal[ordinal],
+                    assetId = assetId,
                     isPartiallyVisible = rect.top < layoutInfo.viewportStartOffset ||
                         rect.bottom > layoutInfo.viewportEndOffset,
+                    itemIndex = info.index,
+                    itemKey = itemKey,
                 )
             }
         } else {
             val header = frame.items.getOrNull(info.index) as? MediaGridHeaderItem ?: continue
             val nextOrdinal = ordinalIndex.mediaOrdinalByItemIndex.getOrNull(info.index + 1) ?: -1
             if (nextOrdinal >= 0 && nextOrdinal in startOrdinal..endOrdinal) {
-                visibleHeaderRects += MediaGridMorphCapturedHeaderRect(nextOrdinal, header.key, rect, header.label)
+                visibleHeaderRects += MediaGridMorphCapturedHeaderRect(
+                    firstMediaOrdinal = nextOrdinal,
+                    key = header.key,
+                    rect = rect,
+                    title = header.label,
+                    itemIndex = info.index,
+                )
                 measuredHeaderHeight = maxOf(measuredHeaderHeight, rect.height)
             }
         }
@@ -559,9 +601,7 @@ internal fun captureMediaGridMorphInput(
         .sortedWith(compareBy<MediaGridMorphCapturedRect> { it.rect.top }.thenBy { it.rect.left })
         .fold(ArrayList<MutableList<MediaGridMorphCapturedRect>>()) { rows, captured ->
             val row = rows.lastOrNull()
-            if (row == null || abs(row.first().rect.top - captured.rect.top) > 0.5f ||
-                abs(row.first().rect.bottom - captured.rect.bottom) > 0.5f
-            ) {
+            if (row == null || abs(row.first().rect.top - captured.rect.top) > 1f) {
                 rows += arrayListOf(captured)
             } else {
                 row += captured
@@ -585,9 +625,40 @@ internal fun captureMediaGridMorphInput(
                         assetId = assetId,
                         rect = capturedRect.rect,
                         isPartiallyVisible = capturedRect.isPartiallyVisible,
+                        itemIndex = capturedRect.itemIndex,
+                        itemKey = capturedRect.itemKey,
+                        preparedImageIdentity = preparedIndex?.preparedImageByAssetId
+                            ?.get(assetId)
+                            ?.identity,
                     )
                 },
                 isPartiallyVisible = ordered.any { it.isPartiallyVisible },
+                rowKey = mediaGridMorphSourceRowKey(
+                    frame = frame,
+                    cells = ordered.mapNotNull { capturedRect ->
+                        val assetId = capturedRect.assetId
+                            ?: capturedByOrdinal[capturedRect.mediaOrdinal]?.assetId
+                            ?: return@mapNotNull null
+                        val actualColumn = (capturedRect.rect.left / actualCellWidth)
+                            .roundToInt()
+                            .coerceIn(0, columnCount - 1)
+                        MediaGridMorphCapturedCell(
+                            column = actualColumn,
+                            mediaOrdinal = capturedRect.mediaOrdinal,
+                            assetId = assetId,
+                            rect = capturedRect.rect,
+                            isPartiallyVisible = capturedRect.isPartiallyVisible,
+                            itemIndex = capturedRect.itemIndex,
+                            itemKey = capturedRect.itemKey,
+                            preparedImageIdentity = preparedIndex?.preparedImageByAssetId
+                                ?.get(assetId)
+                                ?.identity,
+                        )
+                    },
+                    columnCount = columnCount,
+                    sortBase = frame.key.dataKey.sort.baseOrder,
+                ),
+                isActualVisibleSourceRow = true,
             )
         }
 
@@ -617,6 +688,59 @@ internal fun captureMediaGridMorphInput(
         visibleHeaderRects = visibleHeaderRects.toList(),
         sourceRows = sourceRows,
         totalMediaCount = totalMedia,
+    )
+}
+
+private fun mediaGridMorphSourceRowKey(
+    frame: MediaGridFrameData,
+    cells: List<MediaGridMorphCapturedCell>,
+    columnCount: Int,
+    sortBase: ClassifiedSortBase,
+): MediaGridMorphSourceRowKey? {
+    if (cells.isEmpty() || cells.any { it.itemIndex < 0 || it.column !in 0 until columnCount }) return null
+    val ordered = cells.sortedBy { it.rect.left }
+    val columns = ordered.map { it.column }
+    if (columns != columns.distinct().sorted() ||
+        columns.zipWithNext().any { (left, right) -> right != left + 1 }
+    ) return null
+    if (ordered.any { it.mediaOrdinal - it.column != ordered.first().mediaOrdinal - ordered.first().column }) return null
+    val first = ordered.first()
+    val firstItem = frame.items.getOrNull(first.itemIndex) as? MediaGridCellItem ?: return null
+    val currentBucket = mediaGridMorphBucketSpec(
+        firstItem.entry.xCreatedAt,
+        firstItem.entry.likeCount,
+        sortBase,
+        columnCount,
+    )?.key
+    var cursor = first.itemIndex
+    var precedingMediaCount = 0
+    var canonicalStartItemIndex = first.itemIndex
+    while (precedingMediaCount < first.column) {
+        cursor--
+        val previous = frame.items.getOrNull(cursor) ?: return null
+        when (previous) {
+            is MediaGridHeaderItem -> return null
+            is MediaGridCellItem -> {
+                val previousBucket = mediaGridMorphBucketSpec(
+                    previous.entry.xCreatedAt,
+                    previous.entry.likeCount,
+                    sortBase,
+                    columnCount,
+                )?.key
+                if (previousBucket != currentBucket) return null
+                canonicalStartItemIndex = cursor
+                precedingMediaCount++
+            }
+        }
+    }
+    val startOrdinal = frame.ordinalIndex.mediaOrdinalByItemIndex
+        .getOrNull(canonicalStartItemIndex)
+        ?: return null
+    return MediaGridMorphSourceRowKey(
+        canonicalStartItemIndex = canonicalStartItemIndex,
+        canonicalStartMediaOrdinal = startOrdinal,
+        headerOrBucketKey = currentBucket,
+        currentColumnCount = columnCount,
     )
 }
 

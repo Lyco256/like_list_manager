@@ -168,6 +168,7 @@ internal data class MediaGridMorphClaimBundle(
     val textResourceIdentity: MediaGridMorphTextResourceIdentity,
     val directions: Map<MediaGridMorphDirection, MediaGridMorphDirectionClaimBundle>,
     val protectedAssetUnion: LongArray,
+    val sourceViewportAnchor: MediaGridMorphSourceViewportAnchor? = null,
 ) {
     fun isCompleteFor(direction: MediaGridMorphDirection): Boolean =
         directions[direction]?.isComplete == true
@@ -187,6 +188,7 @@ internal fun buildMediaGridMorphClaimBundle(
     secondPointerId: Long,
     firstPosition: androidx.compose.ui.geometry.Offset,
     secondPosition: androidx.compose.ui.geometry.Offset,
+    sourceViewportAnchor: MediaGridMorphSourceViewportAnchor? = null,
 ): MediaGridMorphClaimBundle? {
     val identity = capture.identity.toInteractionIdentity()
     val initialDistance = distanceBetween(firstPosition, secondPosition)
@@ -228,6 +230,7 @@ internal fun buildMediaGridMorphClaimBundle(
         textResourceIdentity = textResources.identity,
         directions = directions.toMap(),
         protectedAssetUnion = union.toLongArray(),
+        sourceViewportAnchor = sourceViewportAnchor,
     )
 }
 
@@ -262,11 +265,18 @@ internal fun mediaGridMorphSelectedPlanCompleteness(
     val source = LinkedHashSet<Long>()
     val target = LinkedHashSet<Long>()
     var geometryComplete = selected.viewport.width > 0f && selected.viewport.height > 0f && selected.rowPlans.isNotEmpty()
+    var sourceViewportComplete = true
     selected.rowPlans.forEach { row ->
         row.cells.forEach { cell ->
             geometryComplete = geometryComplete && coordinates.add(cell.relativeRow to cell.column)
             (cell.startContent as? MediaGridMorphSlotContent.Image)?.assetId?.let(source::add)
             (cell.endContent as? MediaGridMorphSlotContent.Image)?.assetId?.let(target::add)
+            val sourceIdentity = cell.sourcePreparedImageIdentity
+            if (sourceIdentity != null) {
+                val preparedIdentity = (cell.startContent as? MediaGridMorphSlotContent.Image)
+                    ?.let { preparedIndex.preparedImageByAssetId[it.assetId]?.identity }
+                sourceViewportComplete = sourceViewportComplete && preparedIdentity == sourceIdentity
+            }
         }
     }
     val headersComplete = selected.headerPlans.all { header ->
@@ -282,6 +292,7 @@ internal fun mediaGridMorphSelectedPlanCompleteness(
         unresolvedRequiredAssetId = unresolved,
         headerTextComplete = headersComplete,
         geometryComplete = geometryComplete,
+        sourceViewportComplete = sourceViewportComplete,
     )
 }
 
@@ -361,21 +372,31 @@ internal fun DrawScope.drawMediaGridMorphRow(
         var cellIndex = 0
         while (cellIndex < model.cells.size) {
             val cell = model.cells[cellIndex]
-            val left = gridLeft + cell.plan.column * currentCellSize - viewport.left
-            val top = focalRowTop +
-                cell.plan.relativeRow * currentCellSize +
-                lerp(cell.plan.startHeaderOffsetPx, cell.plan.endHeaderOffsetPx, p) - viewport.top
-            val right = left + currentCellSize
-            val bottom = top + currentCellSize
-            val width = currentCellSize.roundToInt().coerceAtLeast(1)
-            val height = width
+            val cellRect = cell.plan.sourceRect?.takeIf { p <= 0f } ?: Rect(
+                left = gridLeft + cell.plan.column * currentCellSize,
+                top = focalRowTop +
+                    cell.plan.relativeRow * currentCellSize +
+                    lerp(cell.plan.startHeaderOffsetPx, cell.plan.endHeaderOffsetPx, p),
+                right = gridLeft + cell.plan.column * currentCellSize + currentCellSize,
+                bottom = focalRowTop +
+                    cell.plan.relativeRow * currentCellSize +
+                    lerp(cell.plan.startHeaderOffsetPx, cell.plan.endHeaderOffsetPx, p) + currentCellSize,
+            )
+            val left = cellRect.left - viewport.left
+            val top = cellRect.top - viewport.top
+            val right = cellRect.right - viewport.left
+            val bottom = cellRect.bottom - viewport.top
+            val drawWidth = cellRect.width
+            val drawHeight = cellRect.height
+            val width = drawWidth.roundToInt().coerceAtLeast(1)
+            val height = drawHeight.roundToInt().coerceAtLeast(1)
             clipRect(left, top, right, bottom) {
                 val blend = mediaGridMorphCellBlend(cell.plan.startContent, cell.plan.endContent, p)
                 fun drawPlaceholder() {
                     drawRect(
                         model.placeholderColor,
                         androidx.compose.ui.geometry.Offset(left, top),
-                        androidx.compose.ui.geometry.Size(currentCellSize, currentCellSize),
+                        androidx.compose.ui.geometry.Size(drawWidth, drawHeight),
                     )
                 }
                 fun drawPrepared(image: MediaGridResidentCanvasPreparedImage, alpha: Float) {
@@ -399,11 +420,17 @@ internal fun DrawScope.drawMediaGridMorphRow(
             val header = model.headers[headerIndex]
             val height = lerp(header.plan.startHeightPx, header.plan.endHeightPx, p)
             val rowTop = focalRowTop + header.plan.relativeRow * currentCellSize
-            val top = rowTop +
-                lerp(header.plan.startOffsetBeforePx, header.plan.endOffsetBeforePx, p) - viewport.top
+            val sourceRect = header.plan.sourceRect
+            val top = if (p <= 0f && sourceRect != null) {
+                sourceRect.top - viewport.top
+            } else {
+                rowTop +
+                    lerp(header.plan.startOffsetBeforePx, header.plan.endOffsetBeforePx, p) - viewport.top
+            }
+            val drawHeight = if (p <= 0f && sourceRect != null) sourceRect.height else height
             val left = gridLeft - viewport.left
             val right = left + viewportWidth
-            val bottom = top + height
+            val bottom = top + drawHeight
             if (right > left && bottom > top) {
                 drawRect(
                     model.surfaceColor,

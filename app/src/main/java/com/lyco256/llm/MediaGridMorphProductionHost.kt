@@ -521,9 +521,18 @@ internal fun MediaGridMorphProductionHandoffEffects(
         val snapshot = controller.snapshot()
         when (snapshot.drawMode) {
             MediaGridMorphDrawMode.RevealCurrent -> {
+                val sourceViewportAnchor = snapshot.claimBundle?.sourceViewportAnchor
+                if (sourceViewportAnchor != null && !state.matches(sourceViewportAnchor)) {
+                    controller.cancelPointers()
+                    host.publishHandoffSnapshot()
+                    return@LaunchedEffect
+                }
                 withFrameNanos { }
-                controller.acknowledgeCurrentReveal(snapshot.interactionGeneration)
-                checkpointIfAllowed()
+                if (sourceViewportAnchor == null || state.matches(sourceViewportAnchor)) {
+                    controller.acknowledgeCurrentReveal(snapshot.interactionGeneration)
+                } else {
+                    controller.cancelPointers()
+                }
             }
             MediaGridMorphDrawMode.RevealTarget -> {
                 withFrameNanos { }
@@ -561,6 +570,10 @@ internal fun MediaGridMorphProductionHandoffEffects(
         }
     }
 }
+
+private fun LazyGridState.matches(anchor: MediaGridMorphSourceViewportAnchor): Boolean =
+    firstVisibleItemIndex == anchor.firstVisibleItemIndex &&
+        firstVisibleItemScrollOffset == anchor.firstVisibleItemScrollOffset
 
 private fun captureMediaGridMorphVisibleTargetRow(
     state: LazyGridState,

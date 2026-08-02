@@ -1,5 +1,14 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-08-02 exact source viewport and current-return gate
+
+| Requirement | Evidence | Status |
+|---|---|---|
+| Visible source row is the sole progress-0 geometry/content truth; canonical rows are bounded validation/target data | `captureMediaGridMorphInput`, `MediaGridMorphSourceRowKey`, `MediaGridMorphViewportPlanTemplate.select` | implemented; safe integration passed |
+| Claim-time item sequence, prepared-image identity, header/cell rects and one-pixel row rounding | `MediaGridMorphLazyGridHandoffComposeTest.productionClaimStartsMorphAtTheExactNormalRowsForAPartialBoundedViewport` | implemented; safe integration passed |
+| Current LazyGrid index/offset stays unchanged through claim and `RevealCurrent`; target anchor remains separate | `MediaGridMorphSourceViewportAnchor`, `MediaGridMorphProductionHandoffEffects`, `MediaGridMorphHandoffRequest` | implemented; safe integration passed |
+| Bounded offsets, header/no-header, partial/top/middle/end, fallback, and roundtrip coverage | `MediaGridMorphLazyGridHandoffComposeTest`, `MainActivityComposeTest`, `MediaGridMorphTest` | safe integration passed |
+
 ## 2026-08-01 current handoff/toolbar update
 
 The current source update restores the pre-devenv toolbar Row bounds inside a full-width background, removes centroid-ratio claim arbitration, distinguishes `NoMedia` from required `Media`/prepared images, adds idle urgent target promotion and claim-time protection, and removes the production `ProductionVisible` Canvas mode. On 2026-08-01, `run-safe-integration-check.cmd` completed through Preflight / Build / UnitTest / Lint / Install / IntegrationTest with `OK (183 tests)` (`build/safe-script-logs/run-safe-integration-check/20260801-233503.log`). The required follow-up `run-safe-debug-check.cmd -InstallToDevice` completed through Preflight / Build / UnitTest / Lint / Install; unchanged successful validation states were safely reused and the production package metadata remained unchanged (`build/safe-script-logs/run-safe-debug-check/20260801-234630.log`).

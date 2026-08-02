@@ -2,6 +2,13 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 
 この文書は、全体構成、現状の実装、変更目的別入口、個別docs一覧だけを担当する。禁止事項、完了報告、検証手順は置かない。
 
+## 2026-08-02 exact source viewport Morph handoff
+
+- `MediaGridMorph.kt` captures the actual visible LazyGrid row/cell/header rects, item sequence, resident prepared-image identity, and a canonical source-row key. One-pixel same-row height rounding is tolerated while each cell keeps its own captured rect.
+- `MediaGridMorphRowReflow.kt` uses visible source rows by row key for source content and uses canonical current-column rows only for bounded overscan/target/validation. Missing or non-one-to-one mapping is fail-closed.
+- `MediaGridMorphRowRenderer.kt` draws captured source rects/header rects at progress 0 and uses the frozen prepared image identity/content order. `MediaGridMorphProductionHost.kt` verifies the claim-time LazyGrid index/offset before the one-shot `RevealCurrent` ACK; current-side handoff scrolling/coordinator correction is not used.
+- `MediaGridMorphLazyGridHandoffComposeTest.kt` covers the real production LazyGrid claim at a bounded partial viewport, header/cell geometry, source ordering, and prepared image identity. `MainActivityComposeTest.kt` covers the scroll-starting production claim path.
+
 ## 2026-08-02 production claim-path correction
 
 - `ClassifiedMediaGridContent` is the production caller: its real `LazyVerticalGrid` captures the current viewport/frame at claim time, builds one resident-backed `MediaGridMorphClaimBundle`, and uses the same grid modifier and `mediaGridSingleSurface` for Normal, Morph, and reveal drawing.

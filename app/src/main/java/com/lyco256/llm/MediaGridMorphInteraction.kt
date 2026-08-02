@@ -58,6 +58,7 @@ internal data class MediaGridMorphHandoffRequest(
     val targetCellSizePx: Float? = null,
     val targetHeaderTitle: String? = null,
     val frozenViewportPlan: MediaGridMorphViewportPlan? = plan.viewportPlan,
+    val sourceViewportAnchor: MediaGridMorphSourceViewportAnchor? = null,
 )
 
 internal enum class MediaGridMorphFailureReason {
@@ -68,6 +69,7 @@ internal enum class MediaGridMorphFailureReason {
     MissingVisibleSourceImage,
     MissingTargetImage,
     MissingHeaderText,
+    SourceViewportMismatch,
     RenderModelIncomplete,
     HandoffRequestMissing,
     ColumnCommandNotIssued,
@@ -682,6 +684,7 @@ internal class MediaGridMorphInteractionController(
                 ?.firstOrNull { it.relativeRow == 0 }
                 ?.endTitle,
             frozenViewportPlan = plan.viewportPlan,
+            sourceViewportAnchor = currentSnapshot.claimBundle?.sourceViewportAnchor,
         )
         publish(
             phase = MediaGridMorphPhase.AwaitingGridHandoff,
