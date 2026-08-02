@@ -1,5 +1,9 @@
 # `MediaGridMorphCanvas.kt`
 
+## 2026-08-02 Morph handoff unlock optimization
+
+- The compatibility canvas can notify its draw completion callback for TEST_HARNESS handoff coverage; production actual-draw ACKs come from the unified resident single surface.
+
 Current production contract: `MediaGridMorphCanvasMode` has only `Disabled` and TEST_HARNESS-only `TestVisible`. Production Morph is rendered by the LazyGrid single-surface modifier; no `ProductionVisible` mode or production Canvas host remains. Missing required `Media` images are incomplete inputs and are not converted to Placeholder by the production row renderer.
 
 ## 2026-07-31 UI・handoff correction

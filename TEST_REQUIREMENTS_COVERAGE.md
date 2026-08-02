@@ -1,5 +1,18 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-08-02 Morph handoff unlock optimization
+
+| Requirement | Evidence | Status |
+|---|---|---|
+| Settle endpoint, column command, expected target frame, target layout, position command, aligned layout, reveal, actual draw, unlock, and checkpoint are traceable in generation order | `MediaGridMorphHandoffTraceEvent`, `MediaGridMorphTestTrace`, production handoff Compose test | implemented; safe integration passed |
+| Production command handlers contain no post-scroll frame wait or direct layout observation; layout observer is the only position source | `MediaGridMorphProductionHost.kt`, `MediaGridMorphLazyGridHandoffTestHost.kt`, `MediaGridRenderingContractTest` | implemented; safe debug passed |
+| Visible no-op, hidden target offset, finite/negative rounding, ordinal/header/cell/row/focal geometry, viewport mismatch, and bounded two-step correction | `MediaGridMorphHandoffTest`, `captureMediaGridMorphVisibleTargetRow` | unit/integration covered; safe integration passed |
+| Single production surface sends one actual-draw ACK for each generation/mode, ignores duplicate/stale modes, and permits retry after a failed non-blocking send | `MediaGridMorphDrawAckDispatcher`, `MediaGridResidentCanvasTest`, `MediaGridResidentCanvas` | unit/integration covered; safe integration passed |
+| Target and rollback unlock immediately after actual draw; checkpoint is one-shot and after unlock; terminal Completed is not stale-cancelled | `MediaGridMorphProductionHandoffEffects`, `MediaGridMorphHandoffTest`, production handoff trace assertions | implemented; safe integration passed |
+| 2↔3, 4↔5, 8↔9, 11↔12, header changes, top/partial/end viewport, rollback and scroll-boundary coverage | `MediaGridMorphLazyGridHandoffComposeTest`, `MainActivityComposeTest` | safe integration passed |
+
+The required follow-up `scripts\run-safe-debug-check.cmd -InstallToDevice` completed with `Preflight / Build / UnitTest / Lint / Install / Success` after the safe integration gate.
+
 ## 2026-08-02 exact source viewport and current-return gate
 
 | Requirement | Evidence | Status |

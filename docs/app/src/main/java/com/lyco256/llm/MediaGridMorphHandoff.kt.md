@@ -1,5 +1,12 @@
 # `MediaGridMorphHandoff.kt`
 
+## 2026-08-02 Morph handoff unlock optimization
+
+- Handoff phases are `WaitingForTargetFrame`, `PositioningTarget`, `VerifyingTarget`, `RevealingTarget`, `Completed`, with `RevealingCurrent` for current/rollback completion. The old fixed next-frame completion phase is removed.
+- Visible aligned target rows go directly to verification; hidden rows use one offset-aware `ScrollToItem`. Geometry correction is limited to two non-duplicate `ScrollBy` commands, with one-pixel tolerance and pure offset-rounding coverage.
+- Visible row geometry uses a bounded primitive loop and ordinal array, plus bounded preceding-header lookup. Target row ordinals, header, cell size, row top, viewport, focal position, and frame identity are all validated before reveal.
+- `Completed` remains terminal while checkpoint permission is consumed separately after actual draw/unlock.
+
 ## 2026-08-01 Phase 2 production handoff
 
 - The real `LazyGridState` is verified by target media ordinal plus visible row ordinals, row top, cell size, and header title; each geometric correction remains within the one-pixel tolerance and bounded retry count.

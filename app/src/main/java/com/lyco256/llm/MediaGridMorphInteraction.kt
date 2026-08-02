@@ -56,10 +56,16 @@ internal data class MediaGridMorphHandoffRequest(
     val targetAnchorRowTop: Float? = null,
     val targetRowMediaOrdinals: List<Int> = emptyList(),
     val targetCellSizePx: Float? = null,
+    val targetHeaderKey: String? = null,
     val targetHeaderTitle: String? = null,
     val frozenViewportPlan: MediaGridMorphViewportPlan? = plan.viewportPlan,
     val sourceViewportAnchor: MediaGridMorphSourceViewportAnchor? = null,
-)
+) {
+    /** Captured once so repeated layout observations do not allocate a row signature. */
+    val targetRowMediaOrdinalArray: IntArray by lazy(LazyThreadSafetyMode.NONE) {
+        targetRowMediaOrdinals.toIntArray()
+    }
+}
 
 internal enum class MediaGridMorphFailureReason {
     CaptureUnavailable,
@@ -621,6 +627,15 @@ internal class MediaGridMorphInteractionController(
             return
         }
         settle = null
+        MediaGridMorphTestTrace.recordHandoffTrace(
+            event = MediaGridMorphHandoffTraceEvent.SettleEndpoint,
+            generation = generation,
+            interactionPhase = if (activeSettle.toTarget) {
+                MediaGridMorphPhase.SettlingToTarget
+            } else {
+                MediaGridMorphPhase.SettlingToCurrent
+            },
+        )
         if (!activeSettle.toTarget) {
             publish(
                 phase = MediaGridMorphPhase.RevealingCurrent,
@@ -652,6 +667,12 @@ internal class MediaGridMorphInteractionController(
             )
             return
         }
+        val viewportPlan = plan.viewportPlan
+        val targetHeader = viewportPlan?.let { selectedViewportPlan ->
+            plan.preparedPair.viewportPlanTemplate?.targetRows
+                ?.firstOrNull { it.rowIndex == selectedViewportPlan.targetAnchorRowIndex }
+                ?.headerBefore
+        }
         val request = MediaGridMorphHandoffRequest(
             interactionGeneration = generation,
             sourceRevision = identity.sourceRevision,
@@ -680,7 +701,8 @@ internal class MediaGridMorphInteractionController(
                 ?.mapNotNull { it.targetMediaOrdinal }
                 .orEmpty(),
             targetCellSizePx = plan.viewportPlan?.let { it.viewport.width / plan.toColumnCount.coerceAtLeast(1) },
-            targetHeaderTitle = plan.viewportPlan?.headerPlans
+            targetHeaderKey = targetHeader?.key,
+            targetHeaderTitle = targetHeader?.title ?: plan.viewportPlan?.headerPlans
                 ?.firstOrNull { it.relativeRow == 0 }
                 ?.endTitle,
             frozenViewportPlan = plan.viewportPlan,
@@ -705,6 +727,25 @@ internal class MediaGridMorphInteractionController(
     fun acknowledgeCurrentReveal(generation: Long) {
         if (currentSnapshot.phase != MediaGridMorphPhase.RevealingCurrent || currentSnapshot.interactionGeneration != generation) return
         resetToIdle(currentSnapshot.fromColumnCount, generation)
+    }
+
+    fun beginCurrentReveal(generation: Long): Boolean {
+        if (currentSnapshot.phase != MediaGridMorphPhase.AwaitingGridHandoff || currentSnapshot.interactionGeneration != generation) return false
+        val identity = currentIdentity ?: return false
+        publish(
+            phase = MediaGridMorphPhase.RevealingCurrent,
+            direction = currentSnapshot.direction,
+            plan = currentSnapshot.plan,
+            progress = 0f,
+            correction = Offset.Zero,
+            center = currentSnapshot.currentPinchCenter,
+            identity = identity,
+            toColumnCount = currentSnapshot.fromColumnCount,
+            handoffRequest = currentSnapshot.handoffRequest,
+            generation = generation,
+            drawMode = MediaGridMorphDrawMode.RevealCurrent,
+        )
+        return true
     }
 
     fun beginTargetReveal(generation: Long): Boolean {

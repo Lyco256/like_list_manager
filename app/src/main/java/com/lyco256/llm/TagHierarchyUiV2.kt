@@ -598,6 +598,7 @@ internal fun EnhancedClassifiedScreen(
                 ) { androidx.compose.material3.CircularProgressIndicator() }
                 else -> ClassifiedMediaGridContent(
                     frame = mediaGridSessionState.frame!!,
+                    sessionKey = mediaGridSessionState.sessionKey,
                     sort = uiState.sort,
                     columnCount = mediaGridSessionState.columnCount,
                     state = mediaGridLazyState,
@@ -3600,6 +3601,7 @@ internal fun MediaGridFramePublicationRunner(target: MediaGridFramePublicationTa
 @OptIn(ExperimentalFoundationApi::class)
 private fun ClassifiedMediaGridContent(
     frame: MediaGridFrameData,
+    sessionKey: MediaGridSessionKey?,
     sort: ClassifiedSortState,
     columnCount: Int,
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
@@ -3676,7 +3678,7 @@ private fun ClassifiedMediaGridContent(
     val morphEnabled = !selectionMode && !showProgress
     val morphHost = rememberMediaGridMorphProductionHostState(
         state = state,
-        sessionKey = null,
+        sessionKey = sessionKey,
         retainedImageStore = retainedImageStore,
         enabled = morphEnabled,
     )
@@ -3727,7 +3729,7 @@ private fun ClassifiedMediaGridContent(
         MediaGridMorphProductionHandoffEffects(
             host = morphHost,
             frame = frame,
-            sessionKey = null,
+            sessionKey = sessionKey,
             identity = morphIdentity,
             state = state,
             onColumnCountChange = onMediaGridColumnCountChange,
@@ -3885,6 +3887,11 @@ private fun ClassifiedMediaGridContent(
                             progress = morphProgress,
                             morphDrawObserver = morphDrawObserver,
                             morphSnapshot = morphController?.snapshotState,
+                            morphDrawAck = morphHost?.drawAckDispatcher?.let { dispatcher ->
+                                { generation, mode, frameNumber ->
+                                    dispatcher.dispatch(generation, mode, frameNumber)
+                                }
+                            },
                         )
                     } else Modifier,
                 ),

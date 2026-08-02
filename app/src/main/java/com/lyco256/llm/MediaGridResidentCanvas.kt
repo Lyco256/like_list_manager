@@ -15,6 +15,7 @@ import java.util.Collections
 import java.util.LinkedHashMap
 import kotlin.math.roundToInt
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicReference
 
 internal enum class MediaGridResidentCanvasMode {
     Disabled,
@@ -52,15 +53,73 @@ internal data class MediaGridMorphClaimObservation(
     val failureReason: MediaGridMorphFailureReason?,
 )
 
+internal enum class MediaGridMorphHandoffTraceEvent {
+    SettleEndpoint,
+    ColumnCommand,
+    ExpectedTargetFrame,
+    TargetLayout,
+    PositionCommand,
+    AlignedLayout,
+    RevealCurrent,
+    RevealTarget,
+    ActualDraw,
+    Unlock,
+    Checkpoint,
+}
+
+internal data class MediaGridMorphHandoffTraceObservation(
+    val event: MediaGridMorphHandoffTraceEvent,
+    val generation: Long,
+    val handoffPhase: MediaGridMorphGridHandoffPhase?,
+    val interactionPhase: MediaGridMorphPhase?,
+    val frameNumber: Long,
+)
+
+internal data class MediaGridMorphDrawAck(
+    val generation: Long,
+    val mode: MediaGridSingleSurfaceMode,
+    val frameNumber: Long,
+)
+
+private data class MediaGridMorphDrawAckKey(
+    val generation: Long,
+    val mode: MediaGridSingleSurfaceMode,
+)
+
+/** Deduplicates reveal notifications without touching Compose state from draw. */
+internal class MediaGridMorphDrawAckDispatcher(
+    private val sink: (MediaGridMorphDrawAck) -> Boolean,
+) {
+    private val lastSent = AtomicReference<MediaGridMorphDrawAckKey?>(null)
+
+    fun dispatch(generation: Long, mode: MediaGridSingleSurfaceMode, frameNumber: Long) {
+        if (mode != MediaGridSingleSurfaceMode.RevealCurrent && mode != MediaGridSingleSurfaceMode.RevealTarget) return
+        val key = MediaGridMorphDrawAckKey(generation, mode)
+        while (true) {
+            val previous = lastSent.get()
+            if (previous == key || !lastSent.compareAndSet(previous, key)) {
+                if (previous == key) return
+                continue
+            }
+            if (!sink(MediaGridMorphDrawAck(generation, mode, frameNumber))) {
+                lastSent.compareAndSet(key, previous)
+            }
+            return
+        }
+    }
+}
+
 internal object MediaGridMorphTestTrace {
     private val drawEvents = CopyOnWriteArrayList<MediaGridMorphDrawObservation>()
     private val claimEvents = CopyOnWriteArrayList<MediaGridMorphClaimObservation>()
+    private val handoffEvents = CopyOnWriteArrayList<MediaGridMorphHandoffTraceObservation>()
     @Volatile private var fallbackCount = 0
     private var nextFrameNumber = 0L
 
     fun clear() {
         drawEvents.clear()
         claimEvents.clear()
+        handoffEvents.clear()
         fallbackCount = 0
         nextFrameNumber = 0L
     }
@@ -78,6 +137,7 @@ internal object MediaGridMorphTestTrace {
     fun fallbackCount(): Int = fallbackCount
 
     fun nextFrameNumber(): Long {
+        if (!BuildConfig.TEST_HARNESS) return 0L
         nextFrameNumber += 1L
         return nextFrameNumber
     }
@@ -87,6 +147,28 @@ internal object MediaGridMorphTestTrace {
     }
 
     fun claimEvents(): List<MediaGridMorphClaimObservation> = claimEvents.toList()
+
+    fun recordHandoffTrace(
+        event: MediaGridMorphHandoffTraceEvent,
+        generation: Long,
+        handoffPhase: MediaGridMorphGridHandoffPhase? = null,
+        interactionPhase: MediaGridMorphPhase? = null,
+        frameNumber: Long = currentFrameNumber(),
+    ) {
+        if (BuildConfig.TEST_HARNESS) {
+            handoffEvents += MediaGridMorphHandoffTraceObservation(
+                event = event,
+                generation = generation,
+                handoffPhase = handoffPhase,
+                interactionPhase = interactionPhase,
+                frameNumber = frameNumber,
+            )
+        }
+    }
+
+    fun handoffEvents(): List<MediaGridMorphHandoffTraceObservation> = handoffEvents.toList()
+
+    fun currentFrameNumber(): Long = nextFrameNumber
 }
 
 internal data class MediaGridResidentCanvasImage(
@@ -269,6 +351,7 @@ internal fun Modifier.mediaGridSingleSurface(
     progress: State<Float>,
     morphDrawObserver: ((MediaGridMorphDrawObservation) -> Unit)? = null,
     morphSnapshot: State<MediaGridMorphInteractionSnapshot>? = null,
+    morphDrawAck: ((Long, MediaGridSingleSurfaceMode, Long) -> Unit)? = null,
 ): Modifier = drawWithCache {
     val layout = state.layoutInfo
     val commands = ArrayList<MediaGridResidentDrawCommand>(layout.visibleItemsInfo.size)
@@ -287,7 +370,9 @@ internal fun Modifier.mediaGridSingleSurface(
         )
     }
     onDrawWithContent {
-        when (mode.value) {
+        val surfaceMode = mode.value
+        val drawFrameNumber = MediaGridMorphTestTrace.nextFrameNumber()
+        when (surfaceMode) {
             MediaGridSingleSurfaceMode.Morph -> {
                 val snapshot = morphSnapshot?.value
                 val model = snapshot?.activeRenderModel ?: morphModel
@@ -302,7 +387,7 @@ internal fun Modifier.mediaGridSingleSurface(
                             drawMode = MediaGridSingleSurfaceMode.Morph,
                             progress = progress.value,
                             modelIdentity = System.identityHashCode(model),
-                            frameNumber = MediaGridMorphTestTrace.nextFrameNumber(),
+                            frameNumber = drawFrameNumber,
                             hasPlan = snapshot?.plan != null,
                             hasActiveRenderModel = snapshot?.activeRenderModel != null,
                             protectedAssetCount = snapshot?.protectedAssetIds?.size ?: 0,
@@ -329,6 +414,9 @@ internal fun Modifier.mediaGridSingleSurface(
                     index++
                 }
                 drawContent()
+                val snapshot = morphSnapshot?.value
+                val generation = snapshot?.interactionGeneration ?: 0L
+                if (generation > 0L) morphDrawAck?.invoke(generation, surfaceMode, drawFrameNumber)
             }
         }
     }

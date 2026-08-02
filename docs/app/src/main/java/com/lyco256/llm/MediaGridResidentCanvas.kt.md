@@ -1,5 +1,10 @@
 # `MediaGridResidentCanvas.kt`
 
+## 2026-08-02 Morph handoff unlock optimization
+
+- The unified `Normal`/`Morph`/`RevealCurrent`/`RevealTarget` surface sends a non-blocking actual-draw ACK only after normal-grid commands and content are drawn for a reveal mode.
+- ACK dispatch is deduplicated by generation and reveal mode, ignores Normal/Morph, and permits retry when the non-blocking sink rejects a notification. Production does not maintain a frame counter or trace list.
+
 ## 2026-08-02 production Morph draw observation
 
 - The unified surface reads the current `MediaGridMorphInteractionSnapshot` State in the draw phase, so a valid claim's frozen model is available on the first Morph frame even when the modifier itself is not recomposed.
