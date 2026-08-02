@@ -1130,17 +1130,28 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                         true
                                     }
                                     if (productionClaimAllowed) launchStopScrollOnce()
-                                    val claimBundle = if (mode == MediaGridMorphGestureMode.Production && productionClaimAllowed) {
+                                    var claimBundle = if (mode == MediaGridMorphGestureMode.Production && productionClaimAllowed) {
                                         latestPrepareClaimBundle?.invoke(activeCandidate)
                                     } else {
                                         activeCandidate.claimBundle
                                     }
+                                    if (
+                                        mode == MediaGridMorphGestureMode.Production &&
+                                            productionClaimAllowed &&
+                                            claimBundle != null &&
+                                            !mediaGridMorphClaimBundleMatchesIdentity(claimBundle, latestIdentity)
+                                    ) {
+                                        // The first production capture can race
+                                        // a LazyGrid layout publication. Give
+                                        // the current layout one bounded retry;
+                                        // never claim a stale bundle.
+                                        claimBundle = latestPrepareClaimBundle?.invoke(activeCandidate)
+                                    }
                                     val claimCapture = if (claimBundle == null) latestCaptureOnClaim?.invoke() else null
                                     val claimIdentity = claimBundle?.identity ?: claimCapture?.identity?.toInteractionIdentity() ?: latestIdentity
                                     val claimBundleIdentityMatches = claimBundle != null && (
-                                        mode == MediaGridMorphGestureMode.Production ||
-                                            mediaGridMorphClaimBundleMatchesIdentity(claimBundle, latestIdentity)
-                                        )
+                                        mediaGridMorphClaimBundleMatchesIdentity(claimBundle, latestIdentity)
+                                    )
                                     val availablePairs = when {
                                         claimBundle != null -> claimBundle.directions.mapValues { it.value.plan.preparedPair }
                                         claimCapture != null -> buildMediaGridMorphRowPreparedPairs(claimCapture)

@@ -3,6 +3,7 @@
 ## 2026-08-02 production claim-path correction
 
 - `ClassifiedMediaGridContent` uses the real `LazyGrid` frame and visible-item geometry at the direction event. It no longer rejects claim preparation solely because `LazyGridState.isScrollInProgress` is true.
+- The production claim compares the fresh bundle identity with the current frame/column/viewport/visible geometry identity and allows one bounded recapture before falling back on a persistent mismatch.
 - Production does not fall back to `beginPointers` when the claim bundle is absent. A selected direction must have a complete plan/render model; otherwise the source grid remains visible and release uses the same canonical distance-ratio fallback.
 - `publish()` exposes Morph only when direction, plan, complete model, protected assets, and claim generation match atomically. The unified surface reads the current snapshot State during draw so the first valid direction is visible on the next frame.
 - `TEST_HARNESS` records claim and draw evidence, including generation, phase, direction, draw mode, progress, model identity, frame number, and protected-asset count. Production has no trace/counter work.
