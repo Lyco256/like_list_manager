@@ -2,6 +2,13 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 
 この文書は、全体構成、現状の実装、変更目的別入口、個別docs一覧だけを担当する。禁止事項、完了報告、検証手順は置かない。
 
+## 2026-08-02 production claim-path correction
+
+- `ClassifiedMediaGridContent` is the production caller: its real `LazyVerticalGrid` captures the current viewport/frame at claim time, builds one resident-backed `MediaGridMorphClaimBundle`, and uses the same grid modifier and `mediaGridSingleSurface` for Normal, Morph, and reveal drawing.
+- Production claim validity is based on frame/column/viewport/visible-item geometry and the selected direction's complete plan/model. A missing bundle or incomplete direction never calls `beginPointers`; it enters the canonical release fallback path.
+- `MediaGridMorphInteractionController` publishes Morph only for one atomic generation-matched snapshot containing direction, plan, complete render model, protected assets, and `MediaGridMorphDrawMode.Morph`. Reverse-direction preparation may remain incomplete without replacing the visible source grid.
+- `MediaGridResidentCanvas.kt` keeps the draw hot path pre-resolved. Generation/draw observations and claim diagnostics exist only behind `BuildConfig.TEST_HARNESS`; production does not allocate or update those traces.
+
 ## 2026-08-01 Phase 1 row reflow
 
 - `TagHierarchyUiV2.kt` keeps production Morph overlay/handoff disconnected and uses `MediaGridLegacyPinch.kt` for one release-time adjacent-column step.

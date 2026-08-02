@@ -1137,16 +1137,18 @@ internal fun mediaGridMorphProgressForScale(
 internal fun mediaGridColumnCountAfterPinchRelease(
     currentColumnCount: Int,
     accumulatedScale: Float?,
-    deadZoneScale: Float = MediaGridMorphDefaults.DeadZoneScale,
     releaseThreshold: Float = MediaGridMorphDefaults.ReleaseThreshold,
 ): Int {
     if (accumulatedScale == null || !accumulatedScale.isFinite() || releaseThreshold !in 0f..1f) {
         return currentColumnCount
     }
-    val direction = mediaGridMorphDirectionForScale(accumulatedScale, deadZoneScale) ?: return currentColumnCount
-    val progress = mediaGridMorphProgressForScale(accumulatedScale, direction, deadZoneScale)
-    if (progress < releaseThreshold) return currentColumnCount
-    return mediaGridMorphTargetColumnCount(currentColumnCount, direction)
+    val decision = mediaGridMorphCanonicalReleaseDecision(
+        currentColumnCount = currentColumnCount,
+        initialDistance = 1f,
+        releaseDistance = 1f / accumulatedScale,
+    )
+    if (decision.progress < releaseThreshold) return currentColumnCount
+    return decision.targetColumnCount
 }
 
 internal fun mediaGridMorphRect(slot: MediaGridMorphSlot, progress: Float): Rect {

@@ -336,13 +336,13 @@ internal class MediaGridMorphInteractionController(
         currentFirstPosition: Offset,
         currentSecondPosition: Offset,
     ): Boolean {
-        if (!bundle.isCompleteForCurrentColumns()) return false
         if (!bundle.initialDistance.isFinite() || bundle.initialDistance <= 0f) return false
         val currentDistance = pointerDistance(currentFirstPosition, currentSecondPosition)
         val scale = mediaGridMorphScale(bundle.initialDistance, currentDistance) ?: return false
         val direction = mediaGridMorphDirectionForScale(scale) ?: return false
         val active = bundle.directions[direction] ?: return false
-        val generation = ++nextGeneration
+        if (!active.isComplete) return false
+        val generation = maxOf(++nextGeneration, bundle.generation).also { nextGeneration = it }
         currentIdentity = bundle.identity
         gesture = Gesture(
             identity = bundle.identity,
@@ -400,9 +400,17 @@ internal class MediaGridMorphInteractionController(
         var direction = if (nextDirection == null) null else currentSnapshot.direction
         if (nextDirection != null && nextDirection != currentSnapshot.direction) {
             val claimDirection = activeGesture.claimBundle?.directions?.get(nextDirection)
+                ?.takeIf { it.isComplete }
             if (claimDirection != null) {
                 plan = claimDirection.plan
                 renderModel = claimDirection.renderModel
+                direction = nextDirection
+            } else if (activeGesture.claimBundle != null) {
+                // An unprepared reverse direction keeps the real source grid
+                // visible. Release is handled by the modifier's canonical
+                // fallback path instead of publishing Morph with no model.
+                plan = null
+                renderModel = null
                 direction = nextDirection
             } else {
                 val pair = activeGesture.pairs[nextDirection]
@@ -445,7 +453,12 @@ internal class MediaGridMorphInteractionController(
             toColumnCount = plan?.toColumnCount ?: activeGesture.identity.currentColumnCount,
             handoffRequest = null,
             generation = activeGesture.generation,
-            drawMode = if (activeGesture.claimBundle != null) MediaGridMorphDrawMode.Morph else null,
+            drawMode = if (
+                activeGesture.claimBundle != null &&
+                    direction != null &&
+                    plan != null &&
+                    renderModel != null
+            ) MediaGridMorphDrawMode.Morph else MediaGridMorphDrawMode.Normal,
             claimBundle = activeGesture.claimBundle,
             renderModel = renderModel,
         )
@@ -751,16 +764,29 @@ internal class MediaGridMorphInteractionController(
         claimBundle: MediaGridMorphClaimBundle? = currentSnapshot.claimBundle,
         renderModel: MediaGridMorphRowRenderModel? = currentSnapshot.activeRenderModel,
     ) {
+        val morphSnapshotComplete = claimBundle != null &&
+            phase != MediaGridMorphPhase.Idle &&
+            direction != null &&
+            plan != null &&
+            renderModel != null &&
+            renderModel.isComplete &&
+            protectedAssetIds != null &&
+            claimBundle.generation == generation
         val resolvedDrawMode = drawMode ?: when (phase) {
-            MediaGridMorphPhase.AwaitingGridHandoff -> MediaGridMorphDrawMode.Morph
+            MediaGridMorphPhase.AwaitingGridHandoff ->
+                if (morphSnapshotComplete) MediaGridMorphDrawMode.Morph else MediaGridMorphDrawMode.Normal
             MediaGridMorphPhase.RevealingCurrent -> MediaGridMorphDrawMode.RevealCurrent
-            MediaGridMorphPhase.RevealingTarget -> MediaGridMorphDrawMode.RevealTarget
+            MediaGridMorphPhase.RevealingTarget ->
+                if (morphSnapshotComplete) MediaGridMorphDrawMode.RevealTarget else MediaGridMorphDrawMode.Normal
             MediaGridMorphPhase.Tracking,
             MediaGridMorphPhase.SettlingToCurrent,
             MediaGridMorphPhase.SettlingToTarget,
-                -> if (renderModel != null) MediaGridMorphDrawMode.Morph else MediaGridMorphDrawMode.Normal
+                -> if (morphSnapshotComplete) MediaGridMorphDrawMode.Morph else MediaGridMorphDrawMode.Normal
             else -> MediaGridMorphDrawMode.Normal
         }
+        val safeDrawMode = if (
+            resolvedDrawMode == MediaGridMorphDrawMode.Morph && !morphSnapshotComplete
+        ) MediaGridMorphDrawMode.Normal else resolvedDrawMode
         currentSnapshot = MediaGridMorphInteractionSnapshot(
             phase = phase,
             direction = direction,
@@ -775,7 +801,7 @@ internal class MediaGridMorphInteractionController(
             handoffRequest = handoffRequest,
             interactionGeneration = generation,
             failureReason = failureReason,
-            drawMode = resolvedDrawMode,
+            drawMode = safeDrawMode,
             claimBundle = claimBundle,
             activeRenderModel = renderModel,
             protectedAssetIds = protectedAssetIds ?: LongArray(0),
@@ -931,6 +957,22 @@ internal fun Modifier.mediaGridMorphGestureInput(
                 pointerScope.launch(start = CoroutineStart.UNDISPATCHED) { latestStopScroll() }
             }
 
+            fun issueCanonicalFallback(distance: Float, center: Offset) {
+                val current = latestColumnCount()
+                val decision = mediaGridMorphCanonicalReleaseDecision(
+                    currentColumnCount = current,
+                    initialDistance = candidate?.initialDistance ?: distance,
+                    releaseDistance = distance,
+                )
+                if (
+                    decision.progress >= MediaGridMorphDefaults.ReleaseThreshold &&
+                        decision.targetColumnCount != current
+                ) {
+                    fallbackAnchor = fallbackAnchor ?: latestFallbackAnchor(center)
+                    latestFallback(fallbackAnchor, decision.targetColumnCount)
+                }
+            }
+
             try {
                 while (true) {
                     val event = awaitPointerEvent()
@@ -1043,14 +1085,7 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                             touchSlop = touchSlop,
                                         )
                                     }
-                                    if (direction != null) {
-                                        fallbackAnchor = fallbackAnchor ?: latestFallbackAnchor(currentCentroid)
-                                        val nextColumnCount = mediaGridColumnCountAfterPinchRelease(
-                                            latestColumnCount(),
-                                            mediaGridMorphScale(activeCandidate.initialDistance, latestDistance),
-                                        )
-                                        latestFallback(fallbackAnchor, nextColumnCount)
-                                    }
+                                    if (direction != null) issueCanonicalFallback(latestDistance, currentCentroid)
                                 }
                                 arbitrationState = MediaGridMorphGestureArbitrationState.ReleasedOrCancelled
                             } else {
@@ -1076,39 +1111,36 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                     )
                                 }
                                 if (direction != null && mode != MediaGridMorphGestureMode.Disabled) {
-                                    // Claim ordering is intentional: stop the
-                                    // real LazyGrid before taking the one
-                                    // stable layout capture used by the plan.
-                                    // A real grid can also deliver a two-pointer
-                                    // move that looks like a scale before the
-                                    // tracked pair is available for that
-                                    // direction. In the callback-free path this
-                                    // is only a candidate, so keep the grid's
-                                    // native scroll/pan behavior intact until a
-                                    // cached pair can actually be claimed. An
-                                    // empty snapshot remains the explicit
-                                    // fallback-test path and keeps its existing
-                                    // stop-before-fallback behavior.
-                                    val cachedPairCanClaim = if (activeCandidate.claimBundle != null) {
+                                    // A production candidate may stop the real
+                                    // grid only when its selected direction is
+                                    // already a valid resident candidate (or
+                                    // there is no cached pair and fallback is
+                                    // the only path). The cached pair is still
+                                    // never used as the Morph source.
+                                    val cachedPairs = latestPairs()
+                                    val productionClaimAllowed = if (mode != MediaGridMorphGestureMode.Production) {
                                         true
+                                    } else if (activeCandidate.claimBundle != null) {
+                                        activeCandidate.claimBundle.isCompleteFor(direction)
                                     } else if (latestCaptureOnClaim == null) {
-                                        val cachedPairs = latestPairs()
-                                        cachedPairs.isEmpty() || (
-                                            controller != null &&
-                                                cachedPairs[direction]?.let { cachedPair ->
-                                                    latestIdentity?.let(cachedPair::matchesIdentity) == true &&
-                                                        latestPairReady(cachedPair)
-                                                } == true
-                                            )
+                                        cachedPairs.isEmpty() || cachedPairs[direction]?.let { pair ->
+                                            latestIdentity?.let(pair::matchesIdentity) == true && latestPairReady(pair)
+                                        } == true
                                     } else {
                                         true
                                     }
-                                    if (cachedPairCanClaim) launchStopScrollOnce()
-                                    val claimBundle = activeCandidate.claimBundle
+                                    if (productionClaimAllowed) launchStopScrollOnce()
+                                    val claimBundle = if (mode == MediaGridMorphGestureMode.Production && productionClaimAllowed) {
+                                        latestPrepareClaimBundle?.invoke(activeCandidate)
+                                    } else {
+                                        activeCandidate.claimBundle
+                                    }
                                     val claimCapture = if (claimBundle == null) latestCaptureOnClaim?.invoke() else null
                                     val claimIdentity = claimBundle?.identity ?: claimCapture?.identity?.toInteractionIdentity() ?: latestIdentity
-                                    val claimBundleIdentityMatches = claimBundle == null ||
-                                        mediaGridMorphClaimBundleMatchesIdentity(claimBundle, latestIdentity)
+                                    val claimBundleIdentityMatches = claimBundle != null && (
+                                        mode == MediaGridMorphGestureMode.Production ||
+                                            mediaGridMorphClaimBundleMatchesIdentity(claimBundle, latestIdentity)
+                                        )
                                     val availablePairs = when {
                                         claimBundle != null -> claimBundle.directions.mapValues { it.value.plan.preparedPair }
                                         claimCapture != null -> buildMediaGridMorphRowPreparedPairs(claimCapture)
@@ -1119,13 +1151,13 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                     val currentPair = currentPairs[direction]
                                     val morphAccepted = if (controller == null || claimIdentity == null) {
                                         false
-                                    } else if (claimBundle != null) {
+                                    } else if (claimBundle != null && claimBundleIdentityMatches) {
                                         claimBundleIdentityMatches && controller.claimPointers(
                                             bundle = claimBundle,
                                             currentFirstPosition = currentFirstPosition,
                                             currentSecondPosition = currentSecondPosition,
                                         )
-                                    } else {
+                                    } else if (mode != MediaGridMorphGestureMode.Production) {
                                         currentPair != null && currentPair.matchesIdentity(claimIdentity) &&
                                             controller.beginPointers(
                                                 identity = claimIdentity,
@@ -1135,6 +1167,19 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                                 firstPosition = activeCandidate.firstInitialPosition,
                                                 secondPosition = activeCandidate.secondInitialPosition,
                                             )
+                                    } else {
+                                        false
+                                    }
+                                    if (BuildConfig.TEST_HARNESS) {
+                                        MediaGridMorphTestTrace.recordClaim(
+                                            MediaGridMorphClaimObservation(
+                                                direction = direction,
+                                                bundlePresent = claimBundle != null,
+                                                directionPrepared = claimBundle?.isCompleteFor(direction) == true,
+                                                accepted = morphAccepted,
+                                                failureReason = if (morphAccepted) null else latestClaimFailureReason(availablePairs[direction]),
+                                            ),
+                                        )
                                     }
                                     if (morphAccepted) {
                                         if (claimBundle == null) {
@@ -1177,11 +1222,26 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                     consumeTracked(first)
                                     consumeTracked(second)
                                 } else if (normalRelease) {
-                                    // releasePointers starts the settle clock on the
-                                    // first Compose frame. PointerInput uptimeMillis
-                                    // has a different clock origin than withFrameNanos.
-                                    controller?.releasePointers()
-                                    completedByExplicitRelease = true
+                                    val snapshot = controller?.snapshot()
+                                    if (
+                                        snapshot?.claimBundle != null &&
+                                            (snapshot.plan == null || snapshot.activeRenderModel == null)
+                                    ) {
+                                        controller?.cancelPointers()
+                                        issueCanonicalFallback(
+                                            latestDistance,
+                                            midpoint(
+                                                trackedFirstPosition ?: activeCandidate.firstInitialPosition,
+                                                trackedSecondPosition ?: activeCandidate.secondInitialPosition,
+                                            ),
+                                        )
+                                    } else {
+                                        // releasePointers starts the settle clock on the
+                                        // first Compose frame. PointerInput uptimeMillis
+                                        // has a different clock origin than withFrameNanos.
+                                        controller?.releasePointers()
+                                        completedByExplicitRelease = true
+                                    }
                                 } else {
                                     controller?.cancelPointers()
                                 }
@@ -1193,11 +1253,13 @@ internal fun Modifier.mediaGridMorphGestureInput(
                         } else if (arbitrationState == MediaGridMorphGestureArbitrationState.FallbackClaimed) {
                             if (bothPresent) latestDistance = pointerDistance(trackedFirstPosition!!, trackedSecondPosition!!)
                             if (!bothPressed) {
-                                val scale = mediaGridMorphScale(activeCandidate.initialDistance, latestDistance)
-                                val nextColumnCount = scale?.let {
-                                    mediaGridColumnCountAfterPinchRelease(latestColumnCount(), it)
-                                } ?: latestColumnCount()
-                                latestFallback(fallbackAnchor, nextColumnCount)
+                                issueCanonicalFallback(
+                                    latestDistance,
+                                    midpoint(
+                                        trackedFirstPosition ?: activeCandidate.firstInitialPosition,
+                                        trackedSecondPosition ?: activeCandidate.secondInitialPosition,
+                                    ),
+                                )
                                 arbitrationState = MediaGridMorphGestureArbitrationState.ReleasedOrCancelled
                             } else {
                                 consumeTracked(first)

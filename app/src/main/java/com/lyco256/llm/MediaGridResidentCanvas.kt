@@ -14,6 +14,7 @@ import coil.memory.MemoryCache
 import java.util.Collections
 import java.util.LinkedHashMap
 import kotlin.math.roundToInt
+import java.util.concurrent.CopyOnWriteArrayList
 
 internal enum class MediaGridResidentCanvasMode {
     Disabled,
@@ -27,6 +28,65 @@ internal enum class MediaGridSingleSurfaceMode {
     Morph,
     RevealCurrent,
     RevealTarget,
+}
+
+/** TEST_HARNESS-only evidence that the unified surface executed the Morph branch. */
+internal data class MediaGridMorphDrawObservation(
+    val generation: Long,
+    val phase: MediaGridMorphPhase,
+    val direction: MediaGridMorphDirection?,
+    val drawMode: MediaGridSingleSurfaceMode,
+    val progress: Float,
+    val modelIdentity: Int,
+    val frameNumber: Long,
+    val hasPlan: Boolean,
+    val hasActiveRenderModel: Boolean,
+    val protectedAssetCount: Int,
+)
+
+internal data class MediaGridMorphClaimObservation(
+    val direction: MediaGridMorphDirection,
+    val bundlePresent: Boolean,
+    val directionPrepared: Boolean,
+    val accepted: Boolean,
+    val failureReason: MediaGridMorphFailureReason?,
+)
+
+internal object MediaGridMorphTestTrace {
+    private val drawEvents = CopyOnWriteArrayList<MediaGridMorphDrawObservation>()
+    private val claimEvents = CopyOnWriteArrayList<MediaGridMorphClaimObservation>()
+    @Volatile private var fallbackCount = 0
+    private var nextFrameNumber = 0L
+
+    fun clear() {
+        drawEvents.clear()
+        claimEvents.clear()
+        fallbackCount = 0
+        nextFrameNumber = 0L
+    }
+
+    fun recordDraw(event: MediaGridMorphDrawObservation) {
+        if (BuildConfig.TEST_HARNESS) drawEvents += event
+    }
+
+    fun recordFallback() {
+        if (BuildConfig.TEST_HARNESS) fallbackCount++
+    }
+
+    fun drawEvents(): List<MediaGridMorphDrawObservation> = drawEvents.toList()
+
+    fun fallbackCount(): Int = fallbackCount
+
+    fun nextFrameNumber(): Long {
+        nextFrameNumber += 1L
+        return nextFrameNumber
+    }
+
+    fun recordClaim(event: MediaGridMorphClaimObservation) {
+        if (BuildConfig.TEST_HARNESS) claimEvents += event
+    }
+
+    fun claimEvents(): List<MediaGridMorphClaimObservation> = claimEvents.toList()
 }
 
 internal data class MediaGridResidentCanvasImage(
@@ -207,6 +267,8 @@ internal fun Modifier.mediaGridSingleSurface(
     mode: State<MediaGridSingleSurfaceMode>,
     morphModel: MediaGridMorphRowRenderModel?,
     progress: State<Float>,
+    morphDrawObserver: ((MediaGridMorphDrawObservation) -> Unit)? = null,
+    morphSnapshot: State<MediaGridMorphInteractionSnapshot>? = null,
 ): Modifier = drawWithCache {
     val layout = state.layoutInfo
     val commands = ArrayList<MediaGridResidentDrawCommand>(layout.visibleItemsInfo.size)
@@ -227,10 +289,25 @@ internal fun Modifier.mediaGridSingleSurface(
     onDrawWithContent {
         when (mode.value) {
             MediaGridSingleSurfaceMode.Morph -> {
-                val model = morphModel
+                val snapshot = morphSnapshot?.value
+                val model = snapshot?.activeRenderModel ?: morphModel
                 if (model == null) {
                     drawContent()
                 } else {
+                    morphDrawObserver?.invoke(
+                        MediaGridMorphDrawObservation(
+                            generation = snapshot?.interactionGeneration ?: 0L,
+                            phase = snapshot?.phase ?: MediaGridMorphPhase.Idle,
+                            direction = snapshot?.direction,
+                            drawMode = MediaGridSingleSurfaceMode.Morph,
+                            progress = progress.value,
+                            modelIdentity = System.identityHashCode(model),
+                            frameNumber = MediaGridMorphTestTrace.nextFrameNumber(),
+                            hasPlan = snapshot?.plan != null,
+                            hasActiveRenderModel = snapshot?.activeRenderModel != null,
+                            protectedAssetCount = snapshot?.protectedAssetIds?.size ?: 0,
+                        ),
+                    )
                     drawRect(model.surfaceColor)
                     drawMediaGridMorphRow(model, progress.value)
                 }

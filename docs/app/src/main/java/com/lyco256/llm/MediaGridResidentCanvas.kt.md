@@ -1,5 +1,10 @@
 # `MediaGridResidentCanvas.kt`
 
+## 2026-08-02 production Morph draw observation
+
+- The unified surface reads the current `MediaGridMorphInteractionSnapshot` State in the draw phase, so a valid claim's frozen model is available on the first Morph frame even when the modifier itself is not recomposed.
+- The generation/frame/model/protection observer is TEST_HARNESS-only. Normal production drawing continues to consume only the pre-resolved resident commands or frozen Morph model, with no trace collection or frame counter.
+
 ## 2026-08-01 Phase 2 single surface
 
 - `mediaGridSingleSurface` prepares immutable resident draw commands in `drawWithCache` and uses one draw surface for `Normal`, `Morph`, `RevealCurrent`, and `RevealTarget`.

@@ -1,5 +1,10 @@
 # `MediaGridMorphTest.kt`
 
+## 2026-08-02 claim/release coverage
+
+- Unit coverage confirms a complete selected direction can claim while the opposite direction is incomplete; reversing into the incomplete direction returns to the real source draw mode without publishing a null-model Morph snapshot.
+- Release assertions use the canonical initial/release distance ratio and the `0.5` threshold for both increase and decrease.
+
 ## 2026-08-01 uniform lattice coverage
 
 - Unit coverage checks 2↔3, 4↔5, 5↔4, 8↔9, and 11↔12 at representative progress values for equal square cell size and grid-left X coordinates.

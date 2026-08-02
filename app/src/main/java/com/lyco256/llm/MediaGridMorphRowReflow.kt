@@ -469,6 +469,40 @@ internal fun mediaGridMorphProgressForDistance(
     return raw.coerceIn(0f, 1f)
 }
 
+internal data class MediaGridMorphReleaseDecision(
+    val direction: MediaGridMorphDirection?,
+    val targetColumnCount: Int,
+    val progress: Float,
+)
+
+/** One release rule shared by Morph and every one-step fallback path. */
+internal fun mediaGridMorphCanonicalReleaseDecision(
+    currentColumnCount: Int,
+    initialDistance: Float,
+    releaseDistance: Float,
+): MediaGridMorphReleaseDecision {
+    if (!initialDistance.isFinite() || !releaseDistance.isFinite() || initialDistance <= 0f || releaseDistance <= 0f) {
+        return MediaGridMorphReleaseDecision(null, currentColumnCount, 0f)
+    }
+    val direction = when {
+        releaseDistance < initialDistance -> MediaGridMorphDirection.IncreaseColumns
+        releaseDistance > initialDistance -> MediaGridMorphDirection.DecreaseColumns
+        else -> null
+    } ?: return MediaGridMorphReleaseDecision(null, currentColumnCount, 0f)
+    val target = mediaGridMorphTargetColumnCount(currentColumnCount, direction)
+    if (target == currentColumnCount) return MediaGridMorphReleaseDecision(direction, currentColumnCount, 0f)
+    return MediaGridMorphReleaseDecision(
+        direction = direction,
+        targetColumnCount = target,
+        progress = mediaGridMorphProgressForDistance(
+            initialDistance = initialDistance,
+            currentDistance = releaseDistance,
+            fromColumnCount = currentColumnCount,
+            toColumnCount = target,
+        ),
+    )
+}
+
 internal fun mediaGridMorphProgressForDistance(
     initialDistance: Float,
     currentDistance: Float,

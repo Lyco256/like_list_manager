@@ -169,12 +169,11 @@ internal data class MediaGridMorphClaimBundle(
     val directions: Map<MediaGridMorphDirection, MediaGridMorphDirectionClaimBundle>,
     val protectedAssetUnion: LongArray,
 ) {
+    fun isCompleteFor(direction: MediaGridMorphDirection): Boolean =
+        directions[direction]?.isComplete == true
+
     fun isCompleteForCurrentColumns(): Boolean {
-        val expected = when (identity.currentColumnCount) {
-            2, 12 -> 1
-            else -> 2
-        }
-        return directions.size == expected && directions.values.all(MediaGridMorphDirectionClaimBundle::isComplete)
+        return directions.values.any(MediaGridMorphDirectionClaimBundle::isComplete)
     }
 }
 

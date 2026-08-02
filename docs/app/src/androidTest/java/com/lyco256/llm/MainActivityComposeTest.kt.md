@@ -1,5 +1,9 @@
 # `app/src/androidTest/java/com/lyco256/llm/MainActivityComposeTest.kt`
 
+## 2026-08-02 production claim-path regression
+
+`productionMorphClaimDrawsBeforePhysicalUpWhenFirstPointerStartsScroll` seeds a real filtered classified grid, retains all resident draw handles, starts with a one-pointer scroll, adds the second pointer, and verifies the real `ClassifiedMediaGridContent` path draws `Tracking`/`Morph` on the unified surface before physical up. It asserts direction, complete plan/model, generation-backed protection, positive progress, no fallback, and unchanged columns.
+
 ## 2026-08-01 production uniform-lattice and toolbar coverage
 
 - The real classified Activity flow continues to exercise normal grid rendering, production same-surface Morph input, reveal/handoff round trips, filter/sort changes, and the absence of the historical overlay.

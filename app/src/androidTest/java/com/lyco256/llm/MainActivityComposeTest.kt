@@ -407,6 +407,153 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun productionMorphClaimDrawsBeforePhysicalUpWhenFirstPointerStartsScroll() {
+        val now = Instant.now().toString()
+        val paths = (0 until 12).map { index ->
+            File(storage().imageDirectory(), "production-claim-path-$index.webp").apply {
+                writeBytes(bitmapBytes(8, 8, if (index % 2 == 0) android.graphics.Color.MAGENTA else android.graphics.Color.CYAN))
+            }.absolutePath
+        }
+        val clipAndAssetIds = runBlocking {
+            storage().withDatabase { database ->
+                val clipId = database.clipDao().insertClip(
+                    ClipEntity(
+                        xPostId = "production-claim-path",
+                        authorName = "Production Claim Author",
+                        authorUsername = "production_claim_author",
+                        text = "Production claim path regression",
+                        postUrl = "https://x.com/production_claim_author/status/production-claim-path",
+                        xCreatedAt = now,
+                        savedAt = now,
+                        syncedAt = now,
+                    ),
+                )
+                val tagId = database.tagDao().insertTag(
+                    TagEntity(name = "ProductionClaimPathTag", createdAt = now, updatedAt = now),
+                )
+                database.clipDao().insertClipTag(ClipTagEntity(clipId, tagId, now))
+                database.clipDao().insertAssets(
+                    paths.mapIndexed { index, path ->
+                        AssetEntity(
+                            clipId = clipId,
+                            mediaKey = "production-claim-path-$index",
+                            type = "photo",
+                            remoteUrl = null,
+                            previewUrl = null,
+                            localPath = path,
+                            width = 1200,
+                            height = 1200,
+                            sizeBytes = null,
+                            downloadState = "downloaded",
+                            createdAt = now,
+                        )
+                    },
+                )
+                clipId to database.clipDao().assetsForClipIds(listOf(clipId)).map { it.id }
+            }
+        }
+        val clipId = clipAndAssetIds.first
+        val assetIds = clipAndAssetIds.second
+        val previewStore = MediaGridPersistentPreviewStore(composeRule.activity.filesDir)
+        runBlocking {
+            assetIds.zip(paths).forEach { (assetId, path) ->
+                previewStore.generate(assetId, File(path)) { true }
+            }
+        }
+
+        composeRule.onNodeWithTag("tab_classified").performClick()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("classified_display_toggle").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_query").performTextReplacement("Production claim path regression")
+        composeRule.onNodeWithTag("filter_apply").performClick()
+        composeRule.waitUntil(30_000) {
+            assetIds.any { assetId ->
+                composeRule.onAllNodesWithTag("media_grid_item_$assetId").fetchSemanticsNodes().isNotEmpty()
+            } || composeRule.onAllNodesWithTag("clip_card_$clipId").fetchSemanticsNodes().isNotEmpty()
+        }
+        if (assetIds.none { assetId ->
+                composeRule.onAllNodesWithTag("media_grid_item_$assetId").fetchSemanticsNodes().isNotEmpty()
+            }
+        ) {
+            composeRule.onNodeWithTag("classified_display_toggle").performClick()
+        }
+        composeRule.waitUntil(30_000) {
+            assetIds.any { assetId ->
+                composeRule.onAllNodesWithTag("media_grid_item_$assetId").fetchSemanticsNodes().isNotEmpty()
+            }
+        }
+        composeRule.waitUntil(30_000) { !mainViewModel().mediaGridSessionState.value.showInitialProgress }
+        assertEquals(4, mainViewModel().mediaGridSessionState.value.columnCount)
+
+        val viewModel = mainViewModel()
+        val residentStore = viewModel.mediaGridSessionState.value.retainedImageStore
+            ?: error("Production retained image store is unavailable")
+        val imageLoader = (composeRule.activity.application as LikeListManagerApp).container.mediaGridImageLoader
+        runBlocking {
+            assetIds.zip(paths).forEachIndexed { index, (assetId, path) ->
+                val previewFile = previewStore.previewFile(assetId)
+                val source = buildMediaGridImageCandidates(
+                    MediaGridImageCandidateInput(
+                        assetId = assetId,
+                        mediaKey = "production-claim-path-$index",
+                        localPath = path,
+                        previewUrl = null,
+                        remoteUrl = null,
+                        displayUrl = path,
+                        persistentPreview = MediaGridPersistentPreviewMetadata(
+                            filePath = previewFile.absolutePath,
+                            length = previewFile.length(),
+                            lastModified = previewFile.lastModified(),
+                        ),
+                    ),
+                ).first()
+                val candidate = MediaGridPreparedCandidate(
+                    kind = source.kind,
+                    requestData = File(source.data as String),
+                    sourceIdentity = source.sourceIdentity,
+                    cacheKey = mediaGridImageCacheKey(source, 256, 256),
+                    width = 256,
+                    height = 256,
+                    useDiskCache = false,
+                )
+                imageLoader.execute(buildMediaGridImageRequest(composeRule.activity, candidate))
+                val value = imageLoader.memoryCache?.get(coil.memory.MemoryCache.Key(candidate.cacheKey))
+                    ?: error("Asset $assetId was not present in the image cache")
+                residentStore.retain(assetId, candidate, value, directDrawEligible = true)
+            }
+        }
+        assetIds.forEach { assertTrue(residentStore.hasEligibleDrawHandle(it)) }
+
+        MediaGridMorphTestTrace.clear()
+        var observationsBeforeUp = emptyList<MediaGridMorphDrawObservation>()
+        scrollThenPinchOnGrid(
+            gridTag = "classified_media_grid",
+            centerSpan = 260f,
+            endSpan = 180f,
+            onBeforePhysicalUp = {
+                observationsBeforeUp = MediaGridMorphTestTrace.drawEvents()
+            },
+        )
+
+        val morphDraw = observationsBeforeUp.lastOrNull { it.drawMode == MediaGridSingleSurfaceMode.Morph }
+            ?: error(
+                "Morph draw was not observed before physical up: draws=$observationsBeforeUp " +
+                    "claims=${MediaGridMorphTestTrace.claimEvents()} fallback=${MediaGridMorphTestTrace.fallbackCount()}",
+            )
+        assertEquals(MediaGridMorphPhase.Tracking, morphDraw.phase)
+        assertEquals(MediaGridMorphDirection.IncreaseColumns, morphDraw.direction)
+        assertEquals(MediaGridSingleSurfaceMode.Morph, morphDraw.drawMode)
+        assertTrue(morphDraw.hasPlan)
+        assertTrue(morphDraw.hasActiveRenderModel)
+        assertTrue(morphDraw.protectedAssetCount > 0)
+        assertTrue(morphDraw.progress > 0f)
+        assertEquals(0, MediaGridMorphTestTrace.fallbackCount())
+        assertEquals(4, mainViewModel().mediaGridSessionState.value.columnCount)
+    }
+
+    @Test
     fun testHarnessMediaGridUsesSameSurfaceRendererWithoutLegacyMorphCanvas() {
         val now = Instant.now().toString()
         val colors = listOf(android.graphics.Color.MAGENTA, android.graphics.Color.CYAN)
@@ -2436,6 +2583,100 @@ class MainActivityComposeTest {
                 cause,
             )
         }
+    }
+
+    private fun scrollThenPinchOnGrid(
+        gridTag: String,
+        centerSpan: Float,
+        endSpan: Float,
+        onBeforePhysicalUp: () -> Unit,
+    ) {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val location = IntArray(2)
+        composeRule.activity.window.decorView.getLocationOnScreen(location)
+        val gridBounds = composeRule.onNodeWithTag(gridTag).fetchSemanticsNode().boundsInRoot
+        val centerX = location[0] + gridBounds.center.x
+        val centerY = location[1] + gridBounds.center.y
+        val downTime = SystemClock.uptimeMillis()
+        val properties = arrayOf(
+            MotionEvent.PointerProperties().apply {
+                id = 0
+                toolType = MotionEvent.TOOL_TYPE_FINGER
+            },
+            MotionEvent.PointerProperties().apply {
+                id = 1
+                toolType = MotionEvent.TOOL_TYPE_FINGER
+            },
+        )
+
+        fun coords(x: Float, y: Float) = MotionEvent.PointerCoords().apply {
+            this.x = x
+            this.y = y
+            pressure = 1f
+            size = 1f
+        }
+
+        fun send(action: Int, timeOffset: Long, values: Array<MotionEvent.PointerCoords>) {
+            val event = MotionEvent.obtain(
+                downTime,
+                downTime + timeOffset,
+                action,
+                values.size,
+                properties,
+                values,
+                0,
+                0,
+                1f,
+                1f,
+                0,
+                0,
+                InputDevice.SOURCE_TOUCHSCREEN,
+                0,
+            ).apply { source = InputDevice.SOURCE_TOUCHSCREEN }
+            check(instrumentation.uiAutomation.injectInputEvent(event, true))
+            event.recycle()
+        }
+
+        val startHalfSpan = centerSpan / 2f
+        val endHalfSpan = endSpan / 2f
+        val scrolledY = centerY + 80f
+        send(MotionEvent.ACTION_DOWN, 0, arrayOf(coords(centerX - startHalfSpan, centerY)))
+        send(MotionEvent.ACTION_MOVE, 12, arrayOf(coords(centerX - startHalfSpan, scrolledY)))
+        send(
+            MotionEvent.ACTION_POINTER_DOWN or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT),
+            16,
+            arrayOf(
+                coords(centerX - startHalfSpan, scrolledY),
+                coords(centerX + startHalfSpan, scrolledY),
+            ),
+        )
+        repeat(8) { step ->
+            val fraction = (step + 1).toFloat() / 8f
+            val span = centerSpan + (endSpan - centerSpan) * fraction
+            val halfSpan = span / 2f
+            send(
+                MotionEvent.ACTION_MOVE,
+                32L + step * 16L,
+                arrayOf(
+                    coords(centerX - halfSpan, scrolledY),
+                    coords(centerX + halfSpan, scrolledY),
+                ),
+            )
+            if (step == 4) {
+                instrumentation.waitForIdleSync()
+                onBeforePhysicalUp()
+            }
+        }
+        send(
+            MotionEvent.ACTION_POINTER_UP or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT),
+            160,
+            arrayOf(
+                coords(centerX - endHalfSpan, scrolledY),
+                coords(centerX + endHalfSpan, scrolledY),
+            ),
+        )
+        send(MotionEvent.ACTION_UP, 176, arrayOf(coords(centerX - endHalfSpan, scrolledY)))
+        instrumentation.waitForIdleSync()
     }
 
     private fun pinchOnGrid(

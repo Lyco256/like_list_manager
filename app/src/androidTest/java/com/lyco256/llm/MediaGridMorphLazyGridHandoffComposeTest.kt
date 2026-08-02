@@ -443,6 +443,9 @@ class MediaGridMorphLazyGridHandoffComposeTest {
                         preparedPairsSnapshot = {
                             mapOf(MediaGridMorphDirection.IncreaseColumns to fixture.pair)
                         },
+                        prepareClaimBundle = { candidate ->
+                            completeProductionClaimBundle(fixture, identity, candidate)
+                        },
                         stopScroll = {
                             stopCalls.incrementAndGet()
                             gridState.stopScroll()
@@ -1178,6 +1181,67 @@ class MediaGridMorphLazyGridHandoffComposeTest {
             )
         }
         return MediaGridResidentCanvasPreparedIndex(1L, Collections.unmodifiableMap(prepared))
+    }
+
+    private fun completeProductionClaimBundle(
+        fixture: Fixture,
+        identity: MediaGridMorphInteractionIdentity,
+        candidate: MediaGridMorphCandidate,
+    ): MediaGridMorphClaimBundle {
+        val plan = MediaGridMorphPlan.select(fixture.pair, candidate.initialCentroid)
+        val model = MediaGridMorphRowRenderModel(
+            viewport = plan.viewport,
+            sourceCellSize = plan.viewport.width,
+            targetCellSize = plan.viewport.width,
+            fixedFocalCenterY = plan.viewport.center.y,
+            focalV = 0.5f,
+            rows = emptyList(),
+            cells = emptyList(),
+            headers = emptyList(),
+            surfaceColor = Color.Transparent,
+            placeholderColor = Color.Transparent,
+            textColor = Color.Transparent,
+            horizontalTextPaddingPx = 0f,
+            verticalTextPaddingPx = 0f,
+            protectedAssetIds = LongArray(0),
+            requiredSourceImageCount = 0,
+            resolvedSourceImageCount = 0,
+            requiredTargetImageCount = 0,
+            resolvedTargetImageCount = 0,
+            unresolvedRequiredAssetId = null,
+            headerTextComplete = true,
+            isComplete = true,
+        )
+        val completeness = MediaGridMorphImageCompleteness(
+            requiredSourceImageCount = 0,
+            resolvedSourceImageCount = 0,
+            requiredTargetImageCount = 0,
+            resolvedTargetImageCount = 0,
+            unresolvedRequiredAssetId = null,
+            headerTextComplete = true,
+            geometryComplete = true,
+        )
+        return MediaGridMorphClaimBundle(
+            generation = candidate.generation,
+            identity = identity,
+            firstPointerId = candidate.firstPointerId,
+            secondPointerId = candidate.secondPointerId,
+            initialDistance = candidate.initialDistance,
+            fixedInitialCenter = candidate.initialCentroid,
+            preparedIndexIdentity = 1L,
+            textResourceIdentity = MediaGridMorphTextResourceIdentity(emptyList(), 1f, 1f, WidthPx),
+            directions = mapOf(
+                MediaGridMorphDirection.IncreaseColumns to MediaGridMorphDirectionClaimBundle(
+                    direction = MediaGridMorphDirection.IncreaseColumns,
+                    targetColumnCount = fixture.toColumns,
+                    plan = plan,
+                    renderModel = model,
+                    completeness = completeness,
+                    protectedAssetIds = LongArray(0),
+                ),
+            ),
+            protectedAssetUnion = LongArray(0),
+        )
     }
 
     private fun assetBitmap(assetId: Long): Bitmap {

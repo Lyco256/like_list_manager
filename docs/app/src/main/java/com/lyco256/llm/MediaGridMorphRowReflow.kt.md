@@ -1,5 +1,9 @@
 # `MediaGridMorphRowReflow.kt`
 
+## 2026-08-02 canonical release decision
+
+Morph, fallback, and release of an unprepared reverse direction share `mediaGridMorphCanonicalReleaseDecision()`. It derives direction from the initial/release pointer-distance ratio, selects at most one adjacent column, computes progress from the source/target cell-width ratio, and applies the existing `0.5` release threshold.
+
 Production row-reflow planning selects the source row and focal media from the claim-time capture, then builds a bounded target row/header plan while keeping geometry independent from asset identity. Media geometry uses `sourceCellSize = viewport.width / N`, `targetCellSize = viewport.width / M`, a common interpolated cell size, a fixed initial pinch-center Y, and relative rows. Header heights and cumulative offsets are independent bands; target anchor information remains only for handoff. The renderer does not use per-row source/target rectangles or zero-height media rows.
 
 ## 2026-08-01 uniform lattice geometry

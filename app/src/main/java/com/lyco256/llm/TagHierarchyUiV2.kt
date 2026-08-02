@@ -3185,6 +3185,15 @@ internal data class MediaGridViewportSignature(
     val viewportHeightPx: Int,
     val cellSizePx: Int,
     val columnCount: Int,
+    val visibleItemGeometry: List<MediaGridViewportItemGeometry> = emptyList(),
+)
+
+internal data class MediaGridViewportItemGeometry(
+    val key: String,
+    val offsetX: Int,
+    val offsetY: Int,
+    val width: Int,
+    val height: Int,
 )
 
 internal fun buildMediaGridViewportSignature(
@@ -3197,6 +3206,7 @@ internal fun buildMediaGridViewportSignature(
     var firstMediaOrdinal = Int.MAX_VALUE
     var lastMediaOrdinal = Int.MIN_VALUE
     var cellSizePx = 0
+    val visibleItemGeometry = ArrayList<MediaGridViewportItemGeometry>(layout.visibleItemsInfo.size)
     val mediaOrdinalByItemIndex = frame.ordinalIndex.mediaOrdinalByItemIndex
     for (info in layout.visibleItemsInfo) {
         val itemIndex = info.index
@@ -3208,6 +3218,13 @@ internal fun buildMediaGridViewportSignature(
             if (mediaOrdinal > lastMediaOrdinal) lastMediaOrdinal = mediaOrdinal
             if (cellSizePx == 0) cellSizePx = info.size.width
         }
+        visibleItemGeometry += MediaGridViewportItemGeometry(
+            key = info.key.toString(),
+            offsetX = info.offset.x,
+            offsetY = info.offset.y,
+            width = info.size.width,
+            height = info.size.height,
+        )
     }
     return MediaGridViewportSignature(
         renderKey = frame.key,
@@ -3219,6 +3236,7 @@ internal fun buildMediaGridViewportSignature(
         viewportHeightPx = (layout.viewportEndOffset - layout.viewportStartOffset).coerceAtLeast(0),
         cellSizePx = cellSizePx,
         columnCount = columnCount,
+        visibleItemGeometry = visibleItemGeometry,
     )
 }
 
@@ -3687,9 +3705,14 @@ private fun ClassifiedMediaGridContent(
     val morphRowRenderModel = morphSnapshot?.activeRenderModel
     val morphVisualActive = morphController?.drawMode?.value == MediaGridMorphDrawMode.Morph && morphRowRenderModel != null
     val morphProgress = morphController?.progress ?: remember { mutableStateOf(0f) }
+    val morphDrawObserver = if (BuildConfig.TEST_HARNESS) {
+        { event: MediaGridMorphDrawObservation -> MediaGridMorphTestTrace.recordDraw(event) }
+    } else {
+        null
+    }
     val singleSurfaceMode = remember(morphController) {
         androidx.compose.runtime.derivedStateOf {
-            when (morphController?.snapshot()?.drawMode) {
+            when (morphController?.snapshotState?.value?.drawMode) {
                 MediaGridMorphDrawMode.Morph -> MediaGridSingleSurfaceMode.Morph
                 MediaGridMorphDrawMode.RevealCurrent -> MediaGridSingleSurfaceMode.RevealCurrent
                 MediaGridMorphDrawMode.RevealTarget -> MediaGridSingleSurfaceMode.RevealTarget
@@ -3732,17 +3755,14 @@ private fun ClassifiedMediaGridContent(
     LaunchedEffect(state, frame.key, columnCount, morphPreparationCache, morphPointerInProgress) {
         combine(
             snapshotFlow {
-                if (state.isScrollInProgress) {
-                    null
-                } else {
-                    buildMediaGridViewportSignature(state.layoutInfo, frame, columnCount)
-                        .takeIf {
-                            it.firstVisibleMediaOrdinal >= 0 &&
-                                it.lastVisibleMediaOrdinal >= it.firstVisibleMediaOrdinal &&
-                                it.viewportWidthPx > 0 &&
-                                it.viewportHeightPx > 0
-                        }
-                }
+                buildMediaGridViewportSignature(state.layoutInfo, frame, columnCount)
+                    .takeIf {
+                        it.firstVisibleMediaOrdinal >= 0 &&
+                            it.lastVisibleMediaOrdinal >= it.firstVisibleMediaOrdinal &&
+                            it.viewportWidthPx > 0 &&
+                            it.viewportHeightPx > 0 &&
+                            it.visibleItemGeometry.isNotEmpty()
+                    }
             }.distinctUntilChanged(),
             morphPointerInProgress,
         ) { signature, pointerInProgress ->
@@ -3793,32 +3813,29 @@ private fun ClassifiedMediaGridContent(
                             preparedPairsSnapshot = morphPreparedPairsSnapshot,
                             stopScroll = suspend { state.stopScroll() },
                             onFallbackPinchFinished = { _, nextColumnCount ->
+                                if (BuildConfig.TEST_HARNESS) MediaGridMorphTestTrace.recordFallback()
                                 onPinchFinished(null, nextColumnCount)
                             },
                             pointerInProgress = morphPointerInProgress,
                             prepareClaimBundle = if (morphEnabled && residentPreparedIndex != null) {
                                 { candidate ->
-                                    if (state.isScrollInProgress) {
-                                        null
-                                    } else {
-                                        val capture = captureMediaGridMorphInput(
-                                            frame = frame,
-                                            layoutInfo = state.layoutInfo,
-                                            columnCount = columnCount,
-                                            fallbackHeaderHeightPx = fallbackMorphHeaderHeightPx,
+                                    val capture = captureMediaGridMorphInput(
+                                        frame = frame,
+                                        layoutInfo = state.layoutInfo,
+                                        columnCount = columnCount,
+                                        fallbackHeaderHeightPx = fallbackMorphHeaderHeightPx,
+                                    )
+                                    capture?.let {
+                                        buildMediaGridMorphClaimBundle(
+                                            capture = it,
+                                            preparedIndex = residentPreparedIndex,
+                                            textResources = morphTextResourceIndex,
+                                            generation = candidate.generation,
+                                            firstPointerId = candidate.firstPointerId,
+                                            secondPointerId = candidate.secondPointerId,
+                                            firstPosition = candidate.firstInitialPosition,
+                                            secondPosition = candidate.secondInitialPosition,
                                         )
-                                        capture?.let {
-                                            buildMediaGridMorphClaimBundle(
-                                                capture = it,
-                                                preparedIndex = residentPreparedIndex,
-                                                textResources = morphTextResourceIndex,
-                                                generation = candidate.generation,
-                                                firstPointerId = candidate.firstPointerId,
-                                                secondPointerId = candidate.secondPointerId,
-                                                firstPosition = candidate.firstInitialPosition,
-                                                secondPosition = candidate.secondInitialPosition,
-                                            )
-                                        }
                                     }
                                 }
                             } else null,
@@ -3858,6 +3875,8 @@ private fun ClassifiedMediaGridContent(
                             mode = singleSurfaceMode,
                             morphModel = morphRowRenderModel,
                             progress = morphProgress,
+                            morphDrawObserver = morphDrawObserver,
+                            morphSnapshot = morphController?.snapshotState,
                         )
                     } else Modifier,
                 ),

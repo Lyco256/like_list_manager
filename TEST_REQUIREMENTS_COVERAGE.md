@@ -557,6 +557,16 @@ Final verification is required through the safe integration and safe debug-insta
 | unprepared cells remain Placeholder | `mediaGridCellVisualState`, `MediaGridPlaceholderRenderingTest` | Implemented |
 | Progress, frame-first display, delayed scroll, and direction reversal on device | `MainActivityComposeTest.kt` scenarios; `run-safe-integration-check.cmd` | verified on connected `SC-56C` |
 
+## 2026-08-02 production claim-path correction
+
+| Requirement | Evidence | Status |
+|---|---|---|
+| Real production caller claims after a scroll-starting pointer sequence and draws Morph before physical up | `MainActivityComposeTest.productionMorphClaimDrawsBeforePhysicalUpWhenFirstPointerStartsScroll`, `ClassifiedMediaGridContent`, `mediaGridSingleSurface` | implemented; safe integration passed |
+| No scroll-state null gate; current frame/column/viewport/visible geometry is the claim identity | `TagHierarchyUiV2.buildMediaGridViewportSignature`, production `prepareClaimBundle` | implemented; unit/static covered |
+| Selected direction may claim independently; incomplete direction falls back without a null-model Morph snapshot | `MediaGridMorphClaimBundle.isCompleteFor`, `MediaGridMorphInteractionController`, canonical fallback | implemented; unit/Compose covered |
+| One atomic generation/protection/model/draw-mode snapshot and TEST_HARNESS draw observer | `MediaGridMorphInteractionController.publish`, `MediaGridMorphTestTrace`, `MediaGridResidentCanvas` | implemented; safe integration passed |
+| One canonical width-ratio release rule with 0.5 threshold | `mediaGridMorphCanonicalReleaseDecision`, `mediaGridColumnCountAfterPinchRelease`, gesture fallback | implemented; unit covered |
+
 ## 2026-08-02 atomic claim, crossfade, and cancellation coverage
 
 | Requirement | Evidence | Status |

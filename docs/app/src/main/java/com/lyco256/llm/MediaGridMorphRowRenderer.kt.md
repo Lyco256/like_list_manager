@@ -1,5 +1,9 @@
 # `MediaGridMorphRowRenderer.kt`
 
+## 2026-08-02 selected-direction readiness
+
+The claim bundle contains both adjacent directions, but completeness is evaluated per selected direction. A complete selected direction can publish Morph while the opposite direction remains unprepared; reversing into that direction keeps the real source grid visible and releases through canonical fallback.
+
 ## 2026-08-01 Phase 2 production renderer
 
 - `MediaGridMorphRowRenderModel` is claim/plan keyed and resolves image endpoints and header text layouts before visual activation. It does not rebuild when the resident draw-index version changes during an active Morph.

@@ -115,6 +115,64 @@ class MediaGridMorphTest {
     }
 
     @Test
+    fun selectedDirectionCanClaimWhenOppositeDirectionIsIncomplete() {
+        val capture = withSourceRows(capture(columns = 4, count = 24), 4)
+        val identity = capture.identity.toInteractionIdentity()
+        val increasePlan = MediaGridMorphPlan.select(
+            pair(4, capture, MediaGridMorphDirection.IncreaseColumns),
+            Offset(100f, 50f),
+        )
+        val decreasePlan = MediaGridMorphPlan.select(
+            pair(4, capture, MediaGridMorphDirection.DecreaseColumns),
+            Offset(100f, 50f),
+        )
+        val increaseModel = completeTestRenderModel(increasePlan, longArrayOf(1L, 2L))
+        val incompleteDecreaseModel = completeTestRenderModel(decreasePlan, longArrayOf(2L, 3L)).copy(isComplete = false)
+        val completeness = completeImageCompleteness()
+        val bundle = MediaGridMorphClaimBundle(
+            generation = 19L,
+            identity = identity,
+            firstPointerId = 10L,
+            secondPointerId = 20L,
+            initialDistance = 100f,
+            fixedInitialCenter = Offset(100f, 50f),
+            preparedIndexIdentity = 23L,
+            textResourceIdentity = MediaGridMorphTextResourceIdentity(emptyList(), 1f, 1f, 1200),
+            directions = mapOf(
+                MediaGridMorphDirection.IncreaseColumns to MediaGridMorphDirectionClaimBundle(
+                    MediaGridMorphDirection.IncreaseColumns,
+                    5,
+                    increasePlan,
+                    increaseModel,
+                    completeness,
+                    increaseModel.protectedAssetIds,
+                ),
+                MediaGridMorphDirection.DecreaseColumns to MediaGridMorphDirectionClaimBundle(
+                    MediaGridMorphDirection.DecreaseColumns,
+                    3,
+                    decreasePlan,
+                    incompleteDecreaseModel,
+                    completeness,
+                    incompleteDecreaseModel.protectedAssetIds,
+                ),
+            ),
+            protectedAssetUnion = longArrayOf(1L, 2L, 3L),
+        )
+        assertTrue(bundle.isCompleteForCurrentColumns())
+        assertTrue(bundle.isCompleteFor(MediaGridMorphDirection.IncreaseColumns))
+        assertFalse(bundle.isCompleteFor(MediaGridMorphDirection.DecreaseColumns))
+
+        val controller = MediaGridMorphInteractionController()
+        assertTrue(controller.claimPointers(bundle, Offset(55f, 50f), Offset(145f, 50f)))
+        assertEquals(MediaGridMorphDrawMode.Morph, controller.snapshot().drawMode)
+        controller.updatePointers(Offset(45f, 50f), Offset(155f, 50f))
+        assertEquals(MediaGridMorphDirection.DecreaseColumns, controller.snapshot().direction)
+        assertNull(controller.snapshot().plan)
+        assertNull(controller.snapshot().activeRenderModel)
+        assertEquals(MediaGridMorphDrawMode.Normal, controller.snapshot().drawMode)
+    }
+
+    @Test
     fun actualSelectedPlanRejectsClaimWhenPreparedImageIsMissing() {
         val capture = withSourceRows(capture(columns = 4, count = 24), 4)
         val textResources = MediaGridMorphTextResourceIndex(
@@ -268,8 +326,10 @@ class MediaGridMorphTest {
     fun pinchReleaseKeepsCurrentBehaviorAndChangesAtMostOneColumn() {
         assertEquals(4, mediaGridColumnCountAfterPinchRelease(4, null))
         assertEquals(4, mediaGridColumnCountAfterPinchRelease(4, 1.01f))
-        assertEquals(5, mediaGridColumnCountAfterPinchRelease(4, 1.04f))
-        assertEquals(3, mediaGridColumnCountAfterPinchRelease(4, 0.96f))
+        assertEquals(4, mediaGridColumnCountAfterPinchRelease(4, 1.04f))
+        assertEquals(4, mediaGridColumnCountAfterPinchRelease(4, 0.96f))
+        assertEquals(5, mediaGridColumnCountAfterPinchRelease(4, 1.12f))
+        assertEquals(3, mediaGridColumnCountAfterPinchRelease(4, 0.84f))
         assertEquals(5, mediaGridColumnCountAfterPinchRelease(4, 2f))
         assertEquals(3, mediaGridColumnCountAfterPinchRelease(4, 0.25f))
         assertEquals(12, mediaGridColumnCountAfterPinchRelease(12, 2f))
