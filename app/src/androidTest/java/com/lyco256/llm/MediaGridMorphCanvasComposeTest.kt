@@ -103,10 +103,24 @@ class MediaGridMorphCanvasComposeTest {
             headerTextComplete = true,
             isComplete = true,
         )
+        val reverseModel = model.copy(
+            cells = model.cells.map { cell ->
+                cell.copy(
+                    plan = cell.plan.copy(
+                        startContent = cell.plan.endContent,
+                        endContent = cell.plan.startContent,
+                    ),
+                    startImage = cell.endImage,
+                    endImage = cell.startImage,
+                )
+            },
+        )
         lateinit var progress: MutableState<Float>
+        lateinit var activeModel: MutableState<MediaGridMorphRowRenderModel>
         try {
             composeRule.setContent {
                 progress = remember { mutableStateOf(0f) }
+                activeModel = remember { mutableStateOf(model) }
                 Canvas(
                     Modifier
                         .requiredSize(
@@ -115,7 +129,7 @@ class MediaGridMorphCanvasComposeTest {
                         )
                         .testTag("row_reflow_pixels"),
                 ) {
-                    drawMediaGridMorphRow(model, progress.value)
+                    drawMediaGridMorphRow(activeModel.value, progress.value)
                 }
             }
             val centers = listOf(
@@ -155,6 +169,25 @@ class MediaGridMorphCanvasComposeTest {
             assertRed(endColors[5])
             assertBlue(endColors[6])
             assertBlue(endColors[7])
+
+            composeRule.runOnIdle {
+                activeModel.value = reverseModel
+                progress.value = 0f
+            }
+            composeRule.waitForIdle()
+            pixels = composeRule.onNodeWithTag("row_reflow_pixels").captureToImage().toPixelMap()
+            val reverseStartColors = centers.map { (x, y) -> pixels[x, y] }
+            reverseStartColors.forEachIndexed { index, color ->
+                if (index in setOf(0, 1, 6, 7)) assertBlue(color) else assertRed(color)
+            }
+
+            composeRule.runOnIdle { progress.value = 1f }
+            composeRule.waitForIdle()
+            pixels = composeRule.onNodeWithTag("row_reflow_pixels").captureToImage().toPixelMap()
+            val reverseEndColors = centers.map { (x, y) -> pixels[x, y] }
+            reverseEndColors.forEachIndexed { index, color ->
+                if (index in setOf(0, 1, 6, 7)) assertRed(color) else assertBlue(color)
+            }
         } finally {
             red.recycle()
             blue.recycle()

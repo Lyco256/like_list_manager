@@ -52,6 +52,13 @@ class MediaGridMorphTest {
             ),
             protectedAssetUnion = longArrayOf(1L, 2L, 3L),
         )
+        assertTrue(mediaGridMorphClaimBundleMatchesIdentity(bundle, identity))
+        assertFalse(
+            mediaGridMorphClaimBundleMatchesIdentity(
+                bundle,
+                identity.copy(viewportSignature = identity.viewportSignature.copy(firstVisibleItemIndex = 1)),
+            ),
+        )
         val protected = ArrayList<LongArray>()
         val released = ArrayList<LongArray>()
         val controller = MediaGridMorphInteractionController()
@@ -80,6 +87,25 @@ class MediaGridMorphTest {
         assertSame(decreaseModel, controller.snapshot().activeRenderModel)
         assertEquals(1, protected.size)
         assertTrue(released.isEmpty())
+
+        repeat(2) {
+            controller.updatePointers(Offset(50f, 50f), Offset(150f, 50f))
+            assertEquals(MediaGridMorphPhase.Tracking, controller.snapshot().phase)
+            assertNull(controller.snapshot().direction)
+            assertEquals(0f, controller.snapshot().progress, 0.001f)
+            controller.updatePointers(Offset(55f, 50f), Offset(145f, 50f))
+            assertEquals(MediaGridMorphDirection.IncreaseColumns, controller.snapshot().direction)
+            assertSame(increaseModel, controller.snapshot().activeRenderModel)
+            controller.updatePointers(Offset(50f, 50f), Offset(150f, 50f))
+            assertEquals(MediaGridMorphPhase.Tracking, controller.snapshot().phase)
+            assertNull(controller.snapshot().direction)
+            controller.updatePointers(Offset(45f, 50f), Offset(155f, 50f))
+            assertEquals(MediaGridMorphDirection.DecreaseColumns, controller.snapshot().direction)
+            assertSame(decreaseModel, controller.snapshot().activeRenderModel)
+        }
+        assertEquals(0L, controller.settleSignal.value)
+        assertTrue(released.isEmpty())
+        assertEquals(1, protected.size)
 
         controller.cancelPointers()
         assertEquals(1, released.size)
@@ -128,11 +154,60 @@ class MediaGridMorphTest {
     fun allPointerUpIsAReleaseEvenWhenOneTrackedChangeIsMissing() {
         val source = locateInteractionSource()
         assertTrue(source.contains("val allPointersUp = !hasPressedPointer(event)"))
-        assertTrue(source.contains("first?.changedToUp() == true ||"))
-        assertTrue(source.contains("second?.changedToUp() == true ||"))
-        assertTrue(source.contains("event.type == PointerEventType.Release &&"))
+        assertTrue(source.contains("val normalRelease = mediaGridMorphShouldRelease("))
+        assertTrue(source.contains("firstChangedToUp = first?.changedToUp() == true"))
+        assertTrue(source.contains("secondChangedToUp = second?.changedToUp() == true"))
+        assertTrue(source.contains("eventIsRelease = event.type == PointerEventType.Release"))
         assertTrue(source.contains("event.changes.any { it.changedToUp() }"))
         assertTrue(source.contains("trackedPointerMissing && hasPressedPointer(event)"))
+    }
+
+    @Test
+    fun pointerReleaseDecisionDistinguishesMissingPointerAndPhysicalUp() {
+        assertFalse(
+            mediaGridMorphShouldRelease(
+                wasBothPressed = true,
+                bothPressed = true,
+                firstChangedToUp = false,
+                secondChangedToUp = false,
+                eventIsRelease = false,
+                allPointersUp = false,
+                anyChangedToUp = false,
+            ),
+        )
+        assertTrue(
+            mediaGridMorphShouldRelease(
+                wasBothPressed = true,
+                bothPressed = false,
+                firstChangedToUp = true,
+                secondChangedToUp = false,
+                eventIsRelease = true,
+                allPointersUp = false,
+                anyChangedToUp = true,
+            ),
+        )
+        assertTrue(
+            mediaGridMorphShouldRelease(
+                wasBothPressed = true,
+                bothPressed = false,
+                firstChangedToUp = false,
+                secondChangedToUp = false,
+                eventIsRelease = true,
+                allPointersUp = true,
+                anyChangedToUp = true,
+            ),
+        )
+        assertFalse(
+            mediaGridMorphShouldRelease(
+                wasBothPressed = true,
+                bothPressed = false,
+                firstChangedToUp = false,
+                secondChangedToUp = false,
+                eventIsRelease = true,
+                allPointersUp = true,
+                anyChangedToUp = false,
+            ),
+        )
     }
 
     @Test

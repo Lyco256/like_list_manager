@@ -121,6 +121,25 @@ internal data class MediaGridMorphCandidate(
     val claimBundle: MediaGridMorphClaimBundle? = null,
 )
 
+internal fun mediaGridMorphClaimBundleMatchesIdentity(
+    bundle: MediaGridMorphClaimBundle,
+    latestIdentity: MediaGridMorphInteractionIdentity?,
+): Boolean = latestIdentity != null && latestIdentity == bundle.identity
+
+internal fun mediaGridMorphShouldRelease(
+    wasBothPressed: Boolean,
+    bothPressed: Boolean,
+    firstChangedToUp: Boolean,
+    secondChangedToUp: Boolean,
+    eventIsRelease: Boolean,
+    allPointersUp: Boolean,
+    anyChangedToUp: Boolean,
+): Boolean = wasBothPressed && !bothPressed && (
+    firstChangedToUp ||
+        secondChangedToUp ||
+        (eventIsRelease && allPointersUp && anyChangedToUp)
+    )
+
 internal fun mediaGridMorphCandidateDirection(
     initialDistance: Float,
     currentDistance: Float,
@@ -985,19 +1004,20 @@ internal fun Modifier.mediaGridMorphGestureInput(
                             latestDistance = pointerDistance(trackedFirstPosition!!, trackedSecondPosition!!)
                         }
                         val allPointersUp = !hasPressedPointer(event)
-                        val pointerScopeReleased = event.type == PointerEventType.Release &&
-                            allPointersUp &&
-                            event.changes.any { it.changedToUp() }
                         val trackedPointerMissing = first == null || second == null
                         // A tracked pointer missing for one event is not a release
                         // while the other pointer is still pressed. Only an
                         // explicit up, or the whole pointer scope becoming up,
                         // releases the claimed gesture.
-                        val normalRelease = wasBothPressed && !bothPressed && (
-                            first?.changedToUp() == true ||
-                            second?.changedToUp() == true ||
-                                pointerScopeReleased
-                            )
+                        val normalRelease = mediaGridMorphShouldRelease(
+                            wasBothPressed = wasBothPressed,
+                            bothPressed = bothPressed,
+                            firstChangedToUp = first?.changedToUp() == true,
+                            secondChangedToUp = second?.changedToUp() == true,
+                            eventIsRelease = event.type == PointerEventType.Release,
+                            allPointersUp = allPointersUp,
+                            anyChangedToUp = event.changes.any { it.changedToUp() },
+                        )
 
                         if (arbitrationState == MediaGridMorphGestureArbitrationState.TwoPointerCandidate) {
                             if (!bothPressed) {
@@ -1087,6 +1107,8 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                     val claimBundle = activeCandidate.claimBundle
                                     val claimCapture = if (claimBundle == null) latestCaptureOnClaim?.invoke() else null
                                     val claimIdentity = claimBundle?.identity ?: claimCapture?.identity?.toInteractionIdentity() ?: latestIdentity
+                                    val claimBundleIdentityMatches = claimBundle == null ||
+                                        mediaGridMorphClaimBundleMatchesIdentity(claimBundle, latestIdentity)
                                     val availablePairs = when {
                                         claimBundle != null -> claimBundle.directions.mapValues { it.value.plan.preparedPair }
                                         claimCapture != null -> buildMediaGridMorphRowPreparedPairs(claimCapture)
@@ -1098,7 +1120,7 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                     val morphAccepted = if (controller == null || claimIdentity == null) {
                                         false
                                     } else if (claimBundle != null) {
-                                        claimBundle.identity == claimIdentity && controller.claimPointers(
+                                        claimBundleIdentityMatches && controller.claimPointers(
                                             bundle = claimBundle,
                                             currentFirstPosition = currentFirstPosition,
                                             currentSecondPosition = currentSecondPosition,
@@ -1126,6 +1148,8 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                             when {
                                                 claimBundle == null && claimCapture == null && latestCaptureOnClaim != null ->
                                                     MediaGridMorphFailureReason.CaptureUnavailable
+                                                claimBundle != null && !claimBundleIdentityMatches ->
+                                                    MediaGridMorphFailureReason.IdentityMismatch
                                                 claimIdentity == null -> MediaGridMorphFailureReason.IdentityMismatch
                                                 else -> latestClaimFailureReason(availablePairs[direction])
                                                     ?: if (availablePairs[direction] == null) {

@@ -73,8 +73,9 @@ pointer updateとsettle frameではprepared pair、render model、画像解決�
 ## 2026-08-02 atomic claim and cancellation safety
 
 - A gesture candidate prepares one immutable claim bundle from the same capture, prepared-image index, and pre-measured text resources for both adjacent directions. Claim publication protects the complete endpoint union and publishes the Tracking snapshot, active row model, and Morph draw mode as one state transition.
-- Direction reversal reuses the frozen bundle and only switches references to the already selected direction. The dead zone keeps the gesture in Tracking with progress zero; missing prepared assets fail completeness before protection or publication.
+- The bundle is accepted only when its interaction identity still matches the latest viewport identity; a stale bundle falls back without claiming. Direction reversal reuses the frozen bundle and only switches references to the already selected direction. The dead zone keeps the gesture in Tracking with progress zero; missing prepared assets fail completeness before protection or publication.
 - A tracked pointer missing for one event while another pointer remains pressed is preserved rather than released. Explicit `changedToUp()` events release once; Compose cancellation and pointer-input coroutine termination cancel the gesture and do not create a handoff.
+- Repeated 3↔4↔5 direction cycles remain in Tracking without settle or protection churn, and the protected union is released once on explicit release/cancel/dispose.
 - Cell rendering keeps Image-to-Image source-over-target crossfade opaque, uses one-sided alpha only for Image/Placeholder endpoints, and keeps Placeholder/Placeholder opaque. The RGB565 0011/1100 inverse fixture covers the midpoint lattice pixels.
 
 Testとproductionは同じ`MediaGridMorphInteractionController`、pointer state machine、scale、方向反転、focal correction、180ms settle、consume規則を共有する。
