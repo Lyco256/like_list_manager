@@ -30,8 +30,23 @@ internal class MediaGridMorphProductionHostState(
     val requestChannel = Channel<MediaGridMorphHandoffRequest>(Channel.UNLIMITED)
     val commandChannel = Channel<MediaGridMorphProductionCommand>(Channel.UNLIMITED)
     val coordinator = MediaGridMorphGridHandoffCoordinator()
-    val controller = MediaGridMorphInteractionController { request ->
-        requestChannel.trySend(request)
+    val controller = MediaGridMorphInteractionController { request -> requestChannel.trySend(request) }.also { controller ->
+        controller.setProtectionCallbacks(
+            onProtect = { assetIds ->
+            retainedImageStore.updateProtection(
+                ownerToken = ownerToken,
+                visibleAssetIds = LongArray(0),
+                activeAssetIds = assetIds,
+            )
+            },
+            onRelease = {
+            retainedImageStore.updateProtection(
+                ownerToken = ownerToken,
+                visibleAssetIds = LongArray(0),
+                activeAssetIds = LongArray(0),
+            )
+            },
+        )
     }
     val handoffSnapshot: State<MediaGridMorphGridHandoffSnapshot>
         get() = _handoffSnapshot

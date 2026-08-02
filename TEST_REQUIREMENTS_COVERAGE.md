@@ -555,4 +555,14 @@ Final verification is required through the safe integration and safe debug-insta
 | visible cells plus one adjacent row from prebuilt index column | `selectMediaGridPreparationIndices`, `MediaGridDirectPreviewTest` | Implemented |
 | stale frame/viewport results are cancelled or rejected | `LaunchedEffect(frame.key)`, `collectLatest`, `mediaGridPreparedImageMatches`, `MediaGridPreparedRenderTest` | Implemented |
 | unprepared cells remain Placeholder | `mediaGridCellVisualState`, `MediaGridPlaceholderRenderingTest` | Implemented |
-| Progress, frame-first display, delayed scroll, and direction reversal on device | `MainActivityComposeTest.kt` scenarios; `run-safe-integration-check.cmd` | 未実機確認: `RFCTA139DMR` did not reconnect during final verification |
+| Progress, frame-first display, delayed scroll, and direction reversal on device | `MainActivityComposeTest.kt` scenarios; `run-safe-integration-check.cmd` | verified on connected `SC-56C` |
+
+## 2026-08-02 atomic claim, crossfade, and cancellation coverage
+
+| Requirement | Evidence | Status |
+|---|---|---|
+| One capture/prepared/text bundle covers both directions and publishes protection plus Morph state atomically | `MediaGridMorphClaimBundle`, `MediaGridMorphInteractionController.claimPointers`, `MediaGridMorphTest.claimBundlePublishesCompleteMorphSnapshotAndKeepsProtectionAcrossDirectionReversal` | unit covered |
+| Direction reversal, dead zone, and incomplete selected-plan resources do not rebuild or protect a new direction | `MediaGridMorphTest` reversal/dead-zone/completeness tests; `MediaGridMorphInteraction.kt` frozen bundle path | unit/static covered |
+| Missing tracked pointer, explicit up, and Compose cancellation have distinct outcomes | `MediaGridMorphCanvasComposeTest.interactiveLayerCancelProducesNoHandoff`, `mediaGridMorphGestureInput` tracked-pointer and `changedToUp()` branches | Compose/integration covered |
+| Opaque Image-to-Image crossfade and one-sided Placeholder endpoints | `mediaGridMorphCellBlend`, `MediaGridMorphCanvasComposeTest.rowRendererRgb565FourColumn0011And1100RoundTripHasNoPlaceholderGaps` | unit/Compose pixel covered |
+| Final device validation | `scripts/run-safe-debug-check.cmd -InstallToDevice`, `scripts/run-safe-integration-check.cmd` | passed on the connected SC-56C |

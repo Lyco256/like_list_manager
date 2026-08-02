@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -90,6 +91,9 @@ internal data class MediaGridMorphInteractionSnapshot(
     val interactionGeneration: Long,
     val failureReason: MediaGridMorphFailureReason? = null,
     val drawMode: MediaGridMorphDrawMode = MediaGridMorphDrawMode.Normal,
+    val claimBundle: MediaGridMorphClaimBundle? = null,
+    val activeRenderModel: MediaGridMorphRowRenderModel? = null,
+    val protectedAssetIds: LongArray = LongArray(0),
 )
 
 internal enum class MediaGridMorphGestureMode {
@@ -114,6 +118,7 @@ internal data class MediaGridMorphCandidate(
     val initialDistance: Float,
     val initialCentroid: Offset,
     val generation: Long,
+    val claimBundle: MediaGridMorphClaimBundle? = null,
 )
 
 internal fun mediaGridMorphCandidateDirection(
@@ -187,9 +192,12 @@ internal fun mediaGridMorphFocalCorrection(
 internal class MediaGridMorphInteractionController(
     private val onHandoffRequest: (MediaGridMorphHandoffRequest) -> Unit = {},
 ) {
+    private var onProtectAssets: (LongArray) -> Unit = {}
+    private var onReleaseAssets: (LongArray) -> Unit = {}
     private data class Gesture(
         val identity: MediaGridMorphInteractionIdentity,
         val pairs: Map<MediaGridMorphDirection, MediaGridMorphPreparedPair>,
+        val claimBundle: MediaGridMorphClaimBundle?,
         val firstPointerId: Long,
         val secondPointerId: Long,
         val initialDistance: Float,
@@ -210,6 +218,7 @@ internal class MediaGridMorphInteractionController(
     private var gesture: Gesture? = null
     private var settle: Settle? = null
     private var currentIdentity: MediaGridMorphInteractionIdentity? = null
+    private var protectedAssetIds: LongArray? = null
     private var currentSnapshot = MediaGridMorphInteractionSnapshot(
         phase = MediaGridMorphPhase.Idle,
         direction = null,
@@ -225,12 +234,13 @@ internal class MediaGridMorphInteractionController(
         interactionGeneration = 0L,
     )
 
-    private val _activePlan = mutableStateOf<MediaGridMorphPlan?>(null)
-    private val _progress = mutableStateOf(0f)
-    private val _correction = mutableStateOf(Offset.Zero)
-    private val _handoffRequest = mutableStateOf<MediaGridMorphHandoffRequest?>(null)
-    private val _interactionLocked = mutableStateOf(false)
-    private val _drawMode = mutableStateOf(MediaGridMorphDrawMode.Normal)
+    private val _snapshotState = mutableStateOf(currentSnapshot)
+    private val _activePlan: State<MediaGridMorphPlan?> = derivedStateOf { _snapshotState.value.plan }
+    private val _progress: State<Float> = derivedStateOf { _snapshotState.value.progress }
+    private val _correction: State<Offset> = derivedStateOf { _snapshotState.value.correction }
+    private val _handoffRequest: State<MediaGridMorphHandoffRequest?> = derivedStateOf { _snapshotState.value.handoffRequest }
+    private val _interactionLocked: State<Boolean> = derivedStateOf { _snapshotState.value.plan != null && _snapshotState.value.phase != MediaGridMorphPhase.Idle }
+    private val _drawMode: State<MediaGridMorphDrawMode> = derivedStateOf { _snapshotState.value.drawMode }
     internal val settleSignal: MutableState<Long> = mutableLongStateOf(0L)
     val activePlan: State<MediaGridMorphPlan?> get() = _activePlan
     val progress: State<Float> get() = _progress
@@ -241,9 +251,21 @@ internal class MediaGridMorphInteractionController(
 
     fun snapshot(): MediaGridMorphInteractionSnapshot = currentSnapshot
 
+    val snapshotState: State<MediaGridMorphInteractionSnapshot> get() = _snapshotState
+
+    fun setProtectionCallbacks(
+        onProtect: (LongArray) -> Unit,
+        onRelease: (LongArray) -> Unit,
+    ) {
+        check(protectedAssetIds == null) { "Protection callbacks cannot change during an active Morph" }
+        onProtectAssets = onProtect
+        onReleaseAssets = onRelease
+    }
+
     fun recordFailure(reason: MediaGridMorphFailureReason) {
         if (currentSnapshot.phase == MediaGridMorphPhase.Idle) {
             currentSnapshot = currentSnapshot.copy(failureReason = reason)
+            _snapshotState.value = currentSnapshot
         }
     }
 
@@ -265,6 +287,7 @@ internal class MediaGridMorphInteractionController(
         gesture = Gesture(
             identity = identity,
             pairs = validPairs,
+            claimBundle = null,
             firstPointerId = firstPointerId,
             secondPointerId = secondPointerId,
             initialDistance = initialDistance,
@@ -272,8 +295,6 @@ internal class MediaGridMorphInteractionController(
             generation = generation,
         )
         settle = null
-        _activePlan.value = null
-        _drawMode.value = MediaGridMorphDrawMode.Normal
         publish(
             phase = MediaGridMorphPhase.Tracking,
             direction = null,
@@ -290,6 +311,61 @@ internal class MediaGridMorphInteractionController(
         return true
     }
 
+    /** Atomically claims a prebuilt bundle on the first direction event. */
+    fun claimPointers(
+        bundle: MediaGridMorphClaimBundle,
+        currentFirstPosition: Offset,
+        currentSecondPosition: Offset,
+    ): Boolean {
+        if (!bundle.isCompleteForCurrentColumns()) return false
+        if (!bundle.initialDistance.isFinite() || bundle.initialDistance <= 0f) return false
+        val currentDistance = pointerDistance(currentFirstPosition, currentSecondPosition)
+        val scale = mediaGridMorphScale(bundle.initialDistance, currentDistance) ?: return false
+        val direction = mediaGridMorphDirectionForScale(scale) ?: return false
+        val active = bundle.directions[direction] ?: return false
+        val generation = ++nextGeneration
+        currentIdentity = bundle.identity
+        gesture = Gesture(
+            identity = bundle.identity,
+            pairs = bundle.directions.mapValues { it.value.plan.preparedPair },
+            claimBundle = bundle,
+            firstPointerId = bundle.firstPointerId,
+            secondPointerId = bundle.secondPointerId,
+            initialDistance = bundle.initialDistance,
+            initialCenter = bundle.fixedInitialCenter,
+            generation = generation,
+        )
+        settle = null
+        if (protectedAssetIds == null) {
+            val union = bundle.protectedAssetUnion.copyOf()
+            onProtectAssets(union)
+            protectedAssetIds = union
+        }
+        val progress = mediaGridMorphProgressForPlan(
+            plan = active.plan,
+            initialDistance = bundle.initialDistance,
+            currentDistance = currentDistance,
+            scale = scale,
+            direction = direction,
+        )
+        publish(
+            phase = MediaGridMorphPhase.Tracking,
+            direction = direction,
+            plan = active.plan,
+            progress = progress,
+            correction = mediaGridMorphFocalCorrection(active.plan, progress, bundle.fixedInitialCenter),
+            center = midpoint(currentFirstPosition, currentSecondPosition),
+            identity = bundle.identity,
+            toColumnCount = active.targetColumnCount,
+            handoffRequest = null,
+            generation = generation,
+            drawMode = MediaGridMorphDrawMode.Morph,
+            claimBundle = bundle,
+            renderModel = active.renderModel,
+        )
+        return true
+    }
+
     fun trackedPointerIds(): Pair<Long, Long>? =
         gesture?.let { it.firstPointerId to it.secondPointerId }
 
@@ -301,18 +377,25 @@ internal class MediaGridMorphInteractionController(
         val center = midpoint(firstPosition, secondPosition)
         val nextDirection = mediaGridMorphDirectionForScale(scale)
         var plan = currentSnapshot.plan
-        var direction = currentSnapshot.direction
-        if (nextDirection != null && nextDirection != direction) {
-            val pair = activeGesture.pairs[nextDirection]
-            if (pair != null) {
-                plan = if (pair.viewportPlanTemplate != null) {
-                    MediaGridMorphPlan.selectRowReflow(pair, activeGesture.initialCenter)
-                } else {
-                    MediaGridMorphPlan.select(pair, activeGesture.initialCenter)
-                }
+        var renderModel = currentSnapshot.activeRenderModel
+        var direction = if (nextDirection == null) null else currentSnapshot.direction
+        if (nextDirection != null && nextDirection != currentSnapshot.direction) {
+            val claimDirection = activeGesture.claimBundle?.directions?.get(nextDirection)
+            if (claimDirection != null) {
+                plan = claimDirection.plan
+                renderModel = claimDirection.renderModel
                 direction = nextDirection
-                _activePlan.value = plan
-                _drawMode.value = MediaGridMorphDrawMode.Normal
+            } else {
+                val pair = activeGesture.pairs[nextDirection]
+                if (pair != null) {
+                    plan = if (pair.viewportPlanTemplate != null) {
+                        MediaGridMorphPlan.selectRowReflow(pair, activeGesture.initialCenter)
+                    } else {
+                        MediaGridMorphPlan.select(pair, activeGesture.initialCenter)
+                    }
+                    renderModel = null
+                    direction = nextDirection
+                }
             }
         }
         val nextProgress = if (nextDirection == null || plan == null) {
@@ -343,6 +426,9 @@ internal class MediaGridMorphInteractionController(
             toColumnCount = plan?.toColumnCount ?: activeGesture.identity.currentColumnCount,
             handoffRequest = null,
             generation = activeGesture.generation,
+            drawMode = if (activeGesture.claimBundle != null) MediaGridMorphDrawMode.Morph else null,
+            claimBundle = activeGesture.claimBundle,
+            renderModel = renderModel,
         )
     }
 
@@ -375,6 +461,9 @@ internal class MediaGridMorphInteractionController(
             toColumnCount = plan.toColumnCount,
             handoffRequest = null,
             generation = activeGesture.generation,
+            drawMode = if (activeGesture.claimBundle != null) MediaGridMorphDrawMode.Morph else null,
+            claimBundle = activeGesture.claimBundle,
+            renderModel = currentSnapshot.activeRenderModel,
         )
         settleSignal.value = activeGesture.generation
     }
@@ -581,17 +670,6 @@ internal class MediaGridMorphInteractionController(
         onHandoffRequest(request)
     }
 
-    fun markRenderModelReady(generation: Long): Boolean {
-        if (currentSnapshot.interactionGeneration != generation || currentSnapshot.plan == null) return false
-        if (currentSnapshot.phase != MediaGridMorphPhase.Tracking &&
-            currentSnapshot.phase != MediaGridMorphPhase.SettlingToCurrent &&
-            currentSnapshot.phase != MediaGridMorphPhase.SettlingToTarget
-        ) return false
-        _drawMode.value = MediaGridMorphDrawMode.Morph
-        currentSnapshot = currentSnapshot.copy(drawMode = MediaGridMorphDrawMode.Morph)
-        return true
-    }
-
     fun acknowledgeCurrentReveal(generation: Long) {
         if (currentSnapshot.phase != MediaGridMorphPhase.RevealingCurrent || currentSnapshot.interactionGeneration != generation) return
         resetToIdle(currentSnapshot.fromColumnCount, generation)
@@ -651,18 +729,19 @@ internal class MediaGridMorphInteractionController(
         generation: Long,
         failureReason: MediaGridMorphFailureReason? = null,
         drawMode: MediaGridMorphDrawMode? = null,
+        claimBundle: MediaGridMorphClaimBundle? = currentSnapshot.claimBundle,
+        renderModel: MediaGridMorphRowRenderModel? = currentSnapshot.activeRenderModel,
     ) {
-        _progress.value = progress
-        _correction.value = correction
-        _handoffRequest.value = handoffRequest
-        _interactionLocked.value = phase != MediaGridMorphPhase.Idle && plan != null
         val resolvedDrawMode = drawMode ?: when (phase) {
             MediaGridMorphPhase.AwaitingGridHandoff -> MediaGridMorphDrawMode.Morph
             MediaGridMorphPhase.RevealingCurrent -> MediaGridMorphDrawMode.RevealCurrent
             MediaGridMorphPhase.RevealingTarget -> MediaGridMorphDrawMode.RevealTarget
+            MediaGridMorphPhase.Tracking,
+            MediaGridMorphPhase.SettlingToCurrent,
+            MediaGridMorphPhase.SettlingToTarget,
+                -> if (renderModel != null) MediaGridMorphDrawMode.Morph else MediaGridMorphDrawMode.Normal
             else -> MediaGridMorphDrawMode.Normal
         }
-        _drawMode.value = resolvedDrawMode
         currentSnapshot = MediaGridMorphInteractionSnapshot(
             phase = phase,
             direction = direction,
@@ -678,7 +757,11 @@ internal class MediaGridMorphInteractionController(
             interactionGeneration = generation,
             failureReason = failureReason,
             drawMode = resolvedDrawMode,
+            claimBundle = claimBundle,
+            activeRenderModel = renderModel,
+            protectedAssetIds = protectedAssetIds ?: LongArray(0),
         )
+        _snapshotState.value = currentSnapshot
     }
 
     private fun resetToIdle(
@@ -686,12 +769,7 @@ internal class MediaGridMorphInteractionController(
         generation: Long,
         failureReason: MediaGridMorphFailureReason? = null,
     ) {
-        _activePlan.value = null
-        _progress.value = 0f
-        _correction.value = Offset.Zero
-        _handoffRequest.value = null
-        _interactionLocked.value = false
-        _drawMode.value = MediaGridMorphDrawMode.Normal
+        releaseProtectedAssets()
         currentSnapshot = MediaGridMorphInteractionSnapshot(
             phase = MediaGridMorphPhase.Idle,
             direction = null,
@@ -707,7 +785,11 @@ internal class MediaGridMorphInteractionController(
             interactionGeneration = generation,
             failureReason = failureReason,
             drawMode = MediaGridMorphDrawMode.Normal,
+            claimBundle = null,
+            activeRenderModel = null,
+            protectedAssetIds = LongArray(0),
         )
+        _snapshotState.value = currentSnapshot
     }
 
     /**
@@ -721,9 +803,9 @@ internal class MediaGridMorphInteractionController(
         failureReason: MediaGridMorphFailureReason,
         toColumnCount: Int = currentColumnCount,
     ) {
-        _activePlan.value = null
         gesture = null
         settle = null
+        releaseProtectedAssets()
         val identity = currentIdentity ?: return
         publish(
             phase = MediaGridMorphPhase.Failed,
@@ -737,7 +819,15 @@ internal class MediaGridMorphInteractionController(
             handoffRequest = null,
             generation = generation,
             failureReason = failureReason,
+            claimBundle = null,
+            renderModel = null,
         )
+    }
+
+    private fun releaseProtectedAssets() {
+        val assets = protectedAssetIds ?: return
+        protectedAssetIds = null
+        onReleaseAssets(assets)
     }
 }
 
@@ -752,6 +842,7 @@ internal fun Modifier.mediaGridMorphGestureInput(
     fallbackColumnCount: () -> Int = { identity?.currentColumnCount ?: 0 },
     fallbackAnchorAtCenter: (Offset) -> ClassifiedMediaGridScrollAnchor? = { null },
     pointerInProgress: MutableStateFlow<Boolean>? = null,
+    prepareClaimBundle: ((MediaGridMorphCandidate) -> MediaGridMorphClaimBundle?)? = null,
     captureOnClaim: (() -> MediaGridMorphCapture?)? = null,
     isPairReady: (MediaGridMorphPreparedPair) -> Boolean = { true },
     claimFailureReason: (MediaGridMorphPreparedPair?) -> MediaGridMorphFailureReason? = { null },
@@ -770,6 +861,7 @@ internal fun Modifier.mediaGridMorphGestureInput(
     val latestPairReady by rememberUpdatedState(isPairReady)
     val latestClaimFailureReason by rememberUpdatedState(claimFailureReason)
     val latestMorphClaimAssets by rememberUpdatedState(onMorphClaimAssets)
+    val latestPrepareClaimBundle by rememberUpdatedState(prepareClaimBundle)
     val touchSlop = LocalViewConfiguration.current.touchSlop
     return pointerInput(mode, controller) {
         coroutineScope {
@@ -785,6 +877,7 @@ internal fun Modifier.mediaGridMorphGestureInput(
             var trackedSecondPosition: Offset? = null
             var trackedFirstPressed = false
             var trackedSecondPressed = false
+            var completedByExplicitRelease = false
 
             fun consumeTracked(change: PointerInputChange?) {
                 if (change == null) return
@@ -850,7 +943,7 @@ internal fun Modifier.mediaGridMorphGestureInput(
                         val initialDistance = pointerDistance(firstPressed.position, secondPressed.position)
                         if (initialDistance.isFinite() && initialDistance > 0f) {
                             nextCandidateGeneration++
-                            candidate = MediaGridMorphCandidate(
+                            val candidateSeed = MediaGridMorphCandidate(
                                 firstPointerId = firstPressed.id.value,
                                 secondPointerId = secondPressed.id.value,
                                 firstInitialPosition = firstPressed.position,
@@ -859,6 +952,7 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                 initialCentroid = midpoint(firstPressed.position, secondPressed.position),
                                 generation = nextCandidateGeneration,
                             )
+                            candidate = candidateSeed.copy(claimBundle = latestPrepareClaimBundle?.invoke(candidateSeed))
                             latestDistance = initialDistance
                             trackedFirstPosition = firstPressed.position
                             trackedSecondPosition = secondPressed.position
@@ -890,14 +984,19 @@ internal fun Modifier.mediaGridMorphGestureInput(
                         if (bothPresent) {
                             latestDistance = pointerDistance(trackedFirstPosition!!, trackedSecondPosition!!)
                         }
-                        // A real up normally reports changedToUp. A tracked pointer
-                        // disappearing from the event is also a normal release. A
-                        // non-up pressed=false change is the cancellation form.
+                        val allPointersUp = !hasPressedPointer(event)
+                        val pointerScopeReleased = event.type == PointerEventType.Release &&
+                            allPointersUp &&
+                            event.changes.any { it.changedToUp() }
+                        val trackedPointerMissing = first == null || second == null
+                        // A tracked pointer missing for one event is not a release
+                        // while the other pointer is still pressed. Only an
+                        // explicit up, or the whole pointer scope becoming up,
+                        // releases the claimed gesture.
                         val normalRelease = wasBothPressed && !bothPressed && (
                             first?.changedToUp() == true ||
-                                second?.changedToUp() == true ||
-                                first == null ||
-                                second == null
+                            second?.changedToUp() == true ||
+                                pointerScopeReleased
                             )
 
                         if (arbitrationState == MediaGridMorphGestureArbitrationState.TwoPointerCandidate) {
@@ -970,7 +1069,9 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                     // empty snapshot remains the explicit
                                     // fallback-test path and keeps its existing
                                     // stop-before-fallback behavior.
-                                    val cachedPairCanClaim = if (latestCaptureOnClaim == null) {
+                                    val cachedPairCanClaim = if (activeCandidate.claimBundle != null) {
+                                        true
+                                    } else if (latestCaptureOnClaim == null) {
                                         val cachedPairs = latestPairs()
                                         cachedPairs.isEmpty() || (
                                             controller != null &&
@@ -983,37 +1084,47 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                         true
                                     }
                                     if (cachedPairCanClaim) launchStopScrollOnce()
-                                    val claimCapture = latestCaptureOnClaim?.invoke()
-                                    val claimIdentity = claimCapture?.identity?.toInteractionIdentity() ?: latestIdentity
+                                    val claimBundle = activeCandidate.claimBundle
+                                    val claimCapture = if (claimBundle == null) latestCaptureOnClaim?.invoke() else null
+                                    val claimIdentity = claimBundle?.identity ?: claimCapture?.identity?.toInteractionIdentity() ?: latestIdentity
                                     val availablePairs = when {
+                                        claimBundle != null -> claimBundle.directions.mapValues { it.value.plan.preparedPair }
                                         claimCapture != null -> buildMediaGridMorphRowPreparedPairs(claimCapture)
                                         mode == MediaGridMorphGestureMode.Test || latestCaptureOnClaim == null -> latestPairs()
                                         else -> emptyMap()
                                     }
-                                    val currentPairs = availablePairs
-                                        .filterValues(latestPairReady)
-                                        .takeIf { it.isNotEmpty() }
-                                        ?: emptyMap()
+                                    val currentPairs = availablePairs.filterValues(latestPairReady).takeIf { it.isNotEmpty() } ?: emptyMap()
                                     val currentPair = currentPairs[direction]
-                                    val morphAccepted = controller != null && claimIdentity != null &&
-                                        currentPair != null && currentPair.matchesIdentity(claimIdentity) &&
-                                        controller.beginPointers(
-                                            identity = claimIdentity,
-                                            preparedPairsSnapshot = currentPairs,
-                                            firstPointerId = activeCandidate.firstPointerId,
-                                            secondPointerId = activeCandidate.secondPointerId,
-                                            firstPosition = activeCandidate.firstInitialPosition,
-                                            secondPosition = activeCandidate.secondInitialPosition,
+                                    val morphAccepted = if (controller == null || claimIdentity == null) {
+                                        false
+                                    } else if (claimBundle != null) {
+                                        claimBundle.identity == claimIdentity && controller.claimPointers(
+                                            bundle = claimBundle,
+                                            currentFirstPosition = currentFirstPosition,
+                                            currentSecondPosition = currentSecondPosition,
                                         )
+                                    } else {
+                                        currentPair != null && currentPair.matchesIdentity(claimIdentity) &&
+                                            controller.beginPointers(
+                                                identity = claimIdentity,
+                                                preparedPairsSnapshot = currentPairs,
+                                                firstPointerId = activeCandidate.firstPointerId,
+                                                secondPointerId = activeCandidate.secondPointerId,
+                                                firstPosition = activeCandidate.firstInitialPosition,
+                                                secondPosition = activeCandidate.secondInitialPosition,
+                                            )
+                                    }
                                     if (morphAccepted) {
-                                        latestMorphClaimAssets(currentPair?.requiredMorphAssetIds() ?: LongArray(0))
-                                        controller.updatePointers(currentFirstPosition, currentSecondPosition)
+                                        if (claimBundle == null) {
+                                            latestMorphClaimAssets(currentPair?.requiredMorphAssetIds() ?: LongArray(0))
+                                            controller?.updatePointers(currentFirstPosition, currentSecondPosition)
+                                        }
                                         pointerInProgress?.value = true
                                         arbitrationState = MediaGridMorphGestureArbitrationState.MorphClaimed
                                     } else {
                                         controller?.recordFailure(
                                             when {
-                                                claimCapture == null && latestCaptureOnClaim != null ->
+                                                claimBundle == null && claimCapture == null && latestCaptureOnClaim != null ->
                                                     MediaGridMorphFailureReason.CaptureUnavailable
                                                 claimIdentity == null -> MediaGridMorphFailureReason.IdentityMismatch
                                                 else -> latestClaimFailureReason(availablePairs[direction])
@@ -1036,11 +1147,17 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                 controller?.updatePointers(trackedFirstPosition!!, trackedSecondPosition!!)
                             }
                             if (!bothPressed) {
-                                if (normalRelease) {
+                                if (trackedPointerMissing && hasPressedPointer(event)) {
+                                    // Preserve the last position/pressed state
+                                    // until the missing tracked pointer returns.
+                                    consumeTracked(first)
+                                    consumeTracked(second)
+                                } else if (normalRelease) {
                                     // releasePointers starts the settle clock on the
                                     // first Compose frame. PointerInput uptimeMillis
                                     // has a different clock origin than withFrameNanos.
                                     controller?.releasePointers()
+                                    completedByExplicitRelease = true
                                 } else {
                                     controller?.cancelPointers()
                                 }
@@ -1067,7 +1184,13 @@ internal fun Modifier.mediaGridMorphGestureInput(
                     if (!hasPressedPointer(event)) break
                 }
             } finally {
-                if (arbitrationState == MediaGridMorphGestureArbitrationState.MorphClaimed) controller?.cancelPointers()
+                if (
+                    !completedByExplicitRelease &&
+                        arbitrationState != MediaGridMorphGestureArbitrationState.FallbackClaimed &&
+                        controller?.snapshot()?.phase != MediaGridMorphPhase.Idle
+                ) {
+                    controller?.cancelPointers()
+                }
                 pointerInProgress?.value = false
             }
             }
@@ -1130,6 +1253,23 @@ private fun pointerDistance(first: Offset, second: Offset): Float =
 
 private fun midpoint(first: Offset, second: Offset): Offset =
     Offset((first.x + second.x) / 2f, (first.y + second.y) / 2f)
+
+private fun mediaGridMorphProgressForPlan(
+    plan: MediaGridMorphPlan,
+    initialDistance: Float,
+    currentDistance: Float,
+    scale: Float,
+    direction: MediaGridMorphDirection,
+): Float = if (plan.viewportPlan != null) {
+    mediaGridMorphProgressForDistance(
+        initialDistance = initialDistance,
+        currentDistance = currentDistance,
+        fromColumnCount = plan.fromColumnCount,
+        toColumnCount = plan.toColumnCount,
+    )
+} else {
+    mediaGridMorphProgressForScale(scale, direction)
+}
 
 private fun lerpValue(start: Float, end: Float, fraction: Float): Float =
     start + (end - start) * fraction

@@ -2,6 +2,7 @@ package com.lyco256.llm
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -11,6 +12,141 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MediaGridMorphTest {
+    @Test
+    fun claimBundlePublishesCompleteMorphSnapshotAndKeepsProtectionAcrossDirectionReversal() {
+        val capture = withSourceRows(capture(columns = 4, count = 24), 4)
+        val identity = capture.identity.toInteractionIdentity()
+        val increasePair = pair(4, capture, MediaGridMorphDirection.IncreaseColumns)
+        val decreasePair = pair(4, capture, MediaGridMorphDirection.DecreaseColumns)
+        val increasePlan = MediaGridMorphPlan.select(increasePair, Offset(100f, 50f))
+        val decreasePlan = MediaGridMorphPlan.select(decreasePair, Offset(100f, 50f))
+        val increaseModel = completeTestRenderModel(increasePlan, longArrayOf(1L, 2L))
+        val decreaseModel = completeTestRenderModel(decreasePlan, longArrayOf(2L, 3L))
+        val completeness = completeImageCompleteness()
+        val bundle = MediaGridMorphClaimBundle(
+            generation = 17L,
+            identity = identity,
+            firstPointerId = 10L,
+            secondPointerId = 20L,
+            initialDistance = 100f,
+            fixedInitialCenter = Offset(100f, 50f),
+            preparedIndexIdentity = 23L,
+            textResourceIdentity = MediaGridMorphTextResourceIdentity(emptyList(), 1f, 1f, 1200),
+            directions = mapOf(
+                MediaGridMorphDirection.IncreaseColumns to MediaGridMorphDirectionClaimBundle(
+                    MediaGridMorphDirection.IncreaseColumns,
+                    5,
+                    increasePlan,
+                    increaseModel,
+                    completeness,
+                    increaseModel.protectedAssetIds,
+                ),
+                MediaGridMorphDirection.DecreaseColumns to MediaGridMorphDirectionClaimBundle(
+                    MediaGridMorphDirection.DecreaseColumns,
+                    3,
+                    decreasePlan,
+                    decreaseModel,
+                    completeness,
+                    decreaseModel.protectedAssetIds,
+                ),
+            ),
+            protectedAssetUnion = longArrayOf(1L, 2L, 3L),
+        )
+        val protected = ArrayList<LongArray>()
+        val released = ArrayList<LongArray>()
+        val controller = MediaGridMorphInteractionController()
+        controller.setProtectionCallbacks({ protected += it }, { released += it })
+
+        assertTrue(controller.claimPointers(bundle, Offset(55f, 50f), Offset(145f, 50f)))
+        val claimed = controller.snapshot()
+        assertEquals(MediaGridMorphPhase.Tracking, claimed.phase)
+        assertEquals(MediaGridMorphDirection.IncreaseColumns, claimed.direction)
+        assertSame(increasePlan, claimed.plan)
+        assertSame(increaseModel, claimed.activeRenderModel)
+        assertEquals(MediaGridMorphDrawMode.Morph, claimed.drawMode)
+        assertSame(bundle, claimed.claimBundle)
+        assertEquals(listOf(1L, 2L, 3L), protected.single().toList())
+
+        controller.updatePointers(Offset(50f, 50f), Offset(150f, 50f))
+        assertEquals(MediaGridMorphPhase.Tracking, controller.snapshot().phase)
+        assertNull(controller.snapshot().direction)
+        assertSame(increasePlan, controller.snapshot().plan)
+        assertSame(increaseModel, controller.snapshot().activeRenderModel)
+        assertTrue(released.isEmpty())
+
+        controller.updatePointers(Offset(45f, 50f), Offset(155f, 50f))
+        assertEquals(MediaGridMorphDirection.DecreaseColumns, controller.snapshot().direction)
+        assertSame(decreasePlan, controller.snapshot().plan)
+        assertSame(decreaseModel, controller.snapshot().activeRenderModel)
+        assertEquals(1, protected.size)
+        assertTrue(released.isEmpty())
+
+        controller.cancelPointers()
+        assertEquals(1, released.size)
+        assertEquals(listOf(1L, 2L, 3L), released.single().toList())
+        controller.cancelPointers()
+        assertEquals(1, released.size)
+    }
+
+    @Test
+    fun actualSelectedPlanRejectsClaimWhenPreparedImageIsMissing() {
+        val capture = withSourceRows(capture(columns = 4, count = 24), 4)
+        val textResources = MediaGridMorphTextResourceIndex(
+            identity = MediaGridMorphTextResourceIdentity(emptyList(), 1f, 1f, 1200),
+            layoutsByTitle = emptyMap(),
+            surfaceColor = Color.Transparent,
+            placeholderColor = Color.Transparent,
+            textColor = Color.Transparent,
+            horizontalTextPaddingPx = 0f,
+            verticalTextPaddingPx = 0f,
+        )
+        val bundle = buildMediaGridMorphClaimBundle(
+            capture = capture,
+            preparedIndex = MediaGridResidentCanvasPreparedIndex(1L, emptyMap()),
+            textResources = textResources,
+            generation = 1L,
+            firstPointerId = 1L,
+            secondPointerId = 2L,
+            firstPosition = Offset(50f, 50f),
+            secondPosition = Offset(150f, 50f),
+        )
+
+        assertNotNull(bundle)
+        assertFalse(bundle!!.isCompleteForCurrentColumns())
+        assertTrue(bundle.directions.values.any {
+            it.completeness.requiredSourceImageCount > it.completeness.resolvedSourceImageCount ||
+                it.completeness.requiredTargetImageCount > it.completeness.resolvedTargetImageCount
+        })
+        val protected = ArrayList<LongArray>()
+        val controller = MediaGridMorphInteractionController()
+        controller.setProtectionCallbacks({ protected += it }, {})
+        assertFalse(controller.claimPointers(bundle, Offset(55f, 50f), Offset(145f, 50f)))
+        assertTrue(protected.isEmpty())
+    }
+
+    @Test
+    fun allPointerUpIsAReleaseEvenWhenOneTrackedChangeIsMissing() {
+        val source = locateInteractionSource()
+        assertTrue(source.contains("val allPointersUp = !hasPressedPointer(event)"))
+        assertTrue(source.contains("first?.changedToUp() == true ||"))
+        assertTrue(source.contains("second?.changedToUp() == true ||"))
+        assertTrue(source.contains("event.type == PointerEventType.Release &&"))
+        assertTrue(source.contains("event.changes.any { it.changedToUp() }"))
+        assertTrue(source.contains("trackedPointerMissing && hasPressedPointer(event)"))
+    }
+
+    @Test
+    fun imageCrossfadeUsesOpaqueSourceOverAndPlaceholderRules() {
+        val imageA = MediaGridMorphSlotContent.Image(1L)
+        val imageB = MediaGridMorphSlotContent.Image(2L)
+        val placeholder = MediaGridMorphSlotContent.Placeholder
+        assertEquals(MediaGridMorphCellBlend(false, 1f, 0.5f), mediaGridMorphCellBlend(imageA, imageB, 0.5f))
+        assertEquals(MediaGridMorphCellBlend(false, 1f, null), mediaGridMorphCellBlend(imageA, imageA, 0.5f))
+        assertEquals(MediaGridMorphCellBlend(true, 0.5f, null), mediaGridMorphCellBlend(imageA, placeholder, 0.5f))
+        assertEquals(MediaGridMorphCellBlend(true, null, 0.5f), mediaGridMorphCellBlend(placeholder, imageB, 0.5f))
+        assertEquals(MediaGridMorphCellBlend(true, null, null), mediaGridMorphCellBlend(placeholder, placeholder, 0.5f))
+    }
+
     @Test
     fun candidateClaimUsesDeadZoneAndSpanSlopWithoutCentroidRatio() {
         assertNull(
@@ -510,6 +646,8 @@ class MediaGridMorphTest {
         assertSame(increasePlan, controller.snapshot().plan)
         assertEquals(0f, controller.snapshot().progress, 0.001f)
         assertEquals(Offset.Zero, controller.snapshot().correction)
+        assertEquals(MediaGridMorphPhase.Tracking, controller.snapshot().phase)
+        assertFalse(controller.isSettling(controller.snapshot().interactionGeneration))
 
         val inverseDeadZone = 1f / MediaGridMorphDefaults.DeadZoneScale
         val distance = 100f / inverseDeadZone
@@ -520,6 +658,7 @@ class MediaGridMorphTest {
         assertEquals(MediaGridMorphDirection.DecreaseColumns, controller.snapshot().direction)
         assertEquals(0f, controller.snapshot().progress, 0.001f)
         assertEquals(Offset.Zero, controller.snapshot().correction)
+        assertEquals(MediaGridMorphPhase.Tracking, controller.snapshot().phase)
         assertTrue(controller.snapshot().plan !== increasePlan)
 
         val beforeInvalidDistance = controller.snapshot()
@@ -1174,6 +1313,51 @@ class MediaGridMorphTest {
         buildMediaGridMorphPreparedPairs(capture).getValue(direction).also {
             assertEquals(columns, it.fromColumnCount)
         }
+
+    private fun completeTestRenderModel(
+        plan: MediaGridMorphPlan,
+        protectedAssetIds: LongArray,
+    ) = MediaGridMorphRowRenderModel(
+        viewport = plan.viewport,
+        sourceCellSize = 100f,
+        targetCellSize = 100f,
+        fixedFocalCenterY = plan.viewport.center.y,
+        focalV = 0.5f,
+        rows = emptyList(),
+        cells = emptyList(),
+        headers = emptyList(),
+        surfaceColor = Color.Transparent,
+        placeholderColor = Color.Transparent,
+        textColor = Color.Transparent,
+        horizontalTextPaddingPx = 0f,
+        verticalTextPaddingPx = 0f,
+        protectedAssetIds = protectedAssetIds,
+        requiredSourceImageCount = 0,
+        resolvedSourceImageCount = 0,
+        requiredTargetImageCount = 0,
+        resolvedTargetImageCount = 0,
+        unresolvedRequiredAssetId = null,
+        headerTextComplete = true,
+        isComplete = true,
+    )
+
+    private fun completeImageCompleteness() = MediaGridMorphImageCompleteness(
+        requiredSourceImageCount = 0,
+        resolvedSourceImageCount = 0,
+        requiredTargetImageCount = 0,
+        resolvedTargetImageCount = 0,
+        unresolvedRequiredAssetId = null,
+        headerTextComplete = true,
+        geometryComplete = true,
+    )
+
+    private fun locateInteractionSource(): String = java.io.File(
+        "src/main/java/com/lyco256/llm/MediaGridMorphInteraction.kt",
+    ).let { file ->
+        if (file.isFile) file.readText() else java.io.File(
+            "app/src/main/java/com/lyco256/llm/MediaGridMorphInteraction.kt",
+        ).readText()
+    }
 
     private fun withSourceRows(capture: MediaGridMorphCapture, columns: Int): MediaGridMorphCapture {
         val byOrdinal = capture.media.associateBy { it.mediaOrdinal }

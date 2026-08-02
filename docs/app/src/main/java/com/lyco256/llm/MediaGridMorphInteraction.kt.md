@@ -70,6 +70,13 @@ Current handoff correction: normal pointer-up/disappearance updates the last tra
 pointer updateとsettle frameではprepared pair、render model、画像解決、crop、text measure、viewport、anchor、queue、publicationを再構築・更新しない。
 # MediaGridMorphInteraction.kt
 
+## 2026-08-02 atomic claim and cancellation safety
+
+- A gesture candidate prepares one immutable claim bundle from the same capture, prepared-image index, and pre-measured text resources for both adjacent directions. Claim publication protects the complete endpoint union and publishes the Tracking snapshot, active row model, and Morph draw mode as one state transition.
+- Direction reversal reuses the frozen bundle and only switches references to the already selected direction. The dead zone keeps the gesture in Tracking with progress zero; missing prepared assets fail completeness before protection or publication.
+- A tracked pointer missing for one event while another pointer remains pressed is preserved rather than released. Explicit `changedToUp()` events release once; Compose cancellation and pointer-input coroutine termination cancel the gesture and do not create a handoff.
+- Cell rendering keeps Image-to-Image source-over-target crossfade opaque, uses one-sided alpha only for Image/Placeholder endpoints, and keeps Placeholder/Placeholder opaque. The RGB565 0011/1100 inverse fixture covers the midpoint lattice pixels.
+
 Testとproductionは同じ`MediaGridMorphInteractionController`、pointer state machine、scale、方向反転、focal correction、180ms settle、consume規則を共有する。
 
 `MediaGridMorphGestureMode`は`Disabled`、`Test`、`Production`。TestだけTEST_HARNESS制限を受ける。productionではprepared pair/readiness不成立時に同じmodifier内のrelease時一段変更fallbackを実行し、Morph accept時はfallbackを発行しない。fallbackのscaleはgesture開始時距離とrelease時距離から直接計算する。

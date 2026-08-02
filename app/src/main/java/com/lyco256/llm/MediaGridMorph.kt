@@ -12,6 +12,7 @@ import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.roundToInt
@@ -221,6 +222,8 @@ internal data class MediaGridMorphPlan(
     val preparedPair: MediaGridMorphPreparedPair,
     val anchor: MediaGridMorphAnchor?,
     val initialPinchCenter: Offset = preparedPair.viewport.center,
+    private val selectedViewportPlan: MediaGridMorphViewportPlan? =
+        preparedPair.viewportPlanTemplate?.select(anchor?.initialPinchCenter ?: initialPinchCenter),
 ) {
     val fromColumnCount: Int get() = preparedPair.fromColumnCount
     val toColumnCount: Int get() = preparedPair.toColumnCount
@@ -228,8 +231,7 @@ internal data class MediaGridMorphPlan(
     val slots: List<MediaGridMorphSlot> get() = preparedPair.slots
     val headers: List<MediaGridMorphHeaderBand> get() = preparedPair.headers
     val plannedItemCount: Int get() = slots.size
-    val viewportPlan: MediaGridMorphViewportPlan?
-        get() = preparedPair.viewportPlanTemplate?.select(anchor?.initialPinchCenter ?: initialPinchCenter)
+    val viewportPlan: MediaGridMorphViewportPlan? get() = selectedViewportPlan
 
     companion object {
         fun select(preparedPair: MediaGridMorphPreparedPair, pinchCenter: Offset): MediaGridMorphPlan {
@@ -257,7 +259,12 @@ internal data class MediaGridMorphPlan(
                     initialPinchCenter = pinchCenter,
                 )
             }
-            return MediaGridMorphPlan(preparedPair, anchor)
+            return MediaGridMorphPlan(
+                preparedPair = preparedPair,
+                anchor = anchor,
+                initialPinchCenter = pinchCenter,
+                selectedViewportPlan = preparedPair.viewportPlanTemplate?.select(pinchCenter),
+            )
         }
 
         fun selectRowReflow(preparedPair: MediaGridMorphPreparedPair, pinchCenter: Offset): MediaGridMorphPlan =
@@ -265,6 +272,7 @@ internal data class MediaGridMorphPlan(
                 preparedPair = preparedPair,
                 anchor = null,
                 initialPinchCenter = pinchCenter,
+                selectedViewportPlan = preparedPair.viewportPlanTemplate?.select(pinchCenter),
             )
     }
 }
@@ -282,6 +290,8 @@ internal class MediaGridMorphPreparationCache {
     private val nextGeneration = AtomicLong(0L)
     private val latestToken = AtomicReference<MediaGridMorphPreparationToken?>(null)
     private val published = AtomicReference<Map<MediaGridMorphDirection, MediaGridMorphPreparedPair>>(emptyMap())
+    private val _publishedVersion = MutableStateFlow(0L)
+    val publishedVersion = _publishedVersion
     private var lastRequestedIdentity: MediaGridMorphPreparationIdentity? = null
 
     @Synchronized
@@ -311,6 +321,7 @@ internal class MediaGridMorphPreparationCache {
             }
         ) return false
         published.set(pairs.toMap())
+        _publishedVersion.value = token.generation
         return true
     }
 

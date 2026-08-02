@@ -2,6 +2,7 @@ package com.lyco256.llm
 
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -42,6 +43,123 @@ import org.junit.Test
 class MediaGridMorphCanvasComposeTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun rowRendererRgb565FourColumn0011And1100RoundTripHasNoPlaceholderGaps() {
+        val red = solidBitmap(AndroidColor.RED)
+        val blue = solidBitmap(AndroidColor.BLUE)
+        val prepared = preparedIndex(1L, mapOf(1L to red, 2L to blue))
+        val sourceRows = listOf(
+            listOf(1L, 1L, 2L, 2L),
+            listOf(2L, 2L, 1L, 1L),
+        )
+        val targetRows = sourceRows.map { row -> row.map { if (it == 1L) 2L else 1L } }
+        val rowPlans = sourceRows.indices.map { rowIndex ->
+            MediaGridMorphRowPlan(
+                relativeRow = rowIndex,
+                cells = sourceRows[rowIndex].indices.map { column ->
+                    MediaGridMorphCellPlan(
+                        relativeRow = rowIndex,
+                        column = column,
+                        startContent = MediaGridMorphSlotContent.Image(sourceRows[rowIndex][column]),
+                        endContent = MediaGridMorphSlotContent.Image(targetRows[rowIndex][column]),
+                    )
+                },
+            )
+        }
+        val cells = rowPlans.flatMap { row ->
+            row.cells.map { cell ->
+                MediaGridMorphRowRenderCell(
+                    plan = cell,
+                    startImage = prepared.preparedImageByAssetId.getValue(
+                        (cell.startContent as MediaGridMorphSlotContent.Image).assetId,
+                    ),
+                    endImage = prepared.preparedImageByAssetId.getValue(
+                        (cell.endContent as MediaGridMorphSlotContent.Image).assetId,
+                    ),
+                )
+            }
+        }
+        val model = MediaGridMorphRowRenderModel(
+            viewport = Rect(0f, 0f, 400f, 200f),
+            sourceCellSize = 100f,
+            targetCellSize = 100f,
+            fixedFocalCenterY = 50f,
+            focalV = 0.5f,
+            rows = rowPlans,
+            cells = cells,
+            headers = emptyList(),
+            surfaceColor = Color.Black,
+            placeholderColor = Color.Magenta,
+            textColor = Color.White,
+            horizontalTextPaddingPx = 0f,
+            verticalTextPaddingPx = 0f,
+            protectedAssetIds = longArrayOf(1L, 2L),
+            requiredSourceImageCount = 2,
+            resolvedSourceImageCount = 2,
+            requiredTargetImageCount = 2,
+            resolvedTargetImageCount = 2,
+            unresolvedRequiredAssetId = null,
+            headerTextComplete = true,
+            isComplete = true,
+        )
+        lateinit var progress: MutableState<Float>
+        try {
+            composeRule.setContent {
+                progress = remember { mutableStateOf(0f) }
+                Canvas(
+                    Modifier
+                        .requiredSize(
+                            400.dp / androidx.compose.ui.platform.LocalDensity.current.density,
+                            200.dp / androidx.compose.ui.platform.LocalDensity.current.density,
+                        )
+                        .testTag("row_reflow_pixels"),
+                ) {
+                    drawMediaGridMorphRow(model, progress.value)
+                }
+            }
+            val centers = listOf(
+                50 to 50, 150 to 50, 250 to 50, 350 to 50,
+                50 to 150, 150 to 150, 250 to 150, 350 to 150,
+            )
+            composeRule.waitForIdle()
+            var pixels = composeRule.onNodeWithTag("row_reflow_pixels").captureToImage().toPixelMap()
+            val startColors = centers.map { (x, y) -> pixels[x, y] }
+            assertRed(startColors[0])
+            assertRed(startColors[1])
+            assertBlue(startColors[2])
+            assertBlue(startColors[3])
+            assertBlue(startColors[4])
+            assertBlue(startColors[5])
+            assertRed(startColors[6])
+            assertRed(startColors[7])
+
+            composeRule.runOnIdle { progress.value = 0.5f }
+            composeRule.waitForIdle()
+            pixels = composeRule.onNodeWithTag("row_reflow_pixels").captureToImage().toPixelMap()
+            centers.forEach { (x, y) ->
+                val color = pixels[x, y]
+                assertTrue(color.red > 0.35f && color.blue > 0.35f)
+                assertTrue(color.alpha > 0.95f)
+            }
+
+            composeRule.runOnIdle { progress.value = 1f }
+            composeRule.waitForIdle()
+            pixels = composeRule.onNodeWithTag("row_reflow_pixels").captureToImage().toPixelMap()
+            val endColors = centers.map { (x, y) -> pixels[x, y] }
+            assertBlue(endColors[0])
+            assertBlue(endColors[1])
+            assertRed(endColors[2])
+            assertRed(endColors[3])
+            assertRed(endColors[4])
+            assertRed(endColors[5])
+            assertBlue(endColors[6])
+            assertBlue(endColors[7])
+        } finally {
+            red.recycle()
+            blue.recycle()
+        }
+    }
 
     @Test
     fun progressReusesRenderModelImagesAndTextAndOverlayDoesNotTakeInput() {
@@ -677,6 +795,18 @@ class MediaGridMorphCanvasComposeTest {
 
     private fun assertChannel(expected: Float, actual: Float) {
         assertTrue("expected=$expected actual=$actual", abs(expected - actual) <= 0.08f)
+    }
+
+    private fun assertRed(color: Color) {
+        assertTrue(color.red > 0.85f)
+        assertTrue(color.blue < 0.15f)
+        assertTrue(color.alpha > 0.95f)
+    }
+
+    private fun assertBlue(color: Color) {
+        assertTrue(color.blue > 0.85f)
+        assertTrue(color.red < 0.15f)
+        assertTrue(color.alpha > 0.95f)
     }
 
     private fun colorDistance(first: Color, second: Color): Float =
