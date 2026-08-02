@@ -1,5 +1,11 @@
 # `MediaGridMorphRowReflow.kt`
 
+## 2026-08-02 aligned source/target rows
+
+- Source and target use the same `buildMediaGridMorphRowsForColumnCount()` alignment rule. The bounded source offset is preserved instead of packing the first media into column 0.
+- The actual visible row list supplies geometry and focal selection only. Its ordinals must map to one canonical source row; row content and relative-row correspondence use the canonical current-column rows, while target rows use the same aligned ordinal stream.
+- A partial first row has no left-side empty cells, bucket changes flush and restart at column 0, and only the right side may be short at the bounded end.
+
 ## 2026-08-02 canonical release decision
 
 Morph, fallback, and release of an unprepared reverse direction share `mediaGridMorphCanonicalReleaseDecision()`. It derives direction from the initial/release pointer-distance ratio, selects at most one adjacent column, computes progress from the source/target cell-width ratio, and applies the existing `0.5` release threshold.

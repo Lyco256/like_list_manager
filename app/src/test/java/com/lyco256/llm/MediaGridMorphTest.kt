@@ -10,10 +10,11 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.roundToInt
 
 class MediaGridMorphTest {
     @Test
-    fun claimBundlePublishesCompleteMorphSnapshotAndKeepsProtectionAcrossDirectionReversal() {
+    fun claimBundleLocksDirectionAndKeepsProtectionAcrossOppositeSideTracking() {
         val capture = withSourceRows(capture(columns = 4, count = 24), 4)
         val identity = capture.identity.toInteractionIdentity()
         val increasePair = pair(4, capture, MediaGridMorphDirection.IncreaseColumns)
@@ -76,32 +77,37 @@ class MediaGridMorphTest {
 
         controller.updatePointers(Offset(50f, 50f), Offset(150f, 50f))
         assertEquals(MediaGridMorphPhase.Tracking, controller.snapshot().phase)
-        assertNull(controller.snapshot().direction)
+        assertEquals(MediaGridMorphDirection.IncreaseColumns, controller.snapshot().direction)
         assertSame(increasePlan, controller.snapshot().plan)
         assertSame(increaseModel, controller.snapshot().activeRenderModel)
+        assertEquals(MediaGridMorphDrawMode.Morph, controller.snapshot().drawMode)
+        assertEquals(0f, controller.snapshot().progress, 0.001f)
         assertTrue(released.isEmpty())
 
         controller.updatePointers(Offset(45f, 50f), Offset(155f, 50f))
-        assertEquals(MediaGridMorphDirection.DecreaseColumns, controller.snapshot().direction)
-        assertSame(decreasePlan, controller.snapshot().plan)
-        assertSame(decreaseModel, controller.snapshot().activeRenderModel)
+        assertEquals(MediaGridMorphDirection.IncreaseColumns, controller.snapshot().direction)
+        assertSame(increasePlan, controller.snapshot().plan)
+        assertSame(increaseModel, controller.snapshot().activeRenderModel)
+        assertEquals(MediaGridMorphDrawMode.Morph, controller.snapshot().drawMode)
+        assertEquals(0f, controller.snapshot().progress, 0.001f)
         assertEquals(1, protected.size)
         assertTrue(released.isEmpty())
 
         repeat(2) {
             controller.updatePointers(Offset(50f, 50f), Offset(150f, 50f))
             assertEquals(MediaGridMorphPhase.Tracking, controller.snapshot().phase)
-            assertNull(controller.snapshot().direction)
+            assertEquals(MediaGridMorphDirection.IncreaseColumns, controller.snapshot().direction)
             assertEquals(0f, controller.snapshot().progress, 0.001f)
             controller.updatePointers(Offset(55f, 50f), Offset(145f, 50f))
             assertEquals(MediaGridMorphDirection.IncreaseColumns, controller.snapshot().direction)
             assertSame(increaseModel, controller.snapshot().activeRenderModel)
             controller.updatePointers(Offset(50f, 50f), Offset(150f, 50f))
             assertEquals(MediaGridMorphPhase.Tracking, controller.snapshot().phase)
-            assertNull(controller.snapshot().direction)
+            assertEquals(MediaGridMorphDirection.IncreaseColumns, controller.snapshot().direction)
             controller.updatePointers(Offset(45f, 50f), Offset(155f, 50f))
-            assertEquals(MediaGridMorphDirection.DecreaseColumns, controller.snapshot().direction)
-            assertSame(decreaseModel, controller.snapshot().activeRenderModel)
+            assertEquals(MediaGridMorphDirection.IncreaseColumns, controller.snapshot().direction)
+            assertSame(increasePlan, controller.snapshot().plan)
+            assertSame(increaseModel, controller.snapshot().activeRenderModel)
         }
         assertEquals(0L, controller.settleSignal.value)
         assertTrue(released.isEmpty())
@@ -166,10 +172,11 @@ class MediaGridMorphTest {
         assertTrue(controller.claimPointers(bundle, Offset(55f, 50f), Offset(145f, 50f)))
         assertEquals(MediaGridMorphDrawMode.Morph, controller.snapshot().drawMode)
         controller.updatePointers(Offset(45f, 50f), Offset(155f, 50f))
-        assertEquals(MediaGridMorphDirection.DecreaseColumns, controller.snapshot().direction)
-        assertNull(controller.snapshot().plan)
-        assertNull(controller.snapshot().activeRenderModel)
-        assertEquals(MediaGridMorphDrawMode.Normal, controller.snapshot().drawMode)
+        assertEquals(MediaGridMorphDirection.IncreaseColumns, controller.snapshot().direction)
+        assertSame(increasePlan, controller.snapshot().plan)
+        assertSame(increaseModel, controller.snapshot().activeRenderModel)
+        assertEquals(MediaGridMorphDrawMode.Morph, controller.snapshot().drawMode)
+        assertEquals(0f, controller.snapshot().progress, 0.001f)
     }
 
     @Test
@@ -756,7 +763,7 @@ class MediaGridMorphTest {
     }
 
     @Test
-    fun controllerReturnsThroughDeadZoneAndSwitchesPreparedDirectionContinuously() {
+    fun controllerReturnsThroughDeadZoneWithoutSwitchingLockedDirection() {
         val capture = capture(columns = 4, count = 24)
         val pairs = buildMediaGridMorphPreparedPairs(capture)
         val controller = MediaGridMorphInteractionController()
@@ -790,11 +797,11 @@ class MediaGridMorphTest {
             Offset(100f - distance / 2f, 50f),
             Offset(100f + distance / 2f, 50f),
         )
-        assertEquals(MediaGridMorphDirection.DecreaseColumns, controller.snapshot().direction)
+        assertEquals(MediaGridMorphDirection.IncreaseColumns, controller.snapshot().direction)
         assertEquals(0f, controller.snapshot().progress, 0.001f)
         assertEquals(Offset.Zero, controller.snapshot().correction)
         assertEquals(MediaGridMorphPhase.Tracking, controller.snapshot().phase)
-        assertTrue(controller.snapshot().plan !== increasePlan)
+        assertSame(increasePlan, controller.snapshot().plan)
 
         val beforeInvalidDistance = controller.snapshot()
         controller.updatePointers(Offset(100f, 50f), Offset(100f, 50f))
@@ -1121,6 +1128,87 @@ class MediaGridMorphTest {
     }
 
     @Test
+    fun alignedRowsRestoreEveryStartOffsetWithoutLeftPadding() {
+        (ClassifiedMediaGridMinColumnCount..ClassifiedMediaGridMaxColumnCount).forEach { columns ->
+            (0 until columns).forEach { offset ->
+                val capture = withSourceRows(capture(
+                    columns = columns,
+                    count = columns * 3,
+                    startOrdinal = offset,
+                ), columns)
+                val direction = if (columns == ClassifiedMediaGridMaxColumnCount) {
+                    MediaGridMorphDirection.DecreaseColumns
+                } else {
+                    MediaGridMorphDirection.IncreaseColumns
+                }
+                val pair = buildMediaGridMorphRowPreparedPairs(capture).getValue(direction)
+                val rows = requireNotNull(pair.viewportPlanTemplate).sourceCanonicalRows
+                val first = rows.first()
+                assertEquals(offset, first.cells.first().column)
+                assertEquals((offset until columns).toList(), first.cells.map { it.column })
+                assertEquals((offset until columns).toList(), first.cells.map { it.mediaOrdinal })
+                assertEquals((0 until columns).toList(), rows[1].cells.map { it.column })
+            }
+        }
+    }
+
+    @Test
+    fun bucketAlignedRowsStopOffsetAtBucketBoundary() {
+        val current = capturedMedia(99L, 9, "2026-07-08T00:00:00Z")
+        val sameBucket = listOf(
+            capturedMedia(97L, 7, "2026-07-08T00:00:00Z"),
+            capturedMedia(98L, 8, "2026-07-08T00:00:00Z"),
+        )
+        val capture = capture(
+            columns = 4,
+            count = 12,
+            startOrdinal = 9,
+            sortBase = ClassifiedSortBase.PostTime,
+        ).copy(
+            media = listOf(current) + (10..20).map { ordinal ->
+                capturedMedia(ordinal.toLong(), ordinal, "2026-07-08T00:00:00Z")
+            },
+            precedingMedia = sameBucket.last(),
+            precedingMediaWindow = sameBucket,
+        )
+        assertEquals(2, capture.startColumnOffset(4))
+
+        val boundaryCapture = capture.copy(
+            precedingMedia = capturedMedia(96L, 6, "2026-07-07T00:00:00Z"),
+            precedingMediaWindow = listOf(capturedMedia(96L, 6, "2026-07-07T00:00:00Z")),
+        )
+        assertEquals(0, boundaryCapture.startColumnOffset(4))
+    }
+
+    @Test
+    fun headerlessFourColumnOffsetTwoKeeps0011And1100SourceImagesAtEveryProgress() {
+        val capture = withSourceRows(capture(columns = 4, count = 20, startOrdinal = 2), 4)
+        val pair = buildMediaGridMorphRowPreparedPairs(capture)
+            .getValue(MediaGridMorphDirection.IncreaseColumns)
+        val template = requireNotNull(pair.viewportPlanTemplate)
+        assertEquals(listOf(2, 3), template.sourceCanonicalRows.first().cells.map { it.column })
+        val plan = template.select(Offset(600f, 150f))
+        val sourceAssets = capture.sourceRows
+            .flatMap { it.cells }
+            .map { it.assetId }
+            .toSet()
+        val planSourceAssets = plan.rowPlans
+            .flatMap { it.cells }
+            .mapNotNull { (it.startContent as? MediaGridMorphSlotContent.Image)?.assetId }
+            .toSet()
+        assertTrue(sourceAssets.isNotEmpty())
+        assertTrue("source=$sourceAssets plan=$planSourceAssets", planSourceAssets.containsAll(sourceAssets))
+        listOf(0.01f, 0.1f, 0.25f, 0.5f, 0.75f).forEach { progress ->
+            plan.rowPlans.flatMap { it.cells }
+                .filter { it.startContent is MediaGridMorphSlotContent.Image }
+                .forEach { cell ->
+                    val rect = mediaGridMorphRowCellRect(plan, cell, progress)
+                    assertTrue("source cell vanished at progress=$progress", rect.width > 0f && rect.height > 0f)
+                }
+        }
+    }
+
+    @Test
     fun rowReflowUsesUniformLatticeForRequiredAdjacentColumnPairs() {
         listOf(2 to 3, 4 to 5, 8 to 9, 11 to 12).forEach { (from, to) ->
             val pair = buildMediaGridMorphRowPreparedPairs(withSourceRows(capture(from, to * 3), from))
@@ -1217,13 +1305,13 @@ class MediaGridMorphTest {
         val fallbackPair = buildMediaGridMorphRowPreparedPairs(fallbackCapture)
             .getValue(MediaGridMorphDirection.IncreaseColumns)
         val fallback = requireNotNull(fallbackPair.viewportPlanTemplate).select(Offset(750f, 450f))
-        assertTrue(fallback.usedOrdinalFractionFallback)
-        assertTrue(fallback.targetAnchorRowIndex >= 0)
+        assertTrue(fallback.rowPlans.isEmpty())
+        assertTrue(fallback.relativeRowRange.isEmpty())
     }
 
     @Test
     fun rowReflowHeaderPlansAreIndependentBandsAndBoundedToRows() {
-        val dates = List(24) { index -> "2026-07-${(index + 1).toString().padStart(2, '0')}T00:00:00Z" }
+        val dates = List(24) { index -> "2026-07-${(index / 4 + 1).toString().padStart(2, '0')}T00:00:00Z" }
         val capture = withSourceRows(capture(4, dates.size, sortBase = ClassifiedSortBase.PostTime, dates = dates), 4)
         val pair = buildMediaGridMorphRowPreparedPairs(capture).getValue(MediaGridMorphDirection.IncreaseColumns)
         val plan = requireNotNull(pair.viewportPlanTemplate).select(Offset(600f, 150f))
@@ -1275,7 +1363,7 @@ class MediaGridMorphTest {
 
     @Test
     fun rowReflowHeaderHeightDoesNotChangeMediaCellSizeOrInsertInteriorZeroRow() {
-        val dates = List(24) { index -> "2026-07-${(index + 1).toString().padStart(2, '0')}T00:00:00Z" }
+        val dates = List(24) { index -> "2026-07-${(index / 4 + 1).toString().padStart(2, '0')}T00:00:00Z" }
         val capture = withSourceRows(
             capture(4, dates.size, sortBase = ClassifiedSortBase.PostTime, dates = dates),
             4,
@@ -1502,10 +1590,12 @@ class MediaGridMorphTest {
             .entries
             .sortedBy { it.key.first }
             .mapIndexedNotNull outer@{ rowIndex, (_, rects) ->
-                val cells = rects.sortedBy { it.rect.left }.mapIndexedNotNull { column, rect ->
+                val cells = rects.sortedBy { it.rect.left }.mapIndexedNotNull { _, rect ->
                     val media = byOrdinal[rect.mediaOrdinal] ?: return@mapIndexedNotNull null
+                    val actualColumn = (rect.rect.left / sourceCellSize).roundToInt()
+                        .coerceIn(0, columns - 1)
                     MediaGridMorphCapturedCell(
-                        column = column,
+                        column = actualColumn,
                         mediaOrdinal = rect.mediaOrdinal,
                         assetId = media.assetId,
                         rect = rect.rect,
@@ -1589,8 +1679,8 @@ class MediaGridMorphTest {
         val visibleCount = minOf(count, columns * 2)
         val visibleRects = List(visibleCount) { index ->
             val ordinal = firstVisibleOrdinal + index
-            val row = index / columns
-            val column = index % columns
+            val row = ordinal / columns
+            val column = ordinal % columns
             MediaGridMorphCapturedRect(
                 mediaOrdinal = ordinal,
                 rect = Rect(

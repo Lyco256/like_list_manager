@@ -1,8 +1,14 @@
 # `MediaGridMorphTest.kt`
 
+## 2026-08-02 row alignment and direction lock coverage
+
+- Unit coverage checks every start offset for 2..12 columns, same-bucket preceding metadata, bucket-boundary reset, and right-sided bounded-row completion using the common source/target row builder.
+- A headerless four-column bounded range beginning at offset 2 covers the former `0011 / 1100` phase error and verifies that all visible source image endpoints remain present at progress 0.01, 0.1, 0.25, 0.5, and 0.75.
+- Controller coverage fixes one gesture to its first claimed direction, keeps plan/model/Morph through dead-zone and opposite-side travel, resumes distance-ratio progress when returning, and does not release protection before physical up.
+
 ## 2026-08-02 claim/release coverage
 
-- Unit coverage confirms a complete selected direction can claim while the opposite direction is incomplete; reversing into the incomplete direction returns to the real source draw mode without publishing a null-model Morph snapshot.
+- Unit coverage confirms a complete selected direction can claim while the opposite direction is incomplete; reversing into the incomplete direction does not replace the active plan/model or leave Morph draw mode.
 - Release assertions use the canonical initial/release distance ratio and the `0.5` threshold for both increase and decrease.
 
 ## 2026-08-01 uniform lattice coverage
@@ -30,14 +36,14 @@
 ## 2026-07-30 gesture tracking／settle
 
 - 初期距離÷現在距離、無効距離、既存dead zone／progressの0／0.25／0.5／0.75／1を検証する。
-- 同一gestureの増加→dead zone→減少pair切替とprogress 0／correction 0の連続性を検証する。
+- 同一gestureのclaim方向→dead zone→反対側→claim方向でpair/model/draw modeを固定し、progress 0から距離比へ連続復帰する。
 - 正規化2次元focal点、X／Y中心移動、slot外、非0 viewport originの開始時非jumpを検証する。
 - release progress 0.25／0.5、0／45／90／135／180msのrelease基準線形settle、current／target終端、exactly-once handoff、Awaiting維持、complete、stale generation拒否を検証する。
 
 ## 2026-07-31 gesture arbitration／readiness
 
 - candidateのdirection判定が既存DeadZone、touchSlop `0.35`、centroid移動比 `0.5`を全て満たす場合だけclaimすることを検証する。
-- candidate開始時のinitial distanceを固定したまま、pure panをclaimせず、方向反転後も全prepared pairを使ってprogressを継続する契約を検証する。
+- candidate開始時のinitial distanceを固定したまま、pure panをclaimせず、claim後の方向反転でも最初のprepared pair/modelを使ってprogress 0を維持し、元方向で継続する契約を検証する。
 - production readinessがviewportへ入り得る正寸法側だけを必須とし、overscan・zero-size側・null Assetを要求しない契約はCompose側で検証する。
 
 ## 対応ソース
@@ -46,7 +52,7 @@
 
 ## 役割
 
-メディアグリッドの現行release列数変更と、後続描画で使用するbounded prepared pair基盤をJVM単体テストで検証します。productionと同じ`buildMediaGridMorphPreparedPairs()`を使用します。
+メディアグリッドの現行release列数変更と、後続描画で使用するbounded prepared pair基盤をJVM単体テストで検証します。row reflow系はproductionと同じ`buildMediaGridMorphRowPreparedPairs()`を使用し、legacy slot系は互換性テストとして分離しています。
 
 ## 主な確認
 

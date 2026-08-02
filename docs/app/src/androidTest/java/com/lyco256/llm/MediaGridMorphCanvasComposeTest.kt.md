@@ -1,5 +1,10 @@
 # `MediaGridMorphCanvasComposeTest.kt`
 
+## 2026-08-02 row alignment and locked-direction coverage
+
+- `interactiveLayerTracksFixedPointersKeepsClaimedDirectionAndReusesResolvedRenderWork` verifies that after the first complete claim, opposite-side pointer motion keeps the claimed direction and exact plan while progress returns to `0`; it must not build the opposite model, resolve new images, or issue a handoff. The TEST_HARNESS uses the non-production Canvas-building path; the unit controller test covers exact render-model identity and `Morph` draw mode for the production claim bundle.
+- The same interaction retains the original pointer IDs and pinch center, and a physical release settles to the current column count without new image resolution or text measurement.
+
 ## 2026-07-31 production Morph correction coverage
 
 - Compose coverage verifies one Canvas, hidden normal visuals, fixed-focal pan behavior, explicit Placeholder edge crossfade, and resident-miss rendering.

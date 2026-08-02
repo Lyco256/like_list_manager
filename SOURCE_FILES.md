@@ -9,6 +9,12 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 - `MediaGridMorphInteractionController` publishes Morph only for one atomic generation-matched snapshot containing direction, plan, complete render model, protected assets, and `MediaGridMorphDrawMode.Morph`. Reverse-direction preparation may remain incomplete without replacing the visible source grid.
 - `MediaGridResidentCanvas.kt` keeps the draw hot path pre-resolved. Generation/draw observations and claim diagnostics exist only behind `BuildConfig.TEST_HARNESS`; production does not allocate or update those traces.
 
+## 2026-08-02 bounded row alignment and single-direction tracking
+
+- `MediaGridMorphCapture` records 2..12 column start offsets from the bounded start ordinal. Headerless grids use ordinal modulo; header-grouped grids count only the preceding same-bucket run within an eleven-item metadata window.
+- `MediaGridMorphRowReflow.kt` uses `buildMediaGridMorphRowsForColumnCount()` for source and target. Real visible rows provide geometry/focal selection, while canonical current-column rows provide source content and row correspondence. A failed mapping makes the selected plan incomplete.
+- `MediaGridMorphInteraction.kt` locks the first successful claim direction for the full gesture. Opposite-side travel retains the same plan/model/Morph draw mode at progress 0, and only physical up can start locked-direction settle/release.
+
 ## 2026-08-01 Phase 1 row reflow
 
 - `TagHierarchyUiV2.kt` keeps production Morph overlay/handoff disconnected and uses `MediaGridLegacyPinch.kt` for one release-time adjacent-column step.

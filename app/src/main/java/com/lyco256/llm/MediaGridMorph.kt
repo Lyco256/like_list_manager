@@ -108,6 +108,10 @@ internal data class MediaGridMorphCapture(
     val mediaOrdinalRange: IntRange,
     val media: List<MediaGridMorphCapturedMedia>,
     val precedingMedia: MediaGridMorphCapturedMedia?,
+    /** Up to eleven media immediately before [mediaOrdinalRange.first]. */
+    val precedingMediaWindow: List<MediaGridMorphCapturedMedia> = emptyList(),
+    /** Index is columnCount - 2 for the supported 2..12 column range. */
+    val startColumnOffsetByColumnCount: List<Int> = emptyList(),
     val visibleMediaRects: List<MediaGridMorphCapturedRect>,
     val visibleHeaderRects: List<MediaGridMorphCapturedHeaderRect>,
     val sourceRows: List<MediaGridMorphCapturedRow> = emptyList(),
@@ -509,6 +513,15 @@ internal fun captureMediaGridMorphInput(
     }
     if (capturedMedia.isEmpty()) return null
 
+    val precedingMediaWindow = (maxOf(0, startOrdinal - (ClassifiedMediaGridMaxColumnCount - 1)) until startOrdinal)
+        .mapNotNull(::capturedAt)
+    val startColumnOffsets = mediaGridMorphStartColumnOffsets(
+        startOrdinal = startOrdinal,
+        sortBase = frame.key.dataKey.sort.baseOrder,
+        currentMedia = capturedMedia.first(),
+        precedingMedia = precedingMediaWindow,
+    )
+
     val visibleMediaRects = ArrayList<MediaGridMorphCapturedRect>()
     val visibleHeaderRects = ArrayList<MediaGridMorphCapturedHeaderRect>()
     var measuredHeaderHeight = 0f
@@ -597,12 +610,53 @@ internal fun captureMediaGridMorphInput(
         sortBase = frame.key.dataKey.sort.baseOrder,
         mediaOrdinalRange = startOrdinal..endOrdinal,
         media = capturedMedia.toList(),
-        precedingMedia = capturedAt(startOrdinal - 1),
+        precedingMedia = precedingMediaWindow.lastOrNull(),
+        precedingMediaWindow = precedingMediaWindow,
+        startColumnOffsetByColumnCount = startColumnOffsets,
         visibleMediaRects = visibleMediaRects.toList(),
         visibleHeaderRects = visibleHeaderRects.toList(),
         sourceRows = sourceRows,
         totalMediaCount = totalMedia,
     )
+}
+
+internal fun mediaGridMorphStartColumnOffsets(
+    startOrdinal: Int,
+    sortBase: ClassifiedSortBase,
+    columnCounts: IntRange = ClassifiedMediaGridMinColumnCount..ClassifiedMediaGridMaxColumnCount,
+    currentMedia: MediaGridMorphCapturedMedia? = null,
+    precedingMedia: List<MediaGridMorphCapturedMedia> = emptyList(),
+): List<Int> = columnCounts.map { columnCount ->
+    if (sortBase == ClassifiedSortBase.Default) {
+        startOrdinal.mod(columnCount)
+    } else {
+        val currentBucket = currentMedia?.let {
+            mediaGridMorphBucketSpec(it.xCreatedAt, it.likeCount, sortBase, columnCount)
+        }
+        if (currentBucket == null) {
+            0
+        } else {
+            precedingMedia.asReversed()
+                .asSequence()
+                .takeWhile {
+                    mediaGridMorphBucketSpec(it.xCreatedAt, it.likeCount, sortBase, columnCount)?.key == currentBucket.key
+                }
+                .count()
+                .coerceAtMost(columnCount - 1)
+        }
+    }
+}
+
+internal fun MediaGridMorphCapture.startColumnOffset(columnCount: Int): Int {
+    val supportedIndex = columnCount - ClassifiedMediaGridMinColumnCount
+    return startColumnOffsetByColumnCount.getOrNull(supportedIndex)?.coerceIn(0, columnCount - 1)
+        ?: mediaGridMorphStartColumnOffsets(
+            startOrdinal = mediaOrdinalRange.first,
+            sortBase = sortBase,
+            columnCounts = columnCount..columnCount,
+            currentMedia = media.firstOrNull(),
+            precedingMedia = precedingMediaWindow.ifEmpty { precedingMedia?.let(::listOf).orEmpty() },
+        ).single()
 }
 
 internal fun mediaGridMorphOrdinalRange(

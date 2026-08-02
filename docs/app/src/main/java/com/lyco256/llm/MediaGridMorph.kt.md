@@ -1,5 +1,11 @@
 # MediaGridMorph.kt
 
+## 2026-08-02 bounded row alignment and canonical source content
+
+- `MediaGridMorphCapture` keeps the preceding bounded metadata window (at most eleven media) and immutable start-column offsets for every 2..12 column count. Headerless ordering uses `startOrdinal % columnCount`; header grouping counts only contiguous preceding media from the same bucket and stops at the bucket boundary.
+- `buildMediaGridMorphRowsForColumnCount()` is the common source/target row builder. A bounded range that starts mid-row places its first media at the recovered column and starts later rows at column 0; it never creates left-side `NoMedia` padding. Bucket headers flush the partial row and restart at column 0, while the final short row is right-sided only.
+- The real visible source rows remain the authority for focal-row selection and geometry. Their media ordinals are mapped to one canonical current-column row, and source content is taken from that canonical row so a partial visible row cannot shift assets into another column. If the mapping is not one-to-one, the selected plan remains incomplete and claim falls back.
+
 ## 2026-08-01 Phase 2 production row morph
 
 - Production claim captures the real `LazyGridLayoutInfo` first, then builds a bounded viewport/row plan and immutable render model before Morph becomes visible.
@@ -29,7 +35,7 @@ The current readiness model reports required/resolved source and target image co
 ## 事前計画
 
 - `captureMediaGridMorphInput()`は現在frameの`MediaGridOrdinalIndex`を使い、visible media ordinalと上下2行だけをmain threadでcaptureする。局所mediaのAsset ID、ordinal、item index、bucket計算用primitive、visible geometryだけを保持し、全frame走査やresident／Bitmap／IO参照を行わない。
-- 局所先頭の一つ前のmediaをbucket比較専用に保持し、範囲がbucket途中から始まる場合に偽headerを生成しない。
+- 局所先頭の直前最大11件のmediaをbucket比較専用に保持し、2..12列のstart column offsetをcapture時に算出する。範囲がbucket途中から始まる場合も、同じbucket内の連続件数だけをoffsetへ含め、bucket境界を越えてscanしない。
 - `buildMediaGridMorphPreparedPairs()`はproductionとUnit Testで共有する唯一のbuilderで、隣接する増加・減少方向のimmutable `MediaGridMorphPreparedPair`を作る。2列の減少方向と12列の増加方向は作らない。
 - pairはsource revision、frame key、from/to列数、viewport、viewport signature、start/target layout、slot template、header band template、media ordinal範囲を保持する。画像、Painter、TextLayout、store、queue、workerは保持しない。
 - target layoutとstart overscanは、それぞれの列数に対する`viewport.width / columnCount`をcellのwidth／heightへ使用する。start visible cellだけはcaptureした実測rectを上書きして維持するため、2〜12列のtargetはすべて正方形になる。

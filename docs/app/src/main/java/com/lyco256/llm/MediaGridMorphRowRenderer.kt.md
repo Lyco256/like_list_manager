@@ -2,7 +2,7 @@
 
 ## 2026-08-02 selected-direction readiness
 
-The claim bundle contains both adjacent directions, but completeness is evaluated per selected direction. A complete selected direction can publish Morph while the opposite direction remains unprepared; reversing into that direction keeps the real source grid visible and releases through canonical fallback.
+The claim bundle contains both adjacent directions, but completeness is evaluated for the direction that claims first. A complete selected direction publishes Morph; movement into the opposite direction keeps the same source/target model and Morph draw mode at progress 0 rather than switching models.
 
 ## 2026-08-01 Phase 2 production renderer
 

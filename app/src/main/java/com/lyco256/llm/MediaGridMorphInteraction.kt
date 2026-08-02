@@ -222,6 +222,7 @@ internal class MediaGridMorphInteractionController(
         val initialDistance: Float,
         val initialCenter: Offset,
         val generation: Long,
+        var lockedDirection: MediaGridMorphDirection? = null,
     )
 
     private data class Settle(
@@ -312,6 +313,7 @@ internal class MediaGridMorphInteractionController(
             initialDistance = initialDistance,
             initialCenter = center,
             generation = generation,
+            lockedDirection = null,
         )
         settle = null
         publish(
@@ -353,6 +355,7 @@ internal class MediaGridMorphInteractionController(
             initialDistance = bundle.initialDistance,
             initialCenter = bundle.fixedInitialCenter,
             generation = generation,
+            lockedDirection = direction,
         )
         settle = null
         if (protectedAssetIds == null) {
@@ -397,35 +400,29 @@ internal class MediaGridMorphInteractionController(
         val nextDirection = mediaGridMorphDirectionForScale(scale)
         var plan = currentSnapshot.plan
         var renderModel = currentSnapshot.activeRenderModel
-        var direction = if (nextDirection == null) null else currentSnapshot.direction
-        if (nextDirection != null && nextDirection != currentSnapshot.direction) {
+        if (activeGesture.lockedDirection == null && nextDirection != null) {
             val claimDirection = activeGesture.claimBundle?.directions?.get(nextDirection)
                 ?.takeIf { it.isComplete }
-            if (claimDirection != null) {
-                plan = claimDirection.plan
-                renderModel = claimDirection.renderModel
-                direction = nextDirection
-            } else if (activeGesture.claimBundle != null) {
-                // An unprepared reverse direction keeps the real source grid
-                // visible. Release is handled by the modifier's canonical
-                // fallback path instead of publishing Morph with no model.
-                plan = null
-                renderModel = null
-                direction = nextDirection
-            } else {
-                val pair = activeGesture.pairs[nextDirection]
-                if (pair != null) {
+            val pair = activeGesture.pairs[nextDirection]
+            when {
+                claimDirection != null -> {
+                    activeGesture.lockedDirection = nextDirection
+                    plan = claimDirection.plan
+                    renderModel = claimDirection.renderModel
+                }
+                activeGesture.claimBundle == null && pair != null -> {
+                    activeGesture.lockedDirection = nextDirection
                     plan = if (pair.viewportPlanTemplate != null) {
                         MediaGridMorphPlan.selectRowReflow(pair, activeGesture.initialCenter)
                     } else {
                         MediaGridMorphPlan.select(pair, activeGesture.initialCenter)
                     }
                     renderModel = null
-                    direction = nextDirection
                 }
             }
         }
-        val nextProgress = if (nextDirection == null || plan == null) {
+        val direction = activeGesture.lockedDirection
+        val nextProgress = if (direction == null || plan == null) {
             0f
         } else {
             if (plan.viewportPlan != null) {
@@ -436,7 +433,7 @@ internal class MediaGridMorphInteractionController(
                     toColumnCount = plan.toColumnCount,
                 )
             } else {
-                mediaGridMorphProgressForScale(scale, nextDirection)
+                mediaGridMorphProgressForScale(scale, direction)
             }
         }
         val nextCorrection = plan?.let {
@@ -916,6 +913,7 @@ internal fun Modifier.mediaGridMorphGestureInput(
             var arbitrationState = MediaGridMorphGestureArbitrationState.OnePointerOrIdle
             var candidate: MediaGridMorphCandidate? = null
             var latestDistance = 0f
+            var lockedFallbackDirection: MediaGridMorphDirection? = null
             var fallbackAnchor: ClassifiedMediaGridScrollAnchor? = null
             var stopScrollLaunched = false
             var trackedFirstPosition: Offset? = null
@@ -957,12 +955,17 @@ internal fun Modifier.mediaGridMorphGestureInput(
                 pointerScope.launch(start = CoroutineStart.UNDISPATCHED) { latestStopScroll() }
             }
 
-            fun issueCanonicalFallback(distance: Float, center: Offset) {
+            fun issueCanonicalFallback(
+                distance: Float,
+                center: Offset,
+                direction: MediaGridMorphDirection? = lockedFallbackDirection,
+            ) {
                 val current = latestColumnCount()
                 val decision = mediaGridMorphCanonicalReleaseDecision(
                     currentColumnCount = current,
                     initialDistance = candidate?.initialDistance ?: distance,
                     releaseDistance = distance,
+                    lockedDirection = direction,
                 )
                 if (
                     decision.progress >= MediaGridMorphDefaults.ReleaseThreshold &&
@@ -1085,7 +1088,10 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                             touchSlop = touchSlop,
                                         )
                                     }
-                                    if (direction != null) issueCanonicalFallback(latestDistance, currentCentroid)
+                                    if (direction != null) {
+                                        lockedFallbackDirection = direction
+                                        issueCanonicalFallback(latestDistance, currentCentroid, direction)
+                                    }
                                 }
                                 arbitrationState = MediaGridMorphGestureArbitrationState.ReleasedOrCancelled
                             } else {
@@ -1111,6 +1117,7 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                     )
                                 }
                                 if (direction != null && mode != MediaGridMorphGestureMode.Disabled) {
+                                    lockedFallbackDirection = direction
                                     // A production candidate may stop the real
                                     // grid only when its selected direction is
                                     // already a valid resident candidate (or

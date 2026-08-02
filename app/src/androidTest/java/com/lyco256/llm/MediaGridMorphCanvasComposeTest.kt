@@ -35,6 +35,7 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -565,7 +566,7 @@ class MediaGridMorphCanvasComposeTest {
     }
 
     @Test
-    fun interactiveLayerTracksFixedPointersReversesAndReusesResolvedRenderWork() {
+    fun interactiveLayerTracksFixedPointersKeepsClaimedDirectionAndReusesResolvedRenderWork() {
         val red = solidBitmap(AndroidColor.RED)
         val blue = solidBitmap(AndroidColor.BLUE)
         val prepared = preparedIndex(1L, mapOf(1L to red, 2L to blue))
@@ -594,6 +595,7 @@ class MediaGridMorphCanvasComposeTest {
         val imageResolutions = AtomicInteger()
         val textMeasures = AtomicInteger()
         var initiallyTrackedPointerIds: Pair<Long, Long>? = null
+        var claimedPlan: MediaGridMorphPlan? = null
         try {
             composeRule.setContent {
                 MaterialTheme {
@@ -642,6 +644,8 @@ class MediaGridMorphCanvasComposeTest {
             assertEquals(1f, controller.snapshot().progress, 0.001f)
             assertEquals(1, modelBuilds.get())
             assertEquals(2, imageResolutions.get())
+            claimedPlan = controller.snapshot().plan
+            assertNotNull(claimedPlan)
             var pixels = composeRule.onNodeWithTag("interactive_morph_root").captureToImage().toPixelMap()
             assertTrue(pixels[60, 60].blue > pixels[60, 60].red)
             assertTrue(pixels[5, 60].red < 0.05f && pixels[5, 60].blue < 0.05f)
@@ -664,12 +668,13 @@ class MediaGridMorphCanvasComposeTest {
                 moveTo(2, Offset(80f, 20f))
             }
             composeRule.waitForIdle()
-            assertEquals(MediaGridMorphDirection.DecreaseColumns, controller.snapshot().direction)
-            assertTrue(controller.snapshot().progress > 0f)
+            assertEquals(MediaGridMorphDirection.IncreaseColumns, controller.snapshot().direction)
+            assertEquals(0f, controller.snapshot().progress, 0.001f)
+            assertSame(claimedPlan, controller.snapshot().plan)
             assertEquals(initiallyTrackedPointerIds, controller.trackedPointerIds())
             assertEquals(Offset(0f, 10f), controller.snapshot().currentPinchCenter!! - Offset(60f, 60f))
-            assertEquals(2, modelBuilds.get())
-            assertEquals(4, imageResolutions.get())
+            assertEquals(1, modelBuilds.get())
+            assertEquals(2, imageResolutions.get())
 
             composeRule.onNodeWithTag("interactive_morph_root").performTouchInput {
                 up(0)
@@ -677,15 +682,15 @@ class MediaGridMorphCanvasComposeTest {
                 up(2)
             }
             composeRule.waitForIdle()
-            assertEquals(MediaGridMorphPhase.AwaitingGridHandoff, controller.snapshot().phase)
-            assertEquals(1, requests.size)
-            assertEquals(1f, controller.snapshot().progress, 0.001f)
-            composeRule.onAllNodesWithTag("media_grid_morph_canvas").assertCountEquals(1)
-            assertEquals(2, modelBuilds.get())
-            assertEquals(4, imageResolutions.get())
+            assertTrue(
+                controller.snapshot().phase == MediaGridMorphPhase.SettlingToCurrent ||
+                    controller.snapshot().phase == MediaGridMorphPhase.RevealingCurrent ||
+                    controller.snapshot().phase == MediaGridMorphPhase.Idle,
+            )
+            assertEquals(0, requests.size)
+            assertEquals(1, modelBuilds.get())
+            assertEquals(2, imageResolutions.get())
             assertEquals(0, textMeasures.get())
-            pixels = composeRule.onNodeWithTag("interactive_morph_root").captureToImage().toPixelMap()
-            assertTrue(pixels[60, 60].blue > pixels[60, 60].red)
         } finally {
             red.recycle()
             blue.recycle()
