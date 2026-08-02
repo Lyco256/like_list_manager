@@ -7,6 +7,7 @@
 ## 2026-08-01 production uniform-lattice and toolbar coverage
 
 - The real classified Activity flow continues to exercise normal grid rendering, production same-surface Morph input, reveal/handoff round trips, filter/sort changes, and the absence of the historical overlay.
+- The real classified-grid round trip also asserts canonical fallback callbacks for the incomplete-image 4→5 and 5→4 gestures, plus no callback below the release threshold.
 - The production rendering contract verifies one clipped LazyGrid surface and opaque positive-layer containers for both the filter/count/sort toolbar and selection toolbar. No second grid or overlay is introduced.
 
 `imageViewerSwipeMovesBetweenSavedPhotosWithoutChangingDatabase` sends the horizontal swipe through the Compose `image_viewer` node instead of relying on raw full-screen coordinates; the viewer parent drag handler leaves horizontal movement available to `HorizontalPager`.

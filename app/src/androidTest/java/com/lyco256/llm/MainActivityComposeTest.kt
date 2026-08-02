@@ -321,8 +321,10 @@ class MainActivityComposeTest {
         }
         waitForGridColumnCount(ClassifiedMediaGridDefaultColumnCount)
         val beforePinchColumns = mainViewModel().mediaGridSessionState.value.columnCount
+        MediaGridMorphTestTrace.clear()
         pinchOnGrid("classified_media_grid", centerSpan = 260f, endSpan = 180f)
         waitForMorphCanvasRemoval()
+        assertEquals(1, MediaGridMorphTestTrace.fallbackCount())
         val afterPinchInColumns = mediaGridMorphTargetColumnCount(
             beforePinchColumns,
             MediaGridMorphDirection.IncreaseColumns,
@@ -330,8 +332,10 @@ class MainActivityComposeTest {
         waitForGridColumnCount(afterPinchInColumns)
         assertTrue(composeRule.onAllNodesWithTag("media_grid_morph_overlay", useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
 
+        MediaGridMorphTestTrace.clear()
         pinchOnGrid("classified_media_grid", centerSpan = 180f, endSpan = 260f)
         waitForMorphCanvasRemoval()
+        assertEquals(1, MediaGridMorphTestTrace.fallbackCount())
         val afterPinchOutColumns = mediaGridMorphTargetColumnCount(
             afterPinchInColumns,
             MediaGridMorphDirection.DecreaseColumns,
@@ -339,8 +343,10 @@ class MainActivityComposeTest {
         waitForGridColumnCount(afterPinchOutColumns)
         assertTrue(composeRule.onAllNodesWithTag("media_grid_morph_overlay", useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
 
+        MediaGridMorphTestTrace.clear()
         pinchOnGrid("classified_media_grid", centerSpan = 260f, endSpan = 258f)
         waitForMorphCanvasRemoval()
+        assertEquals(0, MediaGridMorphTestTrace.fallbackCount())
         waitForGridColumnCount(afterPinchOutColumns)
 
         composeRule.onNodeWithTag(photoTag, useUnmergedTree = true).performClick()
