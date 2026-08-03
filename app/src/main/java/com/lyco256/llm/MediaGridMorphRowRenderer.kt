@@ -91,6 +91,57 @@ internal data class MediaGridMorphTextResourceIndex(
     val verticalTextPaddingPx: Float,
 )
 
+internal enum class MediaGridMorphClaimReadinessReason {
+    CaptureUnavailable,
+    DirectionUnavailable,
+    StaleIdentity,
+    SourceViewportMismatch,
+    MissingSourceImage,
+    MissingTargetImage,
+    MissingHeaderText,
+    GeometryIncomplete,
+    PreparedIndexChanged,
+}
+
+internal data class MediaGridMorphClaimReadinessReport(
+    val sourceFrameKey: MediaGridRenderKey?,
+    val sourceDataKey: MediaGridDataKey?,
+    val currentColumnCount: Int,
+    val requestedDirection: MediaGridMorphDirection?,
+    val firstVisibleItemIndex: Int = -1,
+    val firstVisibleItemScrollOffset: Int = 0,
+    val firstVisibleMediaOrdinal: Int = -1,
+    val lastVisibleMediaOrdinal: Int = -1,
+    val sourceFocalRowKey: MediaGridMorphSourceRowKey? = null,
+    val fixedPinchCenterY: Float = Float.NaN,
+    val selectedTargetRowIndex: Int? = null,
+    val selectedTargetMediaOrdinal: Int? = null,
+    val requiredSourceImageCount: Int = 0,
+    val resolvedSourceImageCount: Int = 0,
+    val requiredTargetImageCount: Int = 0,
+    val resolvedTargetImageCount: Int = 0,
+    val unresolvedRequiredAssetId: Long? = null,
+    val missingHeaderTitle: String? = null,
+    val sourceViewportComplete: Boolean = false,
+    val geometryComplete: Boolean = false,
+    val preparedIndexVersion: Long? = null,
+    val finalReason: MediaGridMorphClaimReadinessReason? = null,
+)
+
+internal sealed interface MediaGridMorphClaimPreparationResult {
+    val report: MediaGridMorphClaimReadinessReport
+
+    data class Ready(
+        val bundle: MediaGridMorphClaimBundle,
+        override val report: MediaGridMorphClaimReadinessReport,
+    ) : MediaGridMorphClaimPreparationResult
+
+    data class Unavailable(
+        val reason: MediaGridMorphClaimReadinessReason,
+        override val report: MediaGridMorphClaimReadinessReport,
+    ) : MediaGridMorphClaimPreparationResult
+}
+
 @Composable
 internal fun rememberMediaGridMorphTextResourceIndex(
     pairs: Map<MediaGridMorphDirection, MediaGridMorphPreparedPair>,
@@ -189,10 +240,13 @@ internal fun buildMediaGridMorphClaimBundle(
     firstPosition: androidx.compose.ui.geometry.Offset,
     secondPosition: androidx.compose.ui.geometry.Offset,
     sourceViewportAnchor: MediaGridMorphSourceViewportAnchor? = null,
+    initialDistanceOverride: Float? = null,
+    fixedInitialCenterOverride: androidx.compose.ui.geometry.Offset? = null,
 ): MediaGridMorphClaimBundle? {
     val identity = capture.identity.toInteractionIdentity()
-    val initialDistance = distanceBetween(firstPosition, secondPosition)
-    if (!initialDistance.isFinite() || initialDistance <= 0f) return null
+    val claimDistance = distanceBetween(firstPosition, secondPosition)
+    val initialDistance = initialDistanceOverride ?: claimDistance
+    if (!claimDistance.isFinite() || claimDistance <= 0f || !initialDistance.isFinite() || initialDistance <= 0f) return null
     val center = androidx.compose.ui.geometry.Offset(
         (firstPosition.x + secondPosition.x) / 2f,
         (firstPosition.y + secondPosition.y) / 2f,
@@ -225,13 +279,139 @@ internal fun buildMediaGridMorphClaimBundle(
         firstPointerId = firstPointerId,
         secondPointerId = secondPointerId,
         initialDistance = initialDistance,
-        fixedInitialCenter = center,
+        fixedInitialCenter = fixedInitialCenterOverride ?: center,
         preparedIndexIdentity = preparedIndex.drawIndexVersion,
         textResourceIdentity = textResources.identity,
         directions = directions.toMap(),
         protectedAssetUnion = union.toLongArray(),
         sourceViewportAnchor = sourceViewportAnchor,
     )
+}
+
+/**
+ * Production claim preparation. The requested direction and actual current
+ * pointer positions select the plan used for the report; cached pair
+ * completeness is never promoted to a claim failure reason.
+ */
+internal fun prepareMediaGridMorphClaim(
+    capture: MediaGridMorphCapture?,
+    preparedIndex: MediaGridResidentCanvasPreparedIndex,
+    textResources: MediaGridMorphTextResourceIndex,
+    candidate: MediaGridMorphCandidate,
+    requestedDirection: MediaGridMorphDirection?,
+    latestIdentity: MediaGridMorphInteractionIdentity?,
+    sourceViewportAnchor: MediaGridMorphSourceViewportAnchor? = null,
+): MediaGridMorphClaimPreparationResult {
+    val claimFirst = candidate.claimFirstPosition ?: candidate.firstInitialPosition
+    val claimSecond = candidate.claimSecondPosition ?: candidate.secondInitialPosition
+    val baseIdentity = capture?.identity?.toInteractionIdentity() ?: latestIdentity
+    fun baseReport(
+        reason: MediaGridMorphClaimReadinessReason?,
+        plan: MediaGridMorphPlan? = null,
+        completeness: MediaGridMorphImageCompleteness? = null,
+    ): MediaGridMorphClaimReadinessReport {
+        val identity = baseIdentity
+        val signature = identity?.viewportSignature
+        val sourceRow = plan?.viewportPlan?.focalMediaOrdinal?.let { ordinal ->
+            capture?.sourceRows?.firstOrNull { row -> row.cells.any { it.mediaOrdinal == ordinal } }?.rowKey
+        }
+        return MediaGridMorphClaimReadinessReport(
+            sourceFrameKey = identity?.frameKey,
+            sourceDataKey = identity?.frameKey?.dataKey,
+            currentColumnCount = identity?.currentColumnCount ?: 0,
+            requestedDirection = requestedDirection,
+            firstVisibleItemIndex = sourceViewportAnchor?.firstVisibleItemIndex
+                ?: signature?.firstVisibleItemIndex ?: -1,
+            firstVisibleItemScrollOffset = sourceViewportAnchor?.firstVisibleItemScrollOffset ?: 0,
+            firstVisibleMediaOrdinal = signature?.firstVisibleMediaOrdinal ?: -1,
+            lastVisibleMediaOrdinal = signature?.lastVisibleMediaOrdinal ?: -1,
+            sourceFocalRowKey = sourceRow,
+            fixedPinchCenterY = (candidate.claimFirstPosition ?: candidate.firstInitialPosition).let { first ->
+                (first.y + (candidate.claimSecondPosition ?: candidate.secondInitialPosition).y) / 2f
+            },
+            selectedTargetRowIndex = plan?.viewportPlan?.targetAnchorRowIndex,
+            selectedTargetMediaOrdinal = plan?.viewportPlan?.targetFocalMediaOrdinal,
+            requiredSourceImageCount = completeness?.requiredSourceImageCount ?: 0,
+            resolvedSourceImageCount = completeness?.resolvedSourceImageCount ?: 0,
+            requiredTargetImageCount = completeness?.requiredTargetImageCount ?: 0,
+            resolvedTargetImageCount = completeness?.resolvedTargetImageCount ?: 0,
+            unresolvedRequiredAssetId = completeness?.unresolvedRequiredAssetId,
+            missingHeaderTitle = completeness?.missingHeaderTitle,
+            sourceViewportComplete = completeness?.sourceViewportComplete == true,
+            geometryComplete = completeness?.geometryComplete == true,
+            preparedIndexVersion = preparedIndex.drawIndexVersion,
+            finalReason = reason,
+        )
+    }
+
+    if (capture == null) {
+        return MediaGridMorphClaimPreparationResult.Unavailable(
+            MediaGridMorphClaimReadinessReason.CaptureUnavailable,
+            baseReport(MediaGridMorphClaimReadinessReason.CaptureUnavailable),
+        )
+    }
+    if (capture.preparedIndexVersion != null && capture.preparedIndexVersion != preparedIndex.drawIndexVersion) {
+        return MediaGridMorphClaimPreparationResult.Unavailable(
+            MediaGridMorphClaimReadinessReason.PreparedIndexChanged,
+            baseReport(MediaGridMorphClaimReadinessReason.PreparedIndexChanged),
+        )
+    }
+    val bundle = buildMediaGridMorphClaimBundle(
+        capture = capture,
+        preparedIndex = preparedIndex,
+        textResources = textResources,
+        generation = candidate.generation,
+        firstPointerId = candidate.firstPointerId,
+        secondPointerId = candidate.secondPointerId,
+        firstPosition = claimFirst,
+        secondPosition = claimSecond,
+        sourceViewportAnchor = sourceViewportAnchor,
+        initialDistanceOverride = candidate.initialDistance,
+        fixedInitialCenterOverride = androidx.compose.ui.geometry.Offset(
+            (claimFirst.x + claimSecond.x) / 2f,
+            (claimFirst.y + claimSecond.y) / 2f,
+        ),
+    ) ?: return MediaGridMorphClaimPreparationResult.Unavailable(
+        MediaGridMorphClaimReadinessReason.DirectionUnavailable,
+        baseReport(MediaGridMorphClaimReadinessReason.DirectionUnavailable),
+    )
+    if (latestIdentity == null || bundle.identity != latestIdentity) {
+        val selected = requestedDirection?.let(bundle.directions::get)
+        return MediaGridMorphClaimPreparationResult.Unavailable(
+            MediaGridMorphClaimReadinessReason.StaleIdentity,
+            baseReport(
+                MediaGridMorphClaimReadinessReason.StaleIdentity,
+                selected?.plan,
+                selected?.completeness,
+            ),
+        )
+    }
+    val selected = requestedDirection?.let(bundle.directions::get)
+        ?: return MediaGridMorphClaimPreparationResult.Unavailable(
+            MediaGridMorphClaimReadinessReason.DirectionUnavailable,
+            baseReport(MediaGridMorphClaimReadinessReason.DirectionUnavailable),
+        )
+    val completeness = selected.completeness
+    val reason = when {
+        !completeness.sourceViewportComplete -> MediaGridMorphClaimReadinessReason.SourceViewportMismatch
+        completeness.requiredSourceImageCount != completeness.resolvedSourceImageCount ->
+            MediaGridMorphClaimReadinessReason.MissingSourceImage
+        completeness.requiredTargetImageCount != completeness.resolvedTargetImageCount ->
+            MediaGridMorphClaimReadinessReason.MissingTargetImage
+        !completeness.headerTextComplete -> MediaGridMorphClaimReadinessReason.MissingHeaderText
+        !completeness.geometryComplete || !selected.renderModel.isComplete ->
+            MediaGridMorphClaimReadinessReason.GeometryIncomplete
+        else -> null
+    }
+    val report = baseReport(reason, selected.plan, completeness)
+    return if (reason == null && selected.isComplete) {
+        MediaGridMorphClaimPreparationResult.Ready(bundle, report)
+    } else {
+        MediaGridMorphClaimPreparationResult.Unavailable(
+            reason ?: MediaGridMorphClaimReadinessReason.GeometryIncomplete,
+            report.copy(finalReason = reason ?: MediaGridMorphClaimReadinessReason.GeometryIncomplete),
+        )
+    }
 }
 
 internal fun mediaGridMorphSelectedPlanCompleteness(
@@ -255,10 +435,14 @@ internal fun mediaGridMorphSelectedPlanCompleteness(
             (header.startTitle == null || textResources.layoutsByTitle.containsKey(header.startTitle)) &&
                 (header.endTitle == null || textResources.layoutsByTitle.containsKey(header.endTitle))
         }
+        val missingHeaderTitle = plan.headers.asSequence()
+            .flatMap { sequenceOf(it.startTitle, it.endTitle) }
+            .firstOrNull { !it.isNullOrBlank() && it !in textResources.layoutsByTitle }
         return MediaGridMorphImageCompleteness(
             source.size, source.count { it in preparedIndex.preparedImageByAssetId },
             target.size, target.count { it in preparedIndex.preparedImageByAssetId },
             unresolved, textComplete, plan.viewport.width > 0f && plan.viewport.height > 0f && visible.isNotEmpty(),
+            missingHeaderTitle = missingHeaderTitle,
         )
     }
     val coordinates = HashSet<Pair<Int, Int>>()
@@ -279,10 +463,10 @@ internal fun mediaGridMorphSelectedPlanCompleteness(
             }
         }
     }
-    val headersComplete = selected.headerPlans.all { header ->
-        (header.startTitle == null || textResources.layoutsByTitle.containsKey(header.startTitle)) &&
-            (header.endTitle == null || textResources.layoutsByTitle.containsKey(header.endTitle))
-    }
+    val missingHeaderTitle = selected.headerPlans.asSequence()
+        .flatMap { sequenceOf(it.startTitle, it.endTitle) }
+        .firstOrNull { !it.isNullOrBlank() && it !in textResources.layoutsByTitle }
+    val headersComplete = missingHeaderTitle == null
     val unresolved = (source + target).firstOrNull { it !in preparedIndex.preparedImageByAssetId }
     return MediaGridMorphImageCompleteness(
         requiredSourceImageCount = source.size,
@@ -293,6 +477,7 @@ internal fun mediaGridMorphSelectedPlanCompleteness(
         headerTextComplete = headersComplete,
         geometryComplete = geometryComplete,
         sourceViewportComplete = sourceViewportComplete,
+        missingHeaderTitle = missingHeaderTitle,
     )
 }
 

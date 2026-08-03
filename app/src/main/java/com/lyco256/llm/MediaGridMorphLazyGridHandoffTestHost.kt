@@ -27,7 +27,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Rect
@@ -38,7 +37,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
  * TEST_HARNESS-only one-grid host for the real LazyVerticalGrid handoff.
@@ -82,7 +80,7 @@ internal fun MediaGridMorphLazyGridHandoffTestHost(
         ?.takeIf {
             handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.PositioningTarget ||
                 handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.VerifyingTarget ||
-                handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.RevealingTarget ||
+                handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.ReadyToComplete ||
                 handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.Idle
         }
         ?: 0f
@@ -92,7 +90,7 @@ internal fun MediaGridMorphLazyGridHandoffTestHost(
         ?.takeIf {
             handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.PositioningTarget ||
                 handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.VerifyingTarget ||
-                handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.RevealingTarget ||
+                handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.ReadyToComplete ||
                 handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.Idle
         }
         ?: 0f
@@ -171,7 +169,6 @@ internal fun MediaGridMorphLazyGridHandoffTestHost(
             coordinator.snapshot().phase != MediaGridMorphGridHandoffPhase.PositioningTarget &&
             coordinator.snapshot().phase != MediaGridMorphGridHandoffPhase.RollingBack
         ) return
-        val activeGeneration = coordinator.snapshot().request?.interactionGeneration ?: return
         val layout = state.layoutInfo
         enqueue(
             coordinator.observeLayout(
@@ -183,42 +180,27 @@ internal fun MediaGridMorphLazyGridHandoffTestHost(
             ),
         )
         if (coordinator.snapshot().phase == MediaGridMorphGridHandoffPhase.VerifyingTarget) {
-            controller.beginTargetReveal(activeGeneration)
-            coordinator.beginTargetReveal(activeGeneration)
-            publishSnapshot()
-        } else if (coordinator.snapshot().phase == MediaGridMorphGridHandoffPhase.RevealingCurrent) {
-            controller.beginCurrentReveal(activeGeneration)
-            publishSnapshot()
-        } else if (coordinator.snapshot().phase == MediaGridMorphGridHandoffPhase.Cancelled) {
-            controller.cancelHandoff(activeGeneration)
+            withFrameNanos { }
+            coordinator.underlyingTargetGridDrawn()
             publishSnapshot()
         }
     }
 
     LaunchedEffect(handoffSnapshot.phase, completionAllowed) {
-        if (!completionAllowed) return@LaunchedEffect
-        val handoffPhase = coordinator.snapshot().phase
-        if (handoffPhase == MediaGridMorphGridHandoffPhase.RevealingTarget) {
-            val generation = coordinator.snapshot().request?.interactionGeneration ?: return@LaunchedEffect
-            controller.acknowledgeTargetReveal(generation)
-            coordinator.completeAfterReveal(generation, target = true)
-            publishSnapshot()
-        } else if (handoffPhase == MediaGridMorphGridHandoffPhase.RevealingCurrent) {
-            val generation = coordinator.snapshot().request?.interactionGeneration ?: return@LaunchedEffect
-            controller.acknowledgeCurrentReveal(generation)
-            coordinator.completeAfterReveal(generation, target = false)
-            publishSnapshot()
+        if (
+            completionAllowed &&
+            coordinator.snapshot().phase == MediaGridMorphGridHandoffPhase.ReadyToComplete
+        ) {
+            withFrameNanos { }
+            enqueue(coordinator.nextFrame())
         }
     }
 
     LaunchedEffect(displayedFrame.key, request) {
         if (request == null) return@LaunchedEffect
         enqueue(coordinator.observeFrame(displayedFrame))
-        snapshotFlow {
-            state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset
-        }.distinctUntilChanged().collect {
-            observeCurrentLayout()
-        }
+        withFrameNanos { }
+        observeCurrentLayout()
     }
 
     LaunchedEffect(commands, state) {
@@ -230,10 +212,16 @@ internal fun MediaGridMorphLazyGridHandoffTestHost(
                     columnCount = command.columnCount
                 is MediaGridMorphGridHandoffCommand.ScrollToItem -> {
                     state.scrollToItem(command.itemIndex, command.scrollOffset)
+                    withFrameNanos { }
+                    observeCurrentLayout()
                 }
                 is MediaGridMorphGridHandoffCommand.ScrollBy -> {
                     state.scrollBy(command.pixels)
+                    withFrameNanos { }
+                    observeCurrentLayout()
                 }
+                is MediaGridMorphGridHandoffCommand.Complete ->
+                    controller.completeHandoff(command.interactionGeneration)
                 is MediaGridMorphGridHandoffCommand.Cancel ->
                     controller.cancelHandoff(command.interactionGeneration)
             }

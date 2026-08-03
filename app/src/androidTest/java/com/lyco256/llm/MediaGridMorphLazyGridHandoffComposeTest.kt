@@ -20,7 +20,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.MutableState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -28,6 +27,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -88,7 +88,7 @@ class MediaGridMorphLazyGridHandoffComposeTest {
         runHandoff(12, 11, ClassifiedSortBase.LikeCount)
 
     @Test
-    fun productionHostUsesTheSingleSurfaceAndCompletesAfterActualDraw() {
+    fun productionHostUsesTheSameLazyGridAndRemovesCanvasAfterHandoff() {
         val fixture = fixture(2, 3, ClassifiedSortBase.Default)
         val bitmaps = fixture.entries.associate { it.assetId to assetBitmap(it.assetId) }
         val preparedIndex = preparedIndex(bitmaps)
@@ -125,16 +125,27 @@ class MediaGridMorphLazyGridHandoffComposeTest {
                 )
                 val interactionLocked = hostState.controller.interactionLocked.value ||
                     hostState.handoffSnapshot.value.suppressesUserScroll
-                val singleSurfaceMode = remember(hostState.controller) {
-                    derivedStateOf {
-                        when (hostState.controller.drawMode.value) {
-                            MediaGridMorphDrawMode.Morph -> MediaGridSingleSurfaceMode.Morph
-                            MediaGridMorphDrawMode.RevealCurrent -> MediaGridSingleSurfaceMode.RevealCurrent
-                            MediaGridMorphDrawMode.RevealTarget -> MediaGridSingleSurfaceMode.RevealTarget
-                            else -> MediaGridSingleSurfaceMode.Normal
-                        }
+                val handoffSnapshot = hostState.handoffSnapshot.value
+                val handoffVisualTranslationX = handoffSnapshot.request
+                    ?.finalCorrection
+                    ?.x
+                    ?.takeIf {
+                        handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.PositioningTarget ||
+                            handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.VerifyingTarget ||
+                            handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.ReadyToComplete ||
+                            handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.Idle
                     }
-                }
+                    ?: 0f
+                val handoffVisualTranslationY = handoffSnapshot.request
+                    ?.finalCorrection
+                    ?.y
+                    ?.takeIf {
+                        handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.PositioningTarget ||
+                            handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.VerifyingTarget ||
+                            handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.ReadyToComplete ||
+                            handoffSnapshot.phase == MediaGridMorphGridHandoffPhase.Idle
+                    }
+                    ?: 0f
                 MaterialTheme {
                     Box(
                         Modifier
@@ -150,16 +161,14 @@ class MediaGridMorphLazyGridHandoffComposeTest {
                             userScrollEnabled = !interactionLocked,
                             modifier = Modifier
                                 .fillMaxSize()
-                                .mediaGridSingleSurface(
-                                    state = gridState,
-                                    assetIdByItemKey = frame.assetIdByItemKey,
-                                    preparedIndex = preparedIndex,
-                                    mode = singleSurfaceMode,
-                                    morphModel = hostState.controller.snapshotState.value.activeRenderModel,
-                                    progress = hostState.controller.progress,
-                                    morphSnapshot = hostState.controller.snapshotState,
-                                    morphDrawAck = { generation, mode, frameNumber ->
-                                        hostState.drawAckDispatcher.dispatch(generation, mode, frameNumber)
+                                .then(
+                                    if (handoffVisualTranslationX != 0f || handoffVisualTranslationY != 0f) {
+                                        Modifier.graphicsLayer {
+                                            translationX = handoffVisualTranslationX
+                                            translationY = handoffVisualTranslationY
+                                        }
+                                    } else {
+                                        Modifier
                                     },
                                 )
                                 .testTag("production_morph_grid"),
@@ -184,11 +193,13 @@ class MediaGridMorphLazyGridHandoffComposeTest {
                                 }
                             }
                         }
-                        MediaGridMorphProductionHandoffEffects(
+                        MediaGridMorphTestHandoffHost(
                             host = hostState,
                             frame = frame,
                             sessionKey = mediaGridSessionKey(fixture.dataKey),
                             identity = identity,
+                            preparedPairsSnapshot = { mapOf(fixture.direction to fixture.pair) },
+                            preparedIndex = preparedIndex,
                             state = gridState,
                             onColumnCountChange = { next ->
                                 columnChanges++
@@ -197,12 +208,12 @@ class MediaGridMorphLazyGridHandoffComposeTest {
                             },
                             onAnchorCheckpoint = { _, anchor -> anchorCheckpoints += anchor },
                             onCheckpointSuppressed = { checkpointSuppression += it },
+                            modifier = Modifier.fillMaxSize().testTag("production_morph_canvas_layer"),
                         )
                     }
                 }
             }
             composeRule.waitForIdle()
-            MediaGridMorphTestTrace.clear()
             composeRule.runOnIdle {
                 val center = fixtureAnchorSlot(fixture.pair, fixture.toColumns).startRect.center
                 val plan = MediaGridMorphPlan.select(fixture.pair, center)
@@ -236,19 +247,10 @@ class MediaGridMorphLazyGridHandoffComposeTest {
             composeRule.waitForIdle()
             assertEquals(1, columnChanges)
             assertEquals(MediaGridMorphPhase.Idle, hostState.controller.snapshot().phase)
-            composeRule.onAllNodesWithTag("production_morph_grid").assertCountEquals(1)
+            composeRule.onAllNodesWithTag("media_grid_morph_canvas").assertCountEquals(0)
             assertTrue(checkpointSuppression.contains(true))
             assertEquals(false, checkpointSuppression.last())
             assertEquals(1, anchorCheckpoints.size)
-            val traceEvents = MediaGridMorphTestTrace.handoffEvents()
-            val actualDrawIndex = traceEvents.indexOfFirst { it.event == MediaGridMorphHandoffTraceEvent.ActualDraw }
-            val unlockIndex = traceEvents.indexOfFirst { it.event == MediaGridMorphHandoffTraceEvent.Unlock }
-            val checkpointIndex = traceEvents.indexOfFirst { it.event == MediaGridMorphHandoffTraceEvent.Checkpoint }
-            assertTrue(actualDrawIndex >= 0)
-            assertTrue(traceEvents[actualDrawIndex].frameNumber > 0L)
-            assertTrue(unlockIndex > actualDrawIndex)
-            assertTrue(checkpointIndex > unlockIndex)
-            assertEquals(1, traceEvents.count { it.event == MediaGridMorphHandoffTraceEvent.Checkpoint })
         } finally {
             composeRule.runOnIdle { store.close() }
             bitmaps.values.forEach(Bitmap::recycle)
@@ -830,7 +832,7 @@ class MediaGridMorphLazyGridHandoffComposeTest {
         assertEquals(1, result.commands.count {
             it is MediaGridMorphGridHandoffCommand.RollbackColumnCount
         })
-        assertEquals(0, result.commands.count {
+        assertEquals(1, result.commands.count {
             it is MediaGridMorphGridHandoffCommand.Cancel
         })
         assertTrue(result.snapshots.any {
@@ -881,6 +883,9 @@ class MediaGridMorphLazyGridHandoffComposeTest {
         assertEquals(1, result.commands.count {
             it is MediaGridMorphGridHandoffCommand.ChangeColumnCount
         })
+        assertEquals(1, result.commands.count {
+            it is MediaGridMorphGridHandoffCommand.Complete
+        })
         assertFalse(result.commands.any {
             it is MediaGridMorphGridHandoffCommand.RollbackColumnCount
         })
@@ -891,13 +896,13 @@ class MediaGridMorphLazyGridHandoffComposeTest {
             it.phase == MediaGridMorphGridHandoffPhase.VerifyingTarget
         })
         assertTrue(result.snapshots.any {
-            it.phase == MediaGridMorphGridHandoffPhase.RevealingTarget
+            it.phase == MediaGridMorphGridHandoffPhase.ReadyToComplete
         })
-        assertTrue(result.snapshots.all { it.correctionAttempts <= 2 })
+        assertTrue(result.snapshots.all { it.correctionAttempts <= 3 })
         val correctionCommandCount = result.commands.count {
             it is MediaGridMorphGridHandoffCommand.ScrollBy
         }
-        assertTrue(correctionCommandCount <= 2)
+        assertTrue(correctionCommandCount <= 3)
         val geometry = result.geometries.last { it.assetId == result.request.targetAnchor.assetId }
         val target = result.request.targetAnchor
         val actualFocal = Offset(
@@ -1004,7 +1009,7 @@ class MediaGridMorphLazyGridHandoffComposeTest {
                 var frameCount = 0
                 while (
                     snapshots.lastOrNull()?.phase !=
-                    MediaGridMorphGridHandoffPhase.RevealingTarget &&
+                    MediaGridMorphGridHandoffPhase.ReadyToComplete &&
                     frameCount < 20
                 ) {
                     composeRule.mainClock.advanceTimeByFrame()
@@ -1012,7 +1017,7 @@ class MediaGridMorphLazyGridHandoffComposeTest {
                     frameCount++
                 }
                 assertEquals(
-                    MediaGridMorphGridHandoffPhase.RevealingTarget,
+                    MediaGridMorphGridHandoffPhase.ReadyToComplete,
                     snapshots.last().phase,
                 )
                 composeRule.onAllNodesWithTag("media_grid_morph_canvas").assertCountEquals(1)
@@ -1360,8 +1365,13 @@ class MediaGridMorphLazyGridHandoffComposeTest {
         fixture: Fixture,
         identity: MediaGridMorphInteractionIdentity,
         candidate: MediaGridMorphCandidate,
-    ): MediaGridMorphClaimBundle {
-        val plan = MediaGridMorphPlan.select(fixture.pair, candidate.initialCentroid)
+    ): MediaGridMorphClaimPreparationResult {
+        val first = candidate.claimFirstPosition ?: candidate.firstInitialPosition
+        val second = candidate.claimSecondPosition ?: candidate.secondInitialPosition
+        val claimCenter = Offset((first.x + second.x) / 2f, (first.y + second.y) / 2f)
+        val direction = candidate.claimDirection
+        val preparedDirection = MediaGridMorphDirection.IncreaseColumns
+        val plan = MediaGridMorphPlan.select(fixture.pair, claimCenter)
         val model = MediaGridMorphRowRenderModel(
             viewport = plan.viewport,
             sourceCellSize = plan.viewport.width,
@@ -1394,18 +1404,18 @@ class MediaGridMorphLazyGridHandoffComposeTest {
             headerTextComplete = true,
             geometryComplete = true,
         )
-        return MediaGridMorphClaimBundle(
+        val bundle = MediaGridMorphClaimBundle(
             generation = candidate.generation,
             identity = identity,
             firstPointerId = candidate.firstPointerId,
             secondPointerId = candidate.secondPointerId,
             initialDistance = candidate.initialDistance,
-            fixedInitialCenter = candidate.initialCentroid,
+            fixedInitialCenter = claimCenter,
             preparedIndexIdentity = 1L,
             textResourceIdentity = MediaGridMorphTextResourceIdentity(emptyList(), 1f, 1f, WidthPx),
             directions = mapOf(
-                MediaGridMorphDirection.IncreaseColumns to MediaGridMorphDirectionClaimBundle(
-                    direction = MediaGridMorphDirection.IncreaseColumns,
+                preparedDirection to MediaGridMorphDirectionClaimBundle(
+                    direction = preparedDirection,
                     targetColumnCount = fixture.toColumns,
                     plan = plan,
                     renderModel = model,
@@ -1415,6 +1425,23 @@ class MediaGridMorphLazyGridHandoffComposeTest {
             ),
             protectedAssetUnion = LongArray(0),
         )
+        val report = MediaGridMorphClaimReadinessReport(
+            sourceFrameKey = identity.frameKey,
+            sourceDataKey = identity.frameKey.dataKey,
+            currentColumnCount = identity.currentColumnCount,
+            requestedDirection = direction,
+            sourceViewportComplete = true,
+            geometryComplete = true,
+            preparedIndexVersion = 1L,
+        )
+        return if (direction == preparedDirection) {
+            MediaGridMorphClaimPreparationResult.Ready(bundle = bundle, report = report)
+        } else {
+            MediaGridMorphClaimPreparationResult.Unavailable(
+                reason = MediaGridMorphClaimReadinessReason.DirectionUnavailable,
+                report = report.copy(finalReason = MediaGridMorphClaimReadinessReason.DirectionUnavailable),
+            )
+        }
     }
 
     private fun assetBitmap(assetId: Long): Bitmap {

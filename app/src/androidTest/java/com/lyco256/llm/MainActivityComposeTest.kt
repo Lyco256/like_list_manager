@@ -26,6 +26,7 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeUp
 import com.lyco256.llm.data.AssetEntity
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipTagEntity
@@ -557,6 +558,14 @@ class MainActivityComposeTest {
         assertTrue(morphDraw.progress > 0f)
         assertEquals(0, MediaGridMorphTestTrace.fallbackCount())
         assertEquals(4, mainViewModel().mediaGridSessionState.value.columnCount)
+
+        waitForGridColumnCount(5)
+        waitForMorphCanvasRemoval()
+        MediaGridMorphTestTrace.clear()
+        composeRule.onNodeWithTag("classified_media_grid").performTouchInput { swipeUp() }
+        composeRule.waitForIdle()
+        assertEquals(5, mainViewModel().mediaGridSessionState.value.columnCount)
+        assertEquals(0, MediaGridMorphTestTrace.rollbackColumnCountCommandCount())
     }
 
     @Test

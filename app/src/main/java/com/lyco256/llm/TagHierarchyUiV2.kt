@@ -598,7 +598,6 @@ internal fun EnhancedClassifiedScreen(
                 ) { androidx.compose.material3.CircularProgressIndicator() }
                 else -> ClassifiedMediaGridContent(
                     frame = mediaGridSessionState.frame!!,
-                    sessionKey = mediaGridSessionState.sessionKey,
                     sort = uiState.sort,
                     columnCount = mediaGridSessionState.columnCount,
                     state = mediaGridLazyState,
@@ -3601,7 +3600,6 @@ internal fun MediaGridFramePublicationRunner(target: MediaGridFramePublicationTa
 @OptIn(ExperimentalFoundationApi::class)
 private fun ClassifiedMediaGridContent(
     frame: MediaGridFrameData,
-    sessionKey: MediaGridSessionKey?,
     sort: ClassifiedSortState,
     columnCount: Int,
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
@@ -3678,7 +3676,7 @@ private fun ClassifiedMediaGridContent(
     val morphEnabled = !selectionMode && !showProgress
     val morphHost = rememberMediaGridMorphProductionHostState(
         state = state,
-        sessionKey = sessionKey,
+        sessionKey = null,
         retainedImageStore = retainedImageStore,
         enabled = morphEnabled,
     )
@@ -3729,7 +3727,7 @@ private fun ClassifiedMediaGridContent(
         MediaGridMorphProductionHandoffEffects(
             host = morphHost,
             frame = frame,
-            sessionKey = sessionKey,
+            sessionKey = null,
             identity = morphIdentity,
             state = state,
             onColumnCountChange = onMediaGridColumnCountChange,
@@ -3766,9 +3764,10 @@ private fun ClassifiedMediaGridContent(
                             it.visibleItemGeometry.isNotEmpty()
                     }
             }.distinctUntilChanged(),
+            snapshotFlow { state.isScrollInProgress }.distinctUntilChanged(),
             morphPointerInProgress,
-        ) { signature, pointerInProgress ->
-            signature?.takeUnless { pointerInProgress }
+        ) { signature, isScrollInProgress, pointerInProgress ->
+            signature?.takeUnless { isScrollInProgress || pointerInProgress }
         }.distinctUntilChanged().collectLatest { signature ->
             if (signature == null) return@collectLatest
             val identity = MediaGridMorphPreparationIdentity(
@@ -3829,22 +3828,18 @@ private fun ClassifiedMediaGridContent(
                                         fallbackHeaderHeightPx = fallbackMorphHeaderHeightPx,
                                         preparedIndex = residentPreparedIndex,
                                     )
-                                    capture?.let {
-                                        buildMediaGridMorphClaimBundle(
-                                            capture = it,
-                                            preparedIndex = residentPreparedIndex,
-                                            textResources = morphTextResourceIndex,
-                                            generation = candidate.generation,
-                                            firstPointerId = candidate.firstPointerId,
-                                            secondPointerId = candidate.secondPointerId,
-                                            firstPosition = candidate.firstInitialPosition,
-                                            secondPosition = candidate.secondInitialPosition,
-                                            sourceViewportAnchor = MediaGridMorphSourceViewportAnchor(
-                                                firstVisibleItemIndex = state.firstVisibleItemIndex,
-                                                firstVisibleItemScrollOffset = state.firstVisibleItemScrollOffset,
-                                            ),
-                                        )
-                                    }
+                                    prepareMediaGridMorphClaim(
+                                        capture = capture,
+                                        preparedIndex = residentPreparedIndex,
+                                        textResources = morphTextResourceIndex,
+                                        candidate = candidate,
+                                        requestedDirection = candidate.claimDirection,
+                                        latestIdentity = morphIdentity,
+                                        sourceViewportAnchor = MediaGridMorphSourceViewportAnchor(
+                                            firstVisibleItemIndex = state.firstVisibleItemIndex,
+                                            firstVisibleItemScrollOffset = state.firstVisibleItemScrollOffset,
+                                        ),
+                                    )
                                 }
                             } else null,
                             isPairReady = if (residentPreparedIndex != null) {
@@ -3887,11 +3882,6 @@ private fun ClassifiedMediaGridContent(
                             progress = morphProgress,
                             morphDrawObserver = morphDrawObserver,
                             morphSnapshot = morphController?.snapshotState,
-                            morphDrawAck = morphHost?.drawAckDispatcher?.let { dispatcher ->
-                                { generation, mode, frameNumber ->
-                                    dispatcher.dispatch(generation, mode, frameNumber)
-                                }
-                            },
                         )
                     } else Modifier,
                 ),

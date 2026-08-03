@@ -161,7 +161,7 @@ class MediaGridMorphHandoffTest {
     }
 
     @Test
-    fun coordinatorChangesColumnOnceRevealsImmediatelyAfterAlignedLayout() {
+    fun coordinatorChangesColumnOnceWaitsForFrameAndCompletesOnFollowingFrame() {
         val request = request()
         val coordinator = MediaGridMorphGridHandoffCoordinator()
         val first = coordinator.start(request)
@@ -187,7 +187,7 @@ class MediaGridMorphHandoffTest {
             ),
         )
         assertEquals(MediaGridMorphGridHandoffPhase.PositioningTarget, coordinator.snapshot().phase)
-        assertNull(
+        assertTrue(
             coordinator.observeLayout(
                 frame(request.expectedTargetFrameKey, longArrayOf(11L, 12L)),
                 visibleTarget = MediaGridMorphVisibleItemGeometry(
@@ -197,7 +197,7 @@ class MediaGridMorphHandoffTest {
                 ),
                 viewportWidth = 300,
                 viewportHeight = 300,
-            ),
+            ) is MediaGridMorphGridHandoffCommand.ScrollToItem,
         )
         assertNull(
             coordinator.observeLayout(
@@ -212,10 +212,13 @@ class MediaGridMorphHandoffTest {
             ),
         )
         assertEquals(MediaGridMorphGridHandoffPhase.VerifyingTarget, coordinator.snapshot().phase)
-        assertTrue(coordinator.beginTargetReveal(7L))
-        assertEquals(MediaGridMorphGridHandoffPhase.RevealingTarget, coordinator.snapshot().phase)
-        assertTrue(coordinator.completeAfterReveal(7L, target = true))
-        assertEquals(MediaGridMorphGridHandoffPhase.Completed, coordinator.snapshot().phase)
+        assertNull(coordinator.underlyingTargetGridDrawn())
+        assertEquals(MediaGridMorphGridHandoffPhase.ReadyToComplete, coordinator.snapshot().phase)
+        assertEquals(
+            MediaGridMorphGridHandoffCommand.Complete(7L),
+            coordinator.nextFrame(),
+        )
+        assertNull(coordinator.nextFrame())
         assertTrue(coordinator.consumeFinalAnchorCheckpointPermission())
         assertFalse(coordinator.consumeFinalAnchorCheckpointPermission())
     }
@@ -241,11 +244,7 @@ class MediaGridMorphHandoffTest {
         val coordinator = MediaGridMorphGridHandoffCoordinator()
         coordinator.start(request)
         coordinator.observeFrame(targetFrame)
-        val initialPositionCommand = coordinator.observeLayout(targetFrame, visibleTarget, 300, 300)
-        assertEquals(
-            MediaGridMorphGridHandoffCommand.ScrollToItem(itemIndex = 0, scrollOffset = 12),
-            initialPositionCommand,
-        )
+        assertTrue(coordinator.observeLayout(targetFrame, visibleTarget, 300, 300) is MediaGridMorphGridHandoffCommand.ScrollToItem)
         assertNull(coordinator.observeLayout(targetFrame, visibleTarget, 300, 300, visibleRow))
         assertEquals(MediaGridMorphGridHandoffPhase.VerifyingTarget, coordinator.snapshot().phase)
 
@@ -281,7 +280,7 @@ class MediaGridMorphHandoffTest {
     }
 
     @Test
-    fun coordinatorUsesOrdinalFallbackAndLimitsYCorrectionToTwoAttempts() {
+    fun coordinatorUsesOrdinalFallbackAndLimitsYCorrectionToThreeAttempts() {
         val request = request().copy(
             targetAnchor = request().targetAnchor.copy(assetId = 99L, mediaOrdinal = 1),
         )
@@ -292,8 +291,28 @@ class MediaGridMorphHandoffTest {
         assertEquals(22L, coordinator.snapshot().resolvedTarget?.assetId)
         assertEquals(1, coordinator.snapshot().resolvedTarget?.mediaOrdinal)
 
+        assertTrue(
+            coordinator.observeLayout(
+                targetFrame,
+                MediaGridMorphVisibleItemGeometry(22L, 1, Rect(0f, 10f, 100f, 110f)),
+                300,
+                300,
+            ) is MediaGridMorphGridHandoffCommand.ScrollToItem,
+        )
+        repeat(3) { attempt ->
+            assertEquals(
+                MediaGridMorphGridHandoffCommand.ScrollBy(10f),
+                coordinator.observeLayout(
+                    targetFrame,
+                    MediaGridMorphVisibleItemGeometry(22L, 1, Rect(0f, 10f, 100f, 110f)),
+                    300,
+                    300,
+                ),
+            )
+            assertEquals(attempt + 1, coordinator.snapshot().correctionAttempts)
+        }
         assertEquals(
-            MediaGridMorphGridHandoffCommand.ScrollBy(10f),
+            MediaGridMorphGridHandoffCommand.RollbackColumnCount(2),
             coordinator.observeLayout(
                 targetFrame,
                 MediaGridMorphVisibleItemGeometry(22L, 1, Rect(0f, 10f, 100f, 110f)),
@@ -301,26 +320,7 @@ class MediaGridMorphHandoffTest {
                 300,
             ),
         )
-        assertEquals(1, coordinator.snapshot().correctionAttempts)
-        assertEquals(
-            MediaGridMorphGridHandoffCommand.ScrollBy(8f),
-            coordinator.observeLayout(
-                targetFrame,
-                MediaGridMorphVisibleItemGeometry(22L, 1, Rect(0f, 8f, 100f, 108f)),
-                300,
-                300,
-            ),
-        )
-        assertEquals(2, coordinator.snapshot().correctionAttempts)
-        assertEquals(
-            MediaGridMorphGridHandoffCommand.RollbackColumnCount(2),
-            coordinator.observeLayout(
-                targetFrame,
-                MediaGridMorphVisibleItemGeometry(22L, 1, Rect(0f, 8f, 100f, 108f)),
-                300,
-                300,
-            ),
-        )
+        assertNull(coordinator.failCurrent())
         assertEquals(MediaGridMorphGridHandoffPhase.RollingBack, coordinator.snapshot().phase)
     }
 
@@ -363,13 +363,13 @@ class MediaGridMorphHandoffTest {
         assertTrue(success.snapshot().suppressesAnchorCheckpoint)
         success.observeFrame(frame(successRequest.expectedTargetFrameKey, longArrayOf(11L)))
         assertTrue(success.snapshot().suppressesAnchorCheckpoint)
-        assertNull(
+        assertTrue(
             success.observeLayout(
                 frame(successRequest.expectedTargetFrameKey, longArrayOf(11L)),
                 MediaGridMorphVisibleItemGeometry(11L, 0, Rect(0f, 0f, 100f, 100f)),
                 300,
                 300,
-            ),
+            ) is MediaGridMorphGridHandoffCommand.ScrollToItem,
         )
         success.observeLayout(
             frame(successRequest.expectedTargetFrameKey, longArrayOf(11L)),
@@ -378,12 +378,10 @@ class MediaGridMorphHandoffTest {
             300,
         )
         assertTrue(success.snapshot().suppressesAnchorCheckpoint)
-        assertTrue(success.beginTargetReveal(successRequest.interactionGeneration))
+        success.underlyingTargetGridDrawn()
         assertTrue(success.snapshot().suppressesAnchorCheckpoint)
-        assertTrue(success.completeAfterReveal(successRequest.interactionGeneration, target = true))
+        success.nextFrame()
         assertFalse(success.snapshot().suppressesAnchorCheckpoint)
-        success.cancelForStaleDisplay()
-        assertEquals(MediaGridMorphGridHandoffPhase.Completed, success.snapshot().phase)
         assertTrue(success.consumeFinalAnchorCheckpointPermission())
         assertFalse(success.consumeFinalAnchorCheckpointPermission())
 
@@ -398,9 +396,6 @@ class MediaGridMorphHandoffTest {
             300,
             300,
         )
-        assertEquals(MediaGridMorphGridHandoffPhase.RevealingCurrent, rollback.snapshot().phase)
-        assertTrue(rollback.snapshot().suppressesAnchorCheckpoint)
-        assertTrue(rollback.completeAfterReveal(successRequest.interactionGeneration, target = false))
         assertFalse(rollback.snapshot().suppressesAnchorCheckpoint)
         assertTrue(rollback.consumeFinalAnchorCheckpointPermission())
         assertFalse(rollback.consumeFinalAnchorCheckpointPermission())
@@ -410,16 +405,6 @@ class MediaGridMorphHandoffTest {
         staleDisplay.cancelForStaleDisplay()
         assertFalse(staleDisplay.snapshot().suppressesAnchorCheckpoint)
         assertFalse(staleDisplay.consumeFinalAnchorCheckpointPermission())
-    }
-
-    @Test
-    fun targetScrollOffsetRoundsFiniteValuesAndFallsBackForMissingOrNonFiniteInput() {
-        assertEquals(13, mediaGridMorphTargetScrollOffset(12.5f))
-        assertEquals(-12, mediaGridMorphTargetScrollOffset(-12.5f))
-        assertEquals(-13, mediaGridMorphTargetScrollOffset(-12.6f))
-        assertEquals(0, mediaGridMorphTargetScrollOffset(null))
-        assertEquals(0, mediaGridMorphTargetScrollOffset(Float.NaN))
-        assertEquals(0, mediaGridMorphTargetScrollOffset(Float.POSITIVE_INFINITY))
     }
 
     @Test

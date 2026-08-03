@@ -1,11 +1,5 @@
 # MediaGridMorphProductionHost.kt
 
-## 2026-08-02 Morph handoff unlock optimization
-
-- The production effect observes `LazyGridState.layoutInfo` and passes one immutable layout sample to the coordinator. `ScrollToItem`/`ScrollBy` handlers only issue the scroll operation; they do not wait for a frame or call the layout observer directly.
-- Target geometry includes `finalCorrection`, target row ordinals/header/cell size/row top, and focal position. An aligned layout enters reveal immediately; completion waits for the unified surface's generation/mode actual-draw ACK.
-- ACK handling completes target or rollback-current reveal, unlocks input, releases protected assets, and leaves a separate one-shot checkpoint effect after unlock. `Completed` is terminal and is not converted to stale cancellation when the controller clears its request.
-
 ## 2026-08-01 Phase 2 production integration
 
 - `MediaGridMorphProductionHandoffEffects` is the production handoff coordinator for the existing `LazyVerticalGrid`; it has no visual layer and drives scroll, verification, reveal, rollback, checkpoint suppression, and retained-image ownership.

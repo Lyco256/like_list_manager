@@ -1,13 +1,8 @@
 # `MediaGridMorphLazyGridHandoffTestHost.kt`
 
-## 2026-08-02 Morph handoff unlock optimization
-
-- The TEST_HARNESS host's scroll handlers only mutate `LazyGridState`; `snapshotFlow` layout observation is the sole coordinator position input.
-- Target/current reveal completion uses the same generation-matched actual-draw ACK contract as production compatibility wiring, including rollback-current and checkpoint gating.
-
 ## 2026-07-31 UI・handoff correction
 
-- The TEST_HARNESS host mirrors production target visual translation while `snapshotFlow` re-observes layout independently of the `ScrollToItem`/`ScrollBy` handlers, remaining separate from production UI.
+- The TEST_HARNESS host mirrors production target visual translation and re-observes layout after `ScrollToItem`/`ScrollBy`, while remaining separate from production UI.
 
 ## Current production contract
 

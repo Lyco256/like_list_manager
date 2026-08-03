@@ -1,10 +1,5 @@
 # `MediaGridMorphInteraction.kt`
 
-## 2026-08-02 Morph handoff unlock optimization
-
-- The 180ms settle endpoint records the generation trace and publishes the target request at progress 1. The request carries target row top, target row ordinals, cell size, header identity/title, and a cached ordinal signature for repeated layout observations.
-- Target and current reveals remain generation-matched; actual draw ACK handling is owned by the production handoff host so lock release and asset protection are not tied to a fixed frame wait or checkpoint.
-
 ## 2026-08-02 locked-direction tracking
 
 - The first direction that successfully claims Morph is stored on the gesture and remains fixed through physical up. The selected target column, plan, render model, protected asset union, initial distance, and draw mode are not replaced by the opposite direction.

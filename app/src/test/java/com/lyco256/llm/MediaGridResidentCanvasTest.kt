@@ -51,46 +51,6 @@ class MediaGridResidentCanvasTest {
         assertEquals(RectExpectation(0f, 0f, 0f, 0f), mediaGridResidentCanvasViewportRect(-1, -1).toExpectation())
     }
 
-    @Test
-    fun revealDrawAckIsOneShotPerGenerationAndMode() {
-        val acks = mutableListOf<MediaGridMorphDrawAck>()
-        val dispatcher = MediaGridMorphDrawAckDispatcher { ack ->
-            acks += ack
-            true
-        }
-
-        dispatcher.dispatch(7L, MediaGridSingleSurfaceMode.RevealTarget, 10L)
-        dispatcher.dispatch(7L, MediaGridSingleSurfaceMode.RevealTarget, 11L)
-        dispatcher.dispatch(7L, MediaGridSingleSurfaceMode.RevealCurrent, 12L)
-        dispatcher.dispatch(8L, MediaGridSingleSurfaceMode.RevealTarget, 13L)
-        dispatcher.dispatch(8L, MediaGridSingleSurfaceMode.Morph, 14L)
-
-        assertEquals(
-            listOf(
-                MediaGridMorphDrawAck(7L, MediaGridSingleSurfaceMode.RevealTarget, 10L),
-                MediaGridMorphDrawAck(7L, MediaGridSingleSurfaceMode.RevealCurrent, 12L),
-                MediaGridMorphDrawAck(8L, MediaGridSingleSurfaceMode.RevealTarget, 13L),
-            ),
-            acks,
-        )
-    }
-
-    @Test
-    fun failedRevealDrawAckCanBeRetriedWithoutDuplicatingAcceptedAck() {
-        var accepted = false
-        val acks = mutableListOf<MediaGridMorphDrawAck>()
-        val dispatcher = MediaGridMorphDrawAckDispatcher { ack ->
-            if (!accepted) false else acks.add(ack).let { true }
-        }
-
-        dispatcher.dispatch(9L, MediaGridSingleSurfaceMode.RevealTarget, 20L)
-        accepted = true
-        dispatcher.dispatch(9L, MediaGridSingleSurfaceMode.RevealTarget, 21L)
-        dispatcher.dispatch(9L, MediaGridSingleSurfaceMode.RevealTarget, 22L)
-
-        assertEquals(listOf(MediaGridMorphDrawAck(9L, MediaGridSingleSurfaceMode.RevealTarget, 21L)), acks)
-    }
-
     private data class RectExpectation(val left: Float, val top: Float, val right: Float, val bottom: Float)
 
     private fun androidx.compose.ui.geometry.Rect?.toExpectation(): RectExpectation? = this?.let {

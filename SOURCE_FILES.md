@@ -2,13 +2,6 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 
 この文書は、全体構成、現状の実装、変更目的別入口、個別docs一覧だけを担当する。禁止事項、完了報告、検証手順は置かない。
 
-## 2026-08-02 Morph handoff unlock optimization (current)
-
-- `MediaGridMorphProductionHost.kt` uses `LazyGridState.layoutInfo` as the sole target-position truth. Scroll command handlers only issue `scrollToItem`/`scrollBy`; the observer verifies expected frame/data/columns/viewport, target row ordinals, header, cell size, row top, focal geometry, and one-pixel tolerance. `finalCorrection` is retained in the observed target geometry.
-- `MediaGridMorphHandoff.kt` uses `VerifyingTarget -> RevealingTarget` and `RevealingCurrent` terminal paths. Target rows that are already aligned do not receive a position command; hidden rows receive one offset-aware `ScrollToItem`, and residual correction is bounded to two non-duplicate `ScrollBy` commands. `Completed` is terminal and is not invalidated by the controller's request cleanup.
-- `MediaGridResidentCanvas.kt` emits one non-blocking, generation/mode-deduplicated actual-draw ACK only after `RevealCurrent` or `RevealTarget` normal-grid drawing. `MediaGridMorphProductionHost.kt` unlocks and releases protected assets immediately on that ACK; checkpoint permission is a separate one-shot after unlock.
-- `MediaGridMorphLazyGridHandoffComposeTest.kt` exercises the real production effects and single surface, including actual-draw/unlock/checkpoint trace ordering. Pure tests cover offset rounding, one-shot ACK/retry, no-op alignment, header/ordinal/geometry validation, rollback, and checkpoint gating.
-
 ## 2026-08-02 exact source viewport Morph handoff
 
 - `MediaGridMorph.kt` captures the actual visible LazyGrid row/cell/header rects, item sequence, resident prepared-image identity, and a canonical source-row key. One-pixel same-row height rounding is tolerated while each cell keeps its own captured rect.

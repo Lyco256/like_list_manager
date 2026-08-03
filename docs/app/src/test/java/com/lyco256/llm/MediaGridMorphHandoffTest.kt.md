@@ -1,9 +1,5 @@
 # `MediaGridMorphHandoffTest.kt`
 
-## 2026-08-02 Morph handoff unlock optimization
-
-- Pure coordinator tests cover no-op alignment, offset-aware hidden-row positioning, rounding, row/header/geometry validation, two-correction bound, rollback-current reveal, terminal checkpoint gating, and terminal `Completed` stale-cancel protection.
-
 ## 2026-08-01 Phase 2 coverage
 
 - Coordinator tests cover target ordinal/row/header/cell geometry verification, one-pixel correction, rollback, stale data, viewport mismatch, and checkpoint suppression.

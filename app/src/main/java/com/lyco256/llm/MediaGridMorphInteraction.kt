@@ -56,16 +56,10 @@ internal data class MediaGridMorphHandoffRequest(
     val targetAnchorRowTop: Float? = null,
     val targetRowMediaOrdinals: List<Int> = emptyList(),
     val targetCellSizePx: Float? = null,
-    val targetHeaderKey: String? = null,
     val targetHeaderTitle: String? = null,
     val frozenViewportPlan: MediaGridMorphViewportPlan? = plan.viewportPlan,
     val sourceViewportAnchor: MediaGridMorphSourceViewportAnchor? = null,
-) {
-    /** Captured once so repeated layout observations do not allocate a row signature. */
-    val targetRowMediaOrdinalArray: IntArray by lazy(LazyThreadSafetyMode.NONE) {
-        targetRowMediaOrdinals.toIntArray()
-    }
-}
+)
 
 internal enum class MediaGridMorphFailureReason {
     CaptureUnavailable,
@@ -127,12 +121,29 @@ internal data class MediaGridMorphCandidate(
     val initialCentroid: Offset,
     val generation: Long,
     val claimBundle: MediaGridMorphClaimBundle? = null,
+    val claimFirstPosition: Offset? = null,
+    val claimSecondPosition: Offset? = null,
+    val claimDirection: MediaGridMorphDirection? = null,
 )
 
 internal fun mediaGridMorphClaimBundleMatchesIdentity(
     bundle: MediaGridMorphClaimBundle,
     latestIdentity: MediaGridMorphInteractionIdentity?,
 ): Boolean = latestIdentity != null && latestIdentity == bundle.identity
+
+internal fun mediaGridMorphFailureReasonForClaimReadiness(
+    reason: MediaGridMorphClaimReadinessReason,
+): MediaGridMorphFailureReason = when (reason) {
+    MediaGridMorphClaimReadinessReason.CaptureUnavailable -> MediaGridMorphFailureReason.CaptureUnavailable
+    MediaGridMorphClaimReadinessReason.DirectionUnavailable -> MediaGridMorphFailureReason.PairUnavailable
+    MediaGridMorphClaimReadinessReason.StaleIdentity -> MediaGridMorphFailureReason.IdentityMismatch
+    MediaGridMorphClaimReadinessReason.SourceViewportMismatch -> MediaGridMorphFailureReason.SourceViewportMismatch
+    MediaGridMorphClaimReadinessReason.MissingSourceImage -> MediaGridMorphFailureReason.MissingVisibleSourceImage
+    MediaGridMorphClaimReadinessReason.MissingTargetImage -> MediaGridMorphFailureReason.MissingTargetImage
+    MediaGridMorphClaimReadinessReason.MissingHeaderText -> MediaGridMorphFailureReason.MissingHeaderText
+    MediaGridMorphClaimReadinessReason.GeometryIncomplete -> MediaGridMorphFailureReason.RenderModelIncomplete
+    MediaGridMorphClaimReadinessReason.PreparedIndexChanged -> MediaGridMorphFailureReason.IdentityMismatch
+}
 
 internal fun mediaGridMorphShouldRelease(
     wasBothPressed: Boolean,
@@ -627,15 +638,6 @@ internal class MediaGridMorphInteractionController(
             return
         }
         settle = null
-        MediaGridMorphTestTrace.recordHandoffTrace(
-            event = MediaGridMorphHandoffTraceEvent.SettleEndpoint,
-            generation = generation,
-            interactionPhase = if (activeSettle.toTarget) {
-                MediaGridMorphPhase.SettlingToTarget
-            } else {
-                MediaGridMorphPhase.SettlingToCurrent
-            },
-        )
         if (!activeSettle.toTarget) {
             publish(
                 phase = MediaGridMorphPhase.RevealingCurrent,
@@ -667,12 +669,6 @@ internal class MediaGridMorphInteractionController(
             )
             return
         }
-        val viewportPlan = plan.viewportPlan
-        val targetHeader = viewportPlan?.let { selectedViewportPlan ->
-            plan.preparedPair.viewportPlanTemplate?.targetRows
-                ?.firstOrNull { it.rowIndex == selectedViewportPlan.targetAnchorRowIndex }
-                ?.headerBefore
-        }
         val request = MediaGridMorphHandoffRequest(
             interactionGeneration = generation,
             sourceRevision = identity.sourceRevision,
@@ -701,8 +697,7 @@ internal class MediaGridMorphInteractionController(
                 ?.mapNotNull { it.targetMediaOrdinal }
                 .orEmpty(),
             targetCellSizePx = plan.viewportPlan?.let { it.viewport.width / plan.toColumnCount.coerceAtLeast(1) },
-            targetHeaderKey = targetHeader?.key,
-            targetHeaderTitle = targetHeader?.title ?: plan.viewportPlan?.headerPlans
+            targetHeaderTitle = plan.viewportPlan?.headerPlans
                 ?.firstOrNull { it.relativeRow == 0 }
                 ?.endTitle,
             frozenViewportPlan = plan.viewportPlan,
@@ -727,25 +722,6 @@ internal class MediaGridMorphInteractionController(
     fun acknowledgeCurrentReveal(generation: Long) {
         if (currentSnapshot.phase != MediaGridMorphPhase.RevealingCurrent || currentSnapshot.interactionGeneration != generation) return
         resetToIdle(currentSnapshot.fromColumnCount, generation)
-    }
-
-    fun beginCurrentReveal(generation: Long): Boolean {
-        if (currentSnapshot.phase != MediaGridMorphPhase.AwaitingGridHandoff || currentSnapshot.interactionGeneration != generation) return false
-        val identity = currentIdentity ?: return false
-        publish(
-            phase = MediaGridMorphPhase.RevealingCurrent,
-            direction = currentSnapshot.direction,
-            plan = currentSnapshot.plan,
-            progress = 0f,
-            correction = Offset.Zero,
-            center = currentSnapshot.currentPinchCenter,
-            identity = identity,
-            toColumnCount = currentSnapshot.fromColumnCount,
-            handoffRequest = currentSnapshot.handoffRequest,
-            generation = generation,
-            drawMode = MediaGridMorphDrawMode.RevealCurrent,
-        )
-        return true
     }
 
     fun beginTargetReveal(generation: Long): Boolean {
@@ -928,7 +904,7 @@ internal fun Modifier.mediaGridMorphGestureInput(
     fallbackColumnCount: () -> Int = { identity?.currentColumnCount ?: 0 },
     fallbackAnchorAtCenter: (Offset) -> ClassifiedMediaGridScrollAnchor? = { null },
     pointerInProgress: MutableStateFlow<Boolean>? = null,
-    prepareClaimBundle: ((MediaGridMorphCandidate) -> MediaGridMorphClaimBundle?)? = null,
+    prepareClaimBundle: ((MediaGridMorphCandidate) -> MediaGridMorphClaimPreparationResult)? = null,
     captureOnClaim: (() -> MediaGridMorphCapture?)? = null,
     isPairReady: (MediaGridMorphPreparedPair) -> Boolean = { true },
     claimFailureReason: (MediaGridMorphPreparedPair?) -> MediaGridMorphFailureReason? = { null },
@@ -1060,7 +1036,11 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                 initialCentroid = midpoint(firstPressed.position, secondPressed.position),
                                 generation = nextCandidateGeneration,
                             )
-                            candidate = candidateSeed.copy(claimBundle = latestPrepareClaimBundle?.invoke(candidateSeed))
+                            // Claim preparation is intentionally deferred until
+                            // the direction threshold is crossed. At that point
+                            // the current pointer positions provide the actual
+                            // pinch center used for plan selection.
+                            candidate = candidateSeed
                             latestDistance = initialDistance
                             trackedFirstPosition = firstPressed.position
                             trackedSecondPosition = secondPressed.position
@@ -1162,14 +1142,16 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                 }
                                 if (direction != null && mode != MediaGridMorphGestureMode.Disabled) {
                                     lockedFallbackDirection = direction
-                                    // A production candidate may stop the real
-                                    // grid only when its selected direction is
-                                    // already a valid resident candidate (or
-                                    // there is no cached pair and fallback is
-                                    // the only path). The cached pair is still
-                                    // never used as the Morph source.
+                                    // Production preparation is bounded and
+                                    // selected from the actual current pinch
+                                    // center. A cached pair may describe a
+                                    // fallback, but it must not authorize a
+                                    // Morph claim when a production preparer
+                                    // is available; never claim a stale bundle.
                                     val cachedPairs = latestPairs()
                                     val productionClaimAllowed = if (mode != MediaGridMorphGestureMode.Production) {
+                                        true
+                                    } else if (latestPrepareClaimBundle != null) {
                                         true
                                     } else if (activeCandidate.claimBundle != null) {
                                         activeCandidate.claimBundle.isCompleteFor(direction)
@@ -1180,25 +1162,34 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                     } else {
                                         true
                                     }
-                                    if (productionClaimAllowed) launchStopScrollOnce()
-                                    var claimBundle = if (mode == MediaGridMorphGestureMode.Production && productionClaimAllowed) {
-                                        latestPrepareClaimBundle?.invoke(activeCandidate)
+                                    val claimCandidate = activeCandidate.copy(
+                                        claimFirstPosition = currentFirstPosition,
+                                        claimSecondPosition = currentSecondPosition,
+                                        claimDirection = direction,
+                                    )
+                                    val claimPreparation = if (
+                                        mode == MediaGridMorphGestureMode.Production &&
+                                            productionClaimAllowed
+                                    ) {
+                                        latestPrepareClaimBundle?.invoke(claimCandidate)
                                     } else {
-                                        activeCandidate.claimBundle
+                                        null
                                     }
                                     if (
-                                        mode == MediaGridMorphGestureMode.Production &&
-                                            productionClaimAllowed &&
-                                            claimBundle != null &&
-                                            !mediaGridMorphClaimBundleMatchesIdentity(claimBundle, latestIdentity)
+                                        productionClaimAllowed &&
+                                            (mode != MediaGridMorphGestureMode.Production ||
+                                                claimPreparation == null ||
+                                                claimPreparation is MediaGridMorphClaimPreparationResult.Ready)
                                     ) {
-                                        // The first production capture can race
-                                        // a LazyGrid layout publication. Give
-                                        // the current layout one bounded retry;
-                                        // never claim a stale bundle.
-                                        claimBundle = latestPrepareClaimBundle?.invoke(activeCandidate)
+                                        launchStopScrollOnce()
                                     }
-                                    val claimCapture = if (claimBundle == null) latestCaptureOnClaim?.invoke() else null
+                                    val claimBundle = when (claimPreparation) {
+                                        is MediaGridMorphClaimPreparationResult.Ready -> claimPreparation.bundle
+                                        else -> if (claimPreparation == null) activeCandidate.claimBundle else null
+                                    }
+                                    val claimCapture = if (claimBundle == null && claimPreparation == null) {
+                                        latestCaptureOnClaim?.invoke()
+                                    } else null
                                     val claimIdentity = claimBundle?.identity ?: claimCapture?.identity?.toInteractionIdentity() ?: latestIdentity
                                     val claimBundleIdentityMatches = claimBundle != null && (
                                         mediaGridMorphClaimBundleMatchesIdentity(claimBundle, latestIdentity)
@@ -1206,7 +1197,11 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                     val availablePairs = when {
                                         claimBundle != null -> claimBundle.directions.mapValues { it.value.plan.preparedPair }
                                         claimCapture != null -> buildMediaGridMorphRowPreparedPairs(claimCapture)
-                                        mode == MediaGridMorphGestureMode.Test || latestCaptureOnClaim == null -> latestPairs()
+                                        mode == MediaGridMorphGestureMode.Test || (
+                                            mode == MediaGridMorphGestureMode.Production &&
+                                                claimPreparation == null &&
+                                                latestCaptureOnClaim == null
+                                            ) -> latestPairs()
                                         else -> emptyMap()
                                     }
                                     val currentPairs = availablePairs.filterValues(latestPairReady).takeIf { it.isNotEmpty() } ?: emptyMap()
@@ -1239,7 +1234,14 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                                 bundlePresent = claimBundle != null,
                                                 directionPrepared = claimBundle?.isCompleteFor(direction) == true,
                                                 accepted = morphAccepted,
-                                                failureReason = if (morphAccepted) null else latestClaimFailureReason(availablePairs[direction]),
+                                                failureReason = if (morphAccepted) null else {
+                                                    (claimPreparation as? MediaGridMorphClaimPreparationResult.Unavailable)
+                                                        ?.let { mediaGridMorphFailureReasonForClaimReadiness(it.reason) }
+                                                        ?: latestClaimFailureReason(availablePairs[direction])
+                                                },
+                                                readinessReason = (claimPreparation as? MediaGridMorphClaimPreparationResult.Unavailable)
+                                                    ?.reason,
+                                                readinessReport = claimPreparation?.report,
                                             ),
                                         )
                                     }
@@ -1253,6 +1255,8 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                     } else {
                                         controller?.recordFailure(
                                             when {
+                                                claimPreparation is MediaGridMorphClaimPreparationResult.Unavailable ->
+                                                    mediaGridMorphFailureReasonForClaimReadiness(claimPreparation.reason)
                                                 claimBundle == null && claimCapture == null && latestCaptureOnClaim != null ->
                                                     MediaGridMorphFailureReason.CaptureUnavailable
                                                 claimBundle != null && !claimBundleIdentityMatches ->

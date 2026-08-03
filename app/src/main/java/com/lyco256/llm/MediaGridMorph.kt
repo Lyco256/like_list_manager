@@ -140,6 +140,7 @@ internal data class MediaGridMorphCapture(
     val visibleHeaderRects: List<MediaGridMorphCapturedHeaderRect>,
     val sourceRows: List<MediaGridMorphCapturedRow> = emptyList(),
     val totalMediaCount: Int = mediaOrdinalRange.last + 1,
+    val preparedIndexVersion: Long? = null,
 )
 
 internal data class MediaGridMorphMedia(
@@ -376,9 +377,16 @@ internal fun isMediaGridMorphProductionReady(
 
 internal fun MediaGridMorphPreparedPair.requiredMorphAssetIds(): LongArray {
     val ids = LinkedHashSet<Long>()
-    viewportPlanTemplate?.sourceRows?.flatMap { it.cells }?.forEach { ids += it.assetId }
-    viewportPlanTemplate?.targetRows?.flatMap { it.cells }?.forEach { ids += it.assetId }
-    if (viewportPlanTemplate == null) {
+    viewportPlanTemplate?.let {
+        mediaGridMorphPossibleFocalCenters(this).forEach { center ->
+            it.select(center).rowPlans.forEach { row ->
+                row.cells.forEach { cell ->
+                    cell.startContent.assetIdOrNull()?.let(ids::add)
+                    cell.endContent.assetIdOrNull()?.let(ids::add)
+                }
+            }
+        }
+    } ?: run {
         slots.forEach { slot ->
             slot.startContent.assetIdOrNull()?.let(ids::add)
             slot.endContent.assetIdOrNull()?.let(ids::add)
@@ -396,6 +404,7 @@ internal data class MediaGridMorphImageCompleteness(
     val headerTextComplete: Boolean,
     val geometryComplete: Boolean,
     val sourceViewportComplete: Boolean = true,
+    val missingHeaderTitle: String? = null,
 ) {
     val isComplete: Boolean
         get() = geometryComplete &&
@@ -419,18 +428,17 @@ internal fun mediaGridMorphImageCompleteness(
     val geometryComplete: Boolean
     val viewportPlan = pair.viewportPlanTemplate
     if (viewportPlan != null) {
-        val candidateCenters = listOf(0.25f, 0.5f, 0.75f).map { fraction ->
-            Offset(
-                x = pair.viewport.width * 0.5f,
-                y = pair.viewport.height * fraction,
-            )
-        }
-        val selectedPlans = candidateCenters.map(viewportPlan::select)
+        val selectedPlans = mediaGridMorphPossibleFocalCenters(pair).map(viewportPlan::select)
         val sourceAssets = LinkedHashSet<Long>()
         val targetAssets = LinkedHashSet<Long>()
+        var geometry = selectedPlans.isNotEmpty()
+        var missingTitle: String? = null
         selectedPlans.forEach { selected ->
+            if (selected.rowPlans.isEmpty()) geometry = false
+            val coordinates = HashSet<Pair<Int, Int>>()
             selected.rowPlans.forEach { row ->
                 row.cells.forEach { cell ->
+                    geometry = geometry && coordinates.add(cell.relativeRow to cell.column)
                     val startRect = mediaGridMorphRowCellRect(selected, cell, 0f)
                     val endRect = mediaGridMorphRowCellRect(selected, cell, 1f)
                     val swept = Rect(
@@ -444,14 +452,18 @@ internal fun mediaGridMorphImageCompleteness(
                     (cell.endContent as? MediaGridMorphSlotContent.Image)?.assetId?.let(targetAssets::add)
                 }
             }
+            missingTitle = missingTitle ?: selected.headerPlans.asSequence()
+                .flatMap { sequenceOf(it.startTitle, it.endTitle) }
+                .firstOrNull { it.isNullOrBlank() }
         }
         sourceIds = sourceAssets
         targetIds = targetAssets
-        headerTextComplete = viewportPlan.sourceHeaders.all { it.title.isNotBlank() } &&
+        headerTextComplete = missingTitle == null &&
+            viewportPlan.sourceHeaders.all { it.title.isNotBlank() } &&
             viewportPlan.targetHeaders.all { it.title.isNotBlank() }
-        geometryComplete = viewportPlan.viewport.width > 0f && viewportPlan.viewport.height > 0f &&
+        geometryComplete = geometry && viewportPlan.viewport.width > 0f && viewportPlan.viewport.height > 0f &&
             viewportPlan.sourceRows.isNotEmpty() && viewportPlan.targetRows.isNotEmpty() &&
-            selectedPlans.any { it.rowPlans.isNotEmpty() }
+            selectedPlans.isNotEmpty()
     } else {
         val visibleSlots = pair.slots.filter { slot ->
             val left = minOf(slot.startRect.left, slot.endRect.left)
@@ -477,7 +489,64 @@ internal fun mediaGridMorphImageCompleteness(
         unresolvedRequiredAssetId = unresolved,
         headerTextComplete = headerTextComplete,
         geometryComplete = geometryComplete,
+        sourceViewportComplete = if (viewportPlan == null) {
+            true
+        } else {
+            mediaGridMorphPossibleFocalCenters(pair).all { center ->
+                val selected = viewportPlan.select(center)
+                selected.rowPlans.all { row ->
+                    row.cells.all { cell ->
+                        val sourceIdentity = cell.sourcePreparedImageIdentity ?: return@all true
+                        val sourceAssetId = cell.startContent.assetIdOrNull() ?: return@all true
+                        prepared[sourceAssetId]?.identity == sourceIdentity
+                    }
+                }
+            }
+        },
+        missingHeaderTitle = if (viewportPlan == null) {
+            null
+        } else {
+            mediaGridMorphPossibleFocalCenters(pair).asSequence()
+                .map(viewportPlan::select)
+                .flatMap { it.headerPlans.asSequence() }
+                .flatMap { sequenceOf(it.startTitle, it.endTitle) }
+                .firstOrNull { it.isNullOrBlank() }
+        },
     )
+}
+
+/**
+ * Bounded representative centers for every source row that can be selected
+ * from the current viewport. This includes partial rows, row edges, and the
+ * gaps around headers without scanning the complete dataset.
+ */
+internal fun mediaGridMorphPossibleFocalCenters(
+    pair: MediaGridMorphPreparedPair,
+): List<Offset> {
+    val template = pair.viewportPlanTemplate ?: return listOf(pair.viewport.center)
+    val rows = template.sourceRows.filter { it.cells.isNotEmpty() }
+    if (rows.isEmpty()) return emptyList()
+    val ys = ArrayList<Float>(rows.size * 5 + 3)
+    ys += pair.viewport.top
+    ys += pair.viewport.center.y
+    ys += pair.viewport.bottom
+    rows.forEach { row ->
+        ys += row.top
+        ys += (row.top + row.bottom) / 2f
+        ys += row.bottom
+    }
+    template.sourceHeaders.forEach { header ->
+        ys += header.rect.top
+        ys += header.rect.center.y
+        ys += header.rect.bottom
+    }
+    rows.zipWithNext().forEach { (first, second) ->
+        ys += (first.bottom + second.top) / 2f
+        ys += (first.top + second.top) / 2f
+    }
+    return ys
+        .map { y -> Offset(pair.viewport.width / 2f, y.coerceIn(pair.viewport.top, pair.viewport.bottom)) }
+        .distinctBy { (it.x * 10f).roundToInt() to (it.y * 10f).roundToInt() }
 }
 
 private fun Rect.intersectsViewport(viewport: Rect): Boolean =
@@ -688,6 +757,7 @@ internal fun captureMediaGridMorphInput(
         visibleHeaderRects = visibleHeaderRects.toList(),
         sourceRows = sourceRows,
         totalMediaCount = totalMedia,
+        preparedIndexVersion = preparedIndex?.drawIndexVersion,
     )
 }
 

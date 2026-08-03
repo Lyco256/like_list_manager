@@ -168,7 +168,6 @@ internal fun MediaGridMorphCanvasLayer(
     onRenderModelBuilt: (() -> Unit)? = null,
     onImageResolved: ((Long) -> Unit)? = null,
     onTextMeasured: ((String) -> Unit)? = null,
-    onDrawn: (() -> Unit)? = null,
 ) {
     if (mode == MediaGridMorphCanvasMode.Disabled) return
     check(mode != MediaGridMorphCanvasMode.TestVisible || BuildConfig.TEST_HARNESS) {
@@ -247,7 +246,6 @@ internal fun MediaGridMorphCanvasLayer(
         progress = progress,
         correction = correction,
         modifier = modifier,
-        onDrawn = onDrawn,
     )
 }
 
@@ -257,7 +255,6 @@ private fun MediaGridMorphCanvas(
     progress: State<Float>,
     correction: State<Offset>,
     modifier: Modifier,
-    onDrawn: (() -> Unit)?,
 ) {
     Canvas(
         modifier = modifier
@@ -404,7 +401,6 @@ private fun MediaGridMorphCanvas(
                 }
             }
         }
-        onDrawn?.invoke()
     }
 }
 
