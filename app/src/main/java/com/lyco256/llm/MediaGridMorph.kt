@@ -309,6 +309,7 @@ internal data class MediaGridMorphPlan(
 internal data class MediaGridMorphPreparationToken(
     val generation: Long,
     val identity: MediaGridMorphPreparationIdentity,
+    val preparedIndexVersion: Long,
 )
 
 /**
@@ -322,16 +323,27 @@ internal class MediaGridMorphPreparationCache {
     private val _publishedVersion = MutableStateFlow(0L)
     val publishedVersion = _publishedVersion
     private var lastRequestedIdentity: MediaGridMorphPreparationIdentity? = null
+    private var lastRequestedPreparedIndexVersion: Long = Long.MIN_VALUE
 
     @Synchronized
     fun request(
         identity: MediaGridMorphPreparationIdentity,
         isScrollInProgress: Boolean,
         isPointerInProgress: Boolean,
+        preparedIndexVersion: Long = 0L,
     ): MediaGridMorphPreparationToken? {
-        if (isScrollInProgress || isPointerInProgress || identity == lastRequestedIdentity) return null
-        val token = MediaGridMorphPreparationToken(nextGeneration.incrementAndGet(), identity)
+        if (
+            isScrollInProgress ||
+                isPointerInProgress ||
+                (identity == lastRequestedIdentity && preparedIndexVersion == lastRequestedPreparedIndexVersion)
+        ) return null
+        val token = MediaGridMorphPreparationToken(
+            generation = nextGeneration.incrementAndGet(),
+            identity = identity,
+            preparedIndexVersion = preparedIndexVersion,
+        )
         lastRequestedIdentity = identity
+        lastRequestedPreparedIndexVersion = preparedIndexVersion
         latestToken.set(token)
         return token
     }
@@ -823,23 +835,23 @@ internal fun mediaGridMorphStartColumnOffsets(
 ): List<Int> = columnCounts.map { columnCount ->
     if (sortBase == ClassifiedSortBase.Default) {
         startOrdinal.mod(columnCount)
-    } else {
-        val currentBucket = currentMedia?.let {
-            mediaGridMorphBucketSpec(it.xCreatedAt, it.likeCount, sortBase, columnCount)
-        }
-        if (currentBucket == null) {
-            0
         } else {
-            precedingMedia.asReversed()
-                .asSequence()
-                .takeWhile {
-                    mediaGridMorphBucketSpec(it.xCreatedAt, it.likeCount, sortBase, columnCount)?.key == currentBucket.key
-                }
-                .count()
-                .coerceAtMost(columnCount - 1)
+            val currentBucket = currentMedia?.let {
+                mediaGridMorphBucketSpec(it.xCreatedAt, it.likeCount, sortBase, columnCount)
+            }
+            if (currentBucket == null) {
+                0
+            } else {
+                precedingMedia.asReversed()
+                    .asSequence()
+                    .takeWhile {
+                        mediaGridMorphBucketSpec(it.xCreatedAt, it.likeCount, sortBase, columnCount)?.key == currentBucket.key
+                    }
+                    .count()
+                    .mod(columnCount)
+            }
         }
     }
-}
 
 internal fun MediaGridMorphCapture.startColumnOffset(columnCount: Int): Int {
     val supportedIndex = columnCount - ClassifiedMediaGridMinColumnCount

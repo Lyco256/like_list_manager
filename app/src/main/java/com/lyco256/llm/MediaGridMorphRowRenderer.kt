@@ -104,6 +104,7 @@ internal enum class MediaGridMorphClaimReadinessReason {
 }
 
 internal data class MediaGridMorphClaimReadinessReport(
+    val generation: Long = 0L,
     val sourceFrameKey: MediaGridRenderKey?,
     val sourceDataKey: MediaGridDataKey?,
     val currentColumnCount: Int,
@@ -146,6 +147,7 @@ internal sealed interface MediaGridMorphClaimPreparationResult {
 internal fun rememberMediaGridMorphTextResourceIndex(
     pairs: Map<MediaGridMorphDirection, MediaGridMorphPreparedPair>,
     viewportWidthPx: Int,
+    additionalTitles: List<String> = emptyList(),
 ): MediaGridMorphTextResourceIndex {
     val colors = androidx.compose.material3.MaterialTheme.colorScheme
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -158,6 +160,7 @@ internal fun rememberMediaGridMorphTextResourceIndex(
     )
     val titles = remember(pairs, viewportWidthPx) {
         buildList {
+            additionalTitles.forEach { it.takeIf(String::isNotBlank)?.let(::add) }
             pairs.values.forEach { pair ->
                 pair.viewportPlanTemplate?.sourceHeaders?.forEach { it.title.takeIf(String::isNotBlank)?.let(::add) }
                 pair.viewportPlanTemplate?.targetHeaders?.forEach { it.title.takeIf(String::isNotBlank)?.let(::add) }
@@ -316,6 +319,7 @@ internal fun prepareMediaGridMorphClaim(
             capture?.sourceRows?.firstOrNull { row -> row.cells.any { it.mediaOrdinal == ordinal } }?.rowKey
         }
         return MediaGridMorphClaimReadinessReport(
+            generation = candidate.generation,
             sourceFrameKey = identity?.frameKey,
             sourceDataKey = identity?.frameKey?.dataKey,
             currentColumnCount = identity?.currentColumnCount ?: 0,
@@ -412,6 +416,56 @@ internal fun prepareMediaGridMorphClaim(
             report.copy(finalReason = reason ?: MediaGridMorphClaimReadinessReason.GeometryIncomplete),
         )
     }
+}
+
+/**
+ * Stable-idle gate used by TEST_HARNESS diagnostics and the production
+ * preparation contract. Every focal center that can select a distinct source
+ * row must have a complete selected plan before the viewport is reported
+ * ready. This is bounded by the current pair's viewport rows and headers.
+ */
+internal fun mediaGridMorphStableIdleReady(
+    pair: MediaGridMorphPreparedPair,
+    preparedIndex: MediaGridResidentCanvasPreparedIndex,
+    textResources: MediaGridMorphTextResourceIndex,
+): Boolean = mediaGridMorphStableIdleFailureReason(pair, preparedIndex, textResources) == null
+
+internal fun mediaGridMorphStableIdleFailureReason(
+    pair: MediaGridMorphPreparedPair,
+    preparedIndex: MediaGridResidentCanvasPreparedIndex,
+    textResources: MediaGridMorphTextResourceIndex,
+): String? {
+    val centers = mediaGridMorphPossibleFocalCenters(pair)
+    if (centers.isEmpty()) return "no-focal-centers"
+    centers.forEach { center ->
+        val plan = if (pair.viewportPlanTemplate != null) {
+            MediaGridMorphPlan.selectRowReflow(pair, center)
+        } else {
+            MediaGridMorphPlan.select(pair, center)
+        }
+        val completeness = mediaGridMorphSelectedPlanCompleteness(plan, preparedIndex, textResources)
+        if (!completeness.isComplete) {
+            val reason = when {
+                completeness.resolvedSourceImageCount != completeness.requiredSourceImageCount ->
+                    MediaGridMorphClaimReadinessReason.MissingSourceImage
+                completeness.resolvedTargetImageCount != completeness.requiredTargetImageCount ->
+                    MediaGridMorphClaimReadinessReason.MissingTargetImage
+                !completeness.sourceViewportComplete ->
+                    MediaGridMorphClaimReadinessReason.SourceViewportMismatch
+                !completeness.headerTextComplete ->
+                    MediaGridMorphClaimReadinessReason.MissingHeaderText
+                else -> MediaGridMorphClaimReadinessReason.GeometryIncomplete
+            }
+            return "$reason:center=$center source=${completeness.resolvedSourceImageCount}/${completeness.requiredSourceImageCount} " +
+                "target=${completeness.resolvedTargetImageCount}/${completeness.requiredTargetImageCount} " +
+                "sourceViewport=${completeness.sourceViewportComplete} " +
+                "geometry=${completeness.geometryComplete} " +
+                "headerText=${completeness.headerTextComplete} " +
+                "unresolvedAsset=${completeness.unresolvedRequiredAssetId} " +
+                "missingHeader=${completeness.missingHeaderTitle}"
+        }
+    }
+    return null
 }
 
 internal fun mediaGridMorphSelectedPlanCompleteness(

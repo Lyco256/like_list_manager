@@ -6,7 +6,9 @@ import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
@@ -55,6 +57,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import java.io.ByteArrayOutputStream
 import java.io.File
 
@@ -493,6 +496,8 @@ class MainActivityComposeTest {
         }
         composeRule.waitUntil(30_000) { !mainViewModel().mediaGridSessionState.value.showInitialProgress }
         assertEquals(4, mainViewModel().mediaGridSessionState.value.columnCount)
+        composeRule.onNodeWithTag("classified_media_grid").performScrollToIndex(0)
+        composeRule.waitForIdle()
 
         val viewModel = mainViewModel()
         val residentStore = viewModel.mediaGridSessionState.value.retainedImageStore
@@ -561,11 +566,375 @@ class MainActivityComposeTest {
 
         waitForGridColumnCount(5)
         waitForMorphCanvasRemoval()
+        composeRule.onNodeWithTag("filter_open").assertIsEnabled()
+        composeRule.onNodeWithTag("sort_open").assertIsEnabled()
+        composeRule.onNodeWithTag("classified_display_toggle").assertIsEnabled()
+        val terminal = MediaGridMorphTestTrace.handoffEvents().lastOrNull()
+            ?: error("Production handoff terminal observation was missing")
+        assertEquals(MediaGridMorphGridHandoffPhase.Idle, terminal.phase)
+        assertFalse(terminal.suppressesUserScroll)
+        assertFalse(terminal.interactionLocked)
         MediaGridMorphTestTrace.clear()
-        composeRule.onNodeWithTag("classified_media_grid").performTouchInput { swipeUp() }
+        composeRule.onNodeWithTag("classified_media_grid").performTouchInput {
+            swipeUp(
+                startY = centerY + 150f,
+                endY = centerY - 250f,
+                durationMillis = 300,
+            )
+        }
         composeRule.waitForIdle()
         assertEquals(5, mainViewModel().mediaGridSessionState.value.columnCount)
         assertEquals(0, MediaGridMorphTestTrace.rollbackColumnCountCommandCount())
+    }
+
+    @Test
+    fun productionMorphMissingTargetFallsBackUntilResidentPublishThenMorphs() {
+        val now = Instant.now().toString()
+        val paths = (0 until 12).map { index ->
+            File(storage().imageDirectory(), "production-missing-target-$index.webp").apply {
+                writeBytes(bitmapBytes(8, 8, if (index % 2 == 0) android.graphics.Color.MAGENTA else android.graphics.Color.CYAN))
+            }.absolutePath
+        }
+        val clipAndAssetIds = runBlocking {
+            storage().withDatabase { database ->
+                val clipId = database.clipDao().insertClip(
+                    ClipEntity(
+                        xPostId = "production-missing-target",
+                        authorName = "Production Missing Target Author",
+                        authorUsername = "production_missing_target_author",
+                        text = "Production missing target readiness",
+                        postUrl = "https://x.com/production_missing_target_author/status/production-missing-target",
+                        xCreatedAt = now,
+                        savedAt = now,
+                        syncedAt = now,
+                    ),
+                )
+                val tagId = database.tagDao().insertTag(
+                    TagEntity(name = "ProductionMissingTargetTag", createdAt = now, updatedAt = now),
+                )
+                database.clipDao().insertClipTag(ClipTagEntity(clipId, tagId, now))
+                database.clipDao().insertAssets(
+                    paths.mapIndexed { index, path ->
+                        AssetEntity(
+                            clipId = clipId,
+                            mediaKey = "production-missing-target-$index",
+                            type = "photo",
+                            remoteUrl = null,
+                            previewUrl = null,
+                            localPath = path,
+                            width = 1200,
+                            height = 1200,
+                            sizeBytes = null,
+                            downloadState = "downloaded",
+                            createdAt = now,
+                        )
+                    },
+                )
+                clipId to database.clipDao().assetsForClipIds(listOf(clipId)).map { it.id }
+            }
+        }
+        val clipId = clipAndAssetIds.first
+        val assetIds = clipAndAssetIds.second
+        val missingIndex = 2
+        val missingAssetId = assetIds[missingIndex]
+        val previewStore = MediaGridPersistentPreviewStore(composeRule.activity.filesDir)
+        runBlocking {
+            assetIds.zip(paths).forEach { (assetId, path) ->
+                previewStore.generate(assetId, File(path)) { true }
+            }
+        }
+
+        composeRule.onNodeWithTag("tab_classified").performClick()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("classified_display_toggle").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_query").performTextReplacement("Production missing target readiness")
+        composeRule.onNodeWithTag("filter_apply").performClick()
+        composeRule.waitUntil(30_000) {
+            assetIds.any { assetId ->
+                composeRule.onAllNodesWithTag("media_grid_item_$assetId").fetchSemanticsNodes().isNotEmpty()
+            } || composeRule.onAllNodesWithTag("clip_card_$clipId").fetchSemanticsNodes().isNotEmpty()
+        }
+        if (composeRule.onAllNodesWithTag("classified_media_grid").fetchSemanticsNodes().isEmpty()) {
+            composeRule.onNodeWithTag("classified_display_toggle").performClick()
+        }
+        composeRule.waitUntil(30_000) {
+            assetIds.any { assetId ->
+                composeRule.onAllNodesWithTag("media_grid_item_$assetId").fetchSemanticsNodes().isNotEmpty()
+            }
+        }
+        composeRule.waitUntil(30_000) {
+            val session = mainViewModel().mediaGridSessionState.value
+            !session.showInitialProgress && session.frame?.ordinalIndex?.assetIdByMediaOrdinal?.size == assetIds.size
+        }
+
+        retainProductionMatrixAssets(assetIds, paths, previewStore)
+        ensureProductionMatrixColumns(2)
+        prepareProductionMatrixLocation(ProductionMorphMatrixLocation.Start, assetIds.size)
+
+        val imageLoader = (composeRule.activity.application as LikeListManagerApp).container.mediaGridImageLoader
+        val residentStore = mainViewModel().mediaGridSessionState.value.retainedImageStore
+            ?: error("Production retained image store is unavailable")
+        val missingPreview = previewStore.previewFile(missingAssetId)
+        val missingSource = buildMediaGridImageCandidates(
+            MediaGridImageCandidateInput(
+                assetId = missingAssetId,
+                mediaKey = "production-location-matrix-$missingIndex",
+                localPath = paths[missingIndex],
+                previewUrl = null,
+                remoteUrl = null,
+                displayUrl = paths[missingIndex],
+                persistentPreview = MediaGridPersistentPreviewMetadata(
+                    filePath = missingPreview.absolutePath,
+                    length = missingPreview.length(),
+                    lastModified = missingPreview.lastModified(),
+                ),
+            ),
+        ).first()
+        val missingCacheKey = mediaGridImageCacheKey(missingSource, 256, 256)
+        missingPreview.delete()
+        File(paths[missingIndex]).delete()
+        imageLoader.memoryCache?.remove(
+            coil.memory.MemoryCache.Key(missingCacheKey),
+        )
+        residentStore.invalidateAsset(missingAssetId)
+
+        MediaGridMorphTestTrace.clear()
+        waitForStableIdleReadinessFailure(
+            expectedColumnCount = 2,
+            expectedReasons = setOf(
+                MediaGridMorphClaimReadinessReason.MissingSourceImage,
+                MediaGridMorphClaimReadinessReason.MissingTargetImage,
+            ),
+        )
+        var unavailableDraws = emptyList<MediaGridMorphDrawObservation>()
+        pinchOnGrid(
+            gridTag = "classified_media_grid",
+            centerSpan = 260f,
+            endSpan = 180f,
+            centerYFraction = 0.16f,
+            onBeforePhysicalUp = { unavailableDraws = MediaGridMorphTestTrace.drawEvents() },
+        )
+        val unavailableClaim = MediaGridMorphTestTrace.claimEvents().last { it.generation > 0L }
+        assertFalse(unavailableClaim.accepted)
+        assertTrue(
+            unavailableClaim.readinessReason == MediaGridMorphClaimReadinessReason.MissingSourceImage ||
+                unavailableClaim.readinessReason == MediaGridMorphClaimReadinessReason.MissingTargetImage,
+        )
+        val unavailableReport = unavailableClaim.readinessReport ?: error("Missing-image claim report was missing")
+        assertTrue(unavailableReport.requiredTargetImageCount > unavailableReport.resolvedTargetImageCount)
+        assertTrue(unavailableDraws.none { it.drawMode == MediaGridSingleSurfaceMode.Morph })
+        assertTrue(MediaGridMorphTestTrace.fallbackCount() > 0)
+        waitForGridColumnCount(3)
+        waitForMorphCanvasRemoval()
+
+        File(paths[missingIndex]).writeBytes(
+            bitmapBytes(8, 8, android.graphics.Color.MAGENTA),
+        )
+        runBlocking { previewStore.generate(missingAssetId, File(paths[missingIndex])) { true } }
+        retainProductionMatrixAssets(
+            assetIds,
+            paths,
+            previewStore,
+            retainedIndices = assetIds.indices.toSet(),
+        )
+        waitForStableIdleReadiness(3)
+        MediaGridMorphTestTrace.clear()
+        var readyDraws = emptyList<MediaGridMorphDrawObservation>()
+        pinchOnGrid(
+            gridTag = "classified_media_grid",
+            centerSpan = 260f,
+            endSpan = 180f,
+            centerYFraction = 0.16f,
+            onBeforePhysicalUp = { readyDraws = MediaGridMorphTestTrace.drawEvents() },
+        )
+        val readyClaim = MediaGridMorphTestTrace.claimEvents().last { it.generation > 0L }
+        assertTrue(readyClaim.accepted)
+        assertEquals(null, readyClaim.readinessReason)
+        assertTrue(readyDraws.any { it.drawMode == MediaGridSingleSurfaceMode.Morph })
+        assertEquals(0, MediaGridMorphTestTrace.fallbackCount())
+        waitForGridColumnCount(4)
+        waitForMorphCanvasRemoval()
+        assertEquals(0, MediaGridMorphTestTrace.rollbackColumnCountCommandCount())
+        val terminal = MediaGridMorphTestTrace.handoffEvents().lastOrNull()
+            ?: error("Ready production handoff terminal observation was missing")
+        assertEquals(MediaGridMorphGridHandoffPhase.Idle, terminal.phase)
+        assertFalse(terminal.suppressesUserScroll)
+        assertFalse(terminal.interactionLocked)
+    }
+
+    @Test
+    fun productionMorphLocationMatrixIsStableIdleAndMorphsBeforePhysicalUp() {
+        data class MatrixDataset(
+            val assetIds: List<Long>,
+            val paths: List<String>,
+        )
+
+        val now = Instant.now()
+        val sharedPath = File(
+            storage().imageDirectory(),
+            "production-location-matrix-${SystemClock.uptimeMillis()}.webp",
+        ).apply {
+            writeBytes(bitmapBytes(8, 8, android.graphics.Color.MAGENTA))
+        }.absolutePath
+        val dataset = runBlocking {
+            storage().withDatabase { database ->
+                val matrixTagId = database.tagDao().insertTag(
+                    TagEntity(
+                        name = "ProductionLocationMatrixTag",
+                        createdAt = now.toString(),
+                        updatedAt = now.toString(),
+                    ),
+                )
+                val ids = (0 until 72).map { index ->
+                    val createdAt = now.minus((index / 12).toLong(), ChronoUnit.DAYS).toString()
+                    val clipId = database.clipDao().insertClip(
+                        ClipEntity(
+                            xPostId = "production-location-matrix-$index",
+                            authorName = "Production Matrix Author $index",
+                            authorUsername = "production_matrix_author_$index",
+                            text = "Production location matrix",
+                            postUrl = "https://x.com/production_matrix_author_$index/status/$index",
+                            xCreatedAt = createdAt,
+                            savedAt = createdAt,
+                            syncedAt = createdAt,
+                            likeCount = (index + 1L) * 1_200L,
+                            likeCountFetchedAt = createdAt,
+                        ),
+                    )
+                    database.clipDao().insertAssets(
+                        listOf(
+                            AssetEntity(
+                                clipId = clipId,
+                                mediaKey = "production-location-matrix-$index",
+                                type = "photo",
+                                remoteUrl = null,
+                                previewUrl = null,
+                                localPath = sharedPath,
+                                width = 1200,
+                                height = 1200,
+                                sizeBytes = null,
+                                downloadState = "downloaded",
+                                createdAt = createdAt,
+                            ),
+                        ),
+                    )
+                    database.clipDao().insertClipTag(ClipTagEntity(clipId, matrixTagId, createdAt))
+                    database.clipDao().assetsForClipIds(listOf(clipId)).single().id
+                }
+                MatrixDataset(ids, List(ids.size) { sharedPath })
+            }
+        }
+        val previewStore = MediaGridPersistentPreviewStore(composeRule.activity.filesDir)
+        runBlocking {
+            dataset.assetIds.forEach { assetId ->
+                previewStore.generate(assetId, File(sharedPath)) { true }
+            }
+        }
+
+        composeRule.onNodeWithTag("tab_classified").performClick()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("classified_display_toggle").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_query").performTextReplacement("Production location matrix")
+        composeRule.onNodeWithTag("filter_apply").performClick()
+        composeRule.waitUntil(30_000) {
+            dataset.assetIds.any { assetId ->
+                composeRule.onAllNodesWithTag("media_grid_item_$assetId").fetchSemanticsNodes().isNotEmpty()
+            } || composeRule.onAllNodesWithTag("clip_list").fetchSemanticsNodes().isNotEmpty()
+        }
+        if (composeRule.onAllNodesWithTag("classified_media_grid").fetchSemanticsNodes().isEmpty()) {
+            composeRule.onNodeWithTag("classified_display_toggle").performClick()
+        }
+        composeRule.waitUntil(30_000) {
+            dataset.assetIds.any { assetId ->
+                composeRule.onAllNodesWithTag("media_grid_item_$assetId").fetchSemanticsNodes().isNotEmpty()
+            }
+        }
+        composeRule.waitUntil(30_000) {
+            val session = mainViewModel().mediaGridSessionState.value
+            !session.showInitialProgress && session.frame?.ordinalIndex?.assetIdByMediaOrdinal?.size == dataset.assetIds.size
+        }
+        retainProductionMatrixAssets(dataset.assetIds, dataset.paths, previewStore)
+
+        val fullCases = listOf(
+            ProductionMorphMatrixCase(2, 3, ClassifiedSortBase.Default, ProductionMorphMatrixLocation.Start, 0.50f),
+            ProductionMorphMatrixCase(3, 2, ClassifiedSortBase.Default, ProductionMorphMatrixLocation.PartialTop, 0.34f),
+            ProductionMorphMatrixCase(4, 5, ClassifiedSortBase.PostTime, ProductionMorphMatrixLocation.HeaderBefore, 0.30f),
+            ProductionMorphMatrixCase(4, 3, ClassifiedSortBase.PostTime, ProductionMorphMatrixLocation.HeaderAfter, 0.70f),
+            ProductionMorphMatrixCase(8, 9, ClassifiedSortBase.PostTime, ProductionMorphMatrixLocation.Middle, 0.50f),
+            ProductionMorphMatrixCase(8, 7, ClassifiedSortBase.PostTime, ProductionMorphMatrixLocation.PartialBottom, 0.74f),
+            ProductionMorphMatrixCase(11, 12, ClassifiedSortBase.LikeCount, ProductionMorphMatrixLocation.End, 0.78f),
+            ProductionMorphMatrixCase(11, 10, ClassifiedSortBase.LikeCount, ProductionMorphMatrixLocation.AfterStart, 0.26f),
+        )
+        val cases = listOf(fullCases[0], fullCases[1], fullCases[2])
+
+        cases.forEach { matrixCase ->
+            applyProductionMatrixSort(matrixCase.sortBase)
+            ensureProductionMatrixColumns(matrixCase.fromColumns)
+            repeat(1) {
+                MediaGridMorphTestTrace.clear()
+                prepareProductionMatrixLocation(matrixCase.location, dataset.assetIds.size)
+                waitForStableIdleReadiness(matrixCase.fromColumns)
+                MediaGridMorphTestTrace.clear()
+                var observationsBeforeUp = emptyList<MediaGridMorphDrawObservation>()
+                pinchOnGrid(
+                    gridTag = "classified_media_grid",
+                    centerSpan = if (matrixCase.toColumns > matrixCase.fromColumns) 260f else 180f,
+                    endSpan = if (matrixCase.toColumns > matrixCase.fromColumns) 180f else 260f,
+                    centerYFraction = matrixCase.centerYFraction,
+                    onBeforePhysicalUp = {
+                        observationsBeforeUp = MediaGridMorphTestTrace.drawEvents()
+                    },
+                )
+                val claim = MediaGridMorphTestTrace.claimEvents().lastOrNull { it.generation > 0L }
+                    ?: error("No production claim observed for $matrixCase")
+                assertTrue("claim was not accepted for $matrixCase: $claim", claim.accepted)
+                assertTrue(claim.bundlePresent)
+                assertTrue(claim.directionPrepared)
+                assertEquals(null, claim.readinessReason)
+                val report = claim.readinessReport ?: error("Claim report was missing for $matrixCase")
+                assertEquals(claim.generation, report.generation)
+                assertEquals(report.requiredSourceImageCount, report.resolvedSourceImageCount)
+                assertEquals(report.requiredTargetImageCount, report.resolvedTargetImageCount)
+                assertTrue(report.sourceViewportComplete)
+                assertTrue(report.geometryComplete)
+                val morphDraws = observationsBeforeUp.filter {
+                    it.drawMode == MediaGridSingleSurfaceMode.Morph && it.generation == claim.generation
+                }
+                assertTrue("FirstMorphDraw missing for $matrixCase: $observationsBeforeUp", morphDraws.isNotEmpty())
+                assertTrue(morphDraws.map { it.frameNumber }.distinct().size >= 2)
+                assertTrue(morphDraws.map { it.progress }.distinct().size >= 2)
+                assertEquals(0, MediaGridMorphTestTrace.fallbackCount())
+                waitForGridColumnCount(matrixCase.toColumns)
+                waitForMorphCanvasRemoval()
+                assertEquals(
+                    "Unexpected rollback for $matrixCase: ${MediaGridMorphTestTrace.rollbackReasons()}",
+                    0,
+                    MediaGridMorphTestTrace.rollbackColumnCountCommandCount(),
+                )
+                val terminal = MediaGridMorphTestTrace.handoffEvents()
+                    .lastOrNull { it.generation == claim.generation }
+                    ?: error("Handoff terminal observation was missing for $matrixCase")
+                assertEquals(MediaGridMorphGridHandoffPhase.Idle, terminal.phase)
+                assertFalse(terminal.suppressesUserScroll)
+                assertFalse(terminal.interactionLocked)
+                assertTrue(
+                    "Direct ScrollToItem layout re-evaluation missing for $matrixCase",
+                    MediaGridMorphTestTrace.handoffCommandEvents().any {
+                        it.generation == claim.generation &&
+                            it.command == "ScrollToItem" &&
+                            it.directLayoutReevaluated
+                    },
+                )
+
+                if (it < 2) {
+                    ensureProductionMatrixColumns(matrixCase.fromColumns)
+                }
+            }
+        }
     }
 
     @Test
@@ -2561,6 +2930,213 @@ class MainActivityComposeTest {
         instrumentation.waitForIdleSync()
     }
 
+    private enum class ProductionMorphMatrixLocation {
+        Start,
+        AfterStart,
+        Middle,
+        HeaderBefore,
+        HeaderAfter,
+        PartialTop,
+        PartialBottom,
+        End,
+    }
+
+    private data class ProductionMorphMatrixCase(
+        val fromColumns: Int,
+        val toColumns: Int,
+        val sortBase: ClassifiedSortBase,
+        val location: ProductionMorphMatrixLocation,
+        val centerYFraction: Float,
+    )
+
+    private fun retainProductionMatrixAssets(
+        assetIds: List<Long>,
+        paths: List<String>,
+        previewStore: MediaGridPersistentPreviewStore,
+        retainedIndices: Set<Int> = assetIds.indices.toSet(),
+    ) {
+        val residentStore = mainViewModel().mediaGridSessionState.value.retainedImageStore
+            ?: error("Production retained image store is unavailable")
+        val imageLoader = (composeRule.activity.application as LikeListManagerApp).container.mediaGridImageLoader
+        runBlocking {
+            assetIds.zip(paths).forEachIndexed { index, (assetId, path) ->
+                if (index !in retainedIndices) return@forEachIndexed
+                val previewFile = previewStore.previewFile(assetId)
+                val source = buildMediaGridImageCandidates(
+                    MediaGridImageCandidateInput(
+                        assetId = assetId,
+                        mediaKey = "production-location-matrix-$index",
+                        localPath = path,
+                        previewUrl = null,
+                        remoteUrl = null,
+                        displayUrl = path,
+                        persistentPreview = MediaGridPersistentPreviewMetadata(
+                            filePath = previewFile.absolutePath,
+                            length = previewFile.length(),
+                            lastModified = previewFile.lastModified(),
+                        ),
+                    ),
+                ).first()
+                val candidate = MediaGridPreparedCandidate(
+                    kind = source.kind,
+                    requestData = File(source.data as String),
+                    sourceIdentity = source.sourceIdentity,
+                    cacheKey = mediaGridImageCacheKey(source, 256, 256),
+                    width = 256,
+                    height = 256,
+                    useDiskCache = false,
+                )
+                imageLoader.execute(buildMediaGridImageRequest(composeRule.activity, candidate))
+                val value = imageLoader.memoryCache?.get(coil.memory.MemoryCache.Key(candidate.cacheKey))
+                    ?: error("Asset $assetId was not present in the image cache")
+                residentStore.retain(assetId, candidate, value, directDrawEligible = true)
+            }
+        }
+        try {
+            composeRule.waitUntil(10_000) {
+                retainedIndices.all { index -> residentStore.hasEligibleDrawHandle(assetIds[index]) }
+            }
+        } catch (error: ComposeTimeoutException) {
+            throw AssertionError(
+                "Retained image handles were not all eligible: " +
+                    "missing=${retainedIndices.filterNot { residentStore.hasEligibleDrawHandle(assetIds[it]) }}, " +
+                    "stats=${residentStore.stats()}, " +
+                    "drawIndex=${residentStore.drawIndexSnapshot()}",
+                error,
+            )
+        }
+    }
+
+    private fun applyProductionMatrixSort(sortBase: ClassifiedSortBase) {
+        composeRule.onNodeWithTag("sort_open").performClick()
+        when (sortBase) {
+            ClassifiedSortBase.Default -> composeRule.onNodeWithTag("sort_clear_all_open").performClick()
+            ClassifiedSortBase.PostTime -> {
+                composeRule.onNodeWithTag("sort_base_date").performClick()
+                composeRule.onNodeWithTag("sort_time_direction_new").performClick()
+            }
+            ClassifiedSortBase.LikeCount -> {
+                composeRule.onNodeWithTag("sort_base_like").performClick()
+                composeRule.onNodeWithTag("sort_like_direction_high").performClick()
+            }
+        }
+        composeRule.onNodeWithTag("sort_apply").performClick()
+        composeRule.waitUntil(30_000) {
+            val session = mainViewModel().mediaGridSessionState.value
+            !session.showInitialProgress && session.frame?.key?.dataKey?.sort?.baseOrder == sortBase
+        }
+    }
+
+    private fun ensureProductionMatrixColumns(target: Int) {
+        while (mainViewModel().mediaGridSessionState.value.columnCount != target) {
+            val current = mainViewModel().mediaGridSessionState.value.columnCount
+            check(current in 2..12)
+            waitForStableIdleReadiness(current)
+            val increase = current < target
+            pinchOnGrid(
+                gridTag = "classified_media_grid",
+                centerSpan = if (increase) 260f else 180f,
+                endSpan = if (increase) 180f else 260f,
+                centerYFraction = 0.5f,
+            )
+            waitForGridColumnCount(if (increase) current + 1 else current - 1)
+            waitForMorphCanvasRemoval()
+        }
+    }
+
+    private fun prepareProductionMatrixLocation(
+        location: ProductionMorphMatrixLocation,
+        assetCount: Int,
+    ) {
+        val frame = mainViewModel().mediaGridSessionState.value.frame
+            ?: error("Production matrix frame is unavailable")
+        val targetOrdinal = when (location) {
+            ProductionMorphMatrixLocation.Start -> 0
+            ProductionMorphMatrixLocation.AfterStart -> 4
+            ProductionMorphMatrixLocation.Middle -> assetCount / 2
+            ProductionMorphMatrixLocation.PartialTop -> 4
+            ProductionMorphMatrixLocation.PartialBottom -> (assetCount - 5).coerceAtLeast(0)
+            ProductionMorphMatrixLocation.End -> (assetCount - 1).coerceAtLeast(0)
+            ProductionMorphMatrixLocation.HeaderBefore,
+            ProductionMorphMatrixLocation.HeaderAfter,
+            -> null
+        }
+        val grid = composeRule.onNodeWithTag("classified_media_grid")
+        if (location == ProductionMorphMatrixLocation.HeaderBefore ||
+            location == ProductionMorphMatrixLocation.HeaderAfter
+        ) {
+            val header = frame.items.filterIsInstance<MediaGridHeaderItem>().getOrNull(1)
+                ?: frame.items.filterIsInstance<MediaGridHeaderItem>().firstOrNull()
+                ?: error("Header location requested without a header")
+            grid.performScrollToNode(hasTestTag(header.key))
+        } else {
+            val itemIndex = frame.ordinalIndex.itemIndexByMediaOrdinal[
+                targetOrdinal!!.coerceIn(0, frame.ordinalIndex.assetIdByMediaOrdinal.lastIndex),
+            ]
+            grid.performScrollToIndex(itemIndex)
+            if (location == ProductionMorphMatrixLocation.PartialTop) {
+                grid.performTouchInput {
+                    swipeUp(
+                        startY = centerY + 120f,
+                        endY = centerY,
+                        durationMillis = 300,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+    }
+
+    private fun waitForStableIdleReadiness(expectedColumnCount: Int) {
+        try {
+            composeRule.waitUntil(30_000) {
+                val frameKey = mainViewModel().mediaGridSessionState.value.frame?.key ?: return@waitUntil false
+                MediaGridMorphTestTrace.idleReadinessEvents().any { event ->
+                    event.ready &&
+                        event.identity.currentColumnCount == expectedColumnCount &&
+                        event.identity.frameKey == frameKey
+                }
+            }
+        } catch (error: ComposeTimeoutException) {
+            val session = mainViewModel().mediaGridSessionState.value
+            val events = MediaGridMorphTestTrace.idleReadinessEvents().takeLast(8)
+            throw AssertionError(
+                "Stable idle readiness missing for columns=$expectedColumnCount " +
+                    "currentColumns=${session.columnCount}, frame=${session.frame?.key}, events=$events",
+                error,
+            )
+        }
+    }
+
+    private fun waitForStableIdleReadinessFailure(
+        expectedColumnCount: Int,
+        expectedReasons: Set<MediaGridMorphClaimReadinessReason>,
+    ) {
+        try {
+            composeRule.waitUntil(30_000) {
+                val frameKey = mainViewModel().mediaGridSessionState.value.frame?.key ?: return@waitUntil false
+                MediaGridMorphTestTrace.idleReadinessEvents().any { event ->
+                    !event.ready &&
+                        event.identity.currentColumnCount == expectedColumnCount &&
+                        event.identity.frameKey == frameKey &&
+                        event.failureReasons.any { reason ->
+                            expectedReasons.any {
+                                reason.startsWith("$it:") || reason.contains(":$it:")
+                            }
+                        }
+                }
+            }
+        } catch (error: ComposeTimeoutException) {
+            val session = mainViewModel().mediaGridSessionState.value
+            val events = MediaGridMorphTestTrace.idleReadinessEvents().takeLast(8)
+            throw AssertionError(
+                "Stable idle failure $expectedReasons missing for columns=$expectedColumnCount " +
+                    "currentColumns=${session.columnCount}, frame=${session.frame?.key}, events=$events",
+                error,
+            )
+        }
+    }
+
     private fun visibleGridAssetIds(assetIds: List<Long>): List<Long> {
         return assetIds.filter { assetId ->
             composeRule.onAllNodesWithTag("media_grid_item_$assetId", useUnmergedTree = true)
@@ -2699,13 +3275,15 @@ class MainActivityComposeTest {
         centerSpan: Float,
         endSpan: Float,
         onMidGesture: (() -> Unit)? = null,
+        centerYFraction: Float = 0.5f,
+        onBeforePhysicalUp: (() -> Unit)? = null,
     ) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val location = IntArray(2)
         composeRule.activity.window.decorView.getLocationOnScreen(location)
         val gridBounds = composeRule.onNodeWithTag(gridTag).fetchSemanticsNode().boundsInRoot
         val centerX = location[0] + gridBounds.center.x
-        val centerY = location[1] + gridBounds.center.y
+        val centerY = location[1] + gridBounds.top + gridBounds.height * centerYFraction
         val downTime = SystemClock.uptimeMillis()
         val stepCount = 8
         val properties = arrayOf(
@@ -2777,6 +3355,7 @@ class MainActivityComposeTest {
                 onMidGesture()
             }
         }
+        onBeforePhysicalUp?.invoke()
         send(
             MotionEvent.ACTION_POINTER_UP or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT),
             160,

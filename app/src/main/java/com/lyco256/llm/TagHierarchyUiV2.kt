@@ -3698,6 +3698,7 @@ private fun ClassifiedMediaGridContent(
     val morphTextResourceIndex = rememberMediaGridMorphTextResourceIndex(
         pairs = morphPairsForTextResources,
         viewportWidthPx = morphIdentity.viewportSignature.viewportWidthPx,
+        additionalTitles = frame.items.filterIsInstance<MediaGridHeaderItem>().map { it.label },
     )
     val morphInteractionLocked = morphController?.interactionLocked?.value == true
     val morphSnapshot = morphController?.snapshotState?.value
@@ -3752,7 +3753,14 @@ private fun ClassifiedMediaGridContent(
             }
         }
     }
-    LaunchedEffect(state, frame.key, columnCount, morphPreparationCache, morphPointerInProgress) {
+    LaunchedEffect(
+        state,
+        frame.key,
+        columnCount,
+        morphPreparationCache,
+        morphPointerInProgress,
+        residentPreparedIndex?.drawIndexVersion,
+    ) {
         combine(
             snapshotFlow {
                 buildMediaGridViewportSignature(state.layoutInfo, frame, columnCount)
@@ -3780,6 +3788,7 @@ private fun ClassifiedMediaGridContent(
                 identity = identity,
                 isScrollInProgress = false,
                 isPointerInProgress = false,
+                preparedIndexVersion = residentPreparedIndex?.drawIndexVersion ?: Long.MIN_VALUE,
             ) ?: return@collectLatest
             val capture = captureMediaGridMorphInput(
                 frame = frame,
@@ -3796,6 +3805,32 @@ private fun ClassifiedMediaGridContent(
             )
             morphPreparationCache.publish(token, pairs)
         }
+    }
+    LaunchedEffect(
+        morphPairVersion,
+        morphIdentity,
+        residentPreparedIndex?.drawIndexVersion,
+        morphTextResourceIndex.identity,
+    ) {
+        if (!BuildConfig.TEST_HARNESS) return@LaunchedEffect
+        val preparedIndex = residentPreparedIndex ?: return@LaunchedEffect
+        val pairs = morphPreparationCache.snapshot()
+            .filterValues { it.matchesIdentity(morphIdentity) }
+        if (pairs.isEmpty()) return@LaunchedEffect
+        val failureReasons = pairs.mapNotNull { (direction, pair) ->
+            mediaGridMorphStableIdleFailureReason(pair, preparedIndex, morphTextResourceIndex)
+                ?.let { reason -> "$direction:$reason" }
+        }
+        MediaGridMorphTestTrace.recordIdleReadiness(
+            MediaGridMorphIdleReadinessObservation(
+                generation = morphPairVersion,
+                identity = morphIdentity,
+                directionCount = pairs.size,
+                readyDirectionCount = pairs.size - failureReasons.size,
+                ready = failureReasons.isEmpty() && pairs.isNotEmpty(),
+                failureReasons = failureReasons,
+            ),
+        )
     }
     effectiveController?.let { MediaGridFramePublicationRunner(it) }
     Box(Modifier.fillMaxSize()) {

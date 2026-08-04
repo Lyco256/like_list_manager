@@ -266,7 +266,12 @@ internal data class MediaGridMorphViewportPlanTemplate(
         val estimatedHeaderCount = if (sortBase == ClassifiedSortBase.Default) 0 else targetHeaders.size
         val contentHeight = totalMediaRows * targetCellHeight + estimatedHeaderCount * headerHeightPx
         val maxScroll = (contentHeight - viewport.height).coerceAtLeast(0f)
-        val rowTopAtScrollZero = viewport.top + rowPrefix * targetCellHeight
+        val headersBeforeTarget = if (sortBase == ClassifiedSortBase.Default) {
+            0
+        } else {
+            targetRows.take(targetRowIndex + 1).count { it.headerBefore != null }
+        }
+        val rowTopAtScrollZero = viewport.top + rowPrefix * targetCellHeight + headersBeforeTarget * headerHeightPx
         val minimumTop = rowTopAtScrollZero - maxScroll
         val maximumTop = rowTopAtScrollZero
         return idealTargetRowTop.coerceIn(minimumTop, maximumTop)

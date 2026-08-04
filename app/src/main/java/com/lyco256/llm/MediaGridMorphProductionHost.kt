@@ -55,7 +55,20 @@ internal class MediaGridMorphProductionHostState(
     private var disposed = false
 
     fun publishHandoffSnapshot() {
-        if (!disposed) _handoffSnapshot.value = coordinator.snapshot()
+        if (!disposed) {
+            val snapshot = coordinator.snapshot()
+            _handoffSnapshot.value = snapshot
+            if (BuildConfig.TEST_HARNESS) {
+                MediaGridMorphTestTrace.recordHandoff(
+                    MediaGridMorphHandoffObservation(
+                        generation = snapshot.request?.interactionGeneration ?: 0L,
+                        phase = snapshot.phase,
+                        suppressesUserScroll = snapshot.suppressesUserScroll,
+                        interactionLocked = controller.interactionLocked.value,
+                    ),
+                )
+            }
+        }
     }
 
     fun dispose() {
@@ -345,12 +358,30 @@ internal fun MediaGridMorphTestHandoffHost(
                     coordinator.snapshot().request?.let { request ->
                         observeCurrentHandoffLayout(request, latestFrame)
                     }
+                    if (BuildConfig.TEST_HARNESS) {
+                        MediaGridMorphTestTrace.recordHandoffCommand(
+                            MediaGridMorphHandoffCommandObservation(
+                                generation = envelope.generation,
+                                command = "ScrollToItem",
+                                directLayoutReevaluated = true,
+                            )
+                        )
+                    }
                 }
                 is MediaGridMorphGridHandoffCommand.ScrollBy -> {
                     state.scrollBy(command.pixels)
                     withFrameNanos { }
                     coordinator.snapshot().request?.let { request ->
                         observeCurrentHandoffLayout(request, latestFrame)
+                    }
+                    if (BuildConfig.TEST_HARNESS) {
+                        MediaGridMorphTestTrace.recordHandoffCommand(
+                            MediaGridMorphHandoffCommandObservation(
+                                generation = envelope.generation,
+                                command = "ScrollBy",
+                                directLayoutReevaluated = true,
+                            )
+                        )
                     }
                 }
                 is MediaGridMorphGridHandoffCommand.Complete -> {
@@ -608,7 +639,12 @@ internal fun MediaGridMorphProductionHandoffEffects(
             when (val command = envelope.command) {
                 is MediaGridMorphGridHandoffCommand.ChangeColumnCount -> latestColumnChange(command.columnCount)
                 is MediaGridMorphGridHandoffCommand.RollbackColumnCount -> {
-                    if (BuildConfig.TEST_HARNESS) MediaGridMorphTestTrace.recordRollbackColumnCountCommand()
+                    if (BuildConfig.TEST_HARNESS) {
+                        MediaGridMorphTestTrace.recordRollbackColumnCountCommand(
+                            coordinator.snapshot().failureReason?.name,
+                            coordinator.snapshot().failureDetail,
+                        )
+                    }
                     latestColumnChange(command.columnCount)
                 }
                 is MediaGridMorphGridHandoffCommand.ScrollToItem -> {
@@ -617,12 +653,30 @@ internal fun MediaGridMorphProductionHandoffEffects(
                     coordinator.snapshot().request?.let { request ->
                         observeCurrentHandoffLayout(request, latestFrame)
                     }
+                    if (BuildConfig.TEST_HARNESS) {
+                        MediaGridMorphTestTrace.recordHandoffCommand(
+                            MediaGridMorphHandoffCommandObservation(
+                                generation = envelope.generation,
+                                command = "ScrollToItem",
+                                directLayoutReevaluated = true,
+                            )
+                        )
+                    }
                 }
                 is MediaGridMorphGridHandoffCommand.ScrollBy -> {
                     state.scrollBy(command.pixels)
                     withFrameNanos { }
                     coordinator.snapshot().request?.let { request ->
                         observeCurrentHandoffLayout(request, latestFrame)
+                    }
+                    if (BuildConfig.TEST_HARNESS) {
+                        MediaGridMorphTestTrace.recordHandoffCommand(
+                            MediaGridMorphHandoffCommandObservation(
+                                generation = envelope.generation,
+                                command = "ScrollBy",
+                                directLayoutReevaluated = true,
+                            )
+                        )
                     }
                 }
                 is MediaGridMorphGridHandoffCommand.Complete -> checkpointIfAllowed()

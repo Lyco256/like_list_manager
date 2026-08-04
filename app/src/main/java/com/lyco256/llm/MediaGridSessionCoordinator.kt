@@ -118,7 +118,7 @@ internal class MediaGridSessionCoordinator(
             val next = withContext(Dispatchers.Default) {
                 buildMediaGridFrameData(source.entries, dataKey.sort, columns, dataKey)
             }
-            if (session.refreshGeneration != generation || sessions[session.key] !== session) return@launch
+            if (!isCurrentSession(session, generation)) return@launch
             val controller = session.controller
             if (controller == null) {
                 val created = MediaGridSteadyLoadController(
@@ -137,7 +137,7 @@ internal class MediaGridSessionCoordinator(
                 session.controller = created
                 session.collectJob = scope.launch {
                     created.uiState.collect { value ->
-                        if (sessions[session.key] === session) publish(session, value)
+                        if (isCurrentSession(session)) publish(session, value)
                     }
                 }
                 created.start()
@@ -156,6 +156,10 @@ internal class MediaGridSessionCoordinator(
     }
 
     private fun activeSession(): Session? = activeKey?.let { sessions[it] }
+
+    @Synchronized
+    private fun isCurrentSession(session: Session, generation: Long? = null): Boolean =
+        sessions[session.key] === session && (generation == null || session.refreshGeneration == generation)
 
     @Synchronized private fun publish(session: Session, controllerState: MediaGridControllerUiState? = session.controller?.uiState?.value) {
         if (activeKey != session.key) return

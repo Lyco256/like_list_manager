@@ -1181,6 +1181,26 @@ class MediaGridMorphTest {
     }
 
     @Test
+    fun bucketAlignedRowsWrapAfterACompletePrecedingRow() {
+        val bucketDate = "2026-07-08T00:00:00Z"
+        val capture = capture(
+            columns = 2,
+            count = 4,
+            startOrdinal = 2,
+            sortBase = ClassifiedSortBase.PostTime,
+            dates = List(4) { bucketDate },
+        ).copy(
+            precedingMedia = capturedMedia(2L, 1, bucketDate),
+            precedingMediaWindow = listOf(
+                capturedMedia(1L, 0, bucketDate),
+                capturedMedia(2L, 1, bucketDate),
+            ),
+        )
+
+        assertEquals(0, capture.startColumnOffset(2))
+    }
+
+    @Test
     fun headerlessFourColumnOffsetTwoKeeps0011And1100SourceImagesAtEveryProgress() {
         val capture = withSourceRows(capture(columns = 4, count = 20, startOrdinal = 2), 4)
         val pair = buildMediaGridMorphRowPreparedPairs(capture)

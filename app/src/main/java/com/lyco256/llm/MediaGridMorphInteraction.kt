@@ -1230,6 +1230,7 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                     if (BuildConfig.TEST_HARNESS) {
                                         MediaGridMorphTestTrace.recordClaim(
                                             MediaGridMorphClaimObservation(
+                                                generation = activeCandidate.generation,
                                                 direction = direction,
                                                 bundlePresent = claimBundle != null,
                                                 directionPrepared = claimBundle?.isCompleteFor(direction) == true,

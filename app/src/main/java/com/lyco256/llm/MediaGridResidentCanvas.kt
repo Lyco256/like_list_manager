@@ -46,6 +46,7 @@ internal data class MediaGridMorphDrawObservation(
 )
 
 internal data class MediaGridMorphClaimObservation(
+    val generation: Long = 0L,
     val direction: MediaGridMorphDirection,
     val bundlePresent: Boolean,
     val directionPrepared: Boolean,
@@ -55,17 +56,47 @@ internal data class MediaGridMorphClaimObservation(
     val readinessReport: MediaGridMorphClaimReadinessReport? = null,
 )
 
+internal data class MediaGridMorphIdleReadinessObservation(
+    val generation: Long,
+    val identity: MediaGridMorphInteractionIdentity,
+    val directionCount: Int,
+    val readyDirectionCount: Int,
+    val ready: Boolean,
+    val failureReasons: List<String> = emptyList(),
+)
+
+internal data class MediaGridMorphHandoffObservation(
+    val generation: Long,
+    val phase: MediaGridMorphGridHandoffPhase,
+    val suppressesUserScroll: Boolean,
+    val interactionLocked: Boolean,
+)
+
+internal data class MediaGridMorphHandoffCommandObservation(
+    val generation: Long,
+    val command: String,
+    val directLayoutReevaluated: Boolean,
+)
+
 internal object MediaGridMorphTestTrace {
     private val drawEvents = CopyOnWriteArrayList<MediaGridMorphDrawObservation>()
     private val claimEvents = CopyOnWriteArrayList<MediaGridMorphClaimObservation>()
+    private val idleReadinessEvents = CopyOnWriteArrayList<MediaGridMorphIdleReadinessObservation>()
+    private val handoffEvents = CopyOnWriteArrayList<MediaGridMorphHandoffObservation>()
+    private val handoffCommandEvents = CopyOnWriteArrayList<MediaGridMorphHandoffCommandObservation>()
     private val rollbackColumnCountCommands = AtomicInteger()
+    private val rollbackReasons = CopyOnWriteArrayList<String>()
     @Volatile private var fallbackCount = 0
     private var nextFrameNumber = 0L
 
     fun clear() {
         drawEvents.clear()
         claimEvents.clear()
+        idleReadinessEvents.clear()
+        handoffEvents.clear()
+        handoffCommandEvents.clear()
         rollbackColumnCountCommands.set(0)
+        rollbackReasons.clear()
         fallbackCount = 0
         nextFrameNumber = 0L
     }
@@ -93,11 +124,34 @@ internal object MediaGridMorphTestTrace {
 
     fun claimEvents(): List<MediaGridMorphClaimObservation> = claimEvents.toList()
 
-    fun recordRollbackColumnCountCommand() {
-        if (BuildConfig.TEST_HARNESS) rollbackColumnCountCommands.incrementAndGet()
+    fun recordIdleReadiness(event: MediaGridMorphIdleReadinessObservation) {
+        if (BuildConfig.TEST_HARNESS) idleReadinessEvents += event
+    }
+
+    fun idleReadinessEvents(): List<MediaGridMorphIdleReadinessObservation> = idleReadinessEvents.toList()
+
+    fun recordHandoff(event: MediaGridMorphHandoffObservation) {
+        if (BuildConfig.TEST_HARNESS) handoffEvents += event
+    }
+
+    fun handoffEvents(): List<MediaGridMorphHandoffObservation> = handoffEvents.toList()
+
+    fun recordHandoffCommand(event: MediaGridMorphHandoffCommandObservation) {
+        if (BuildConfig.TEST_HARNESS) handoffCommandEvents += event
+    }
+
+    fun handoffCommandEvents(): List<MediaGridMorphHandoffCommandObservation> = handoffCommandEvents.toList()
+
+    fun recordRollbackColumnCountCommand(reason: String? = null, detail: String? = null) {
+        if (BuildConfig.TEST_HARNESS) {
+            rollbackColumnCountCommands.incrementAndGet()
+            if (reason != null) rollbackReasons += listOfNotNull(reason, detail).joinToString(":")
+        }
     }
 
     fun rollbackColumnCountCommandCount(): Int = rollbackColumnCountCommands.get()
+
+    fun rollbackReasons(): List<String> = rollbackReasons.toList()
 }
 
 internal data class MediaGridResidentCanvasImage(
