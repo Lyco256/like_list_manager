@@ -2,6 +2,15 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 
 この文書は、全体構成、現状の実装、変更目的別入口、個別docs一覧だけを担当する。禁止事項、完了報告、検証手順は置かない。
 
+## 2026-08-05 RequiredRenderSet and exact target handoff
+
+- `MediaGridMorphRequiredRenderSet.kt` is the single selected-plan contract for claim readiness, resident protection, rendering, and missing-image/header checks. It sweeps each cell/header from progress 0 to 1 against the local viewport; offscreen overscan is optional and is reported separately.
+- `MediaGridMorph.kt` captures all Y coordinates in viewport-local space, selects one idle focal center per visible source row, and prepares only adjacent target column indexes.
+- `MediaGridMorphRowReflow.kt` validates each visible source row against exactly one canonical row by row key and cell ordinal/asset identity. It does not require global visible/canonical row counts to match.
+- `MediaGridMorphExactTargetLayoutIndex.kt` computes the target LazyGrid item sequence, exact row ID/first item index/media ordinals/header positions, content height, and achievable scroll bounds without copying images or frame-wide media payloads.
+- `MediaGridMorphProductionHost.kt` captures the target viewport in local coordinates. `MediaGridMorphHandoff.kt` scrolls the exact target row, permits at most one Y correction, and verifies every visible target row/cell/header before reveal.
+- `MainActivityComposeTest.kt`, `MediaGridMorphTest.kt`, and `MediaGridMorphExactTargetLayoutIndexTest.kt` cover the three representative 4→5 production locations, RequiredRenderSet boundaries, canonical-row matching, exact target geometry, and one-correction handoff behavior.
+
 ## 2026-08-02 exact source viewport Morph handoff
 
 - `MediaGridMorph.kt` captures the actual visible LazyGrid row/cell/header rects, item sequence, resident prepared-image identity, and a canonical source-row key. One-pixel same-row height rounding is tolerated while each cell keeps its own captured rect.

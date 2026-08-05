@@ -280,7 +280,7 @@ class MediaGridMorphHandoffTest {
     }
 
     @Test
-    fun coordinatorUsesOrdinalFallbackAndLimitsYCorrectionToThreeAttempts() {
+    fun coordinatorUsesOrdinalFallbackAndLimitsYCorrectionToOneAttempt() {
         val request = request().copy(
             targetAnchor = request().targetAnchor.copy(assetId = 99L, mediaOrdinal = 1),
         )
@@ -299,18 +299,16 @@ class MediaGridMorphHandoffTest {
                 300,
             ) is MediaGridMorphGridHandoffCommand.ScrollToItem,
         )
-        repeat(3) { attempt ->
-            assertEquals(
-                MediaGridMorphGridHandoffCommand.ScrollBy(10f),
-                coordinator.observeLayout(
-                    targetFrame,
-                    MediaGridMorphVisibleItemGeometry(22L, 1, Rect(0f, 10f, 100f, 110f)),
-                    300,
-                    300,
-                ),
-            )
-            assertEquals(attempt + 1, coordinator.snapshot().correctionAttempts)
-        }
+        assertEquals(
+            MediaGridMorphGridHandoffCommand.ScrollBy(10f),
+            coordinator.observeLayout(
+                targetFrame,
+                MediaGridMorphVisibleItemGeometry(22L, 1, Rect(0f, 10f, 100f, 110f)),
+                300,
+                300,
+            ),
+        )
+        assertEquals(1, coordinator.snapshot().correctionAttempts)
         assertEquals(
             MediaGridMorphGridHandoffCommand.RollbackColumnCount(2),
             coordinator.observeLayout(

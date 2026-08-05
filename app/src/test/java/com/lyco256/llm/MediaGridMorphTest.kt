@@ -1272,6 +1272,52 @@ class MediaGridMorphTest {
     }
 
     @Test
+    fun requiredRenderSetOnlyProtectsSweptViewportCellsAndVisibleHeaders() {
+        val capture = withSourceRows(capture(4, 40), 4)
+        val pair = buildMediaGridMorphRowPreparedPairs(capture)
+            .getValue(MediaGridMorphDirection.IncreaseColumns)
+        val template = requireNotNull(pair.viewportPlanTemplate)
+        val centers = mediaGridMorphPossibleFocalCenters(pair)
+        assertEquals(template.sourceRows.distinctBy { it.rowKey }.size, centers.size)
+
+        val plan = MediaGridMorphPlan.selectRowReflow(pair, Offset(600f, 150f))
+        val selected = requireNotNull(plan.viewportPlan)
+        val required = plan.requiredRenderSet()
+        val allCellIdentities = selected.rowPlans.flatMap { row ->
+            row.cells.map { MediaGridMorphRequiredCellIdentity(it.relativeRow, it.column) }
+        }.toSet()
+        assertTrue(required.requiredCellIdentities.isNotEmpty())
+        assertTrue(required.requiredCellIdentities.size < allCellIdentities.size)
+        assertEquals(
+            required.protectedAssetIds,
+            required.requiredSourceAssetIds + required.requiredTargetAssetIds,
+        )
+        assertEquals(allCellIdentities.size - required.requiredCellIdentities.size, required.optionalCellCount)
+    }
+
+    @Test
+    fun sourceRowsAreMatchedByExactCanonicalRowIdentityWithoutGlobalRowCountEquality() {
+        val capture = withSourceRows(capture(4, 40), 4)
+        val pair = buildMediaGridMorphRowPreparedPairs(capture)
+            .getValue(MediaGridMorphDirection.IncreaseColumns)
+        val template = requireNotNull(pair.viewportPlanTemplate)
+        val valid = template.select(Offset(600f, 150f))
+        assertTrue(valid.rowPlans.isNotEmpty())
+        val visibleKey = template.sourceRows.first().rowKey ?: error("visible row key missing")
+        val corruptedCanonical = template.sourceCanonicalRows.map { row ->
+            if (row.rowKey == visibleKey) {
+                row.copy(cells = row.cells.mapIndexed { index, cell ->
+                    if (index == 0) cell.copy(assetId = cell.assetId + 1000L) else cell
+                })
+            } else {
+                row
+            }
+        }
+        val invalid = template.copy(sourceCanonicalRows = corruptedCanonical).select(Offset(600f, 150f))
+        assertTrue(invalid.rowPlans.isEmpty())
+    }
+
+    @Test
     fun rowReflowUsesFixedFocalYWithoutCentroidTranslation() {
         val capture = withSourceRows(capture(4, 20), 4)
         val pair = buildMediaGridMorphRowPreparedPairs(capture).getValue(MediaGridMorphDirection.IncreaseColumns)

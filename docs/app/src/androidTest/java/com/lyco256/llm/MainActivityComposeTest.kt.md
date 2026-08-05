@@ -1,5 +1,9 @@
 # `app/src/androidTest/java/com/lyco256/llm/MainActivityComposeTest.kt`
 
+## 2026-08-05 exact 4-to-5 production matrix
+
+`productionMorphLocationMatrixIsStableIdleAndMorphsBeforePhysicalUp` uses exactly three representative 4→5 sequences: a headerless dataset with distinct asset identities, a visible PostTime header, and a roughly four-row offset. Each claim asserts RequiredRenderSet counts, exact target row metadata, Morph-before-up, no fallback, no rollback, and terminal handoff completion.
+
 ## 2026-08-02 production claim-path regression
 
 `productionMorphClaimDrawsBeforePhysicalUpWhenFirstPointerStartsScroll` seeds a real filtered classified grid, retains all resident draw handles, starts with a one-pointer scroll, adds the second pointer, and verifies the real `ClassifiedMediaGridContent` path draws `Tracking`/`Morph` on the unified surface before physical up. It asserts direction, complete plan/model, generation-backed protection, positive progress, no fallback, and unchanged columns.

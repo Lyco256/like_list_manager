@@ -1,5 +1,11 @@
 # `MediaGridMorphHandoff.kt`
 
+## 2026-08-05 exact target verification
+
+- The handoff request carries the exact target row ID, first item index, focal item index, row ordinals, exact layout index, local desired row top, and target scroll bounds.
+- Target Y correction is limited to one `ScrollBy`. Before reveal, the coordinator validates the complete visible target viewport: row IDs/ordinals, every cell item index and rect, and every visible header key/title/rect.
+- Visible geometry is captured in LazyGrid viewport-local coordinates; stale frame/viewport/identity paths rollback or cancel without fallback being counted as Morph success.
+
 ## 2026-08-01 Phase 2 production handoff
 
 - The real `LazyGridState` is verified by target media ordinal plus visible row ordinals, row top, cell size, and header title; each geometric correction remains within the one-pixel tolerance and bounded retry count.

@@ -3682,13 +3682,11 @@ private fun ClassifiedMediaGridContent(
     )
     val morphController = morphHost?.controller
     val morphPreparedPairsSnapshot: () -> Map<MediaGridMorphDirection, MediaGridMorphPreparedPair> = {
-        val preparedIndex = residentPreparedIndex
-        if (preparedIndex == null) {
+        if (residentPreparedIndex == null) {
             emptyMap()
         } else {
             morphPreparationCache.snapshot().filterValues { pair ->
-                pair.matchesIdentity(morphIdentity) &&
-                    isMediaGridMorphProductionReady(pair, preparedIndex)
+                pair.matchesIdentity(morphIdentity)
             }
         }
     }
@@ -3878,7 +3876,7 @@ private fun ClassifiedMediaGridContent(
                                 }
                             } else null,
                             isPairReady = if (residentPreparedIndex != null) {
-                                { pair -> isMediaGridMorphProductionReady(pair, residentPreparedIndex) }
+                                { pair -> pair.matchesIdentity(morphIdentity) }
                             } else {
                                 { false }
                             },

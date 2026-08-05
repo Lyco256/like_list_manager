@@ -1,5 +1,10 @@
 # `MediaGridMorphRowRenderer.kt`
 
+## 2026-08-05 current required render set
+
+- `MediaGridMorphPlan.requiredRenderSet()` is shared by completeness, render-model filtering, protected assets, and claim reports. It includes only cells and headers whose swept endpoint geometry intersects the viewport; offscreen overscan is optional.
+- A selected render model contains only required cells/headers, resolves both image endpoints and required text before claim, and reports required/resolved counts plus optional offscreen count.
+
 ## 2026-08-02 selected-direction readiness
 
 The claim bundle contains both adjacent directions, but completeness is evaluated for the direction that claims first. A complete selected direction publishes Morph; movement into the opposite direction keeps the same source/target model and Morph draw mode at progress 0 rather than switching models.

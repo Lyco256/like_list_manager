@@ -1,5 +1,9 @@
 # `MediaGridMorphInteraction.kt`
 
+## 2026-08-05 exact handoff request
+
+- The settle request preserves the selected RequiredRenderSet-backed plan and carries exact target row/item metadata and the adjacent-column exact layout index into the real-grid handoff.
+
 ## 2026-08-02 locked-direction tracking
 
 - The first direction that successfully claims Morph is stored on the gesture and remains fixed through physical up. The selected target column, plan, render model, protected asset union, initial distance, and draw mode are not replaced by the opposite direction.

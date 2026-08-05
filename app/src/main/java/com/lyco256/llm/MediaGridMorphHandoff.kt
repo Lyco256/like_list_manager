@@ -158,6 +158,26 @@ internal data class MediaGridMorphVisibleRowGeometry(
     val mediaOrdinals: List<Int>,
     val headerKey: String? = null,
     val headerTitle: String? = null,
+    val cells: List<MediaGridMorphVisibleCellGeometry> = emptyList(),
+)
+
+internal data class MediaGridMorphVisibleCellGeometry(
+    val mediaOrdinal: Int,
+    val itemIndex: Int,
+    val rect: Rect,
+)
+
+internal data class MediaGridMorphVisibleHeaderGeometry(
+    val itemIndex: Int,
+    val key: String,
+    val title: String,
+    val rect: Rect,
+)
+
+internal data class MediaGridMorphVisibleViewportGeometry(
+    val viewport: Rect,
+    val rows: List<MediaGridMorphVisibleRowGeometry>,
+    val headers: List<MediaGridMorphVisibleHeaderGeometry>,
 )
 
 internal enum class MediaGridMorphGridHandoffFailureReason {
@@ -289,14 +309,24 @@ internal class MediaGridMorphGridHandoffCoordinator {
         }
         val targetAnchor = request.targetAnchor
         val targetOrdinal = request.targetFocalMediaOrdinal ?: targetAnchor.mediaOrdinal
-        val directIndex = request.targetFocalMediaOrdinal?.let { frame.ordinalIndex.itemIndexByMediaOrdinal.getOrNull(it) }
+        val exactIndex = request.targetFocalItemIndex
+        if (request.exactTargetLayoutIndex != null && exactIndex == null) {
+            return beginRollback(MediaGridMorphGridHandoffFailureReason.TargetMediaUnavailable)
+        }
+        val directIndex = exactIndex
+            ?: request.targetFocalMediaOrdinal?.let { frame.ordinalIndex.itemIndexByMediaOrdinal.getOrNull(it) }
             ?: frame.ordinalIndex.itemIndexByAssetId[targetAnchor.assetId]
         val resolvedOrdinal: Int
         val resolvedAssetId: Long
         val resolvedItemIndex: Int
-        if (directIndex != null) {
+        if (directIndex != null && directIndex in frame.ordinalIndex.mediaOrdinalByItemIndex.indices) {
             resolvedOrdinal = frame.ordinalIndex.mediaOrdinalByItemIndex[directIndex]
-            resolvedAssetId = targetAnchor.assetId
+            if (resolvedOrdinal < 0) return beginRollback(MediaGridMorphGridHandoffFailureReason.TargetMediaUnavailable)
+            resolvedAssetId = frame.ordinalIndex.assetIdByMediaOrdinal.getOrNull(resolvedOrdinal)
+                ?: return beginRollback(MediaGridMorphGridHandoffFailureReason.TargetMediaUnavailable)
+            if (exactIndex != null && resolvedAssetId != targetAnchor.assetId) {
+                return beginRollback(MediaGridMorphGridHandoffFailureReason.TargetMediaUnavailable)
+            }
             resolvedItemIndex = directIndex
         } else {
             val ordinals = frame.ordinalIndex.assetIdByMediaOrdinal.indices
@@ -328,6 +358,7 @@ internal class MediaGridMorphGridHandoffCoordinator {
         viewportWidth: Int,
         viewportHeight: Int,
         visibleTargetRow: MediaGridMorphVisibleRowGeometry? = null,
+        visibleTargetViewport: MediaGridMorphVisibleViewportGeometry? = null,
     ): MediaGridMorphGridHandoffCommand? {
         if (
             current.phase != MediaGridMorphGridHandoffPhase.PositioningTarget &&
@@ -348,10 +379,16 @@ internal class MediaGridMorphGridHandoffCoordinator {
             }
         }
         val target = current.resolvedTarget ?: return null
-        val targetScrollOffset = target.targetRowTop?.roundToInt()?.let { -it } ?: 0
+        val targetScrollOffset = (request.targetDesiredRowTopViewportLocal ?: target.targetRowTop)
+            ?.roundToInt()
+            ?.let { -it }
+            ?: 0
         if (!rollingBack && !current.targetScrollIssued) {
             current = current.copy(targetScrollIssued = true)
-            return MediaGridMorphGridHandoffCommand.ScrollToItem(target.itemIndex, targetScrollOffset)
+            return MediaGridMorphGridHandoffCommand.ScrollToItem(
+                request.targetRowFirstItemIndex ?: target.itemIndex,
+                targetScrollOffset,
+            )
         }
         if (visibleTarget == null || visibleTarget.assetId != target.assetId) {
             if (rollingBack) {
@@ -360,7 +397,10 @@ internal class MediaGridMorphGridHandoffCoordinator {
             } else {
                 if (current.targetVisibilityAttempts < 2) {
                     current = current.copy(targetVisibilityAttempts = current.targetVisibilityAttempts + 1)
-                    return MediaGridMorphGridHandoffCommand.ScrollToItem(target.itemIndex, targetScrollOffset)
+                    return MediaGridMorphGridHandoffCommand.ScrollToItem(
+                        request.targetRowFirstItemIndex ?: target.itemIndex,
+                        targetScrollOffset,
+                    )
                 }
                 return beginRollback(
                     MediaGridMorphGridHandoffFailureReason.TargetInvisible,
@@ -374,7 +414,10 @@ internal class MediaGridMorphGridHandoffCoordinator {
             if (row == null || row.mediaOrdinals != request.targetRowMediaOrdinals) {
                 if (current.targetVisibilityAttempts < 2) {
                     current = current.copy(targetVisibilityAttempts = current.targetVisibilityAttempts + 1)
-                    return MediaGridMorphGridHandoffCommand.ScrollToItem(target.itemIndex, targetScrollOffset)
+                    return MediaGridMorphGridHandoffCommand.ScrollToItem(
+                        request.targetRowFirstItemIndex ?: target.itemIndex,
+                        targetScrollOffset,
+                    )
                 }
                 return beginRollback(
                     MediaGridMorphGridHandoffFailureReason.TargetInvisible,
@@ -402,11 +445,22 @@ internal class MediaGridMorphGridHandoffCoordinator {
                 current = current.copy(correctionAttempts = current.correctionAttempts + 1)
                 return MediaGridMorphGridHandoffCommand.ScrollBy(rowDelta)
             }
-            if (request.targetHeaderTitle != null && row.headerTitle != request.targetHeaderTitle) {
+            if (request.exactTargetLayoutIndex == null &&
+                request.targetHeaderTitle != null && row.headerTitle != request.targetHeaderTitle
+            ) {
                 return beginRollback(
                     MediaGridMorphGridHandoffFailureReason.GeometryMismatch,
                     "header expected=${request.targetHeaderTitle} actual=${row.headerTitle} rowTop=${row.rowTop} expectedTop=$expectedRowTop row=${row.mediaOrdinals}",
                 )
+            }
+            if (request.exactTargetLayoutIndex != null) {
+                val viewport = visibleTargetViewport
+                if (viewport == null || !validateMediaGridMorphExactTargetViewport(request.exactTargetLayoutIndex, viewport)) {
+                    return beginRollback(
+                        MediaGridMorphGridHandoffFailureReason.GeometryMismatch,
+                        "exact-target-viewport-invalid row=${row.mediaOrdinals} expected=${request.targetRowMediaOrdinals}",
+                    )
+                }
             }
             current = current.copy(phase = MediaGridMorphGridHandoffPhase.VerifyingTarget)
             return null
@@ -526,6 +580,6 @@ internal class MediaGridMorphGridHandoffCoordinator {
 
     private companion object {
         const val GeometryTolerancePx = 1f
-        const val MaxCorrectionAttempts = 3
+        const val MaxCorrectionAttempts = 1
     }
 }

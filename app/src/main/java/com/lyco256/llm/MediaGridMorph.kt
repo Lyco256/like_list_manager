@@ -141,6 +141,7 @@ internal data class MediaGridMorphCapture(
     val sourceRows: List<MediaGridMorphCapturedRow> = emptyList(),
     val totalMediaCount: Int = mediaOrdinalRange.last + 1,
     val preparedIndexVersion: Long? = null,
+    val exactTargetLayoutIndexes: Map<Int, MediaGridMorphExactTargetLayoutIndex> = emptyMap(),
 )
 
 internal data class MediaGridMorphMedia(
@@ -391,12 +392,8 @@ internal fun MediaGridMorphPreparedPair.requiredMorphAssetIds(): LongArray {
     val ids = LinkedHashSet<Long>()
     viewportPlanTemplate?.let {
         mediaGridMorphPossibleFocalCenters(this).forEach { center ->
-            it.select(center).rowPlans.forEach { row ->
-                row.cells.forEach { cell ->
-                    cell.startContent.assetIdOrNull()?.let(ids::add)
-                    cell.endContent.assetIdOrNull()?.let(ids::add)
-                }
-            }
+            val renderSet = MediaGridMorphPlan.selectRowReflow(this, center).requiredRenderSet()
+            renderSet.protectedAssetIds.forEach(ids::add)
         }
     } ?: run {
         slots.forEach { slot ->
@@ -417,6 +414,9 @@ internal data class MediaGridMorphImageCompleteness(
     val geometryComplete: Boolean,
     val sourceViewportComplete: Boolean = true,
     val missingHeaderTitle: String? = null,
+    val optionalOffscreenCellCount: Int = 0,
+    val requiredCellCount: Int = 0,
+    val requiredHeaderCount: Int = 0,
 ) {
     val isComplete: Boolean
         get() = geometryComplete &&
@@ -448,31 +448,31 @@ internal fun mediaGridMorphImageCompleteness(
         selectedPlans.forEach { selected ->
             if (selected.rowPlans.isEmpty()) geometry = false
             val coordinates = HashSet<Pair<Int, Int>>()
+            val renderSet = MediaGridMorphPlan.selectRowReflow(pair, selected.initialPinchCenter).requiredRenderSet()
+            renderSet.requiredSourceAssetIds.forEach(sourceAssets::add)
+            renderSet.requiredTargetAssetIds.forEach(targetAssets::add)
             selected.rowPlans.forEach { row ->
                 row.cells.forEach { cell ->
-                    geometry = geometry && coordinates.add(cell.relativeRow to cell.column)
-                    val startRect = mediaGridMorphRowCellRect(selected, cell, 0f)
-                    val endRect = mediaGridMorphRowCellRect(selected, cell, 1f)
-                    val swept = Rect(
-                        left = minOf(startRect.left, endRect.left),
-                        top = minOf(startRect.top, endRect.top),
-                        right = maxOf(startRect.right, endRect.right),
-                        bottom = maxOf(startRect.bottom, endRect.bottom),
-                    )
-                    if (!swept.intersectsViewport(pair.viewport)) return@forEach
-                    (cell.startContent as? MediaGridMorphSlotContent.Image)?.assetId?.let(sourceAssets::add)
-                    (cell.endContent as? MediaGridMorphSlotContent.Image)?.assetId?.let(targetAssets::add)
+                    val identity = MediaGridMorphRequiredCellIdentity(cell.relativeRow, cell.column)
+                    if (identity in renderSet.requiredCellIdentities) {
+                        geometry = geometry && coordinates.add(identity.relativeRow to identity.column)
+                    }
                 }
             }
             missingTitle = missingTitle ?: selected.headerPlans.asSequence()
+                .filter { header ->
+                    MediaGridMorphRequiredHeaderIdentity(
+                        header.relativeRow,
+                        header.startKey,
+                        header.endKey,
+                    ) in renderSet.requiredHeaderIdentities
+                }
                 .flatMap { sequenceOf(it.startTitle, it.endTitle) }
                 .firstOrNull { it.isNullOrBlank() }
         }
         sourceIds = sourceAssets
         targetIds = targetAssets
-        headerTextComplete = missingTitle == null &&
-            viewportPlan.sourceHeaders.all { it.title.isNotBlank() } &&
-            viewportPlan.targetHeaders.all { it.title.isNotBlank() }
+        headerTextComplete = missingTitle == null
         geometryComplete = geometry && viewportPlan.viewport.width > 0f && viewportPlan.viewport.height > 0f &&
             viewportPlan.sourceRows.isNotEmpty() && viewportPlan.targetRows.isNotEmpty() &&
             selectedPlans.isNotEmpty()
@@ -506,13 +506,14 @@ internal fun mediaGridMorphImageCompleteness(
         } else {
             mediaGridMorphPossibleFocalCenters(pair).all { center ->
                 val selected = viewportPlan.select(center)
-                selected.rowPlans.all { row ->
-                    row.cells.all { cell ->
+                val renderSet = MediaGridMorphPlan.selectRowReflow(pair, center).requiredRenderSet()
+                selected.rowPlans.flatMap { it.cells }
+                    .filter { MediaGridMorphRequiredCellIdentity(it.relativeRow, it.column) in renderSet.requiredCellIdentities }
+                    .all { cell ->
                         val sourceIdentity = cell.sourcePreparedImageIdentity ?: return@all true
                         val sourceAssetId = cell.startContent.assetIdOrNull() ?: return@all true
                         prepared[sourceAssetId]?.identity == sourceIdentity
                     }
-                }
             }
         },
         missingHeaderTitle = if (viewportPlan == null) {
@@ -520,7 +521,18 @@ internal fun mediaGridMorphImageCompleteness(
         } else {
             mediaGridMorphPossibleFocalCenters(pair).asSequence()
                 .map(viewportPlan::select)
-                .flatMap { it.headerPlans.asSequence() }
+                .flatMap { selected ->
+                    val required = MediaGridMorphPlan.selectRowReflow(pair, selected.initialPinchCenter)
+                        .requiredRenderSet()
+                        .requiredHeaderIdentities
+                    selected.headerPlans.asSequence().filter { header ->
+                        MediaGridMorphRequiredHeaderIdentity(
+                            header.relativeRow,
+                            header.startKey,
+                            header.endKey,
+                        ) in required
+                    }
+                }
                 .flatMap { sequenceOf(it.startTitle, it.endTitle) }
                 .firstOrNull { it.isNullOrBlank() }
         },
@@ -536,29 +548,17 @@ internal fun mediaGridMorphPossibleFocalCenters(
     pair: MediaGridMorphPreparedPair,
 ): List<Offset> {
     val template = pair.viewportPlanTemplate ?: return listOf(pair.viewport.center)
-    val rows = template.sourceRows.filter { it.cells.isNotEmpty() }
+    val actualRows = template.sourceRows.filter { it.isActualVisibleSourceRow }
+    val rows = (actualRows.ifEmpty { template.sourceRows }).filter { it.cells.isNotEmpty() }
     if (rows.isEmpty()) return emptyList()
-    val ys = ArrayList<Float>(rows.size * 5 + 3)
-    ys += pair.viewport.top
-    ys += pair.viewport.center.y
-    ys += pair.viewport.bottom
-    rows.forEach { row ->
-        ys += row.top
-        ys += (row.top + row.bottom) / 2f
-        ys += row.bottom
-    }
-    template.sourceHeaders.forEach { header ->
-        ys += header.rect.top
-        ys += header.rect.center.y
-        ys += header.rect.bottom
-    }
-    rows.zipWithNext().forEach { (first, second) ->
-        ys += (first.bottom + second.top) / 2f
-        ys += (first.top + second.top) / 2f
-    }
-    return ys
-        .map { y -> Offset(pair.viewport.width / 2f, y.coerceIn(pair.viewport.top, pair.viewport.bottom)) }
-        .distinctBy { (it.x * 10f).roundToInt() to (it.y * 10f).roundToInt() }
+    return rows
+        .distinctBy { row -> row.rowKey ?: "invalid-visible-row-${row.visibleRow}" }
+        .map { row ->
+            Offset(
+                pair.viewport.width / 2f,
+                ((row.top + row.bottom) / 2f).coerceIn(pair.viewport.top, pair.viewport.bottom),
+            )
+        }
 }
 
 private fun Rect.intersectsViewport(viewport: Rect): Boolean =
@@ -637,13 +637,15 @@ internal fun captureMediaGridMorphInput(
     val visibleMediaRects = ArrayList<MediaGridMorphCapturedRect>()
     val visibleHeaderRects = ArrayList<MediaGridMorphCapturedHeaderRect>()
     var measuredHeaderHeight = 0f
+    val viewportStartOffset = layoutInfo.viewportStartOffset
+    val viewportHeight = (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset).coerceAtLeast(0)
     for (info in layoutInfo.visibleItemsInfo) {
         val ordinal = ordinalIndex.mediaOrdinalByItemIndex.getOrNull(info.index) ?: -1
         val rect = Rect(
             info.offset.x.toFloat(),
-            info.offset.y.toFloat(),
+            (info.offset.y - viewportStartOffset).toFloat(),
             (info.offset.x + info.size.width).toFloat(),
-            (info.offset.y + info.size.height).toFloat(),
+            (info.offset.y - viewportStartOffset + info.size.height).toFloat(),
         )
         if (ordinal >= 0) {
             if (ordinal in startOrdinal..endOrdinal) {
@@ -654,8 +656,7 @@ internal fun captureMediaGridMorphInput(
                     mediaOrdinal = ordinal,
                     rect = rect,
                     assetId = assetId,
-                    isPartiallyVisible = rect.top < layoutInfo.viewportStartOffset ||
-                        rect.bottom > layoutInfo.viewportEndOffset,
+                    isPartiallyVisible = rect.top < 0f || rect.bottom > viewportHeight,
                     itemIndex = info.index,
                     itemKey = itemKey,
                 )
@@ -739,7 +740,9 @@ internal fun captureMediaGridMorphInput(
                     columnCount = columnCount,
                     sortBase = frame.key.dataKey.sort.baseOrder,
                 ),
-                isActualVisibleSourceRow = true,
+                isActualVisibleSourceRow = ordered.any { captured ->
+                    captured.rect.bottom > 0f && captured.rect.top < viewportHeight
+                },
             )
         }
 
@@ -752,9 +755,9 @@ internal fun captureMediaGridMorphInput(
         ),
         viewport = Rect(
             0f,
-            layoutInfo.viewportStartOffset.toFloat(),
+            0f,
             layoutInfo.viewportSize.width.toFloat(),
-            layoutInfo.viewportEndOffset.toFloat(),
+            (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset).coerceAtLeast(0).toFloat(),
         ),
         cellSizePx = signature.cellSizePx.coerceAtLeast(1).toFloat(),
         headerHeightPx = measuredHeaderHeight.takeIf { it > 0f }
@@ -770,6 +773,18 @@ internal fun captureMediaGridMorphInput(
         sourceRows = sourceRows,
         totalMediaCount = totalMedia,
         preparedIndexVersion = preparedIndex?.drawIndexVersion,
+        exactTargetLayoutIndexes = listOf(columnCount - 1, columnCount + 1)
+            .filter { it in ClassifiedMediaGridMinColumnCount..ClassifiedMediaGridMaxColumnCount }
+            .distinct()
+            .associateWith { targetColumnCount ->
+                buildMediaGridMorphExactTargetLayoutIndex(
+                    frame = frame,
+                    targetColumnCount = targetColumnCount,
+                    viewportWidthPx = layoutInfo.viewportSize.width,
+                    viewportHeightPx = (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset).coerceAtLeast(0),
+                    headerHeightPx = measuredHeaderHeight.takeIf { it > 0f } ?: fallbackHeaderHeightPx,
+                )
+            },
     )
 }
 

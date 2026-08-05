@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlin.math.roundToInt
 
 internal class MediaGridMorphProductionHostState(
     val retainedImageStore: MediaGridRetainedImageStore,
@@ -254,6 +255,19 @@ internal fun MediaGridMorphTestHandoffHost(
             coordinator.observeLayout(
                 frame = currentFrame,
                 visibleTarget = target,
+                visibleTargetRow = captureMediaGridMorphVisibleTargetRow(
+                    state = state,
+                    frame = currentFrame,
+                    targetOrdinal = request.targetFocalMediaOrdinal ?: request.targetAnchor.mediaOrdinal,
+                    targetRowIndex = request.targetAnchorRowIndex,
+                    exactTargetLayoutIndex = request.exactTargetLayoutIndex,
+                ),
+                visibleTargetViewport = captureMediaGridMorphVisibleTargetViewport(
+                    state = state,
+                    frame = currentFrame,
+                    exactTargetLayoutIndex = request.exactTargetLayoutIndex,
+                    targetRowIndex = request.targetAnchorRowIndex,
+                ),
                 viewportWidth = layout.viewportSize.width,
                 viewportHeight = (layout.viewportEndOffset - layout.viewportStartOffset).coerceAtLeast(0),
             ),
@@ -505,12 +519,20 @@ internal fun MediaGridMorphProductionHandoffEffects(
             frame = currentFrame,
             targetOrdinal = request.targetFocalMediaOrdinal ?: request.targetAnchor.mediaOrdinal,
             targetRowIndex = request.targetAnchorRowIndex,
+            exactTargetLayoutIndex = request.exactTargetLayoutIndex,
+        )
+        val visibleViewport = captureMediaGridMorphVisibleTargetViewport(
+            state = state,
+            frame = currentFrame,
+            exactTargetLayoutIndex = request.exactTargetLayoutIndex,
+            targetRowIndex = request.targetAnchorRowIndex,
         )
         publish(
             coordinator.observeLayout(
                 frame = currentFrame,
                 visibleTarget = visibleTarget,
                 visibleTargetRow = visibleRow,
+                visibleTargetViewport = visibleViewport,
                 viewportWidth = layout.viewportSize.width,
                 viewportHeight = (layout.viewportEndOffset - layout.viewportStartOffset).coerceAtLeast(0),
             ),
@@ -575,19 +597,35 @@ internal fun MediaGridMorphProductionHandoffEffects(
                 frame = latestFrame,
                 targetOrdinal = request.targetFocalMediaOrdinal ?: request.targetAnchor.mediaOrdinal,
                 targetRowIndex = request.targetAnchorRowIndex,
+                exactTargetLayoutIndex = request.exactTargetLayoutIndex,
+            )
+            val visibleViewport = captureMediaGridMorphVisibleTargetViewport(
+                state = state,
+                frame = latestFrame,
+                exactTargetLayoutIndex = request.exactTargetLayoutIndex,
+                targetRowIndex = request.targetAnchorRowIndex,
             )
             Triple(
                 visibleTarget,
                 visibleRow,
                 layout.viewportSize.width to (layout.viewportEndOffset - layout.viewportStartOffset).coerceAtLeast(0),
-            )
-        }.distinctUntilChanged().collect { (visibleTarget, visibleRow, viewport) ->
+            ).let { (targetGeometry, rowGeometry, viewportSize) ->
+                HandoffLayoutSample(
+                    target = targetGeometry,
+                    row = rowGeometry,
+                    viewport = visibleViewport,
+                    viewportWidth = viewportSize.first,
+                    viewportHeight = viewportSize.second,
+                )
+            }
+        }.distinctUntilChanged().collect { sample ->
             val command = coordinator.observeLayout(
                 frame = latestFrame,
-                visibleTarget = visibleTarget,
-                visibleTargetRow = visibleRow,
-                viewportWidth = viewport.first,
-                viewportHeight = viewport.second,
+                visibleTarget = sample.target,
+                visibleTargetRow = sample.row,
+                visibleTargetViewport = sample.viewport,
+                viewportWidth = sample.viewportWidth,
+                viewportHeight = sample.viewportHeight,
             )
             publish(command, request.interactionGeneration)
             if (coordinator.snapshot().phase == MediaGridMorphGridHandoffPhase.VerifyingTarget) {
@@ -699,29 +737,78 @@ private fun captureMediaGridMorphVisibleTargetRow(
     frame: MediaGridFrameData,
     targetOrdinal: Int,
     targetRowIndex: Int?,
+    exactTargetLayoutIndex: MediaGridMorphExactTargetLayoutIndex? = null,
 ): MediaGridMorphVisibleRowGeometry? {
+    val viewport = captureMediaGridMorphVisibleTargetViewport(
+        state = state,
+        frame = frame,
+        exactTargetLayoutIndex = exactTargetLayoutIndex,
+        targetRowIndex = targetRowIndex,
+    )
+    return viewport.rows.firstOrNull { targetOrdinal in it.mediaOrdinals }
+}
+
+private data class HandoffLayoutSample(
+    val target: MediaGridMorphVisibleItemGeometry?,
+    val row: MediaGridMorphVisibleRowGeometry?,
+    val viewport: MediaGridMorphVisibleViewportGeometry?,
+    val viewportWidth: Int,
+    val viewportHeight: Int,
+)
+
+private fun captureMediaGridMorphVisibleTargetViewport(
+    state: LazyGridState,
+    frame: MediaGridFrameData,
+    exactTargetLayoutIndex: MediaGridMorphExactTargetLayoutIndex?,
+    targetRowIndex: Int?,
+): MediaGridMorphVisibleViewportGeometry {
     val layout = state.layoutInfo
+    val viewportWidth = layout.viewportSize.width.toFloat()
+    val viewportHeight = (layout.viewportEndOffset - layout.viewportStartOffset).coerceAtLeast(0).toFloat()
+    val viewport = Rect(0f, 0f, viewportWidth, viewportHeight)
+    fun localRect(info: androidx.compose.foundation.lazy.grid.LazyGridItemInfo): Rect = Rect(
+        left = info.offset.x.toFloat(),
+        top = (info.offset.y - layout.viewportStartOffset).toFloat(),
+        right = (info.offset.x + info.size.width).toFloat(),
+        bottom = (info.offset.y - layout.viewportStartOffset + info.size.height).toFloat(),
+    )
+    fun visible(rect: Rect): Boolean =
+        rect.right > viewport.left && rect.left < viewport.right &&
+            rect.bottom > viewport.top && rect.top < viewport.bottom
+
     val media = layout.visibleItemsInfo.mapNotNull { info ->
         val ordinal = frame.ordinalIndex.mediaOrdinalByItemIndex.getOrNull(info.index) ?: return@mapNotNull null
         if (ordinal < 0) return@mapNotNull null
-        Triple(info, ordinal, info.offset.y.toFloat())
+        val rect = localRect(info)
+        if (!visible(rect)) return@mapNotNull null
+        MediaGridMorphVisibleCellGeometry(ordinal, info.index, rect)
     }
-    val target = media.firstOrNull { it.second == targetOrdinal } ?: return null
-    val row = media.filter { kotlin.math.abs(it.third - target.third) <= 1f }
-        .sortedBy { it.first.offset.x }
-    if (row.isEmpty()) return null
-    val firstIndex = row.minOf { it.first.index }
-    val header = layout.visibleItemsInfo
-        .filter { it.index < firstIndex }
-        .sortedByDescending { it.index }
-        .firstNotNullOfOrNull { info -> frame.items.getOrNull(info.index) as? MediaGridHeaderItem }
-    return MediaGridMorphVisibleRowGeometry(
-        rowIndex = targetRowIndex ?: target.third.toInt(),
-        rowTop = row.minOf { it.third },
-        cellWidth = row.first().first.size.width.toFloat(),
-        cellHeight = row.first().first.size.height.toFloat(),
-        mediaOrdinals = row.map { it.second },
-        headerKey = header?.key,
-        headerTitle = header?.label,
-    )
+    val rows = media.groupBy { cell ->
+        exactTargetLayoutIndex?.rowIdForMediaOrdinal(cell.mediaOrdinal)
+            ?: cell.rect.top.roundToInt()
+    }.toList()
+        .sortedBy { (_, cells) -> cells.minOf { it.rect.top } }
+        .map { (rowId, cells) ->
+            val ordered = cells.sortedBy { it.rect.left }
+            MediaGridMorphVisibleRowGeometry(
+                rowIndex = rowId,
+                rowTop = ordered.minOf { it.rect.top },
+                cellWidth = ordered.first().rect.width,
+                cellHeight = ordered.first().rect.height,
+                mediaOrdinals = ordered.map { it.mediaOrdinal },
+                cells = ordered,
+            )
+        }
+    val headers = layout.visibleItemsInfo.mapNotNull { info ->
+        val header = frame.items.getOrNull(info.index) as? MediaGridHeaderItem ?: return@mapNotNull null
+        val rect = localRect(info)
+        if (!visible(rect)) return@mapNotNull null
+        MediaGridMorphVisibleHeaderGeometry(info.index, header.key, header.label, rect)
+    }.sortedBy { it.itemIndex }
+    val rowsWithHeaders = rows.map { row ->
+        val firstItemIndex = row.cells.minOf { it.itemIndex }
+        val header = headers.lastOrNull { it.itemIndex < firstItemIndex }
+        row.copy(headerKey = header?.key, headerTitle = header?.title)
+    }
+    return MediaGridMorphVisibleViewportGeometry(viewport, rowsWithHeaders, headers)
 }

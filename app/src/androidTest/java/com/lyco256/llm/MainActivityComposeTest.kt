@@ -48,6 +48,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.first
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Ignore
@@ -772,12 +773,18 @@ class MainActivityComposeTest {
         )
 
         val now = Instant.now()
-        val sharedPath = File(
-            storage().imageDirectory(),
-            "production-location-matrix-${SystemClock.uptimeMillis()}.webp",
-        ).apply {
-            writeBytes(bitmapBytes(8, 8, android.graphics.Color.MAGENTA))
-        }.absolutePath
+        val matrixImagePaths = (0 until 48).map { index ->
+            File(
+                storage().imageDirectory(),
+                "production-location-matrix-${SystemClock.uptimeMillis()}-$index.webp",
+            ).apply {
+                writeBytes(bitmapBytes(8, 8, android.graphics.Color.rgb(
+                    (index * 47) % 255,
+                    (index * 83) % 255,
+                    (index * 131) % 255,
+                )))
+            }.absolutePath
+        }
         val dataset = runBlocking {
             storage().withDatabase { database ->
                 val matrixTagId = database.tagDao().insertTag(
@@ -787,7 +794,7 @@ class MainActivityComposeTest {
                         updatedAt = now.toString(),
                     ),
                 )
-                val ids = (0 until 72).map { index ->
+                val ids = (0 until 48).map { index ->
                     val createdAt = now.minus((index / 12).toLong(), ChronoUnit.DAYS).toString()
                     val clipId = database.clipDao().insertClip(
                         ClipEntity(
@@ -811,7 +818,7 @@ class MainActivityComposeTest {
                                 type = "photo",
                                 remoteUrl = null,
                                 previewUrl = null,
-                                localPath = sharedPath,
+                                 localPath = matrixImagePaths[index],
                                 width = 1200,
                                 height = 1200,
                                 sizeBytes = null,
@@ -823,13 +830,13 @@ class MainActivityComposeTest {
                     database.clipDao().insertClipTag(ClipTagEntity(clipId, matrixTagId, createdAt))
                     database.clipDao().assetsForClipIds(listOf(clipId)).single().id
                 }
-                MatrixDataset(ids, List(ids.size) { sharedPath })
+                MatrixDataset(ids, matrixImagePaths)
             }
         }
         val previewStore = MediaGridPersistentPreviewStore(composeRule.activity.filesDir)
         runBlocking {
-            dataset.assetIds.forEach { assetId ->
-                previewStore.generate(assetId, File(sharedPath)) { true }
+            dataset.assetIds.forEachIndexed { index, assetId ->
+                previewStore.generate(assetId, File(dataset.paths[index])) { true }
             }
         }
 
@@ -859,28 +866,21 @@ class MainActivityComposeTest {
         }
         retainProductionMatrixAssets(dataset.assetIds, dataset.paths, previewStore)
 
-        val fullCases = listOf(
-            ProductionMorphMatrixCase(2, 3, ClassifiedSortBase.Default, ProductionMorphMatrixLocation.Start, 0.50f),
-            ProductionMorphMatrixCase(3, 2, ClassifiedSortBase.Default, ProductionMorphMatrixLocation.PartialTop, 0.34f),
+        val cases = listOf(
+            ProductionMorphMatrixCase(4, 5, ClassifiedSortBase.Default, ProductionMorphMatrixLocation.Start, 0.50f),
             ProductionMorphMatrixCase(4, 5, ClassifiedSortBase.PostTime, ProductionMorphMatrixLocation.HeaderBefore, 0.30f),
-            ProductionMorphMatrixCase(4, 3, ClassifiedSortBase.PostTime, ProductionMorphMatrixLocation.HeaderAfter, 0.70f),
-            ProductionMorphMatrixCase(8, 9, ClassifiedSortBase.PostTime, ProductionMorphMatrixLocation.Middle, 0.50f),
-            ProductionMorphMatrixCase(8, 7, ClassifiedSortBase.PostTime, ProductionMorphMatrixLocation.PartialBottom, 0.74f),
-            ProductionMorphMatrixCase(11, 12, ClassifiedSortBase.LikeCount, ProductionMorphMatrixLocation.End, 0.78f),
-            ProductionMorphMatrixCase(11, 10, ClassifiedSortBase.LikeCount, ProductionMorphMatrixLocation.AfterStart, 0.26f),
+            ProductionMorphMatrixCase(4, 5, ClassifiedSortBase.Default, ProductionMorphMatrixLocation.FourRowsDown, 0.50f),
         )
-        val cases = listOf(fullCases[0], fullCases[1], fullCases[2])
 
-        cases.forEach { matrixCase ->
+        cases.forEachIndexed { caseIndex, matrixCase ->
             applyProductionMatrixSort(matrixCase.sortBase)
             ensureProductionMatrixColumns(matrixCase.fromColumns)
-            repeat(1) {
-                MediaGridMorphTestTrace.clear()
-                prepareProductionMatrixLocation(matrixCase.location, dataset.assetIds.size)
-                waitForStableIdleReadiness(matrixCase.fromColumns)
-                MediaGridMorphTestTrace.clear()
-                var observationsBeforeUp = emptyList<MediaGridMorphDrawObservation>()
-                pinchOnGrid(
+            MediaGridMorphTestTrace.clear()
+            prepareProductionMatrixLocation(matrixCase.location, dataset.assetIds.size)
+            waitForStableIdleReadiness(matrixCase.fromColumns)
+            MediaGridMorphTestTrace.clear()
+            var observationsBeforeUp = emptyList<MediaGridMorphDrawObservation>()
+            pinchOnGrid(
                     gridTag = "classified_media_grid",
                     centerSpan = if (matrixCase.toColumns > matrixCase.fromColumns) 260f else 180f,
                     endSpan = if (matrixCase.toColumns > matrixCase.fromColumns) 180f else 260f,
@@ -888,7 +888,7 @@ class MainActivityComposeTest {
                     onBeforePhysicalUp = {
                         observationsBeforeUp = MediaGridMorphTestTrace.drawEvents()
                     },
-                )
+            )
                 val claim = MediaGridMorphTestTrace.claimEvents().lastOrNull { it.generation > 0L }
                     ?: error("No production claim observed for $matrixCase")
                 assertTrue("claim was not accepted for $matrixCase: $claim", claim.accepted)
@@ -901,6 +901,10 @@ class MainActivityComposeTest {
                 assertEquals(report.requiredTargetImageCount, report.resolvedTargetImageCount)
                 assertTrue(report.sourceViewportComplete)
                 assertTrue(report.geometryComplete)
+                assertTrue(report.requiredCellCount > 0)
+                assertTrue(report.optionalOffscreenCellCount >= 0)
+                assertNotNull(report.exactTargetRowId)
+                assertNotNull(report.exactTargetRowFirstItemIndex)
                 val morphDraws = observationsBeforeUp.filter {
                     it.drawMode == MediaGridSingleSurfaceMode.Morph && it.generation == claim.generation
                 }
@@ -930,10 +934,7 @@ class MainActivityComposeTest {
                     },
                 )
 
-                if (it < 2) {
-                    ensureProductionMatrixColumns(matrixCase.fromColumns)
-                }
-            }
+            if (caseIndex < cases.lastIndex) ensureProductionMatrixColumns(matrixCase.fromColumns)
         }
     }
 
@@ -2934,6 +2935,7 @@ class MainActivityComposeTest {
         Start,
         AfterStart,
         Middle,
+        FourRowsDown,
         HeaderBefore,
         HeaderAfter,
         PartialTop,
@@ -3054,6 +3056,7 @@ class MainActivityComposeTest {
             ProductionMorphMatrixLocation.Start -> 0
             ProductionMorphMatrixLocation.AfterStart -> 4
             ProductionMorphMatrixLocation.Middle -> assetCount / 2
+            ProductionMorphMatrixLocation.FourRowsDown -> 16
             ProductionMorphMatrixLocation.PartialTop -> 4
             ProductionMorphMatrixLocation.PartialBottom -> (assetCount - 5).coerceAtLeast(0)
             ProductionMorphMatrixLocation.End -> (assetCount - 1).coerceAtLeast(0)

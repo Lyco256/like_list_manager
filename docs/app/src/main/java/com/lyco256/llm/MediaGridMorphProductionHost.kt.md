@@ -1,5 +1,10 @@
 # MediaGridMorphProductionHost.kt
 
+## 2026-08-05 exact viewport handoff
+
+- The production host captures target rows, cells, and headers from the real `LazyGridLayoutInfo` with Y converted to viewport-local coordinates.
+- It supplies the complete visible viewport geometry to the coordinator after each target scroll/correction. Reveal is entered only after exact row and full-viewport validation succeeds.
+
 ## 2026-08-01 Phase 2 production integration
 
 - `MediaGridMorphProductionHandoffEffects` is the production handoff coordinator for the existing `LazyVerticalGrid`; it has no visual layer and drives scroll, verification, reveal, rollback, checkpoint suppression, and retained-image ownership.

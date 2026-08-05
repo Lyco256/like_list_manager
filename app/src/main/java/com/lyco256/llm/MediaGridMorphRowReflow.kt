@@ -3,7 +3,6 @@ package com.lyco256.llm
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import kotlin.math.abs
-import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
@@ -51,6 +50,8 @@ internal data class MediaGridMorphHeaderPlan(
     val startTitle: String?,
     val endTitle: String?,
     val sourceRect: Rect? = null,
+    val startKey: String? = null,
+    val endKey: String? = null,
 )
 
 /**
@@ -73,42 +74,28 @@ internal data class MediaGridMorphViewportPlanTemplate(
     val totalMediaCount: Int,
     val mediaOrdinalRange: IntRange,
     val headerHeightPx: Float,
+    val exactTargetLayoutIndex: MediaGridMorphExactTargetLayoutIndex? = null,
 ) {
     fun select(initialPinchCenter: Offset): MediaGridMorphViewportPlan {
-        val sourceRowIndex = sourceRows.indexOfFirst { row ->
+        val visibleSourceRows = sourceRows.filter { it.isActualVisibleSourceRow }
+            .ifEmpty { sourceRows }
+        val visibleSourceRow = visibleSourceRows.firstOrNull { row ->
             initialPinchCenter.y >= row.top && initialPinchCenter.y <= row.bottom
-        }.takeIf { it >= 0 } ?: sourceRows.indices.minByOrNull { index ->
-            abs((sourceRows[index].top + sourceRows[index].bottom) / 2f - initialPinchCenter.y)
+        } ?: visibleSourceRows.minByOrNull { row ->
+            abs((row.top + row.bottom) / 2f - initialPinchCenter.y)
         } ?: return emptyPlan(initialPinchCenter)
-        val visibleSourceRow = sourceRows[sourceRowIndex]
-        val visibleRowsByKey: Map<MediaGridMorphSourceRowKey, MediaGridMorphCapturedRow> =
-            sourceRows.mapNotNull { row ->
-                row.rowKey?.let { key -> key to row }
-            }.toMap()
-        val canonicalRowsByKey: Map<MediaGridMorphSourceRowKey, MediaGridMorphAlignedRow> =
-            sourceCanonicalRows.mapNotNull { row ->
-                row.rowKey?.let { key -> key to row }
-            }.toMap()
-        val strictVisibleSourceRows = sourceRows.all { it.isActualVisibleSourceRow }
-        val sourceCanonicalRowIndex = if (strictVisibleSourceRows) {
-            if (
-                visibleRowsByKey.size != sourceRows.size ||
-                canonicalRowsByKey.size != sourceCanonicalRows.size ||
-                sourceRows.any { row ->
-                    val key = row.rowKey ?: return@any true
-                    !sourceRowMatchesCanonical(row, canonicalRowsByKey[key])
-                }
-            ) return emptyPlan(initialPinchCenter)
-            visibleSourceRow.rowKey?.let { key ->
-                sourceCanonicalRows.indexOfFirst { it.rowKey == key }
-            } ?: -1
-        } else {
-            sourceCanonicalRows.indexOfFirst { row ->
-                visibleSourceRow.cells.all { visible ->
-                    row.cells.any { it.mediaOrdinal == visible.mediaOrdinal }
-                }
+        val visibleRowsByKey = visibleSourceRows.groupBy { it.rowKey }
+        val canonicalRowsByKey = sourceCanonicalRows.groupBy { it.rowKey }
+        visibleSourceRows.forEach { row ->
+            val key = row.rowKey ?: return emptyPlan(initialPinchCenter)
+            val matches = canonicalRowsByKey[key].orEmpty()
+            if (matches.size != 1 || !sourceRowMatchesCanonical(row, matches.single())) {
+                return emptyPlan(initialPinchCenter)
             }
         }
+        val sourceCanonicalRowIndex = visibleSourceRow.rowKey?.let { key ->
+            sourceCanonicalRows.indexOfFirst { it.rowKey == key }
+        } ?: -1
         if (sourceCanonicalRowIndex < 0) return emptyPlan(initialPinchCenter)
         val focalCell = visibleSourceRow.cells.minByOrNull { cell ->
             val dx = cell.rect.center.x - initialPinchCenter.x
@@ -139,18 +126,29 @@ internal data class MediaGridMorphViewportPlanTemplate(
         }.takeIf { it >= 0 } ?: targetRows.indices.minByOrNull { index ->
             targetRows[index].cells.minOfOrNull { abs(it.mediaOrdinal - targetOrdinal) } ?: Int.MAX_VALUE
         } ?: 0
-        val targetRowTopByIndex = targetRowTops(targetRowIndex, targetCellSize)
         val targetFocalCell = targetRows.getOrNull(targetRowIndex)?.cells
             ?.firstOrNull { it.mediaOrdinal == targetOrdinal }
         val idealTargetRowTop = fixedFocalCenterY - focalV * targetCellSize
-        val achievableTargetRowTop = targetAnchorRowTopWithinScrollBounds(
-            targetOrdinal = targetOrdinal,
-            targetRowIndex = targetRowIndex,
-            targetCellHeight = targetCellSize,
-            idealTargetRowTop = idealTargetRowTop,
+        val exactTargetRowId = exactTargetLayoutIndex?.rowIdForMediaOrdinal(targetOrdinal)
+        val exactTargetRowTopAtScrollZero = exactTargetRowId?.let { rowId ->
+            exactTargetLayoutIndex?.rowTopAtScrollZero(rowId)
+        }
+        val fallbackTargetRowTopAtScrollZero = targetRows
+            .take(targetRowIndex)
+            .fold(0f) { total, row ->
+                total + targetCellSize + if (row.headerBefore != null) headerHeightPx else 0f
+            } + if (targetRows.getOrNull(targetRowIndex)?.headerBefore != null) headerHeightPx else 0f
+        val fallbackContentHeight = targetRows.fold(0f) { total, row ->
+            total + targetCellSize + if (row.headerBefore != null) headerHeightPx else 0f
+        }
+        val fallbackMaxScroll = (fallbackContentHeight - viewport.height).coerceAtLeast(0f)
+        val achievableTargetRowTop = exactTargetRowId?.let {
+            exactTargetLayoutIndex?.achievableRowTop(it, idealTargetRowTop)
+        } ?: idealTargetRowTop.coerceIn(
+            fallbackTargetRowTopAtScrollZero - fallbackMaxScroll,
+            fallbackTargetRowTopAtScrollZero,
         )
-        val targetTopShift = achievableTargetRowTop - (targetRowTopByIndex[targetRowIndex] ?: achievableTargetRowTop)
-        val shiftedTargetTops = targetRowTopByIndex.mapValues { it.value + targetTopShift }
+        val targetRowTopAdjustment = achievableTargetRowTop - idealTargetRowTop
 
         val contentMinRelative = min(-sourceCanonicalRowIndex, -targetRowIndex)
         val contentMaxRelative = max(sourceCanonicalRows.lastIndex - sourceCanonicalRowIndex, targetRows.lastIndex - targetRowIndex)
@@ -172,16 +170,35 @@ internal data class MediaGridMorphViewportPlanTemplate(
             targetRows = targetRows,
             sourceHeaders = sourceHeaders,
             relativeRange = relativeRange,
+            exactTargetLayoutIndex = exactTargetLayoutIndex,
+            exactTargetRowId = exactTargetRowId,
+            exactTargetRowTopAtScrollZero = exactTargetRowTopAtScrollZero,
+            targetCellSize = targetCellSize,
         )
         val startHeaderHeights = headerPlans.associate { it.relativeRow to it.startHeightPx }
         val endHeaderHeights = headerPlans.associate { it.relativeRow to it.endHeightPx }
+        val exactTargetRowOffsets = targetRows.mapNotNull { row ->
+            val exactRowId = exactTargetLayoutIndex?.let { index ->
+                row.cells.firstOrNull()?.mediaOrdinal?.let(index::rowIdForMediaOrdinal)
+            }
+            val exactTop = exactRowId?.let { rowId -> exactTargetLayoutIndex?.rowTopAtScrollZero(rowId) }
+            if (
+                exactRowId == null ||
+                    exactTop == null ||
+                    exactTargetRowId == null ||
+                    exactTargetRowTopAtScrollZero == null
+            ) {
+                null
+            } else {
+                val relative = exactRowId - exactTargetRowId
+                relative to (exactTop - exactTargetRowTopAtScrollZero - relative * targetCellSize)
+            }
+        }.toMap()
         val rowPlans = (minRelative..maxRelative).map { relativeRow ->
             val canonicalSource = sourceCanonicalRows.getOrNull(sourceCanonicalRowIndex + relativeRow)
             val source = canonicalSource?.let { candidate ->
-                val visible = if (strictVisibleSourceRows) {
-                    candidate.rowKey?.let { key -> visibleRowsByKey[key] }
-                } else {
-                    null
+                val visible = candidate.rowKey?.let { key ->
+                    visibleRowsByKey[key]?.singleOrNull()
                 }
                 if (visible == null) candidate else MediaGridMorphAlignedRow(
                     rowIndex = candidate.rowIndex,
@@ -198,7 +215,8 @@ internal data class MediaGridMorphViewportPlanTemplate(
                     source = source,
                     target = target,
                     startHeaderOffsetPx = mediaGridMorphHeaderOffsetBefore(relativeRow, startHeaderHeights),
-                    endHeaderOffsetPx = mediaGridMorphHeaderOffsetBefore(relativeRow, endHeaderHeights),
+                    endHeaderOffsetPx = exactTargetRowOffsets[relativeRow]
+                        ?: mediaGridMorphHeaderOffsetBefore(relativeRow, endHeaderHeights),
                 ),
             )
         }
@@ -219,62 +237,25 @@ internal data class MediaGridMorphViewportPlanTemplate(
             sourceFocalRowTop = visibleSourceRow.top,
             focalV = focalV,
             relativeRowRange = relativeRange,
-            targetAnchorRowIndex = targetRowIndex,
-            targetAnchorRowTop = shiftedTargetTops[targetRowIndex] ?: achievableTargetRowTop,
+            targetAnchorRowIndex = exactTargetRowId ?: targetRowIndex,
+            targetAnchorRowTop = achievableTargetRowTop,
             usedOrdinalFractionFallback = directTargetRowIndex < 0,
             rowPlans = rowPlans,
             headerPlans = headerPlans,
+            exactTargetLayoutIndex = exactTargetLayoutIndex,
+            targetAnchorRowId = exactTargetRowId,
+            targetAnchorRowFirstItemIndex = exactTargetRowId?.let { rowId ->
+                exactTargetLayoutIndex?.rowFirstItemIndex(rowId)
+            },
+            targetAnchorRowMediaOrdinals = exactTargetRowId?.let { rowId ->
+                exactTargetLayoutIndex?.rowMediaOrdinals(rowId)
+            }
+                ?: IntArray(0),
+            targetAnchorRowTopAtScrollZero = exactTargetRowTopAtScrollZero,
+            targetUnclampedRowTop = idealTargetRowTop,
+            targetMaxScroll = exactTargetLayoutIndex?.maxScrollPx ?: fallbackMaxScroll,
+            targetRowTopAdjustment = targetRowTopAdjustment,
         )
-    }
-
-    private fun targetRowTops(anchorRowIndex: Int, cellHeight: Float): Map<Int, Float> {
-        if (targetRows.isEmpty()) return emptyMap()
-        val result = HashMap<Int, Float>(targetRows.size)
-        result[anchorRowIndex] = viewport.center.y - cellHeight / 2f
-        for (index in anchorRowIndex - 1 downTo 0) {
-            val lower = result[index + 1] ?: continue
-            val header = targetRows[index + 1].headerBefore
-            result[index] = lower - (headerHeightPx.takeIf { header != null } ?: 0f) - cellHeight
-        }
-        for (index in anchorRowIndex + 1..targetRows.lastIndex) {
-            val upper = result[index - 1] ?: continue
-            val header = targetRows[index].headerBefore
-            result[index] = upper + cellHeight + (headerHeightPx.takeIf { header != null } ?: 0f)
-        }
-        return result
-    }
-
-    /**
-     * Converts the ideal focal-row top into a top that a real LazyGrid can
-     * actually realize. Default ordering has no full-span headers, so its
-     * global row index and total content height are exact. Header-based sorts
-     * use the bounded target window plus the media ordinal prefix as the
-     * conservative geometry available to this immutable capture.
-     */
-    private fun targetAnchorRowTopWithinScrollBounds(
-        targetOrdinal: Int,
-        targetRowIndex: Int,
-        targetCellHeight: Float,
-        idealTargetRowTop: Float,
-    ): Float {
-        val rowPrefix = if (sortBase == ClassifiedSortBase.Default) {
-            targetOrdinal / toColumnCount.coerceAtLeast(1)
-        } else {
-            mediaOrdinalRange.first / toColumnCount.coerceAtLeast(1) + targetRowIndex
-        }
-        val totalMediaRows = ceil(totalMediaCount.toFloat() / toColumnCount.coerceAtLeast(1)).toInt()
-        val estimatedHeaderCount = if (sortBase == ClassifiedSortBase.Default) 0 else targetHeaders.size
-        val contentHeight = totalMediaRows * targetCellHeight + estimatedHeaderCount * headerHeightPx
-        val maxScroll = (contentHeight - viewport.height).coerceAtLeast(0f)
-        val headersBeforeTarget = if (sortBase == ClassifiedSortBase.Default) {
-            0
-        } else {
-            targetRows.take(targetRowIndex + 1).count { it.headerBefore != null }
-        }
-        val rowTopAtScrollZero = viewport.top + rowPrefix * targetCellHeight + headersBeforeTarget * headerHeightPx
-        val minimumTop = rowTopAtScrollZero - maxScroll
-        val maximumTop = rowTopAtScrollZero
-        return idealTargetRowTop.coerceIn(minimumTop, maximumTop)
     }
 
     private fun emptyPlan(center: Offset): MediaGridMorphViewportPlan = MediaGridMorphViewportPlan(
@@ -339,6 +320,10 @@ internal data class MediaGridMorphViewportPlanTemplate(
         targetRows: List<MediaGridMorphAlignedRow>,
         sourceHeaders: List<MediaGridMorphCapturedHeaderRect>,
         relativeRange: IntRange,
+        exactTargetLayoutIndex: MediaGridMorphExactTargetLayoutIndex?,
+        exactTargetRowId: Int?,
+        exactTargetRowTopAtScrollZero: Float?,
+        targetCellSize: Float,
     ): List<MediaGridMorphHeaderPlan> {
         val sourceByRelative = sourceHeaders.mapNotNull { header ->
             val rowIndex = sourceRows.indexOfFirst { row -> row.cells.any { it.mediaOrdinal >= header.firstMediaOrdinal } }
@@ -346,7 +331,15 @@ internal data class MediaGridMorphViewportPlanTemplate(
         }.toMap()
         val targetByRelative = targetRows.mapNotNull { row ->
             val header = row.headerBefore ?: return@mapNotNull null
-            (row.rowIndex - targetRowIndex) to header
+            val exactRowId = exactTargetLayoutIndex?.let { index ->
+                row.cells.firstOrNull()?.mediaOrdinal?.let(index::rowIdForMediaOrdinal)
+            }
+            val relative = if (exactRowId != null && exactTargetRowId != null) {
+                exactRowId - exactTargetRowId
+            } else {
+                row.rowIndex - targetRowIndex
+            }
+            relative to header
         }.toMap()
         val rawPlans = (relativeRange.first..relativeRange.last + 1).mapNotNull { relative ->
             val source = sourceByRelative[relative]
@@ -361,14 +354,36 @@ internal data class MediaGridMorphViewportPlanTemplate(
                 startTitle = source?.title,
                 endTitle = target?.title,
                 sourceRect = source?.rect,
+                startKey = source?.key,
+                endKey = target?.key,
             )
         }
         val startHeights = rawPlans.associate { it.relativeRow to it.startHeightPx }
         val endHeights = rawPlans.associate { it.relativeRow to it.endHeightPx }
         return rawPlans.map { plan ->
+            val targetHeaderFirstOrdinal = plan.endKey?.let { key ->
+                targetRows.firstOrNull { it.headerBefore?.key == key }
+                    ?.headerBefore?.firstMediaOrdinal
+            }
+            val exactTargetHeader = if (targetHeaderFirstOrdinal != null) {
+                exactTargetLayoutIndex?.headers?.firstOrNull {
+                    it.key == plan.endKey && it.firstMediaOrdinal == targetHeaderFirstOrdinal
+                }
+            } else null
+            val exactEndOffset = if (
+                exactTargetHeader != null &&
+                    exactTargetRowTopAtScrollZero != null &&
+                    exactTargetRowId != null
+            ) {
+                exactTargetHeader.topAtScrollZero - exactTargetRowTopAtScrollZero -
+                    plan.relativeRow * targetCellSize
+            } else {
+                null
+            }
             plan.copy(
                 startOffsetBeforePx = mediaGridMorphHeaderOffsetBefore(plan.relativeRow, startHeights) - plan.startHeightPx,
-                endOffsetBeforePx = mediaGridMorphHeaderOffsetBefore(plan.relativeRow, endHeights) - plan.endHeightPx,
+                endOffsetBeforePx = exactEndOffset
+                    ?: mediaGridMorphHeaderOffsetBefore(plan.relativeRow, endHeights) - plan.endHeightPx,
             )
         }
     }
@@ -380,12 +395,10 @@ private fun sourceRowMatchesCanonical(
 ): Boolean {
     if (canonical == null || visible.rowKey != canonical.rowKey) return false
     val visibleCells = visible.cells.sortedBy { it.column }
-    val canonicalCells = canonical.cells.sortedBy { it.column }
-    if (visibleCells.size != canonicalCells.size) return false
-    return visibleCells.zip(canonicalCells).all { (actual, expected) ->
-        actual.column == expected.column &&
-            actual.mediaOrdinal == expected.mediaOrdinal &&
-            actual.assetId == expected.assetId
+    val canonicalByColumn = canonical.cells.associateBy { it.column }
+    return visibleCells.all { actual ->
+        val expected = canonicalByColumn[actual.column] ?: return@all false
+        actual.mediaOrdinal == expected.mediaOrdinal && actual.assetId == expected.assetId
     }
 }
 
@@ -411,6 +424,14 @@ internal data class MediaGridMorphViewportPlan(
     val usedOrdinalFractionFallback: Boolean,
     val rowPlans: List<MediaGridMorphRowPlan>,
     val headerPlans: List<MediaGridMorphHeaderPlan>,
+    val exactTargetLayoutIndex: MediaGridMorphExactTargetLayoutIndex? = null,
+    val targetAnchorRowId: Int? = null,
+    val targetAnchorRowFirstItemIndex: Int? = null,
+    val targetAnchorRowMediaOrdinals: IntArray = IntArray(0),
+    val targetAnchorRowTopAtScrollZero: Float? = null,
+    val targetUnclampedRowTop: Float? = null,
+    val targetMaxScroll: Float = 0f,
+    val targetRowTopAdjustment: Float = 0f,
 )
 
 internal fun buildMediaGridMorphViewportPlanTemplate(
@@ -438,6 +459,7 @@ internal fun buildMediaGridMorphViewportPlanTemplate(
         totalMediaCount = capture.totalMediaCount,
         mediaOrdinalRange = capture.mediaOrdinalRange,
         headerHeightPx = capture.headerHeightPx,
+        exactTargetLayoutIndex = capture.exactTargetLayoutIndexes[toColumnCount],
     )
 }
 
@@ -667,9 +689,11 @@ internal fun mediaGridMorphRowCellRect(
     if (p <= 0f && cell.sourceRect != null) return cell.sourceRect
     val currentCellSize = mediaGridMorphCurrentCellSize(plan, p)
     val focalRowTop = plan.fixedFocalCenterY - plan.focalV * currentCellSize
+    val targetAnchorAdjustment = if (p >= 1f) plan.targetRowTopAdjustment else 0f
     val rowTop = focalRowTop +
         cell.relativeRow * currentCellSize +
-        lerpRowEdge(cell.startHeaderOffsetPx, cell.endHeaderOffsetPx, p)
+        lerpRowEdge(cell.startHeaderOffsetPx, cell.endHeaderOffsetPx, p) +
+        targetAnchorAdjustment
     val gridLeft = plan.viewport.left
     return Rect(
         gridLeft + cell.column * currentCellSize,

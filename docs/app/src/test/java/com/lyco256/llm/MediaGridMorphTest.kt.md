@@ -1,5 +1,9 @@
 # `MediaGridMorphTest.kt`
 
+## 2026-08-05 regressions
+
+- Pure tests cover one focal center per visible source row, RequiredRenderSet swept viewport boundaries, visible-row canonical matching without global row-count equality, and exact local target geometry/clamping.
+
 ## 2026-08-02 row alignment and direction lock coverage
 
 - Unit coverage checks every start offset for 2..12 columns, same-bucket preceding metadata, bucket-boundary reset, and right-sided bounded-row completion using the common source/target row builder.

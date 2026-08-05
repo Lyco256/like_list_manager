@@ -55,6 +55,14 @@ internal data class MediaGridMorphHandoffRequest(
     val targetAnchorRowIndex: Int? = null,
     val targetAnchorRowTop: Float? = null,
     val targetRowMediaOrdinals: List<Int> = emptyList(),
+    val targetFocalItemIndex: Int? = null,
+    val targetRowFirstItemIndex: Int? = null,
+    val targetExactRowId: Int? = null,
+    val targetDesiredRowTopViewportLocal: Float? = null,
+    val targetUnclampedRowTopViewportLocal: Float? = null,
+    val targetExactMaxScroll: Float? = null,
+    val exactTargetLayoutIndex: MediaGridMorphExactTargetLayoutIndex? = null,
+    val targetHeaderKey: String? = null,
     val targetCellSizePx: Float? = null,
     val targetHeaderTitle: String? = null,
     val frozenViewportPlan: MediaGridMorphViewportPlan? = plan.viewportPlan,
@@ -691,11 +699,29 @@ internal class MediaGridMorphInteractionController(
             targetFocalMediaOrdinal = plan.viewportPlan?.targetFocalMediaOrdinal,
             targetAnchorRowIndex = plan.viewportPlan?.targetAnchorRowIndex,
             targetAnchorRowTop = plan.viewportPlan?.targetAnchorRowTop,
-            targetRowMediaOrdinals = plan.viewportPlan?.rowPlans
-                ?.firstOrNull { it.relativeRow == 0 }
-                ?.cells
-                ?.mapNotNull { it.targetMediaOrdinal }
-                .orEmpty(),
+            targetRowMediaOrdinals = plan.viewportPlan?.targetAnchorRowMediaOrdinals?.toList()
+                ?.takeIf { it.isNotEmpty() }
+                ?: plan.viewportPlan?.rowPlans
+                    ?.firstOrNull { it.relativeRow == 0 }
+                    ?.cells
+                    ?.mapNotNull { it.targetMediaOrdinal }
+                    .orEmpty(),
+            targetFocalItemIndex = plan.viewportPlan?.let { viewportPlan ->
+                viewportPlan.targetFocalMediaOrdinal?.let { ordinal ->
+                    viewportPlan.exactTargetLayoutIndex?.itemIndexByMediaOrdinal?.getOrNull(ordinal)
+                }
+            },
+            targetRowFirstItemIndex = plan.viewportPlan?.targetAnchorRowFirstItemIndex,
+            targetExactRowId = plan.viewportPlan?.targetAnchorRowId,
+            targetDesiredRowTopViewportLocal = plan.viewportPlan?.targetAnchorRowTop,
+            targetUnclampedRowTopViewportLocal = plan.viewportPlan?.targetUnclampedRowTop,
+            targetExactMaxScroll = plan.viewportPlan?.targetMaxScroll,
+            exactTargetLayoutIndex = plan.viewportPlan?.exactTargetLayoutIndex,
+            targetHeaderKey = plan.viewportPlan?.let { viewportPlan ->
+                viewportPlan.exactTargetLayoutIndex
+                    ?.headerForRow(viewportPlan.targetAnchorRowId ?: -1)
+                    ?.key
+            },
             targetCellSizePx = plan.viewportPlan?.let { it.viewport.width / plan.toColumnCount.coerceAtLeast(1) },
             targetHeaderTitle = plan.viewportPlan?.headerPlans
                 ?.firstOrNull { it.relativeRow == 0 }

@@ -1,5 +1,9 @@
 # `MediaGridMorphHandoffTest.kt`
 
+## 2026-08-05 regressions
+
+- Handoff tests require the one-correction limit and preserve rollback/cancel behavior for stale or invalid target frames.
+
 ## 2026-08-01 Phase 2 coverage
 
 - Coordinator tests cover target ordinal/row/header/cell geometry verification, one-pixel correction, rollback, stale data, viewport mismatch, and checkpoint suppression.
