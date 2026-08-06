@@ -385,10 +385,15 @@ internal class MediaGridMorphGridHandoffCoordinator {
             ?: 0
         if (!rollingBack && !current.targetScrollIssued) {
             current = current.copy(targetScrollIssued = true)
-            return MediaGridMorphGridHandoffCommand.ScrollToItem(
-                request.targetRowFirstItemIndex ?: target.itemIndex,
-                targetScrollOffset,
-            )
+            if (request.plan.viewportPlan != null || request.finalCorrection == Offset.Zero) {
+                return MediaGridMorphGridHandoffCommand.ScrollToItem(
+                    request.targetRowFirstItemIndex ?: target.itemIndex,
+                    targetScrollOffset,
+                )
+            }
+            // Direct slot morphs already carry the target focal correction
+            // in the unified surface. Continue with the current layout
+            // instead of applying a second, unrelated Y translation.
         }
         if (visibleTarget == null || visibleTarget.assetId != target.assetId) {
             if (rollingBack) {
@@ -455,7 +460,10 @@ internal class MediaGridMorphGridHandoffCoordinator {
             }
             if (request.exactTargetLayoutIndex != null) {
                 val viewport = visibleTargetViewport
-                if (viewport == null || !validateMediaGridMorphExactTargetViewport(request.exactTargetLayoutIndex, viewport)) {
+                if (viewport == null || !validateMediaGridMorphExactTargetViewport(
+                    request.exactTargetLayoutIndex,
+                    viewport,
+                )) {
                     return beginRollback(
                         MediaGridMorphGridHandoffFailureReason.GeometryMismatch,
                         "exact-target-viewport-invalid row=${row.mediaOrdinals} expected=${request.targetRowMediaOrdinals}",

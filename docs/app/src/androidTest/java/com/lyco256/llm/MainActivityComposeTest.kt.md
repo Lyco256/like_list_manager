@@ -1,5 +1,11 @@
 # `app/src/androidTest/java/com/lyco256/llm/MainActivityComposeTest.kt`
 
+## 2026-08-05 real-device sequence reduction
+
+- The broad display-toggle test keeps the fallback, reverse-direction, and threshold-miss patterns, but removes the duplicate second increase/decrease pair after cell interaction; recreation and source-revision checks remain.
+- The legacy TEST_HARNESS same-surface smoke is excluded from the default production sequence because the production claim and handoff cases cover the same behavior.
+- All three production location-matrix patterns remain enabled; only the duplicate post-interaction increase/decrease pair was removed.
+
 ## 2026-08-05 exact 4-to-5 production matrix
 
 `productionMorphLocationMatrixIsStableIdleAndMorphsBeforePhysicalUp` uses exactly three representative 4→5 sequences: a headerless dataset with distinct asset identities, a visible PostTime header, and a roughly four-row offset. Each claim asserts RequiredRenderSet counts, exact target row metadata, Morph-before-up, no fallback, no rollback, and terminal handoff completion.

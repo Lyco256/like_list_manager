@@ -23,6 +23,9 @@ internal data class MediaGridMorphExactTargetLayoutIndex(
     val viewportWidthPx: Int,
     val viewportHeightPx: Int,
     val cellSizePx: Float,
+    val columnLeftPx: IntArray,
+    val columnWidthPx: IntArray,
+    val rowHeightPx: Float,
     val itemIndexByMediaOrdinal: IntArray,
     val rowIdByMediaOrdinal: IntArray,
     val rowFirstItemIndex: IntArray,
@@ -79,6 +82,15 @@ internal fun buildMediaGridMorphExactTargetLayoutIndex(
 ): MediaGridMorphExactTargetLayoutIndex {
     val columns = targetColumnCount.coerceAtLeast(1)
     val cellSize = (viewportWidthPx.toFloat() / columns).coerceAtLeast(1f)
+    val width = viewportWidthPx.coerceAtLeast(columns)
+    val baseColumnWidth = width / columns
+    val extraColumnWidths = width % columns
+    val columnWidths = IntArray(columns) { column ->
+        baseColumnWidth + if (column < extraColumnWidths) 1 else 0
+    }
+    val columnLefts = IntArray(columns)
+    for (column in 1 until columns) columnLefts[column] = columnLefts[column - 1] + columnWidths[column - 1]
+    val rowHeight = columnWidths.firstOrNull()?.toFloat() ?: cellSize
     val height = headerHeightPx.coerceAtLeast(0f)
     val entries = frame.items
         .asSequence()
@@ -108,7 +120,7 @@ internal fun buildMediaGridMorphExactTargetLayoutIndex(
     fun flushRow() {
         if (currentRowId < 0) return
         rowMediaOrdinalCount += rowMediaOrdinals.size - currentRowStart
-        contentY += cellSize
+        contentY += rowHeight
         currentRowId = -1
     }
 
@@ -159,6 +171,9 @@ internal fun buildMediaGridMorphExactTargetLayoutIndex(
         viewportWidthPx = viewportWidthPx,
         viewportHeightPx = viewportHeight,
         cellSizePx = cellSize,
+        columnLeftPx = columnLefts,
+        columnWidthPx = columnWidths,
+        rowHeightPx = rowHeight,
         itemIndexByMediaOrdinal = itemIndexByOrdinal,
         rowIdByMediaOrdinal = rowIdByOrdinal,
         rowFirstItemIndex = rowFirstItemIndex.toIntArray(),
@@ -185,13 +200,6 @@ internal fun validateMediaGridMorphExactTargetViewport(
 ): Boolean {
     val viewport = visible.viewport
     if (viewport.width <= 0f || viewport.height <= 0f) return false
-    val scroll = visible.rows.firstOrNull()?.let { row ->
-        index.rowTopAtScrollZero(row.rowIndex)?.minus(row.rowTop)
-    } ?: visible.headers.firstOrNull()?.let { header ->
-        index.headers.firstOrNull { it.itemIndex == header.itemIndex }?.topAtScrollZero
-            ?.minus(header.rect.top)
-    } ?: 0f
-
     fun intersects(top: Float, bottom: Float): Boolean =
         bottom > viewport.top && top < viewport.bottom
 
@@ -202,14 +210,38 @@ internal fun validateMediaGridMorphExactTargetViewport(
             close(actual.right, expected.right) &&
             close(actual.bottom, expected.bottom)
 
+    val observedHeaderHeights = visible.headers.associate { it.itemIndex to it.rect.height }
+    fun headerHeightDelta(header: MediaGridMorphExactTargetHeader): Float =
+        observedHeaderHeights[header.itemIndex]?.minus(header.height) ?: 0f
+    fun adjustedHeaderTop(header: MediaGridMorphExactTargetHeader): Float =
+        header.topAtScrollZero + index.headers
+            .asSequence()
+            .takeWhile { it.itemIndex < header.itemIndex }
+            .fold(0f) { total, previous -> total + headerHeightDelta(previous) }
+    fun adjustedRowTop(rowId: Int): Float? {
+        val baseTop = index.rowTopAtScrollZero(rowId) ?: return null
+        val firstItemIndex = index.rowFirstItemIndex(rowId) ?: return null
+        return baseTop + index.headers
+            .asSequence()
+            .takeWhile { it.itemIndex < firstItemIndex }
+            .fold(0f) { total, previous -> total + headerHeightDelta(previous) }
+    }
+    val scroll = visible.rows.firstOrNull()?.let { row ->
+        adjustedRowTop(row.rowIndex)?.minus(row.rowTop)
+    } ?: visible.headers.firstOrNull()?.let { header ->
+        index.headers.firstOrNull { it.itemIndex == header.itemIndex }
+            ?.let(::adjustedHeaderTop)
+            ?.minus(header.rect.top)
+    } ?: 0f
+
     val expectedRowIds = index.rowTopAtScrollZero.indices.filter { rowId ->
-        val top = index.rowTopAtScrollZero[rowId] - scroll
-        intersects(top, top + index.cellSizePx)
+        val top = (adjustedRowTop(rowId) ?: return@filter false) - scroll
+        intersects(top, top + index.rowHeightPx)
     }
     val actualRows = visible.rows.sortedBy { it.rowIndex }
     if (actualRows.map { it.rowIndex } != expectedRowIds) return false
     actualRows.forEach { row ->
-        val rowTop = index.rowTopAtScrollZero(row.rowIndex) ?: return false
+        val rowTop = adjustedRowTop(row.rowIndex) ?: return false
         val expectedOrdinals = index.rowMediaOrdinals(row.rowIndex) ?: return false
         if (row.mediaOrdinals != expectedOrdinals.toList()) return false
         if (!close(row.rowTop, rowTop - scroll) ||
@@ -220,12 +252,13 @@ internal fun validateMediaGridMorphExactTargetViewport(
         if (cells.size != expectedOrdinals.size) return false
         cells.forEachIndexed { column, cell ->
             val ordinal = expectedOrdinals[column]
-            val expectedItemIndex = index.itemIndexByMediaOrdinal.getOrNull(ordinal) ?: return false
+            val expectedItemIndex = index.itemIndexByMediaOrdinal.getOrNull(ordinal)
+                ?: return false
             val expectedRect = Rect(
-                left = column * index.cellSizePx,
+                left = index.columnLeftPx[column].toFloat(),
                 top = rowTop - scroll,
-                right = (column + 1) * index.cellSizePx,
-                bottom = rowTop - scroll + index.cellSizePx,
+                right = (index.columnLeftPx[column] + index.columnWidthPx[column]).toFloat(),
+                bottom = rowTop - scroll + index.rowHeightPx,
             )
             if (cell.mediaOrdinal != ordinal || cell.itemIndex != expectedItemIndex ||
                 !rectClose(cell.rect, expectedRect)
@@ -234,16 +267,20 @@ internal fun validateMediaGridMorphExactTargetViewport(
     }
 
     val expectedHeaders = index.headers.filter { header ->
-        intersects(header.topAtScrollZero - scroll, header.topAtScrollZero - scroll + header.height)
+        val top = adjustedHeaderTop(header) - scroll
+        val height = observedHeaderHeights[header.itemIndex] ?: header.height
+        intersects(top, top + height)
     }
     val actualHeaders = visible.headers.sortedBy { it.itemIndex }
     if (actualHeaders.map { it.itemIndex } != expectedHeaders.map { it.itemIndex }) return false
     actualHeaders.zip(expectedHeaders).forEach { (actual, expected) ->
+        val expectedTop = adjustedHeaderTop(expected)
+        val expectedHeight = observedHeaderHeights[expected.itemIndex] ?: expected.height
         val expectedRect = Rect(
             left = viewport.left,
-            top = expected.topAtScrollZero - scroll,
+            top = expectedTop - scroll,
             right = viewport.right,
-            bottom = expected.topAtScrollZero - scroll + expected.height,
+            bottom = expectedTop - scroll + expectedHeight,
         )
         if (actual.key != expected.key || actual.title != expected.title ||
             !rectClose(actual.rect, expectedRect)

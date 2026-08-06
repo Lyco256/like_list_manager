@@ -145,6 +145,7 @@ import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.MediaGridClipSource
 import com.lyco256.llm.data.MediaGridPreviewNotifier
+import com.lyco256.llm.data.MediaGridPreviewPreloader
 import com.lyco256.llm.data.MediaGridPreviewRecoveryGate
 import com.lyco256.llm.data.buildMediaGridImageRequest
 import com.lyco256.llm.data.TagEntity
@@ -3643,6 +3644,29 @@ private fun ClassifiedMediaGridContent(
     val effectiveControllerState = if (controller == null) {
         fallbackControllerState
     } else controllerState
+    val previewPreloader: MediaGridPreviewPreloader = remember(appContainer.mediaGridImageLoader) {
+        MediaGridPreviewPreloader(context, appContainer.mediaGridImageLoader)
+    }
+    DisposableEffect(previewPreloader) {
+        onDispose { previewPreloader.cancelAll() }
+    }
+    LaunchedEffect(previewPreloader, state, frame.key, columnCount) {
+        snapshotFlow {
+            state.layoutInfo.visibleItemsInfo
+                .map { it.index }
+                .filter { index -> frame.items.getOrNull(index) is MediaGridCellItem }
+                .distinct()
+        }.distinctUntilChanged().collectLatest { visibleIndices ->
+            val candidates = buildList {
+                appContainer.mediaGridImagePreparer.preparePersistentPreviews(
+                    frame = frame,
+                    indices = visibleIndices,
+                    emit = { add(it) },
+                )
+            }
+            previewPreloader.reconcile(candidates)
+        }
+    }
     val residentDrawIndexVersion = if (residentCanvasMode != MediaGridResidentCanvasMode.Disabled && retainedImageStore != null) {
         val version by retainedImageStore.drawIndexVersionFlow.collectAsState()
         version

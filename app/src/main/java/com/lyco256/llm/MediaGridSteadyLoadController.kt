@@ -732,6 +732,7 @@ internal class MediaGridSteadyLoadController(
                             // Pending here leaves it with no queue entry and no
                             // future wake-up; terminal failure must be explicit
                             // for both urgent and background lanes.
+                            record?.bitmapStatus = QueueTaskStatus.Failed
                             states[task.assetId] = MediaGridCellLoadState(
                                 MediaGridCellLoadStatus.Failed,
                                 task.prepared,
@@ -1049,8 +1050,16 @@ internal class MediaGridSteadyLoadController(
             return
         }
         if (prepared.candidates.isEmpty()) {
-            record.bitmapStatus = QueueTaskStatus.Complete
+            record.bitmapStatus = QueueTaskStatus.Failed
             states[assetId] = MediaGridCellLoadState(MediaGridCellLoadStatus.Failed, prepared)
+            return
+        }
+        if (record.bitmapStatus == QueueTaskStatus.Failed) {
+            states[assetId] = MediaGridCellLoadState(
+                MediaGridCellLoadStatus.Failed,
+                prepared,
+                record.candidateIndex,
+            )
             return
         }
         val firstLocalIndex = prepared.candidates.indexOfFirst(::isLocalCandidate)
