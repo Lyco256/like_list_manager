@@ -8,7 +8,7 @@
 
 ## 2026-08-05 exact 4-to-5 production matrix
 
-`productionMorphLocationMatrixIsStableIdleAndMorphsBeforePhysicalUp` uses exactly three representative 4→5 sequences: a headerless dataset with distinct asset identities, a visible PostTime header, and a roughly four-row offset. Each claim asserts RequiredRenderSet counts, exact target row metadata, Morph-before-up, no fallback, no rollback, and terminal handoff completion.
+The production coverage is split into exactly three representative 4-to-5 sequences: all slots change, a visible PostTime header, and a roughly four-row offset. Each claim asserts RequiredRenderSet counts, exact target row metadata, Morph-before-up, no fallback, no rollback, exact viewport validation, and terminal handoff completion. The four-row case also verifies that the first post-handoff underlying draw is the matching Normal frame.
 
 ## 2026-08-02 production claim-path regression
 

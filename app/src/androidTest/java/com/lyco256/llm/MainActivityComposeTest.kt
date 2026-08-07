@@ -753,17 +753,57 @@ class MainActivityComposeTest {
     }
 
     @Test
-    fun productionMorphLocationMatrixIsStableIdleAndMorphsBeforePhysicalUp() {
+    fun productionMorphAllSlotsChangeIsStableIdleAndMorphsBeforePhysicalUp() {
+        runProductionMorphRepresentativeSequence(
+            ProductionMorphMatrixCase(
+                fromColumns = 4,
+                toColumns = 5,
+                sortBase = ClassifiedSortBase.Default,
+                location = ProductionMorphMatrixLocation.Start,
+                centerYFraction = 0.50f,
+            ),
+        )
+    }
+
+    @Test
+    fun productionMorphHeaderVisibleIsStableIdleAndMorphsBeforePhysicalUp() {
+        runProductionMorphRepresentativeSequence(
+            ProductionMorphMatrixCase(
+                fromColumns = 4,
+                toColumns = 5,
+                sortBase = ClassifiedSortBase.PostTime,
+                location = ProductionMorphMatrixLocation.HeaderBefore,
+                centerYFraction = 0.30f,
+            ),
+        )
+    }
+
+    @Test
+    fun productionMorphFourRowsDownMatchesExactTargetNormalFrame() {
+        runProductionMorphRepresentativeSequence(
+            ProductionMorphMatrixCase(
+                fromColumns = 4,
+                toColumns = 5,
+                sortBase = ClassifiedSortBase.Default,
+                location = ProductionMorphMatrixLocation.FourRowsDown,
+                centerYFraction = 0.50f,
+            ),
+        )
+    }
+
+    private fun runProductionMorphRepresentativeSequence(matrixCase: ProductionMorphMatrixCase) {
         data class MatrixDataset(
             val assetIds: List<Long>,
             val paths: List<String>,
         )
 
         val now = Instant.now()
+        val fixtureName = "Production location ${matrixCase.location.name}"
+        val fixtureKey = "production-location-${matrixCase.location.name.lowercase()}"
         val matrixImagePaths = (0 until 48).map { index ->
             File(
                 storage().imageDirectory(),
-                "production-location-matrix-${SystemClock.uptimeMillis()}-$index.webp",
+                "$fixtureKey-${SystemClock.uptimeMillis()}-$index.webp",
             ).apply {
                 writeBytes(bitmapBytes(8, 8, android.graphics.Color.rgb(
                     (index * 47) % 255,
@@ -785,10 +825,10 @@ class MainActivityComposeTest {
                     val createdAt = now.minus((index / 12).toLong(), ChronoUnit.DAYS).toString()
                     val clipId = database.clipDao().insertClip(
                         ClipEntity(
-                            xPostId = "production-location-matrix-$index",
+                        xPostId = "$fixtureKey-$index",
                             authorName = "Production Matrix Author $index",
                             authorUsername = "production_matrix_author_$index",
-                            text = "Production location matrix",
+                            text = fixtureName,
                             postUrl = "https://x.com/production_matrix_author_$index/status/$index",
                             xCreatedAt = createdAt,
                             savedAt = createdAt,
@@ -801,7 +841,7 @@ class MainActivityComposeTest {
                         listOf(
                             AssetEntity(
                                 clipId = clipId,
-                                mediaKey = "production-location-matrix-$index",
+                                mediaKey = "$fixtureKey-$index",
                                 type = "photo",
                                 remoteUrl = null,
                                 previewUrl = null,
@@ -832,7 +872,7 @@ class MainActivityComposeTest {
             composeRule.onAllNodesWithTag("classified_display_toggle").fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithTag("filter_open").performClick()
-        composeRule.onNodeWithTag("filter_query").performTextReplacement("Production location matrix")
+        composeRule.onNodeWithTag("filter_query").performTextReplacement(fixtureName)
         composeRule.onNodeWithTag("filter_apply").performClick()
         composeRule.waitUntil(30_000) {
             dataset.assetIds.any { assetId ->
@@ -853,74 +893,76 @@ class MainActivityComposeTest {
         }
         retainProductionMatrixAssets(dataset.assetIds, dataset.paths, previewStore)
 
-        val cases = listOf(
-            ProductionMorphMatrixCase(4, 5, ClassifiedSortBase.Default, ProductionMorphMatrixLocation.Start, 0.50f),
-            ProductionMorphMatrixCase(5, 4, ClassifiedSortBase.PostTime, ProductionMorphMatrixLocation.HeaderBefore, 0.30f),
-            ProductionMorphMatrixCase(4, 5, ClassifiedSortBase.Default, ProductionMorphMatrixLocation.FourRowsDown, 0.50f),
+        applyProductionMatrixSort(matrixCase.sortBase)
+        waitForGridColumnCount(matrixCase.fromColumns)
+        MediaGridMorphTestTrace.clear()
+        prepareProductionMatrixLocation(matrixCase.location, dataset.assetIds.size)
+        waitForStableIdleReadiness(matrixCase.fromColumns)
+        MediaGridMorphTestTrace.clear()
+        var observationsBeforeUp = emptyList<MediaGridMorphDrawObservation>()
+        pinchOnGrid(
+            gridTag = "classified_media_grid",
+            centerSpan = 260f,
+            endSpan = 180f,
+            centerYFraction = matrixCase.centerYFraction,
+            onBeforePhysicalUp = {
+                observationsBeforeUp = MediaGridMorphTestTrace.drawEvents()
+            },
         )
-
-        cases.forEachIndexed { caseIndex, matrixCase ->
-            applyProductionMatrixSort(matrixCase.sortBase)
-            if (caseIndex == 0) ensureProductionMatrixColumns(matrixCase.fromColumns)
-            MediaGridMorphTestTrace.clear()
-            prepareProductionMatrixLocation(matrixCase.location, dataset.assetIds.size)
-            waitForStableIdleReadiness(matrixCase.fromColumns)
-            MediaGridMorphTestTrace.clear()
-            var observationsBeforeUp = emptyList<MediaGridMorphDrawObservation>()
-            pinchOnGrid(
-                    gridTag = "classified_media_grid",
-                    centerSpan = if (matrixCase.toColumns > matrixCase.fromColumns) 260f else 180f,
-                    endSpan = if (matrixCase.toColumns > matrixCase.fromColumns) 180f else 260f,
-                    centerYFraction = matrixCase.centerYFraction,
-                    onBeforePhysicalUp = {
-                        observationsBeforeUp = MediaGridMorphTestTrace.drawEvents()
-                    },
-            )
-                val claim = MediaGridMorphTestTrace.claimEvents().lastOrNull { it.generation > 0L }
-                    ?: error("No production claim observed for $matrixCase")
-                assertTrue("claim was not accepted for $matrixCase: $claim", claim.accepted)
-                assertTrue(claim.bundlePresent)
-                assertTrue(claim.directionPrepared)
-                assertEquals(null, claim.readinessReason)
-                val report = claim.readinessReport ?: error("Claim report was missing for $matrixCase")
-                assertEquals(claim.generation, report.generation)
-                assertEquals(report.requiredSourceImageCount, report.resolvedSourceImageCount)
-                assertEquals(report.requiredTargetImageCount, report.resolvedTargetImageCount)
-                assertTrue(report.sourceViewportComplete)
-                assertTrue(report.geometryComplete)
-                assertTrue(report.requiredCellCount > 0)
-                assertTrue(report.optionalOffscreenCellCount >= 0)
-                assertNotNull(report.exactTargetRowId)
-                assertNotNull(report.exactTargetRowFirstItemIndex)
-                val morphDraws = observationsBeforeUp.filter {
-                    it.drawMode == MediaGridSingleSurfaceMode.Morph && it.generation == claim.generation
-                }
-                assertTrue("FirstMorphDraw missing for $matrixCase: $observationsBeforeUp", morphDraws.isNotEmpty())
-                assertTrue(morphDraws.map { it.frameNumber }.distinct().size >= 2)
-                assertTrue(morphDraws.map { it.progress }.distinct().size >= 2)
-                assertEquals(0, MediaGridMorphTestTrace.fallbackCount())
-                waitForGridColumnCount(matrixCase.toColumns)
-                waitForMorphCanvasRemoval()
-                assertEquals(
-                    "Unexpected rollback for $matrixCase: ${MediaGridMorphTestTrace.rollbackReasons()}",
-                    0,
-                    MediaGridMorphTestTrace.rollbackColumnCountCommandCount(),
-                )
-                val terminal = MediaGridMorphTestTrace.handoffEvents()
-                    .lastOrNull { it.generation == claim.generation }
-                    ?: error("Handoff terminal observation was missing for $matrixCase")
-                assertEquals(MediaGridMorphGridHandoffPhase.Idle, terminal.phase)
-                assertFalse(terminal.suppressesUserScroll)
-                assertFalse(terminal.interactionLocked)
-                assertTrue(
-                    "Direct ScrollToItem layout re-evaluation missing for $matrixCase",
-                    MediaGridMorphTestTrace.handoffCommandEvents().any {
-                        it.generation == claim.generation &&
-                            it.command == "ScrollToItem" &&
-                            it.directLayoutReevaluated
-                    },
-                )
+        val claim = MediaGridMorphTestTrace.claimEvents().lastOrNull { it.generation > 0L }
+            ?: error("No production claim observed for $matrixCase")
+        assertTrue("claim was not accepted for $matrixCase: $claim", claim.accepted)
+        assertTrue(claim.bundlePresent)
+        assertTrue(claim.directionPrepared)
+        assertEquals(null, claim.readinessReason)
+        val report = claim.readinessReport ?: error("Claim report was missing for $matrixCase")
+        assertEquals(claim.generation, report.generation)
+        assertEquals(report.requiredSourceImageCount, report.resolvedSourceImageCount)
+        assertEquals(report.requiredTargetImageCount, report.resolvedTargetImageCount)
+        assertTrue(report.sourceViewportComplete)
+        assertTrue(report.geometryComplete)
+        assertTrue(report.requiredCellCount > 0)
+        assertTrue(report.optionalOffscreenCellCount >= 0)
+        assertNotNull(report.exactTargetRowId)
+        assertNotNull(report.exactTargetRowFirstItemIndex)
+        val morphDraws = observationsBeforeUp.filter {
+            it.drawMode == MediaGridSingleSurfaceMode.Morph && it.generation == claim.generation
         }
+        assertTrue("FirstMorphDraw missing for $matrixCase: $observationsBeforeUp", morphDraws.isNotEmpty())
+        assertTrue(morphDraws.map { it.frameNumber }.distinct().size >= 2)
+        assertTrue(morphDraws.map { it.progress }.distinct().size >= 2)
+        assertEquals(0, MediaGridMorphTestTrace.fallbackCount())
+        waitForGridColumnCount(matrixCase.toColumns)
+        waitForMorphCanvasRemoval()
+        assertEquals(
+            "Unexpected rollback for $matrixCase: ${MediaGridMorphTestTrace.rollbackReasons()}",
+            0,
+            MediaGridMorphTestTrace.rollbackColumnCountCommandCount(),
+        )
+        val terminal = MediaGridMorphTestTrace.handoffEvents()
+            .lastOrNull { it.generation == claim.generation }
+            ?: error("Handoff terminal observation was missing for $matrixCase")
+        assertEquals(MediaGridMorphGridHandoffPhase.Idle, terminal.phase)
+        assertFalse(terminal.suppressesUserScroll)
+        assertFalse(terminal.interactionLocked)
+        assertTrue(
+            "Exact target viewport was not validated for $matrixCase",
+            MediaGridMorphTestTrace.exactTargetViewportValidated(claim.generation),
+        )
+        val normalDraws = MediaGridMorphTestTrace.drawEvents().filter {
+            it.generation == claim.generation &&
+                it.drawMode == MediaGridSingleSurfaceMode.Normal &&
+                it.phase == MediaGridMorphPhase.Idle
+        }
+        assertTrue("first target Normal frame missing for $matrixCase", normalDraws.isNotEmpty())
+        assertTrue(
+            "Direct ScrollToItem layout re-evaluation missing for $matrixCase",
+            MediaGridMorphTestTrace.handoffCommandEvents().any {
+                it.generation == claim.generation &&
+                    it.command == "ScrollToItem" &&
+                    it.directLayoutReevaluated
+            },
+        )
     }
 
     @Ignore("TEST_HARNESS legacy smoke duplicates the production same-surface claim and is not part of the production sequence.")

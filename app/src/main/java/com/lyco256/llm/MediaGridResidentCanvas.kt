@@ -84,6 +84,7 @@ internal object MediaGridMorphTestTrace {
     private val idleReadinessEvents = CopyOnWriteArrayList<MediaGridMorphIdleReadinessObservation>()
     private val handoffEvents = CopyOnWriteArrayList<MediaGridMorphHandoffObservation>()
     private val handoffCommandEvents = CopyOnWriteArrayList<MediaGridMorphHandoffCommandObservation>()
+    private val exactTargetViewportGenerations = CopyOnWriteArrayList<Long>()
     private val rollbackColumnCountCommands = AtomicInteger()
     private val rollbackReasons = CopyOnWriteArrayList<String>()
     @Volatile private var fallbackCount = 0
@@ -95,6 +96,7 @@ internal object MediaGridMorphTestTrace {
         idleReadinessEvents.clear()
         handoffEvents.clear()
         handoffCommandEvents.clear()
+        exactTargetViewportGenerations.clear()
         rollbackColumnCountCommands.set(0)
         rollbackReasons.clear()
         fallbackCount = 0
@@ -110,6 +112,13 @@ internal object MediaGridMorphTestTrace {
     }
 
     fun drawEvents(): List<MediaGridMorphDrawObservation> = drawEvents.toList()
+
+    fun recordExactTargetViewportValidated(generation: Long) {
+        if (BuildConfig.TEST_HARNESS) exactTargetViewportGenerations += generation
+    }
+
+    fun exactTargetViewportValidated(generation: Long): Boolean =
+        generation in exactTargetViewportGenerations
 
     fun fallbackCount(): Int = fallbackCount
 
@@ -352,27 +361,30 @@ internal fun Modifier.mediaGridSingleSurface(
         )
     }
     onDrawWithContent {
-        when (mode.value) {
+        val currentMode = mode.value
+        val snapshot = morphSnapshot?.value
+        if (morphDrawObserver != null && snapshot != null) {
+            morphDrawObserver(
+                MediaGridMorphDrawObservation(
+                    generation = snapshot.interactionGeneration,
+                    phase = snapshot.phase,
+                    direction = snapshot.direction,
+                    drawMode = currentMode,
+                    progress = progress.value,
+                    modelIdentity = snapshot.activeRenderModel?.let { System.identityHashCode(it) } ?: 0,
+                    frameNumber = MediaGridMorphTestTrace.nextFrameNumber(),
+                    hasPlan = snapshot.plan != null,
+                    hasActiveRenderModel = snapshot.activeRenderModel != null,
+                    protectedAssetCount = snapshot.protectedAssetIds.size,
+                ),
+            )
+        }
+        when (currentMode) {
             MediaGridSingleSurfaceMode.Morph -> {
-                val snapshot = morphSnapshot?.value
                 val model = snapshot?.activeRenderModel ?: morphModel
                 if (model == null) {
                     drawContent()
                 } else {
-                    morphDrawObserver?.invoke(
-                        MediaGridMorphDrawObservation(
-                            generation = snapshot?.interactionGeneration ?: 0L,
-                            phase = snapshot?.phase ?: MediaGridMorphPhase.Idle,
-                            direction = snapshot?.direction,
-                            drawMode = MediaGridSingleSurfaceMode.Morph,
-                            progress = progress.value,
-                            modelIdentity = System.identityHashCode(model),
-                            frameNumber = MediaGridMorphTestTrace.nextFrameNumber(),
-                            hasPlan = snapshot?.plan != null,
-                            hasActiveRenderModel = snapshot?.activeRenderModel != null,
-                            protectedAssetCount = snapshot?.protectedAssetIds?.size ?: 0,
-                        ),
-                    )
                     drawRect(model.surfaceColor)
                     drawMediaGridMorphRow(model, progress.value)
                 }

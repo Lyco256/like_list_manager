@@ -22,7 +22,7 @@ Identity mismatch assertions require the controller to remain in explicit `Faile
 - source revision、data key、viewport、想定外columnの個別cancel
 - column変更、complete、rollback、最終checkpointのexactly-once
 - target Asset消失時のordinal fallbackと末尾clamp
-- visible化、最大3回のY補正、geometry不一致rollback
+- visible化、最大1回のviewport-local Y補正、全visible geometry不一致rollback
 - stale displayではrollback／checkpointを行わないこと
 - active requestを別generationが上書きしないこと
 

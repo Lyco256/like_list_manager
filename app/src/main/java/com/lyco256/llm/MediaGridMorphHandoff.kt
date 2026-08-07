@@ -460,15 +460,17 @@ internal class MediaGridMorphGridHandoffCoordinator {
             }
             if (request.exactTargetLayoutIndex != null) {
                 val viewport = visibleTargetViewport
-                if (viewport == null || !validateMediaGridMorphExactTargetViewport(
+                val exactViewportValid = viewport != null && validateMediaGridMorphExactTargetViewport(
                     request.exactTargetLayoutIndex,
                     viewport,
-                )) {
+                )
+                if (!exactViewportValid) {
                     return beginRollback(
                         MediaGridMorphGridHandoffFailureReason.GeometryMismatch,
                         "exact-target-viewport-invalid row=${row.mediaOrdinals} expected=${request.targetRowMediaOrdinals}",
                     )
                 }
+                MediaGridMorphTestTrace.recordExactTargetViewportValidated(request.interactionGeneration)
             }
             current = current.copy(phase = MediaGridMorphGridHandoffPhase.VerifyingTarget)
             return null

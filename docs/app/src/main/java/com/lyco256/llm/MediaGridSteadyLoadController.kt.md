@@ -2,7 +2,7 @@
 
 ## 2026-08-01 Morph target priority
 
-`requestMorphUrgentAssets()` promotes only the bounded Morph source/target Asset IDs while the grid is idle. It reuses the existing metadata/bitmap workers and wakes them through the normal scheduler; pointer input never starts IO or decoding. Existing active-window rows, background loading, publication pacing, and retained protection remain unchanged.
+`requestMorphUrgentAssets()` promotes only the bounded RequiredRenderSet source/target Asset IDs while the grid is idle. The urgent union is retained and its completed bitmaps are marked direct-draw eligible, so visible Morph assets are not trimmed between claim and draw. It reuses the existing metadata/bitmap workers and wakes them through the normal scheduler; pointer input never starts IO or decoding. Worker counts and the ordinary active-window/background policy remain unchanged.
 
 ## 2026-07-29 viewport boundary and active window optimization
 

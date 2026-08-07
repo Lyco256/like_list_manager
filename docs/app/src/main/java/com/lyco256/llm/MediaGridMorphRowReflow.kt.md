@@ -2,7 +2,7 @@
 
 ## 2026-08-05 current source/target row contract
 
-- Visible source rows are matched one-to-one by `MediaGridMorphSourceRowKey`; every visible cell must match the canonical row at the same column, media ordinal, and asset ID. Extra bounded canonical rows are allowed.
+- Only rows marked as actual visible source rows select a focal center or participate in validation. Each such row is matched one-to-one by `MediaGridMorphSourceRowKey`; every visible cell must match the canonical row at the same column, media ordinal, and asset ID. Extra canonical overscan rows are allowed and do not reject the claim.
 - `MediaGridMorphExactTargetLayoutIndex` supplies exact target row IDs, first item indexes, media ordinals, header positions, content height, and clamped achievable row tops for the adjacent target column count.
 - All plan geometry is viewport-local. The target-row adjustment is applied at the terminal target geometry so the focal Y remains fixed during the ordinary Morph progress; the handoff then verifies the real LazyGrid viewport.
 
@@ -16,7 +16,7 @@
 
 Morph, fallback, and release of an unprepared reverse direction share `mediaGridMorphCanonicalReleaseDecision()`. It derives direction from the initial/release pointer-distance ratio, selects at most one adjacent column, computes progress from the source/target cell-width ratio, and applies the existing `0.5` release threshold.
 
-Production row-reflow planning selects the source row and focal media from the claim-time capture, then builds a bounded target row/header plan while keeping geometry independent from asset identity. Media geometry uses `sourceCellSize = viewport.width / N`, `targetCellSize = viewport.width / M`, a common interpolated cell size, a fixed initial pinch-center Y, and relative rows. Header heights and cumulative offsets are independent bands; target anchor information remains only for handoff. The renderer does not use per-row source/target rectangles or zero-height media rows.
+Production row-reflow planning selects the source row and focal media from the claim-time capture, then uses the exact adjacent-column layout index for the target row ID, first item index, row top, content height, and scroll bounds. Media geometry uses `sourceCellSize = viewport.width / N`, `targetCellSize = viewport.width / M`, a common interpolated cell size, a fixed initial pinch-center Y, and relative rows. Header heights and cumulative offsets are independent bands; ordinal-fraction and bounded/global target approximations are not used. The renderer does not use per-row source/target rectangles or zero-height media rows.
 
 ## 2026-08-01 uniform lattice geometry
 

@@ -13,7 +13,7 @@ TEST_HARNESSの一枚の実`LazyVerticalGrid`でhandoffを検証するCompose Te
 - target Asset消失時のmedia ordinal fallback
 - target frame不正時のCanvasを維持したrollback
 - viewport先頭、末尾、行の部分表示
-- 最大3回のY補正、geometry確認、underlying描画の次frameでのcomplete
+- 最大1回のviewport-local Y補正、全visible row/cell/headerのgeometry確認、underlying描画の次frameでのcomplete
 - Canvas消失前後の中心pixelとcell境界一致
 - column変更、complete、rollbackのexactly-once
 - handoff中のuser scroll無効化と完了後の再有効化

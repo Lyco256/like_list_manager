@@ -77,8 +77,12 @@ internal data class MediaGridMorphViewportPlanTemplate(
     val exactTargetLayoutIndex: MediaGridMorphExactTargetLayoutIndex? = null,
 ) {
     fun select(initialPinchCenter: Offset): MediaGridMorphViewportPlan {
+        // Only rows actually intersecting the captured source viewport may
+        // select a plan or participate in source validation.  The canonical
+        // row list is intentionally allowed to contain bounded overscan rows
+        // that are not one-to-one with this list.
         val visibleSourceRows = sourceRows.filter { it.isActualVisibleSourceRow }
-            .ifEmpty { sourceRows }
+        if (visibleSourceRows.isEmpty()) return emptyPlan(initialPinchCenter)
         val visibleSourceRow = visibleSourceRows.firstOrNull { row ->
             initialPinchCenter.y >= row.top && initialPinchCenter.y <= row.bottom
         } ?: visibleSourceRows.minByOrNull { row ->
@@ -110,44 +114,18 @@ internal data class MediaGridMorphViewportPlanTemplate(
         val directTargetRowIndex = targetRows.indexOfFirst { row ->
             row.cells.any { it.mediaOrdinal == focalCell.mediaOrdinal }
         }
-        val targetOrdinal = if (directTargetRowIndex >= 0) {
-            focalCell.mediaOrdinal
-        } else {
-            val sourceFraction = focalCell.mediaOrdinal.toFloat() /
-                max(totalMediaCount - 1, 1).toFloat()
-            targetRows.asSequence()
-                .flatMap { it.cells.asSequence() }
-                .minByOrNull { target ->
-                    abs(target.mediaOrdinal.toFloat() / max(totalMediaCount - 1, 1).toFloat() - sourceFraction)
-                }?.mediaOrdinal ?: focalCell.mediaOrdinal
-        }
-        val targetRowIndex = targetRows.indexOfFirst { row ->
-            row.cells.any { it.mediaOrdinal == targetOrdinal }
-        }.takeIf { it >= 0 } ?: targetRows.indices.minByOrNull { index ->
-            targetRows[index].cells.minOfOrNull { abs(it.mediaOrdinal - targetOrdinal) } ?: Int.MAX_VALUE
-        } ?: 0
-        val targetFocalCell = targetRows.getOrNull(targetRowIndex)?.cells
-            ?.firstOrNull { it.mediaOrdinal == targetOrdinal }
+        val targetOrdinal = focalCell.mediaOrdinal
+        val targetRowIndex = directTargetRowIndex.takeIf { it >= 0 } ?: return emptyPlan(initialPinchCenter)
+        val targetFocalCell = targetRows[targetRowIndex].cells
+            .firstOrNull { it.mediaOrdinal == targetOrdinal }
+            ?: return emptyPlan(initialPinchCenter)
         val idealTargetRowTop = fixedFocalCenterY - focalV * targetCellSize
-        val exactTargetRowId = exactTargetLayoutIndex?.rowIdForMediaOrdinal(targetOrdinal)
-        val exactTargetRowTopAtScrollZero = exactTargetRowId?.let { rowId ->
-            exactTargetLayoutIndex?.rowTopAtScrollZero(rowId)
-        }
-        val fallbackTargetRowTopAtScrollZero = targetRows
-            .take(targetRowIndex)
-            .fold(0f) { total, row ->
-                total + targetCellSize + if (row.headerBefore != null) headerHeightPx else 0f
-            } + if (targetRows.getOrNull(targetRowIndex)?.headerBefore != null) headerHeightPx else 0f
-        val fallbackContentHeight = targetRows.fold(0f) { total, row ->
-            total + targetCellSize + if (row.headerBefore != null) headerHeightPx else 0f
-        }
-        val fallbackMaxScroll = (fallbackContentHeight - viewport.height).coerceAtLeast(0f)
-        val achievableTargetRowTop = exactTargetRowId?.let {
-            exactTargetLayoutIndex?.achievableRowTop(it, idealTargetRowTop)
-        } ?: idealTargetRowTop.coerceIn(
-            fallbackTargetRowTopAtScrollZero - fallbackMaxScroll,
-            fallbackTargetRowTopAtScrollZero,
-        )
+        val exactIndex = exactTargetLayoutIndex ?: return emptyPlan(initialPinchCenter)
+        val exactTargetRowId = exactIndex.rowIdForMediaOrdinal(targetOrdinal) ?: return emptyPlan(initialPinchCenter)
+        val exactTargetRowTopAtScrollZero = exactIndex.rowTopAtScrollZero(exactTargetRowId)
+            ?: return emptyPlan(initialPinchCenter)
+        val achievableTargetRowTop = exactIndex.achievableRowTop(exactTargetRowId, idealTargetRowTop)
+            ?: return emptyPlan(initialPinchCenter)
         val targetRowTopAdjustment = achievableTargetRowTop - idealTargetRowTop
 
         val contentMinRelative = min(-sourceCanonicalRowIndex, -targetRowIndex)
@@ -239,7 +217,7 @@ internal data class MediaGridMorphViewportPlanTemplate(
             relativeRowRange = relativeRange,
             targetAnchorRowIndex = exactTargetRowId ?: targetRowIndex,
             targetAnchorRowTop = achievableTargetRowTop,
-            usedOrdinalFractionFallback = directTargetRowIndex < 0,
+            usedOrdinalFractionFallback = false,
             rowPlans = rowPlans,
             headerPlans = headerPlans,
             exactTargetLayoutIndex = exactTargetLayoutIndex,
@@ -253,7 +231,7 @@ internal data class MediaGridMorphViewportPlanTemplate(
                 ?: IntArray(0),
             targetAnchorRowTopAtScrollZero = exactTargetRowTopAtScrollZero,
             targetUnclampedRowTop = idealTargetRowTop,
-            targetMaxScroll = exactTargetLayoutIndex?.maxScrollPx ?: fallbackMaxScroll,
+            targetMaxScroll = exactIndex.maxScrollPx,
             targetRowTopAdjustment = targetRowTopAdjustment,
         )
     }
@@ -492,6 +470,10 @@ private fun fallbackCapturedRows(capture: MediaGridMorphCapture): List<MediaGrid
                     )
                 },
                 isPartiallyVisible = rects.any { it.isPartiallyVisible },
+                // visibleMediaRects comes directly from LazyGridLayoutInfo;
+                // rows synthesized from it are actual viewport rows, not
+                // canonical overscan rows.
+                isActualVisibleSourceRow = true,
             )
         }
 

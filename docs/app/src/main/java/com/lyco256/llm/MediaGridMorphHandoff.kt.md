@@ -8,7 +8,7 @@
 
 ## 2026-08-01 Phase 2 production handoff
 
-- The real `LazyGridState` is verified by target media ordinal plus visible row ordinals, row top, cell size, and header title; each geometric correction remains within the one-pixel tolerance and bounded retry count.
+- The real `LazyGridState` is verified by target media ordinal plus every visible row/cell and header in viewport-local coordinates; each geometric correction remains within the one-pixel tolerance and the handoff permits at most one `ScrollBy` correction.
 - `VerifyingTarget` is followed by one underlying-grid draw and only then `RevealTarget`; mismatches and stale frames issue rollback/cancel without applying the target row contract to the source rollback path.
 
 ## 2026-07-31 UI・handoff correction
@@ -34,11 +34,11 @@ phaseは`Idle`、`RequestingColumnChange`、`WaitingForTargetFrame`、`Positioni
 
 - target列変更は同じrequestで一回だけ発行する。
 - expected frameだけを採用し、Asset消失時はmedia ordinalをclampしてfallbackする。
-- visible itemだけから実rectとfocal位置を計算し、Yだけ最大3回補正する。正方形、plan end cell寸法、X／Y各1px以内を確認する。
+- exact target indexのtarget row先頭itemへ`ScrollToItem`を発行し、viewport-localなYだけを最大1回`ScrollBy`で補正する。Reveal前に全visible row/cell/headerを1px以内で検証する。
 - geometry確認後、underlying target grid描画を通知し、その次frameでcompleteする。
 - target frame不正、item不在、geometry不一致ではfrom列変更を一回だけ発行し、source anchorを位置合わせしてcancelする。
 - source revision／data keyがstaleなら旧画面へrollbackせずCanvasを除去する。
 
 実時間timeout、Delay、polling、画像・resident store・Coil・IO参照を持たない。
 
-`MediaGridMorph.kt`のbounded target layoutは、Default並びの非ゼロ開始ordinalではtarget列剰余を維持する。実際に先頭item indexが0より後ろで、dataset末尾cellがviewport下端へ接するcaptureだけはtarget最終行も下端へ揃え、先頭から全件がちょうど収まる状態を末尾scrollと誤認しない。
+Production row-reflow handoff geometryはfull exact target layout indexから取得する。target row ID、first item index、row top、header sequence、content height、achievable scroll boundsを使い、旧bounded/global target approximationはproduction pathで使わない。

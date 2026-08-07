@@ -1293,6 +1293,71 @@ class MediaGridMorphTest {
             required.requiredSourceAssetIds + required.requiredTargetAssetIds,
         )
         assertEquals(allCellIdentities.size - required.requiredCellIdentities.size, required.optionalCellCount)
+
+        val incoming = selected.rowPlans
+            .flatMap { it.cells }
+            .firstOrNull { it.startContent is MediaGridMorphSlotContent.NoMedia && it.endContent is MediaGridMorphSlotContent.Image }
+            ?: error("increase pair did not contain an incoming right-edge cell")
+        assertTrue(
+            MediaGridMorphRequiredCellIdentity(incoming.relativeRow, incoming.column) in
+                required.requiredCellIdentities,
+        )
+        val imageToImage = selected.rowPlans
+            .flatMap { it.cells }
+            .firstOrNull {
+                it.startContent is MediaGridMorphSlotContent.Image &&
+                    it.endContent is MediaGridMorphSlotContent.Image
+            }
+            ?: error("selected plan did not contain an Image-to-Image cell")
+        val imageIdentity = MediaGridMorphRequiredCellIdentity(imageToImage.relativeRow, imageToImage.column)
+        assertTrue(imageIdentity in required.requiredCellIdentities)
+        assertTrue((imageToImage.startContent as MediaGridMorphSlotContent.Image).assetId in required.requiredSourceAssetIds)
+        assertTrue((imageToImage.endContent as MediaGridMorphSlotContent.Image).assetId in required.requiredTargetAssetIds)
+        assertTrue(
+            selected.rowPlans.flatMap { it.cells }.any {
+                MediaGridMorphRequiredCellIdentity(it.relativeRow, it.column) !in required.requiredCellIdentities
+            },
+        )
+        assertEquals(required.protectedAssetIds.size, required.protectedAssetIds.distinct().size)
+    }
+
+    @Test
+    fun canonicalOverscanNullKeyDoesNotRejectActualVisibleRows() {
+        val capture = withSourceRows(capture(4, 40), 4)
+        val pair = buildMediaGridMorphRowPreparedPairs(capture)
+            .getValue(MediaGridMorphDirection.IncreaseColumns)
+        val template = requireNotNull(pair.viewportPlanTemplate)
+        val extraOverscan = template.sourceCanonicalRows.last().copy(rowKey = null)
+        val selected = template.copy(
+            sourceCanonicalRows = template.sourceCanonicalRows + extraOverscan,
+        ).select(Offset(600f, 150f))
+        assertTrue(selected.rowPlans.isNotEmpty())
+    }
+
+    @Test
+    fun requiredRenderSetDoesNotProtectHeadersOutsideSweptViewport() {
+        val dates = List(40) { index ->
+            "2026-07-${(index / 4 + 1).toString().padStart(2, '0')}T00:00:00Z"
+        }
+        val capture = withSourceRows(
+            capture(4, dates.size, sortBase = ClassifiedSortBase.PostTime, dates = dates),
+            4,
+        )
+        val pair = buildMediaGridMorphRowPreparedPairs(capture)
+            .getValue(MediaGridMorphDirection.IncreaseColumns)
+        val plan = MediaGridMorphPlan.selectRowReflow(pair, Offset(600f, 150f))
+        val selected = requireNotNull(plan.viewportPlan)
+        val required = plan.requiredRenderSet()
+        val optionalHeaders = selected.headerPlans.filter { header ->
+            MediaGridMorphRequiredHeaderIdentity(header.relativeRow, header.startKey, header.endKey) !in
+                required.requiredHeaderIdentities
+        }
+        assertTrue(optionalHeaders.isNotEmpty())
+        assertEquals(optionalHeaders.size, required.optionalHeaderCount)
+        optionalHeaders.flatMap { listOfNotNull(it.startTitle, it.endTitle) }.forEach { title ->
+            assertTrue(title !in required.requiredSourceHeaderTitles)
+            assertTrue(title !in required.requiredTargetHeaderTitles)
+        }
     }
 
     @Test
@@ -1678,6 +1743,7 @@ class MediaGridMorphTest {
                         cell.copy(rect = Rect(cell.rect.left, top, cell.rect.right, top + sourceCellSize))
                     },
                     isPartiallyVisible = rects.any { it.isPartiallyVisible },
+                    isActualVisibleSourceRow = true,
                 )
             }
         return capture.copy(sourceRows = rows, totalMediaCount = maxOf(capture.totalMediaCount, capture.mediaOrdinalRange.last + 1))
@@ -1757,6 +1823,39 @@ class MediaGridMorphTest {
                 ),
             )
         }
+        val frameEntries = List((startOrdinal + count).coerceAtLeast(1)) { ordinal ->
+            val localIndex = (ordinal - startOrdinal).coerceAtLeast(0)
+            MediaGridEntry(
+                entryId = ordinal.toLong() + 1L,
+                clipId = ordinal.toLong() + 1L,
+                assetId = ordinal.toLong() + 1L,
+                mediaKey = "media-$ordinal",
+                mediaIndex = ordinal,
+                type = "photo",
+                displayUrl = null,
+                downloadState = "downloaded",
+                localPath = null,
+                xCreatedAt = dates.getOrElse(localIndex) { dates.last() },
+                likeCount = likes.getOrElse(localIndex) { likes.lastOrNull() },
+            )
+        }
+        val exactFrame = buildMediaGridFrameData(
+            entries = frameEntries,
+            sort = identity.frameKey.dataKey.sort,
+            columnCount = columns,
+            dataKey = identity.frameKey.dataKey,
+        )
+        val exactIndexes = listOf(columns - 1, columns + 1)
+            .filter { it in ClassifiedMediaGridMinColumnCount..ClassifiedMediaGridMaxColumnCount }
+            .associateWith { targetColumns ->
+                buildMediaGridMorphExactTargetLayoutIndex(
+                    frame = exactFrame,
+                    targetColumnCount = targetColumns,
+                    viewportWidthPx = 1200,
+                    viewportHeightPx = 600,
+                    headerHeightPx = 40f,
+                )
+            }
         return MediaGridMorphCapture(
             identity = identity,
             viewport = Rect(0f, 0f, 1200f, 600f),
@@ -1768,6 +1867,7 @@ class MediaGridMorphTest {
             precedingMedia = precedingMedia,
             visibleMediaRects = visibleRects,
             visibleHeaderRects = emptyList(),
+            exactTargetLayoutIndexes = exactIndexes,
         )
     }
 

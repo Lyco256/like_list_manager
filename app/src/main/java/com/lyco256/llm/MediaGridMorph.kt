@@ -439,6 +439,9 @@ internal fun mediaGridMorphImageCompleteness(
     val headerTextComplete: Boolean
     val geometryComplete: Boolean
     val viewportPlan = pair.viewportPlanTemplate
+    var optionalOffscreenCellCount = 0
+    val requiredCellIdentities = LinkedHashSet<MediaGridMorphRequiredCellIdentity>()
+    val requiredHeaderIdentities = LinkedHashSet<MediaGridMorphRequiredHeaderIdentity>()
     if (viewportPlan != null) {
         val selectedPlans = mediaGridMorphPossibleFocalCenters(pair).map(viewportPlan::select)
         val sourceAssets = LinkedHashSet<Long>()
@@ -449,6 +452,9 @@ internal fun mediaGridMorphImageCompleteness(
             if (selected.rowPlans.isEmpty()) geometry = false
             val coordinates = HashSet<Pair<Int, Int>>()
             val renderSet = MediaGridMorphPlan.selectRowReflow(pair, selected.initialPinchCenter).requiredRenderSet()
+            optionalOffscreenCellCount += renderSet.optionalCellCount
+            requiredCellIdentities += renderSet.requiredCellIdentities
+            requiredHeaderIdentities += renderSet.requiredHeaderIdentities
             renderSet.requiredSourceAssetIds.forEach(sourceAssets::add)
             renderSet.requiredTargetAssetIds.forEach(targetAssets::add)
             selected.rowPlans.forEach { row ->
@@ -536,6 +542,9 @@ internal fun mediaGridMorphImageCompleteness(
                 .flatMap { sequenceOf(it.startTitle, it.endTitle) }
                 .firstOrNull { it.isNullOrBlank() }
         },
+        optionalOffscreenCellCount = optionalOffscreenCellCount,
+        requiredCellCount = requiredCellIdentities.size,
+        requiredHeaderCount = requiredHeaderIdentities.size,
     )
 }
 
@@ -548,8 +557,8 @@ internal fun mediaGridMorphPossibleFocalCenters(
     pair: MediaGridMorphPreparedPair,
 ): List<Offset> {
     val template = pair.viewportPlanTemplate ?: return listOf(pair.viewport.center)
-    val actualRows = template.sourceRows.filter { it.isActualVisibleSourceRow }
-    val rows = (actualRows.ifEmpty { template.sourceRows }).filter { it.cells.isNotEmpty() }
+    val rows = template.sourceRows
+        .filter { it.isActualVisibleSourceRow && it.cells.isNotEmpty() }
     if (rows.isEmpty()) return emptyList()
     return rows
         .distinctBy { row -> row.rowKey ?: "invalid-visible-row-${row.visibleRow}" }

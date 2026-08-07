@@ -9,6 +9,7 @@
 
 - `mediaGridSingleSurface` prepares immutable resident draw commands in `drawWithCache` and uses one draw surface for `Normal`, `Morph`, `RevealCurrent`, and `RevealTarget`.
 - The Morph draw branch never draws a second grid or overlay; resident lookup/layout/crop work stays out of `onDrawWithContent`, where only prepared commands, frozen row data, and progress are consumed.
+- Morph urgent assets share the resident protection contract and are promoted to direct-draw eligibility when ready; this does not increase the ordinary resident cap. The unified surface records the same draw observation for Normal, Morph, and Reveal modes in TEST_HARNESS.
 
 `Disabled`、`Enabled`、`TestVisible`を持つresident画像の単一DrawModifierです。`Enabled`と`TestVisible`は同じ`drawWithCache`エンジンを使い、通常画面は`Enabled`を明示し、既定値は`Disabled`です。`Disabled`ではCanvas、draw-index version collector、ImageBitmap adapter、prepared indexを作りません。
 

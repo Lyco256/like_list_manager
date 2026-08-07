@@ -2,7 +2,7 @@
 
 ## 2026-08-05 regressions
 
-- Pure tests cover one focal center per visible source row, RequiredRenderSet swept viewport boundaries, visible-row canonical matching without global row-count equality, and exact local target geometry/clamping.
+- Pure tests cover one focal center per actual visible source row, RequiredRenderSet swept cell/header boundaries, visible-row canonical matching without global row-count equality, the full header-sequence target index, and exact viewport-local target validation.
 
 ## 2026-08-02 row alignment and direction lock coverage
 
@@ -31,7 +31,7 @@
 
 ## 2026-08-01 Phase 1 row reflow coverage
 
-- Unit coverage covers 2↔3, 4↔5, 5↔4, 8↔9, and 11↔12 reflow, right-edge Placeholder behavior, fixed focal row/Y, distance-ratio progress, header bands, and ordinal-first target selection with ordinal-fraction fallback.
+- Unit coverage covers 2↔3, 4↔5, 5↔4, 8↔9, and 11↔12 reflow, right-edge Placeholder behavior, fixed focal row/Y, distance-ratio progress, header bands, and exact-index target selection without ordinal-fraction fallback.
 
 ## 2026-07-31 production Morph correction coverage
 

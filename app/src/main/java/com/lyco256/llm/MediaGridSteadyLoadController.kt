@@ -252,6 +252,7 @@ internal interface MediaGridBitmapGateway {
     fun retain(assetId: Long, candidate: MediaGridPreparedCandidate, directDrawEligible: Boolean) {
         retain(assetId, candidate)
     }
+    fun markDirectDrawEligible(assetId: Long, candidate: MediaGridPreparedCandidate) = Unit
 }
 
 internal interface MediaGridFramePublicationTarget {
@@ -279,6 +280,10 @@ private class CoilMediaGridBitmapGateway(
         imageLoader.memoryCache?.get(MemoryCache.Key(candidate.cacheKey))?.let { value ->
             retainedImageStore?.retain(assetId, candidate, value, directDrawEligible)
         }
+    }
+
+    override fun markDirectDrawEligible(assetId: Long, candidate: MediaGridPreparedCandidate) {
+        retainedImageStore?.markDirectDrawEligible(assetId, candidate)
     }
 
     override suspend fun load(candidate: MediaGridPreparedCandidate): Boolean = suspendCancellableCoroutine { continuation ->
@@ -463,6 +468,8 @@ internal class MediaGridSteadyLoadController(
     private var metadataPending = MediaGridOrdinalPendingSet(ordinalIndex.assetIdByMediaOrdinal.size)
     private var bitmapPending = MediaGridOrdinalPendingSet(ordinalIndex.assetIdByMediaOrdinal.size)
     @Volatile private var activeSnapshot: MediaGridActiveWindowSnapshot? = null
+    /** Idle Morph union protected alongside the visible/active window. */
+    private var morphUrgentAssetIds: Set<Long> = emptySet()
     private val _uiState = MutableStateFlow(MediaGridControllerUiState())
     val uiState: StateFlow<MediaGridControllerUiState> = _uiState.asStateFlow()
     private val _framePublicationDemand = MutableStateFlow(false)
@@ -489,8 +496,14 @@ internal class MediaGridSteadyLoadController(
      * the existing workers can prepare the images before a claim.
      */
     fun requestMorphUrgentAssets(assetIds: LongArray) {
-        if (disposed || assetIds.isEmpty()) return
+        if (disposed) return
         synchronized(lock) {
+            val validAssetIds = ordinalIndex.mediaOrdinalByAssetId.keys
+            morphUrgentAssetIds = assetIds.asSequence()
+                .filter { it in validAssetIds }
+                .toSet()
+            updateRetainedProtectionLocked()
+            if (assetIds.isEmpty()) return@synchronized
             assetIds.asSequence().distinct().forEach(::promoteMorphAssetLocked)
         }
         signalAll()
@@ -514,6 +527,7 @@ internal class MediaGridSteadyLoadController(
     fun pause() {
         paused = true
         publicationPaused = true
+        synchronized(lock) { morphUrgentAssetIds = emptySet() }
         retainedImageStore?.updateProtection(ownerToken, longArrayOf(), longArrayOf())
         reconcilePublishedState(maxNewReady = 0)
         signalAll()
@@ -521,7 +535,7 @@ internal class MediaGridSteadyLoadController(
     fun resume() {
         paused = false
         publicationPaused = false
-        activeSnapshot?.let { retainedImageStore?.updateProtection(ownerToken, it.visibleAssetIds, it.activeAssetIds) }
+        synchronized(lock) { updateRetainedProtectionLocked() }
         synchronized(lock) { activeSnapshot?.activeAssetIds?.forEach { reconcileAssetWorkLocked(it, LoadLane.Urgent) } }
         reconcilePublishedState(maxNewReady = 0)
         signalAll()
@@ -569,6 +583,8 @@ internal class MediaGridSteadyLoadController(
         }
         latestAnchor.set(null)
         activeSnapshot = null
+        synchronized(lock) { morphUrgentAssetIds = emptySet() }
+        retainedImageStore?.updateProtection(ownerToken, longArrayOf(), longArrayOf())
         anchorEpoch.incrementAndGet()
         anchorSignal.trySend(Unit)
         signalAll()
@@ -637,7 +653,7 @@ internal class MediaGridSteadyLoadController(
                 if (disposed || latestAnchor.get() != anchor || anchorEpoch.get() != epoch || generation != snapshot.generation) return@synchronized
                 if (activeSnapshot?.epoch == epoch && activeSnapshot?.generation == generation) return@synchronized
                 activeSnapshot = snapshot
-                retainedImageStore?.updateProtection(ownerToken, snapshot.visibleAssetIds, snapshot.activeAssetIds)
+                updateRetainedProtectionLocked()
                 promoteUrgentMetadataLocked(snapshot)
                 promoteUrgentBitmapLocked(snapshot)
                 enqueueVisiblePreparedLocked(snapshot)
@@ -1001,6 +1017,11 @@ internal class MediaGridSteadyLoadController(
             )
         } else if (record.bitmapStatus !in setOf(QueueTaskStatus.Running, QueueTaskStatus.UrgentQueued, QueueTaskStatus.Complete)) {
             reconcileAssetWorkLocked(assetId, LoadLane.Urgent)
+        } else if (record.bitmapStatus == QueueTaskStatus.Complete) {
+            metadata[assetId]
+                ?.candidates
+                ?.getOrNull(record.candidateIndex)
+                ?.let { bitmapGateway.markDirectDrawEligible(assetId, it) }
         }
     }
 
@@ -1019,7 +1040,11 @@ internal class MediaGridSteadyLoadController(
         record.sourceIdentity = candidate.sourceIdentity
         record.bitmapStatus = QueueTaskStatus.Complete
         val visibleNow = activeSnapshot?.visibleAssetIds?.any { it == assetId } == true
-        bitmapGateway.retain(assetId, candidate, directDrawEligible = !visibleNow)
+        bitmapGateway.retain(
+            assetId,
+            candidate,
+            directDrawEligible = !visibleNow || assetId in morphUrgentAssetIds,
+        )
         ordinalIndex.mediaOrdinalByAssetId[assetId]?.let { bitmapPending.remove(it) }
         urgentBitmapQueue.removeAll { it.assetId == assetId }
         states[assetId] = MediaGridCellLoadState(MediaGridCellLoadStatus.Ready, prepared, candidateIndex)
@@ -1216,9 +1241,24 @@ internal class MediaGridSteadyLoadController(
     }
 
     private fun emitEvent(event: LoadEvent) { if (!disposed) events.trySend(event) }
+    /** Caller holds [lock]. The union is protected without changing resident limits. */
+    private fun updateRetainedProtectionLocked() {
+        val snapshot = activeSnapshot
+        val active = buildList {
+            snapshot?.activeAssetIds?.forEach(::add)
+            addAll(morphUrgentAssetIds)
+        }.distinct().toLongArray()
+        retainedImageStore?.updateProtection(
+            ownerToken = ownerToken,
+            visibleAssetIds = snapshot?.visibleAssetIds ?: LongArray(0),
+            activeAssetIds = active,
+        )
+    }
+
     private fun signalAll() { metadataWake.trySend(Unit); bitmapWake.trySend(Unit); memorySignal.trySend(Unit) }
     fun dispose() {
         disposed = true; generation++
+        morphUrgentAssetIds = emptySet()
         retainedImageStore?.removeOwner(ownerToken)
         workerJobs.forEach(Job::cancel)
         scope.cancel()
