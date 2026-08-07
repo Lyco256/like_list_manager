@@ -1,5 +1,12 @@
 # `app/src/androidTest/java/com/lyco256/llm/MainActivityComposeTest.kt`
 
+## 2026-08-07 start and exact-handoff regression
+
+- The same three representative 4-to-5 sequences now compare the underlying source viewport with the first Morph model and compare the progress-1 Morph endpoint with the first Idle Normal frame by item/header identity and rectangle.
+- The existing visible-header sequence must exercise a real date/like-count section-header appearance or disappearance. Without adding another gesture, every observed Morph frame verifies linear header-height scaling and the matching text fade, in addition to claim, no-dark-fallback, column completion, and exact handoff checks.
+- The existing headerless all-slot-change case returns 5-to-4 immediately after its 4-to-5 handoff without waiting for a stable-idle readiness event. This single reverse gesture verifies an accepted claim, a non-dark first Morph frame, no fallback, column completion, exact target validation, endpoint/Normal position equality, and unlocked Idle state; no repeated location matrix was added.
+- These cases no longer force all 48 fixture assets into the resident store. Production preparation/readiness must supply the required visible set. Readiness waits also match the actually composed first media ordinal, so a ready event from a previous scroll position cannot authorize the gesture.
+
 ## 2026-08-05 real-device sequence reduction
 
 - The broad display-toggle test keeps the fallback, reverse-direction, and threshold-miss patterns, but removes the duplicate second increase/decrease pair after cell interaction; recreation and source-revision checks remain.
@@ -22,7 +29,7 @@ The production coverage is split into exactly three representative 4-to-5 sequen
 
 `imageViewerSwipeMovesBetweenSavedPhotosWithoutChangingDatabase` sends the horizontal swipe through the Compose `image_viewer` node instead of relying on raw full-screen coordinates; the viewer parent drag handler leaves horizontal movement available to `HorizontalPager`.
 
-## 2026-07-31 production Morph correction coverage
+## 2026-07-31 production Morph correction coverage（履歴: 現行経路では不使用）
 
 The Phase 1 production test now asserts the legacy one-step pinch path and the absence of both the old production Morph Canvas and TEST_HARNESS same-surface tag. Production normal grid rendering remains connected during the gesture.
 

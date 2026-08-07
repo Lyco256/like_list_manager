@@ -1,5 +1,15 @@
 # MediaGridMorph.kt
 
+## 2026-08-07 current-column exact index
+
+- Claim capture builds the compact exact layout index for the current column count as well as both adjacent counts. Source canonical rows therefore use the real full-span-header boundaries instead of estimating a section offset from the bounded preceding-media window.
+- The capture remains bounded for prepared image resources; only compact primitive layout metadata is frame-wide.
+
+## 2026-08-07 complete adjacent viewport capture
+
+- The bounded capture range now includes every media cell that can intersect the wider adjacent-column viewport, plus the existing two-row overscan. This prevents a complete-looking Morph model from omitting target cells exposed only after 4-to-5 reflow.
+- The bound remains derived from viewport dimensions and adjacent column count; it does not scan or retain the full dataset.
+
 ## 2026-08-02 bounded row alignment and canonical source content
 
 - `MediaGridMorphCapture` keeps the preceding bounded metadata window (at most eleven media) and immutable start-column offsets for every 2..12 column count. Headerless ordering uses `startOrdinal % columnCount`; header grouping counts only contiguous preceding media from the same bucket and stops at the bucket boundary.

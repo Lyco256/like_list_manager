@@ -767,6 +767,7 @@ class MainActivityComposeTest {
                 sortBase = ClassifiedSortBase.Default,
                 location = ProductionMorphMatrixLocation.Start,
                 centerYFraction = 0.50f,
+                reverseAtSameLocation = true,
             ),
         )
     }
@@ -897,13 +898,17 @@ class MainActivityComposeTest {
             val session = mainViewModel().mediaGridSessionState.value
             !session.showInitialProgress && session.frame?.ordinalIndex?.assetIdByMediaOrdinal?.size == dataset.assetIds.size
         }
-        retainProductionMatrixAssets(dataset.assetIds, dataset.paths, previewStore)
-
         applyProductionMatrixSort(matrixCase.sortBase)
         waitForGridColumnCount(matrixCase.fromColumns, ProductionMorphWaitTimeoutMs)
-        MediaGridMorphTestTrace.clear()
-        prepareProductionMatrixLocation(matrixCase.location, dataset.assetIds.size)
-        waitForStableIdleReadiness(matrixCase.fromColumns, ProductionMorphWaitTimeoutMs)
+        val expectedFirstVisibleMediaOrdinal = prepareProductionMatrixLocation(
+            matrixCase.location,
+            dataset.assetIds.size,
+        )
+        waitForStableIdleReadiness(
+            matrixCase.fromColumns,
+            ProductionMorphWaitTimeoutMs,
+            expectedFirstVisibleMediaOrdinal,
+        )
         MediaGridMorphTestTrace.clear()
         var observationsBeforeUp = emptyList<MediaGridMorphDrawObservation>()
         pinchOnGrid(
@@ -943,11 +948,28 @@ class MainActivityComposeTest {
             observationsBeforeUp.map { it.phase }.distinct().size <= 8,
         )
         assertTrue("FirstMorphDraw missing for $matrixCase: $observationsBeforeUp", morphDraws.isNotEmpty())
+        val firstMorph = morphDraws.first()
+        assertVisualItemsMatch(
+            expected = firstMorph.currentVisualItems,
+            actual = firstMorph.sourceVisualItems,
+            message = "Morph source replaced or darkened at claim for $matrixCase",
+        )
         assertTrue(morphDraws.map { it.frameNumber }.distinct().size >= 2)
         assertTrue(morphDraws.map { it.progress }.distinct().size >= 2)
+        if (matrixCase.location == ProductionMorphMatrixLocation.HeaderBefore) {
+            assertMorphingSubtitleAppearsOrDisappears(morphDraws, matrixCase)
+        }
         assertEquals(0, MediaGridMorphTestTrace.fallbackCount())
         waitForGridColumnCount(matrixCase.toColumns, ProductionMorphWaitTimeoutMs)
         waitForMorphCanvasRemoval(ProductionMorphWaitTimeoutMs)
+        if (matrixCase.reverseAtSameLocation) {
+            runProductionMorphReverseAtSameLocation(
+                matrixCase = matrixCase,
+                waitForReadiness = false,
+                clearTrace = false,
+            )
+            return
+        }
         assertEquals(
             "Unexpected rollback for $matrixCase: ${MediaGridMorphTestTrace.rollbackReasons()}",
             0,
@@ -985,14 +1007,136 @@ class MainActivityComposeTest {
                 it.phase == MediaGridMorphPhase.Idle
         }
         assertTrue("first target Normal frame missing for $matrixCase", normalDraws.isNotEmpty())
+        val targetMorph = MediaGridMorphTestTrace.drawEvents().lastOrNull {
+            it.generation == claim.generation &&
+                it.drawMode == MediaGridSingleSurfaceMode.Morph &&
+                it.progress >= 0.999f
+        } ?: error("target Morph draw missing for $matrixCase")
+        val targetNormal = normalDraws.first { it.frameNumber > targetMorph.frameNumber }
+        assertVisualItemsMatch(
+            expected = targetMorph.targetVisualItems,
+            actual = targetNormal.currentVisualItems,
+            message = "target Normal frame shifted from Morph endpoint for $matrixCase",
+        )
         assertTrue(
             "Direct ScrollToItem layout re-evaluation missing for $matrixCase",
             MediaGridMorphTestTrace.handoffCommandEvents().any {
                 it.generation == claim.generation &&
                     it.command == "ScrollToItem" &&
-                    it.directLayoutReevaluated
+                it.directLayoutReevaluated
             },
         )
+    }
+
+    private fun runProductionMorphReverseAtSameLocation(
+        matrixCase: ProductionMorphMatrixCase,
+        waitForReadiness: Boolean = true,
+        clearTrace: Boolean = true,
+    ) {
+        if (waitForReadiness) waitForStableIdleReadiness(matrixCase.toColumns, ProductionMorphWaitTimeoutMs)
+        if (clearTrace) MediaGridMorphTestTrace.clear()
+        var observationsBeforeUp = emptyList<MediaGridMorphDrawObservation>()
+        pinchOnGrid(
+            gridTag = "classified_media_grid",
+            centerSpan = 180f,
+            endSpan = 260f,
+            centerYFraction = matrixCase.centerYFraction,
+            onBeforePhysicalUp = { observationsBeforeUp = MediaGridMorphTestTrace.drawEvents() },
+        )
+        val claim = MediaGridMorphTestTrace.claimEvents().lastOrNull { it.generation > 0L }
+            ?: error("No same-location reverse claim observed for $matrixCase")
+        assertTrue("same-location reverse claim failed for $matrixCase: $claim", claim.accepted)
+        assertEquals(null, claim.readinessReason)
+        val morphDraws = observationsBeforeUp.filter {
+            it.drawMode == MediaGridSingleSurfaceMode.Morph && it.generation == claim.generation
+        }
+        assertTrue("same-location reverse Morph draw missing for $matrixCase", morphDraws.isNotEmpty())
+        assertVisualItemsMatch(
+            expected = morphDraws.first().currentVisualItems,
+            actual = morphDraws.first().sourceVisualItems,
+            message = "same-location reverse Morph darkened at claim for $matrixCase",
+        )
+        assertEquals(0, MediaGridMorphTestTrace.fallbackCount())
+        waitForGridColumnCount(matrixCase.fromColumns, ProductionMorphWaitTimeoutMs)
+        waitForMorphCanvasRemoval(ProductionMorphWaitTimeoutMs)
+        assertEquals(0, MediaGridMorphTestTrace.rollbackColumnCountCommandCount())
+        assertTrue(MediaGridMorphTestTrace.exactTargetViewportValidated(claim.generation))
+        val terminal = MediaGridMorphTestTrace.handoffEvents().lastOrNull {
+            it.generation == claim.generation
+        } ?: error("same-location reverse terminal missing for $matrixCase")
+        assertEquals(MediaGridMorphGridHandoffPhase.Idle, terminal.phase)
+        assertFalse(terminal.suppressesUserScroll)
+        assertFalse(terminal.interactionLocked)
+        val targetMorph = MediaGridMorphTestTrace.drawEvents().lastOrNull {
+            it.generation == claim.generation &&
+                it.drawMode == MediaGridSingleSurfaceMode.Morph &&
+                it.progress >= 0.999f
+        } ?: error("same-location reverse target Morph missing for $matrixCase")
+        val targetNormal = MediaGridMorphTestTrace.drawEvents().firstOrNull {
+            it.generation == claim.generation &&
+                it.frameNumber > targetMorph.frameNumber &&
+                it.drawMode == MediaGridSingleSurfaceMode.Normal &&
+                it.phase == MediaGridMorphPhase.Idle
+        } ?: error("same-location reverse target Normal missing for $matrixCase")
+        assertVisualItemsMatch(
+            expected = targetMorph.targetVisualItems,
+            actual = targetNormal.currentVisualItems,
+            message = "same-location reverse endpoint shifted for $matrixCase",
+        )
+    }
+
+    private fun assertVisualItemsMatch(
+        expected: List<MediaGridMorphVisualItemObservation>,
+        actual: List<MediaGridMorphVisualItemObservation>,
+        message: String,
+    ) {
+        val actualByKey = actual.associateBy { it.key }
+        assertTrue(
+            "$message missing keys expected=${expected.map { it.key }} actual=${actual.map { it.key }}",
+            expected.all { it.key in actualByKey },
+        )
+        expected.forEach { left ->
+            val right = actualByKey.getValue(left.key)
+            val close = kotlin.math.abs(left.rect.left - right.rect.left) <= 1.01f &&
+                kotlin.math.abs(left.rect.top - right.rect.top) <= 1.01f &&
+                kotlin.math.abs(left.rect.width - right.rect.width) <= 1.01f &&
+                kotlin.math.abs(left.rect.height - right.rect.height) <= 1.01f
+            assertTrue("$message rect expected=$left actual=$right", close)
+        }
+    }
+
+    private fun assertMorphingSubtitleAppearsOrDisappears(
+        morphDraws: List<MediaGridMorphDrawObservation>,
+        matrixCase: ProductionMorphMatrixCase,
+    ) {
+        val transitionIdentity = morphDraws.asSequence()
+            .flatMap { it.headerTransitions.asSequence() }
+            .firstOrNull { (it.startKey == null) xor (it.endKey == null) }
+            ?.let { Triple(it.relativeRow, it.startKey, it.endKey) }
+            ?: error("No appearing/disappearing subtitle was exercised for $matrixCase")
+        val samples = morphDraws.mapNotNull { draw ->
+            draw.headerTransitions.firstOrNull {
+                Triple(it.relativeRow, it.startKey, it.endKey) == transitionIdentity
+            }?.let { draw.progress to it }
+        }
+        assertTrue("Subtitle needs multiple Morph samples for $matrixCase: $samples", samples.size >= 2)
+        assertTrue(
+            "Subtitle height did not change with scale for $matrixCase: $samples",
+            samples.map { it.second.currentHeightPx }.distinct().size >= 2,
+        )
+        samples.forEach { (progress, transition) ->
+            val p = progress.coerceIn(0f, 1f)
+            val expectedHeight = transition.startHeightPx +
+                (transition.endHeightPx - transition.startHeightPx) * p
+            assertEquals(expectedHeight, transition.currentHeightPx, 0.01f)
+            if (transition.startKey == null) {
+                assertEquals(null, transition.startTextAlpha)
+                assertEquals(p, transition.endTextAlpha ?: -1f, 0.001f)
+            } else {
+                assertEquals(1f - p, transition.startTextAlpha ?: -1f, 0.001f)
+                assertEquals(null, transition.endTextAlpha)
+            }
+        }
     }
 
     @Ignore("TEST_HARNESS legacy smoke duplicates the production same-surface claim and is not part of the production sequence.")
@@ -3007,6 +3151,7 @@ class MainActivityComposeTest {
         val sortBase: ClassifiedSortBase,
         val location: ProductionMorphMatrixLocation,
         val centerYFraction: Float,
+        val reverseAtSameLocation: Boolean = false,
     )
 
     private fun retainProductionMatrixAssets(
@@ -3107,7 +3252,7 @@ class MainActivityComposeTest {
     private fun prepareProductionMatrixLocation(
         location: ProductionMorphMatrixLocation,
         assetCount: Int,
-    ) {
+    ): Int {
         val frame = mainViewModel().mediaGridSessionState.value.frame
             ?: error("Production matrix frame is unavailable")
         val targetOrdinal = when (location) {
@@ -3130,6 +3275,10 @@ class MainActivityComposeTest {
                 ?: frame.items.filterIsInstance<MediaGridHeaderItem>().firstOrNull()
                 ?: error("Header location requested without a header")
             grid.performScrollToNode(hasTestTag(header.key))
+            val headerIndex = frame.items.indexOfFirst { it.key == header.key }
+            frame.ordinalIndex.mediaOrdinalByItemIndex.getOrNull(headerIndex + 1)
+                ?.takeIf { it >= 0 }
+                ?: error("Header ${header.key} has no following media ordinal")
         } else {
             val itemIndex = frame.ordinalIndex.itemIndexByMediaOrdinal[
                 targetOrdinal!!.coerceIn(0, frame.ordinalIndex.assetIdByMediaOrdinal.lastIndex),
@@ -3146,16 +3295,26 @@ class MainActivityComposeTest {
             }
         }
         composeRule.waitForIdle()
+        return frame.ordinalIndex.assetIdByMediaOrdinal.indices.firstOrNull { ordinal ->
+            val assetId = frame.ordinalIndex.assetIdByMediaOrdinal[ordinal]
+            composeRule.onAllNodesWithTag("media_grid_item_$assetId").fetchSemanticsNodes().isNotEmpty()
+        } ?: error("Production matrix location has no composed media")
     }
 
-    private fun waitForStableIdleReadiness(expectedColumnCount: Int, timeoutMillis: Long = 30_000L) {
+    private fun waitForStableIdleReadiness(
+        expectedColumnCount: Int,
+        timeoutMillis: Long = 30_000L,
+        expectedFirstVisibleMediaOrdinal: Int? = null,
+    ) {
         try {
             composeRule.waitUntil(timeoutMillis) {
                 val frameKey = mainViewModel().mediaGridSessionState.value.frame?.key ?: return@waitUntil false
                 MediaGridMorphTestTrace.idleReadinessEvents().any { event ->
                     event.ready &&
                         event.identity.currentColumnCount == expectedColumnCount &&
-                        event.identity.frameKey == frameKey
+                        event.identity.frameKey == frameKey &&
+                        (expectedFirstVisibleMediaOrdinal == null ||
+                            event.identity.viewportSignature.firstVisibleMediaOrdinal == expectedFirstVisibleMediaOrdinal)
                 }
             }
         } catch (error: ComposeTimeoutException) {

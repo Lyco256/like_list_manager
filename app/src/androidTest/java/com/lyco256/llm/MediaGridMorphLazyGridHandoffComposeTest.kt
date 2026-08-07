@@ -296,6 +296,10 @@ class MediaGridMorphLazyGridHandoffComposeTest {
                                 mode = surfaceMode,
                                 morphModel = morphModel.value,
                                 progress = progress,
+                                layoutIdentity = MediaGridResidentCanvasLayoutIdentity(
+                                    firstVisibleItemIndex = gridState.firstVisibleItemIndex,
+                                    firstVisibleItemScrollOffset = gridState.firstVisibleItemScrollOffset,
+                                ),
                             ),
                         userScrollEnabled = false,
                     ) {

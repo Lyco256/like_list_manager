@@ -1,5 +1,9 @@
 # `MediaGridRenderingContractTest.kt`
 
+## 2026-08-07 shared renderer helper
+
+- The uniform-lattice static contract follows the shared cell-geometry helper used by both production drawing and endpoint observation.
+
 ## 2026-08-01 Phase 2 coverage
 
 - Static contracts assert one production gesture path, one resident/Morph surface, cache-phase resident command preparation, frozen row rendering, full endpoint protection, and removal of the legacy production pinch/overlay route.
@@ -11,9 +15,9 @@
 
 ## Current production contract
 
-The contract test fixes the Production gesture/host connection, explicit `ProductionVisible` Canvas mode, absence of `mediaGridPinchToResize`, and isolation of the TEST_HARNESS host while preserving resident draw, scheduler, queue, and publication contracts.
+The contract test fixes the shared Production gesture path, the production handoff effects on the unified LazyGrid surface, absence of `ProductionVisible` and `mediaGridPinchToResize`, and isolation of the TEST_HARNESS Canvas host while preserving resident draw, scheduler, queue, and publication contracts.
 
-## 2026-07-30 Morph interaction production境界
+## 2026-07-30 Morph interaction production境界（履歴: 現行経路では不使用）
 
 `MediaGridMorphInteraction.kt`がTEST_HARNESS guardと`withFrameNanos` runnerを持つ一方、production `TagHierarchyUiV2.kt`がinteractive layer、controller、handoff requestを参照せず、既存`mediaGridPinchToResize`とrelease時列数callbackを維持することを静的に固定する。
 

@@ -48,6 +48,49 @@ internal data class MediaGridMorphRowRenderHeader(
     val endText: TextLayoutResult?,
 )
 
+internal data class MediaGridMorphHeaderBlend(
+    val heightPx: Float,
+    val startTextAlpha: Float?,
+    val endTextAlpha: Float?,
+)
+
+internal fun mediaGridMorphHeaderBlend(
+    header: MediaGridMorphHeaderPlan,
+    progress: Float,
+): MediaGridMorphHeaderBlend {
+    val p = progress.coerceIn(0f, 1f)
+    val sameTitle = header.startTitle != null && header.startTitle == header.endTitle
+    return MediaGridMorphHeaderBlend(
+        heightPx = lerp(header.startHeightPx, header.endHeightPx, p),
+        startTextAlpha = when {
+            header.startTitle == null -> null
+            sameTitle -> 1f
+            else -> 1f - p
+        },
+        endTextAlpha = when {
+            header.endTitle == null || sameTitle -> null
+            else -> p
+        },
+    )
+}
+
+internal fun mediaGridMorphHeaderTransitions(
+    model: MediaGridMorphRowRenderModel,
+    progress: Float,
+): List<MediaGridMorphHeaderTransitionObservation> = model.headers.map { header ->
+    val blend = mediaGridMorphHeaderBlend(header.plan, progress)
+    MediaGridMorphHeaderTransitionObservation(
+        relativeRow = header.plan.relativeRow,
+        startKey = header.plan.startKey,
+        endKey = header.plan.endKey,
+        startHeightPx = header.plan.startHeightPx,
+        endHeightPx = header.plan.endHeightPx,
+        currentHeightPx = blend.heightPx,
+        startTextAlpha = blend.startTextAlpha,
+        endTextAlpha = blend.endTextAlpha,
+    )
+}
+
 /** Immutable claim-time data consumed by the single LazyGrid draw surface. */
 internal data class MediaGridMorphRowRenderModel(
     val viewport: Rect,
@@ -73,6 +116,84 @@ internal data class MediaGridMorphRowRenderModel(
     val headerTextComplete: Boolean,
     val isComplete: Boolean,
 )
+
+internal fun mediaGridMorphSourceVisualItems(
+    model: MediaGridMorphRowRenderModel,
+): List<MediaGridMorphVisualItemObservation> = buildList {
+    model.cells.forEach { cell ->
+        val assetId = cell.plan.startContent.assetIdOrNull() ?: return@forEach
+        val rect = mediaGridMorphRenderCellRect(model, cell.plan, 0f)
+        if (rect.intersectsMorphViewport(model.viewport)) {
+            add(MediaGridMorphVisualItemObservation("asset:$assetId", rect))
+        }
+    }
+    model.headers.forEach { header ->
+        val key = header.plan.startKey ?: return@forEach
+        val rect = mediaGridMorphRenderHeaderRect(model, header.plan, 0f)
+        if (rect.intersectsMorphViewport(model.viewport)) {
+            add(MediaGridMorphVisualItemObservation("header:$key", rect))
+        }
+    }
+}.sortedBy { it.key }
+
+internal fun mediaGridMorphTargetVisualItems(
+    model: MediaGridMorphRowRenderModel,
+): List<MediaGridMorphVisualItemObservation> = buildList {
+    model.cells.forEach { cell ->
+        val assetId = cell.plan.endContent.assetIdOrNull() ?: return@forEach
+        val rect = mediaGridMorphRenderCellRect(model, cell.plan, 1f)
+        if (rect.intersectsMorphViewport(model.viewport)) {
+            add(MediaGridMorphVisualItemObservation("asset:$assetId", rect))
+        }
+    }
+    model.headers.forEach { header ->
+        val key = header.plan.endKey ?: return@forEach
+        val rect = mediaGridMorphRenderHeaderRect(model, header.plan, 1f)
+        if (rect.intersectsMorphViewport(model.viewport)) {
+            add(MediaGridMorphVisualItemObservation("header:$key", rect))
+        }
+    }
+}.sortedBy { it.key }
+
+private fun Rect.intersectsMorphViewport(viewport: Rect): Boolean =
+    minOf(right, viewport.right) - maxOf(left, viewport.left) > 1f &&
+        minOf(bottom, viewport.bottom) - maxOf(top, viewport.top) > 1f
+
+internal fun mediaGridMorphRenderCellRect(
+    model: MediaGridMorphRowRenderModel,
+    cell: MediaGridMorphCellPlan,
+    progress: Float,
+): Rect {
+    val p = progress.coerceIn(0f, 1f)
+    if (p <= 0f && cell.sourceRect != null) return cell.sourceRect
+    val currentCellSize = lerp(model.sourceCellSize, model.targetCellSize, p)
+    val focalRowTop = model.fixedFocalCenterY - model.focalV * currentCellSize
+    val targetAdjustment = model.targetRowTopAdjustment * p
+    val top = focalRowTop + cell.relativeRow * currentCellSize +
+        lerp(cell.startHeaderOffsetPx, cell.endHeaderOffsetPx, p) + targetAdjustment
+    return Rect(
+        left = model.viewport.left + cell.column * currentCellSize,
+        top = top,
+        right = model.viewport.left + (cell.column + 1) * currentCellSize,
+        bottom = top + currentCellSize,
+    )
+}
+
+internal fun mediaGridMorphRenderHeaderRect(
+    model: MediaGridMorphRowRenderModel,
+    header: MediaGridMorphHeaderPlan,
+    progress: Float,
+): Rect {
+    val p = progress.coerceIn(0f, 1f)
+    header.sourceRect?.takeIf { p <= 0f }?.let { return it }
+    val currentCellSize = lerp(model.sourceCellSize, model.targetCellSize, p)
+    val focalRowTop = model.fixedFocalCenterY - model.focalV * currentCellSize
+    val targetAdjustment = model.targetRowTopAdjustment * p
+    val top = focalRowTop + header.relativeRow * currentCellSize +
+        lerp(header.startOffsetBeforePx, header.endOffsetBeforePx, p) + targetAdjustment
+    val height = lerp(header.startHeightPx, header.endHeightPx, p)
+    return Rect(model.viewport.left, top, model.viewport.right, top + height)
+}
 
 internal data class MediaGridMorphTextResourceIdentity(
     val titles: List<String>,
@@ -648,28 +769,13 @@ internal fun DrawScope.drawMediaGridMorphRow(
 ) {
     val p = progress.coerceIn(0f, 1f)
     val viewport = model.viewport
-    val gridLeft = viewport.left
     val viewportWidth = viewport.width.coerceAtMost(size.width)
     val viewportHeight = viewport.height.coerceAtMost(size.height)
-    val currentCellSize = lerp(model.sourceCellSize, model.targetCellSize, p)
-    val focalRowTop = model.fixedFocalCenterY - model.focalV * currentCellSize
-    val targetAnchorAdjustment = if (p >= 1f) model.targetRowTopAdjustment else 0f
     clipRect(0f, 0f, viewportWidth, viewportHeight) {
         var cellIndex = 0
         while (cellIndex < model.cells.size) {
             val cell = model.cells[cellIndex]
-            val cellRect = cell.plan.sourceRect?.takeIf { p <= 0f } ?: Rect(
-                left = gridLeft + cell.plan.column * currentCellSize,
-                top = focalRowTop +
-                    cell.plan.relativeRow * currentCellSize +
-                    lerp(cell.plan.startHeaderOffsetPx, cell.plan.endHeaderOffsetPx, p) +
-                    targetAnchorAdjustment,
-                right = gridLeft + cell.plan.column * currentCellSize + currentCellSize,
-                bottom = focalRowTop +
-                    cell.plan.relativeRow * currentCellSize +
-                    lerp(cell.plan.startHeaderOffsetPx, cell.plan.endHeaderOffsetPx, p) +
-                    targetAnchorAdjustment + currentCellSize,
-            )
+            val cellRect = mediaGridMorphRenderCellRect(model, cell.plan, p)
             val left = cellRect.left - viewport.left
             val top = cellRect.top - viewport.top
             val right = cellRect.right - viewport.left
@@ -706,17 +812,11 @@ internal fun DrawScope.drawMediaGridMorphRow(
         var headerIndex = 0
         while (headerIndex < model.headers.size) {
             val header = model.headers[headerIndex]
-            val height = lerp(header.plan.startHeightPx, header.plan.endHeightPx, p)
-            val rowTop = focalRowTop + header.plan.relativeRow * currentCellSize + targetAnchorAdjustment
-            val sourceRect = header.plan.sourceRect
-            val top = if (p <= 0f && sourceRect != null) {
-                sourceRect.top - viewport.top
-            } else {
-                rowTop +
-                    lerp(header.plan.startOffsetBeforePx, header.plan.endOffsetBeforePx, p) - viewport.top
-            }
-            val drawHeight = if (p <= 0f && sourceRect != null) sourceRect.height else height
-            val left = gridLeft - viewport.left
+            val blend = mediaGridMorphHeaderBlend(header.plan, p)
+            val headerRect = mediaGridMorphRenderHeaderRect(model, header.plan, p)
+            val top = headerRect.top - viewport.top
+            val drawHeight = headerRect.height
+            val left = 0f
             val right = left + viewportWidth
             val bottom = top + drawHeight
             if (right > left && bottom > top) {
@@ -728,16 +828,14 @@ internal fun DrawScope.drawMediaGridMorphRow(
                 clipRect(left, top, right, bottom) {
                     val textX = left + model.horizontalTextPaddingPx
                     val textY = top + model.verticalTextPaddingPx
-                    if (header.plan.startTitle != null && header.plan.startTitle == header.plan.endTitle) {
+                    blend.startTextAlpha?.let { alpha ->
                         header.startText?.let {
-                            drawText(it, color = model.textColor, topLeft = androidx.compose.ui.geometry.Offset(textX, textY))
+                            drawText(it, color = model.textColor, topLeft = androidx.compose.ui.geometry.Offset(textX, textY), alpha = alpha)
                         }
-                    } else {
-                        header.startText?.let {
-                            drawText(it, color = model.textColor, topLeft = androidx.compose.ui.geometry.Offset(textX, textY), alpha = 1f - p)
-                        }
+                    }
+                    blend.endTextAlpha?.let { alpha ->
                         header.endText?.let {
-                            drawText(it, color = model.textColor, topLeft = androidx.compose.ui.geometry.Offset(textX, textY), alpha = p)
+                            drawText(it, color = model.textColor, topLeft = androidx.compose.ui.geometry.Offset(textX, textY), alpha = alpha)
                         }
                     }
                 }

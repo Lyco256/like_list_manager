@@ -1,5 +1,9 @@
 # `MediaGridMorphLazyGridHandoffComposeTest.kt`
 
+## 2026-08-07 resident layout identity
+
+- The single-surface fixture supplies the same first-visible index/offset cache identity as production after the resident command invalidation fix.
+
 ## 2026-07-31 production handoff correction coverage
 
 - Handoff cases cover both column directions, header bucket changes, delayed target frames, target draw-before-Canvas-removal, rollback, fallback release, and one-grid scroll suppression.

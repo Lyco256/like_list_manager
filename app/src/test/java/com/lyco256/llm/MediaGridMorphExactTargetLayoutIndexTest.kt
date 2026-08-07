@@ -60,6 +60,26 @@ class MediaGridMorphExactTargetLayoutIndexTest {
     }
 
     @Test
+    fun headerForRowIsPresentOnlyOnTheFirstRowAfterTheHeader() {
+        val dates = List(16) { ordinal ->
+            "2026-07-${(ordinal / 8 + 1).toString().padStart(2, '0')}T00:00:00Z"
+        }
+        val index = buildMediaGridMorphExactTargetLayoutIndex(
+            frame = frame(count = dates.size, sort = ClassifiedSortBase.PostTime, dates = dates),
+            targetColumnCount = 4,
+            viewportWidthPx = 640,
+            viewportHeightPx = 250,
+            headerHeightPx = 40f,
+        )
+
+        assertEquals(listOf(0, -1, 1, -1), index.rowHeaderIndex.toList())
+        assertEquals(index.headers[0], index.headerForRow(0))
+        assertEquals(null, index.headerForRow(1))
+        assertEquals(index.headers[1], index.headerForRow(2))
+        assertEquals(null, index.headerForRow(3))
+    }
+
+    @Test
     fun fullViewportValidatorUsesViewportLocalRowsCellsAndHeadersAcrossBuckets() {
         val dates = List(12) { ordinal ->
             "2026-07-${(ordinal / 4 + 1).toString().padStart(2, '0')}T00:00:00Z"

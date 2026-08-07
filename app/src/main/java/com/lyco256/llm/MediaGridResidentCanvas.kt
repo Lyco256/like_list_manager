@@ -43,6 +43,26 @@ internal data class MediaGridMorphDrawObservation(
     val hasPlan: Boolean,
     val hasActiveRenderModel: Boolean,
     val protectedAssetCount: Int,
+    val currentVisualItems: List<MediaGridMorphVisualItemObservation> = emptyList(),
+    val sourceVisualItems: List<MediaGridMorphVisualItemObservation> = emptyList(),
+    val targetVisualItems: List<MediaGridMorphVisualItemObservation> = emptyList(),
+    val headerTransitions: List<MediaGridMorphHeaderTransitionObservation> = emptyList(),
+)
+
+internal data class MediaGridMorphVisualItemObservation(
+    val key: String,
+    val rect: androidx.compose.ui.geometry.Rect,
+)
+
+internal data class MediaGridMorphHeaderTransitionObservation(
+    val relativeRow: Int,
+    val startKey: String?,
+    val endKey: String?,
+    val startHeightPx: Float,
+    val endHeightPx: Float,
+    val currentHeightPx: Float,
+    val startTextAlpha: Float?,
+    val endTextAlpha: Float?,
 )
 
 internal data class MediaGridMorphClaimObservation(
@@ -329,6 +349,11 @@ private data class MediaGridResidentDrawCommand(
     val size: IntSize,
 )
 
+internal data class MediaGridResidentCanvasLayoutIdentity(
+    val firstVisibleItemIndex: Int,
+    val firstVisibleItemScrollOffset: Int,
+)
+
 /**
  * Unified production surface. Resident commands are prepared in the
  * drawWithCache phase; the draw phase only iterates immutable commands or the
@@ -341,9 +366,12 @@ internal fun Modifier.mediaGridSingleSurface(
     mode: State<MediaGridSingleSurfaceMode>,
     morphModel: MediaGridMorphRowRenderModel?,
     progress: State<Float>,
+    layoutIdentity: MediaGridResidentCanvasLayoutIdentity,
     morphDrawObserver: ((MediaGridMorphDrawObservation) -> Unit)? = null,
     morphSnapshot: State<MediaGridMorphInteractionSnapshot>? = null,
 ): Modifier = drawWithCache {
+    @Suppress("UNUSED_VARIABLE")
+    val cacheInvalidationIdentity = layoutIdentity
     val layout = state.layoutInfo
     val commands = ArrayList<MediaGridResidentDrawCommand>(layout.visibleItemsInfo.size)
     for (info in layout.visibleItemsInfo) {
@@ -359,6 +387,21 @@ internal fun Modifier.mediaGridSingleSurface(
             offset = IntOffset(left, top),
             size = IntSize(info.size.width, info.size.height),
         )
+    }
+    val normalVisualItems = if (morphDrawObserver != null) {
+        layout.visibleItemsInfo.mapNotNull { info ->
+            val key = info.key as? String ?: return@mapNotNull null
+            val visualKey = assetIdByItemKey[key]?.let { "asset:$it" } ?: "header:$key"
+            val rect = mediaGridCanvasDestinationRect(info.offset, info.size, layout.viewportStartOffset)
+            val visibleWidth = minOf(rect.right, size.width) - maxOf(rect.left, 0f)
+            val visibleHeight = minOf(rect.bottom, size.height) - maxOf(rect.top, 0f)
+            if (visibleWidth <= 1f || visibleHeight <= 1f) {
+                return@mapNotNull null
+            }
+            MediaGridMorphVisualItemObservation(visualKey, rect)
+        }.sortedBy { it.key }
+    } else {
+        emptyList()
     }
     onDrawWithContent {
         val currentMode = mode.value
@@ -376,6 +419,16 @@ internal fun Modifier.mediaGridSingleSurface(
                     hasPlan = snapshot.plan != null,
                     hasActiveRenderModel = snapshot.activeRenderModel != null,
                     protectedAssetCount = snapshot.protectedAssetIds.size,
+                    currentVisualItems = normalVisualItems,
+                    sourceVisualItems = snapshot.activeRenderModel
+                        ?.let(::mediaGridMorphSourceVisualItems)
+                        .orEmpty(),
+                    targetVisualItems = snapshot.activeRenderModel
+                        ?.let(::mediaGridMorphTargetVisualItems)
+                        .orEmpty(),
+                    headerTransitions = snapshot.activeRenderModel
+                        ?.let { mediaGridMorphHeaderTransitions(it, progress.value) }
+                        .orEmpty(),
                 ),
             )
         }

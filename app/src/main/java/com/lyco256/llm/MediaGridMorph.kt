@@ -608,6 +608,8 @@ internal fun captureMediaGridMorphInput(
         firstVisibleMediaOrdinal = signature.firstVisibleMediaOrdinal,
         lastVisibleMediaOrdinal = signature.lastVisibleMediaOrdinal,
         columnCount = columnCount,
+        viewportWidthPx = signature.viewportWidthPx,
+        viewportHeightPx = signature.viewportHeightPx,
     ) ?: return null
     val startOrdinal = ordinalRange.first
     val endOrdinal = ordinalRange.last
@@ -782,7 +784,7 @@ internal fun captureMediaGridMorphInput(
         sourceRows = sourceRows,
         totalMediaCount = totalMedia,
         preparedIndexVersion = preparedIndex?.drawIndexVersion,
-        exactTargetLayoutIndexes = listOf(columnCount - 1, columnCount + 1)
+        exactTargetLayoutIndexes = listOf(columnCount - 1, columnCount, columnCount + 1)
             .filter { it in ClassifiedMediaGridMinColumnCount..ClassifiedMediaGridMaxColumnCount }
             .distinct()
             .associateWith { targetColumnCount ->
@@ -894,6 +896,8 @@ internal fun mediaGridMorphOrdinalRange(
     firstVisibleMediaOrdinal: Int,
     lastVisibleMediaOrdinal: Int,
     columnCount: Int,
+    viewportWidthPx: Int = 0,
+    viewportHeightPx: Int = 0,
 ): IntRange? {
     if (
         totalMedia <= 0 ||
@@ -903,7 +907,21 @@ internal fun mediaGridMorphOrdinalRange(
     val widestAdjacentColumnCount = (columnCount + 1)
         .coerceAtMost(ClassifiedMediaGridMaxColumnCount)
         .coerceAtLeast(columnCount)
-    val ordinalPadding = widestAdjacentColumnCount * MediaGridMorphDefaults.OverscanRows
+    val basePadding = widestAdjacentColumnCount * MediaGridMorphDefaults.OverscanRows
+    val visibleMediaCount = lastVisibleMediaOrdinal - firstVisibleMediaOrdinal + 1
+    val adjacentViewportCapacity = if (viewportWidthPx > 0 && viewportHeightPx > 0) {
+        val adjacentCellSize = viewportWidthPx.toFloat() / widestAdjacentColumnCount
+        val rowsIntersectingViewport = kotlin.math.ceil(viewportHeightPx / adjacentCellSize)
+            .toInt() + 1
+        rowsIntersectingViewport * widestAdjacentColumnCount
+    } else {
+        visibleMediaCount
+    }
+    // A wider target grid can expose more media at progress 1 than the
+    // current LazyGrid reports as visible. Keep that complete endpoint plus
+    // the same bounded overscan on both sides.
+    val ordinalPadding = basePadding +
+        (adjacentViewportCapacity - visibleMediaCount).coerceAtLeast(0)
     return (firstVisibleMediaOrdinal - ordinalPadding).coerceAtLeast(0)..
         (lastVisibleMediaOrdinal + ordinalPadding).coerceAtMost(totalMedia - 1)
 }

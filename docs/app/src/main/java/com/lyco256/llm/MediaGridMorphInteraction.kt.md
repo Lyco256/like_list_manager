@@ -1,5 +1,10 @@
 # `MediaGridMorphInteraction.kt`
 
+## 2026-08-07 immediate reverse protection
+
+- A successful target handoff transfers the claimed asset union to an immediate-reverse carryover callback instead of releasing it like a cancellation.
+- Cancel, failure, rollback, and settle-to-current still release assets immediately. The carryover distinction is generation-scoped and does not alter claim completeness.
+
 ## 2026-08-05 exact handoff request
 
 - The settle request preserves the selected RequiredRenderSet-backed plan and carries exact target row/item metadata and the adjacent-column exact layout index into the real-grid handoff.
@@ -24,7 +29,7 @@
 - The controller exposes `Normal`, `Morph`, `RevealCurrent`, and `RevealTarget` draw modes. Current settle renders one reveal frame before unlock; target settle stays at progress 1 until real-grid handoff verification completes.
 - Target requests retain focal ordinal, target row top, row ordinals, cell size, and header title. Source/target identity changes are allowed only in the matching handoff/reveal phase.
 
-## 2026-08-01 Phase 1 row reflow
+## 2026-08-01 Phase 1 row reflow（履歴: 現行経路では不使用）
 
 - Production Morph overlay/handoff is disabled for this phase. Release builds use the legacy one-step pinch resize with a fixed initial pointer distance.
 - TEST_HARNESS captures the real grid at claim, derives progress from current distance divided by the initial distance, and hands off to the actual target `LazyVerticalGrid` row.

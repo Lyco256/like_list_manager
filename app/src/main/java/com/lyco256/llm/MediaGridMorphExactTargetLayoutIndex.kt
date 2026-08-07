@@ -26,6 +26,7 @@ internal data class MediaGridMorphExactTargetLayoutIndex(
     val columnLeftPx: IntArray,
     val columnWidthPx: IntArray,
     val rowHeightPx: Float,
+    val assetIdByMediaOrdinal: LongArray,
     val itemIndexByMediaOrdinal: IntArray,
     val rowIdByMediaOrdinal: IntArray,
     val rowFirstItemIndex: IntArray,
@@ -115,7 +116,7 @@ internal fun buildMediaGridMorphExactTargetLayoutIndex(
     var previousBucketKey: String? = null
     var currentRowId = -1
     var currentRowStart = 0
-    var currentHeaderIndex = -1
+    var pendingHeaderIndex = -1
 
     fun flushRow() {
         if (currentRowId < 0) return
@@ -142,7 +143,7 @@ internal fun buildMediaGridMorphExactTargetLayoutIndex(
                 height = height,
             )
             contentY += height
-            currentHeaderIndex = headers.lastIndex
+            pendingHeaderIndex = headers.lastIndex
             previousBucketKey = bucket.key
         }
         if (currentRowId < 0) {
@@ -151,7 +152,8 @@ internal fun buildMediaGridMorphExactTargetLayoutIndex(
             rowFirstItemIndex += itemIndex
             rowMediaOrdinalStart += rowMediaOrdinals.size
             rowTopAtScrollZero += contentY
-            rowHeaderIndex += currentHeaderIndex
+            rowHeaderIndex += pendingHeaderIndex
+            pendingHeaderIndex = -1
         }
         itemIndexByOrdinal[mediaOrdinal] = itemIndex
         rowIdByOrdinal[mediaOrdinal] = currentRowId
@@ -174,6 +176,7 @@ internal fun buildMediaGridMorphExactTargetLayoutIndex(
         columnLeftPx = columnLefts,
         columnWidthPx = columnWidths,
         rowHeightPx = rowHeight,
+        assetIdByMediaOrdinal = entries.map { it.assetId }.toLongArray(),
         itemIndexByMediaOrdinal = itemIndexByOrdinal,
         rowIdByMediaOrdinal = rowIdByOrdinal,
         rowFirstItemIndex = rowFirstItemIndex.toIntArray(),

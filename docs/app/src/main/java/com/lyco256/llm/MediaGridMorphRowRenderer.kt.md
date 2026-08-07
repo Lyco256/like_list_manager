@@ -1,5 +1,11 @@
 # `MediaGridMorphRowRenderer.kt`
 
+## 2026-08-07 shared endpoint geometry
+
+- Cell and header rectangle calculation is shared by production drawing and TEST_HARNESS source/target viewport observations, preventing the regression assertion from using a separate geometry formula.
+- `mediaGridMorphHeaderBlend` is the shared production/test rule for date and like-count section headers. Appearing or disappearing header height lerps between `0` and the measured header height at the same progress as the grid morph; its text alpha fades between `0` and `1`. Changed titles crossfade, while an unchanged title remains a single opaque layer.
+- The achievable-target scroll-bound adjustment is applied continuously as `adjustment * progress` to both media rows and section headers, preventing a final-frame position jump.
+
 ## 2026-08-05 current required render set
 
 - `MediaGridMorphPlan.requiredRenderSet()` is shared by completeness, render-model filtering, protected assets, and claim reports. It includes only cells and headers whose swept endpoint geometry intersects the viewport; offscreen overscan is optional.

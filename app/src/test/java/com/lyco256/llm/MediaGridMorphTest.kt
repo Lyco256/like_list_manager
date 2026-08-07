@@ -14,6 +14,70 @@ import kotlin.math.roundToInt
 
 class MediaGridMorphTest {
     @Test
+    fun successfulHandoffCarriesProtectedAssetsUntilImmediateReverseIsReady() {
+        val capture = withSourceRows(capture(columns = 4, count = 24), 4)
+        val identity = capture.identity.toInteractionIdentity()
+        val pair = buildMediaGridMorphRowPreparedPairs(capture)
+            .getValue(MediaGridMorphDirection.IncreaseColumns)
+        val plan = MediaGridMorphPlan.selectRowReflow(pair, Offset(100f, 50f))
+        val model = completeTestRenderModel(plan, longArrayOf(1L, 2L, 3L))
+        val bundle = MediaGridMorphClaimBundle(
+            generation = 23L,
+            identity = identity,
+            firstPointerId = 1L,
+            secondPointerId = 2L,
+            initialDistance = 100f,
+            fixedInitialCenter = Offset(100f, 50f),
+            preparedIndexIdentity = 1L,
+            textResourceIdentity = MediaGridMorphTextResourceIdentity(emptyList(), 1f, 1f, 1200),
+            directions = mapOf(
+                MediaGridMorphDirection.IncreaseColumns to MediaGridMorphDirectionClaimBundle(
+                    direction = MediaGridMorphDirection.IncreaseColumns,
+                    targetColumnCount = 5,
+                    plan = plan,
+                    renderModel = model,
+                    completeness = completeImageCompleteness(),
+                    protectedAssetIds = model.protectedAssetIds,
+                ),
+            ),
+            protectedAssetUnion = model.protectedAssetIds,
+        )
+        val released = ArrayList<LongArray>()
+        val carryover = ArrayList<LongArray>()
+        val controller = MediaGridMorphInteractionController()
+        controller.setProtectionCallbacks(
+            onProtect = {},
+            onRelease = { released += it },
+            onCarryover = { carryover += it },
+        )
+
+        assertTrue(controller.claimPointers(bundle, Offset(55f, 50f), Offset(145f, 50f)))
+        controller.updatePointers(Offset(60f, 50f), Offset(140f, 50f))
+        controller.releasePointers()
+        val generation = controller.snapshot().interactionGeneration
+        controller.advanceSettleElapsed(generation, MediaGridMorphDefaults.SettleDurationMillis)
+        assertEquals(MediaGridMorphPhase.AwaitingGridHandoff, controller.snapshot().phase)
+        controller.completeHandoff(generation)
+
+        assertEquals(MediaGridMorphPhase.Idle, controller.snapshot().phase)
+        assertTrue(released.isEmpty())
+        assertEquals(listOf(1L, 2L, 3L), carryover.single().toList())
+
+        val cancelled = MediaGridMorphInteractionController()
+        val cancelledRelease = ArrayList<LongArray>()
+        val cancelledCarryover = ArrayList<LongArray>()
+        cancelled.setProtectionCallbacks(
+            onProtect = {},
+            onRelease = { cancelledRelease += it },
+            onCarryover = { cancelledCarryover += it },
+        )
+        assertTrue(cancelled.claimPointers(bundle, Offset(55f, 50f), Offset(145f, 50f)))
+        cancelled.cancelPointers()
+        assertEquals(listOf(1L, 2L, 3L), cancelledRelease.single().toList())
+        assertTrue(cancelledCarryover.isEmpty())
+    }
+
+    @Test
     fun claimBundleLocksDirectionAndKeepsProtectionAcrossOppositeSideTracking() {
         val capture = withSourceRows(capture(columns = 4, count = 24), 4)
         val identity = capture.identity.toInteractionIdentity()
@@ -583,6 +647,35 @@ class MediaGridMorphTest {
         assertEquals(4_990, range.first)
         assertEquals(5_029, range.last)
         assertEquals(20 + (5 * 4), range.count())
+    }
+
+    @Test
+    fun localRangeIncludesTheCompleteWiderTargetViewport() {
+        val range = mediaGridMorphOrdinalRange(
+            totalMedia = 10_000,
+            firstVisibleMediaOrdinal = 5_000,
+            lastVisibleMediaOrdinal = 5_027,
+            columnCount = 4,
+            viewportWidthPx = 674,
+            viewportHeightPx = 1_158,
+        )!!
+
+        // Five target columns fit ten intersecting rows. The bounded range
+        // must include those 50 endpoint cells and two target overscan rows.
+        assertTrue(range.last >= 5_027 + (50 - 28) + 10)
+        assertTrue(range.first <= 5_000 - (50 - 28) - 10)
+    }
+
+    @Test
+    fun exactMorphHandoffIsNotOverwrittenByLegacyAnchorRestore() {
+        assertFalse(shouldRestoreLegacyMediaGridPinchAnchor(null, morphCheckpointSuppressed = true))
+        assertTrue(shouldRestoreLegacyMediaGridPinchAnchor(null, morphCheckpointSuppressed = false))
+        assertTrue(
+            shouldRestoreLegacyMediaGridPinchAnchor(
+                ClassifiedMediaGridScrollAnchor("asset", 12, 4, 0f),
+                morphCheckpointSuppressed = true,
+            ),
+        )
     }
 
     @Test
@@ -1406,7 +1499,7 @@ class MediaGridMorphTest {
         assertEquals(0.5f, plan.focalV, 0.0001f)
         assertEquals(sourceFocal.top, mediaGridMorphRowCellRect(plan, focal.cells.first(), 0f).top, 0.0001f)
         assertEquals(
-            plan.fixedFocalCenterY,
+            plan.fixedFocalCenterY + plan.targetRowTopAdjustment * 0.5f,
             mediaGridMorphRowCellRect(plan, focal.cells.first(), 0.5f).top +
                 plan.focalV * mediaGridMorphCurrentCellSize(plan, 0.5f),
             0.0001f,
@@ -1516,6 +1609,34 @@ class MediaGridMorphTest {
         val plan = requireNotNull(pair.viewportPlanTemplate).select(Offset(600f, 450f))
 
         assertTrue(plan.headerPlans.any { it.startHeightPx != it.endHeightPx })
+        val appearingOrDisappearing = plan.headerPlans.first {
+            (it.startTitle == null) xor (it.endTitle == null)
+        }
+        val exactTarget = requireNotNull(plan.exactTargetLayoutIndex)
+        plan.rowPlans.forEach { row ->
+            val targetRowId = requireNotNull(plan.targetAnchorRowId) + row.relativeRow
+            val expected = exactTarget.rowMediaOrdinals(targetRowId)?.toList().orEmpty()
+            val actual = row.cells.mapNotNull { it.targetMediaOrdinal }
+            if (expected.isNotEmpty() && actual.isNotEmpty()) {
+                assertEquals(expected, actual)
+            }
+        }
+        listOf(0f, 0.25f, 0.5f, 0.75f, 1f).forEach { progress ->
+            val blend = mediaGridMorphHeaderBlend(appearingOrDisappearing, progress)
+            assertEquals(
+                appearingOrDisappearing.startHeightPx +
+                    (appearingOrDisappearing.endHeightPx - appearingOrDisappearing.startHeightPx) * progress,
+                blend.heightPx,
+                0.0001f,
+            )
+            if (appearingOrDisappearing.startTitle == null) {
+                assertEquals(null, blend.startTextAlpha)
+                assertEquals(progress, blend.endTextAlpha ?: -1f, 0.0001f)
+            } else {
+                assertEquals(1f - progress, blend.startTextAlpha ?: -1f, 0.0001f)
+                assertEquals(null, blend.endTextAlpha)
+            }
+        }
         listOf(0f, 0.5f, 1f).forEach { progress ->
             val size = mediaGridMorphCurrentCellSize(plan, progress)
             plan.rowPlans.flatMap { it.cells }.forEach { cell ->
@@ -1524,6 +1645,13 @@ class MediaGridMorphTest {
                 assertEquals(rect.top + size, rect.bottom, 0.0001f)
             }
         }
+        val focalCell = plan.rowPlans.first { it.relativeRow == 0 }.cells.first()
+        val beforeEnd = mediaGridMorphRowCellRect(plan, focalCell, 0.999f)
+        val atEnd = mediaGridMorphRowCellRect(plan, focalCell, 1f)
+        assertTrue(
+            "target scroll-bound correction must not jump at progress 1: before=$beforeEnd end=$atEnd",
+            kotlin.math.abs(atEnd.top - beforeEnd.top) < 1f,
+        )
     }
 
     @Test

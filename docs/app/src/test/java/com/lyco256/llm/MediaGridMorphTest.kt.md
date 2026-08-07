@@ -1,5 +1,19 @@
 # `MediaGridMorphTest.kt`
 
+## 2026-08-07 immediate reverse handoff
+
+- A fixed synthetic 4-to-5 claim verifies that successful handoff completion sends the protected asset union to carryover rather than release.
+- The same fixed bundle verifies pointer cancellation sends the union to normal release and never to carryover. This reproduces the timing contract without device data or waiting for image workers.
+
+## 2026-08-07 section-header appearance/disappearance
+
+- The row-reflow header test now selects an actual appearing or disappearing date/like-count section header and checks progress `0`, `0.25`, `0.5`, `0.75`, and `1`. Height must be the exact linear interpolation between zero and the measured endpoint, while text alpha follows the same progress in the appropriate direction.
+- Every available target row in that plan must use the exact target index's media ordinals, and the scroll-bound adjustment must remain continuous between progress `0.999` and `1`.
+
+## 2026-08-07 viewport and restore regressions
+
+- Pure coverage verifies that the local range includes the complete wider adjacent viewport and that an exact Morph handoff cannot be overwritten by the legacy fallback anchor restore.
+
 ## 2026-08-05 regressions
 
 - Pure tests cover one focal center per actual visible source row, RequiredRenderSet swept cell/header boundaries, visible-row canonical matching without global row-count equality, the full header-sequence target index, and exact viewport-local target validation.

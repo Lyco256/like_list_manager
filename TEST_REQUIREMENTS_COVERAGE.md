@@ -37,7 +37,7 @@ The required safe integration and device-install gates completed successfully af
 | no draw-phase collections/lookups/text/crop/state work | `MediaGridResidentCanvas.kt`, `MediaGridMorphRowRenderer.kt`, rendering contract test | Implemented; static contract passed |
 | safe integration/debug verification | `scripts/run-safe-integration-check.cmd`, `scripts/run-safe-debug-check.cmd -InstallToDevice` | Implemented; final safe runs passed |
 
-## 2026-08-01 Phase 1 row reflow
+## 2026-08-01 Phase 1 row reflow（履歴: 現行経路では不使用）
 
 | Requirement | Evidence | Status |
 |---|---|---|
@@ -50,7 +50,7 @@ The required safe integration and device-install gates completed successfully af
 | TEST_HARNESS path is row-only and does not build legacy dataset slots | `buildMediaGridMorphRowPreparedPairs`, `MediaGridMorphPlan.selectRowReflow`, `MediaGridMorphTest.rowReflowPairDoesNotBuildLegacyDatasetSlots` | covered |
 | TEST_HARNESS prepared-pair miss still completes adjacent fallback | `TagHierarchyUiV2.kt` shared gesture modifier fallback callback | covered |
 
-## 2026-07-31 Morph UI・handoff correction
+## 2026-07-31 Morph UI・handoff correction（履歴: 現行経路では不使用）
 
 | Requirement | Evidence | Status |
 |---|---|---|
@@ -65,7 +65,7 @@ Failure states are explicit: identity mismatch and target-anchor failure publish
 
 The live test waits for the source/target `columnCount`, `requestedColumnCount`, and frame key to agree. It does not infer column changes from a clipped cell `boundsInRoot` width while handoff visual correction is active.
 
-## 2026-07-31 gesture arbitration fix
+## 2026-07-31 gesture arbitration fix（履歴: 現行経路では不使用）
 
 | 要件 | 証跡 | 状態 |
 | --- | --- | --- |
@@ -77,7 +77,7 @@ The live test waits for the source/target `columnCount`, `requestedColumnCount`,
 
 検証結果: `scripts\run-safe-integration-check.cmd` 成功、続けて `scripts\run-safe-debug-check.cmd -InstallToDevice` も成功。Macrobenchmark、本番DB・画像・設定・認証情報の初期化は行わない。
 
-## 2026-07-30 TEST_HARNESS 実LazyGrid handoff基盤
+## 2026-07-30 TEST_HARNESS 実LazyGrid handoff基盤（履歴: 現行経路では不使用）
 
 | 要件 | 証跡 | 状態 |
 | --- | --- | --- |
@@ -94,7 +94,7 @@ The live test waits for the source/target `columnCount`, `requestedColumnCount`,
 
 検証結果: `scripts\run-safe-integration-check.cmd`成功、続けて`scripts\run-safe-debug-check.cmd -InstallToDevice`成功。Macrobenchmark、本番DB／設定／認証情報の初期化は実施していない。
 
-## 2026-07-30 TEST_HARNESS Morph gesture tracking／settle
+## 2026-07-30 TEST_HARNESS Morph gesture tracking／settle（履歴: 現行経路では不使用）
 
 | 要件 | 証跡 | 状態 |
 |---|---|---|
@@ -105,7 +105,7 @@ The live test waits for the source/target `columnCount`, `requestedColumnCount`,
 | pointer／settle中のrender work再実行防止 | plan Stateをdirection切替時だけ更新、Canvas既存counter test、interactive counter test | Unit・隔離Compose Test完了 |
 | production未接続、通常pinch／LazyGrid不変 | `MediaGridRenderingContractTest.morphInteractionIsTestHarnessOnlyAndDoesNotReplaceProductionPinchOrGridHandoff` | 静的契約・隔離integration完了 |
 
-## 2026-07-30 TEST_HARNESS単一Morph Canvas
+## 2026-07-30 TEST_HARNESS単一Morph Canvas（履歴: 現行経路では不使用）
 
 | 対象 | 実装・証跡 | 状態 |
 |---|---|---|
@@ -122,7 +122,7 @@ The live test waits for the source/target `columnCount`, `requestedColumnCount`,
 - 続けて`run-safe-debug-check.cmd -InstallToDevice`: `Preflight / Build / UnitTest / Lint / Install / Success`。本番packageのDB・元WebP・JPEG・RGB_565 pack・設定・認証情報を初期化していない。
 - Macrobenchmarkは対象外で実行しない。
 
-## 2026-07-31 production Morph integration
+## 2026-07-31 production Morph integration（履歴: 現行経路では不使用）
 
 | Requirement | Evidence | Status |
 |---|---|---|
@@ -135,7 +135,7 @@ The live test waits for the source/target `columnCount`, `requestedColumnCount`,
 
 Final verification is required through the safe integration and safe debug-install entry points before commit.
 
-## 2026-07-30 bounded Morph prepared pair foundation
+## 2026-07-30 bounded Morph prepared pair foundation（履歴: 現行経路では不使用）
 
 | 対象 | 実装・証跡 | 状態 |
 |---|---|---|
@@ -511,7 +511,7 @@ Final verification is required through the safe integration and safe debug-insta
 
 実装22では本番最適化（worker数、Coil/cache容量、生成間隔、viewport間引き、画像反映延期）を変更していない。
 
-## 2026-07-17 simple column-change stabilization
+## 2026-07-17 simple column-change stabilization（履歴: 現行経路では不使用）
 
 - Unit: `MediaGridMorphTest` covers threshold miss, pinch-in `+1`, pinch-out `-1`, final cumulative ratio after direction reversal, cancellation, 2..12 bounds, and the one-step limit through `mediaGridColumnCountAfterPinchRelease`.
 - Integration: `MainActivityComposeTest.classifiedDisplayToggleSwitchesBetweenCardAndMediaGridAndSurvivesActivityRecreation` uses real two-pointer input to cover 4→5→4, threshold-miss no-op, repeated round trips, anchor position, immediate cell dialog interaction, post-change scroll, and absence of `media_grid_morph_overlay`.
@@ -585,3 +585,20 @@ Final verification is required through the safe integration and safe debug-insta
 | Missing tracked pointer, explicit up, and Compose cancellation have distinct outcomes | `MediaGridMorphCanvasComposeTest.interactiveLayerCancelProducesNoHandoff`, `mediaGridMorphGestureInput` tracked-pointer and `changedToUp()` branches | Compose/integration covered |
 | Opaque Image-to-Image crossfade and one-sided Placeholder endpoints | `mediaGridMorphCellBlend`, `MediaGridMorphCanvasComposeTest.rowRendererRgb565FourColumn0011And1100RoundTripHasNoPlaceholderGaps` | unit/Compose pixel covered |
 | Final device validation | `scripts/run-safe-debug-check.cmd -InstallToDevice`, `scripts/run-safe-integration-check.cmd` | passed on the connected SC-56C |
+
+## 2026-08-07 Morph visible-set and handoff regression
+
+| Requirement | Evidence | Status |
+|---|---|---|
+| All-change and header-visible gestures cannot replace the source viewport with an incomplete/dark Morph surface | Three production 4-to-5 cases compare current source item/header identities and rectangles with the first Morph model; fixture-wide forced residency was removed | safe integration passed |
+| Wider target viewport contains every required endpoint cell | Viewport-capacity-aware `mediaGridMorphOrdinalRange`; `localRangeIncludesTheCompleteWiderTargetViewport` | unit and device covered |
+| Progress 1 and first Idle Normal frame have the same visible identity/geometry | TEST_HARNESS visual-item trace and `assertVisualItemsMatch` in the same three representative cases | safe integration passed |
+| Exact handoff is not overwritten by old-anchor restore | `shouldRestoreLegacyMediaGridPinchAnchor`; legacy restore remains enabled for explicit fallback anchors | unit and device covered |
+| Header layout does not change at Morph/reveal boundary | `ClassifiedMediaGridHeader` retains one measured layout; no fixed-height hidden substitute | header-visible device case passed |
+| A date/like-count section header that appears or disappears scales its height with Morph progress and fades its text | Shared `mediaGridMorphHeaderBlend`; per-frame `headerTransitions`; strengthened existing header-visible 4-to-5 case and row-reflow unit test | unit and safe integration passed |
+| Terminal state remains scrollable and does not roll back | Existing Idle/unlocked/no-rollback assertions remain in each representative case | safe integration passed |
+| A headerless grid can reverse 5-to-4 at the same unchanged location after 4-to-5 without a dark claim or lost column change | One reverse gesture appended to the existing all-slot-change representative case; first-Morph source comparison and exact terminal assertions | safe integration passed |
+| Header appearance/disappearance uses the actual post-change item order | Target rows come from `MediaGridMorphExactTargetLayoutIndex`; headers attach only to their immediately following exact row | unit and safe integration passed |
+| Scroll-bound correction cannot jump at the final Morph frame | Row/header target adjustment is linear in progress; unit continuity check at `0.999`/`1`; Morph endpoint versus first Normal frame | unit and safe integration passed |
+| Returning to the original columns immediately after a successful handoff still uses Morph | Successful handoff assets move to bounded carryover until new-column stable-idle readiness; `successfulHandoffCarriesProtectedAssetsUntilImmediateReverseIsReady` | unit and wait-free safe integration passed |
+| An unavailable immediate Morph fallback does not shift the focal scroll position | Production fallback forwards its captured anchor to the existing legacy anchor restore path | unit/static contract and safe integration covered |

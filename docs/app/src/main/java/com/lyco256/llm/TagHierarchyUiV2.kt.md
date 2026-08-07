@@ -1,5 +1,15 @@
 # `TagHierarchyUiV2.kt`
 
+## 2026-08-07 immediate reverse resize
+
+- Stable-idle readiness now releases the previous successful handoff's bounded carryover protection only after the new-column source and both endpoint resources are complete.
+- Canonical fallback forwards its captured center anchor to `onPinchFinished`; if Morph is genuinely unavailable, the direct column change still restores the same focal position instead of repacking from the raw LazyGrid offset.
+
+## 2026-08-07 Morph handoff stability
+
+- A Morph-controlled column change does not run the legacy fallback anchor restore after the exact handoff. Legacy fallback pinches still restore their explicitly captured anchor.
+- Grid headers retain the same measured Surface/Text layout while Morph is active. The single draw surface suppresses child drawing, avoiding the former fixed-40dp substitute and its reveal-time height change.
+
 ## 第14実装
 
 セルはcontrollerが選んだraw→JPEG→local→URL候補を使います。`downloadState == "failed"`でも利用可能候補を抑止しません。pack open、mapping、metadata検査、raw生成はComposableで行いません。
@@ -246,10 +256,9 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - Cells render Placeholder for `Pending` and `Loading`, the existing Error design for terminal failure, and an `AsyncImage` only for a controller-published `Ready` candidate already confirmed in the shared memory cache. Candidate fallback and recovery are controller-owned.
 - Selection, tap, long press, badges, tweet dialog, headers, filtering, sorting, and pinch column changes retain their existing paths.
 
-- The production grid keeps one normal `LazyVerticalGrid` visible during the entire two-pointer gesture. It does not render or update a morph overlay, motion progress, settle animation, or grid handoff.
-- `mediaGridColumnCountAfterPinchRelease` uses the final accumulated distance ratio only when the gesture ends. A threshold miss, cancellation, source revision change, or 2/12 boundary leaves the count unchanged; a successful gesture changes exactly one adjacent column.
-- Pinch-in increases columns and pinch-out decreases columns. Direction reversal is resolved from the final cumulative ratio rather than from an early locked direction.
-- The pinch-start anchor prefers the visible media item below the pinch center and otherwise the nearest visible media item. The stable item key and relative center offset are restored after the normal grid rebuild, with finite layout retries and no retained overlay state.
+- The production grid keeps one normal `LazyVerticalGrid` as the only layout surface during the two-pointer gesture. The shared input claims a complete prepared direction, draws Morph on `mediaGridSingleSurface`, and hands off through `MediaGridMorphProductionHandoffEffects`.
+- `mediaGridColumnCountAfterPinchRelease` remains the one-step release fallback when preparation is unavailable. A threshold miss, cancellation, source revision change, or 2/12 boundary leaves the count unchanged; a successful fallback changes exactly one adjacent column.
+- A successful Morph handoff verifies the actual target row/header geometry before unlocking the grid. Its bounded carryover protection keeps an immediate reverse gesture claimable until new-column stable-idle readiness.
 - `MediaGridMorphSession` and the former `MediaGridMorphOverlay` path are not part of the current product source path.
 
 ## 2026-07-18 第2実装 viewport通知（廃止済み）
@@ -274,7 +283,7 @@ The classified filter/count/sort toolbar and selection toolbar are each wrapped 
 - Morph protection is updated from the complete frozen row model endpoint set. Reveal modes return to the underlying grid only after the production handoff effects acknowledge the required frame.
 - The production path no longer installs the legacy pinch modifier, a separate row-reflow canvas, or a translated overlay.
 
-## 2026-08-01 Phase 1 Morph boundary
+## 2026-08-01 Phase 1 Morph boundary（履歴: 現行経路では不使用）
 
 - The normal classified `LazyVerticalGrid` remains the only grid surface. In `TEST_HARNESS`, the row reflow renderer is attached to that grid's draw modifier; no second grid, overlay Box, or z-index Morph host is composed.
 - Production builds keep the existing resident canvas and use the legacy release-time one-step pinch resize. The former production Morph host is not connected.

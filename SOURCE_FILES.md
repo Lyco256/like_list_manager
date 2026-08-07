@@ -31,7 +31,7 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 - `MediaGridMorphRowReflow.kt` uses `buildMediaGridMorphRowsForColumnCount()` for source and target. Real visible rows provide geometry/focal selection, while canonical current-column rows provide source content and row correspondence. A failed mapping makes the selected plan incomplete.
 - `MediaGridMorphInteraction.kt` locks the first successful claim direction for the full gesture. Opposite-side travel retains the same plan/model/Morph draw mode at progress 0, and only physical up can start locked-direction settle/release.
 
-## 2026-08-01 Phase 1 row reflow
+## 2026-08-01 Phase 1 row reflow（履歴: 現行経路では不使用）
 
 - `TagHierarchyUiV2.kt` keeps production Morph overlay/handoff disconnected and uses `MediaGridLegacyPinch.kt` for one release-time adjacent-column step.
 - `MediaGridMorph.kt` captures visible media rows/header rects once at TEST_HARNESS claim. `buildMediaGridMorphRowPreparedPairs()` is the real TEST_HARNESS builder; `MediaGridMorphRowReflow.kt` plans fixed-screen-column row geometry, focal-row selection, header bands, Placeholder endpoints, target scroll clamping, and distance-ratio progress.
@@ -39,27 +39,27 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 - TEST_HARNESS のpair未準備時は同じgesture modifierのrelease-time fallbackで列数変更を完了させる。
 - `MediaGridMorphRowRenderer.kt` is a same-surface draw modifier on the real `LazyVerticalGrid`; target handoff corrects the real `LazyGridState` row before completion.
 
-## 2026-07-30 TEST_HARNESS 実LazyGrid handoff基盤
+## 2026-07-30 TEST_HARNESS 実LazyGrid handoff基盤（履歴: 現行経路では不使用）
 
 - `MediaGridMorphHandoff.kt`はbounded planから一回だけ選ぶtarget anchorと、列変更、target frame採用、item表示、最大3回のY補正、geometry確認、次frame完了、rollbackを管理する純粋coordinatorを所有する。
 - target anchorはinteraction slotのend Asset、final pinch centerを含むend rect、最寄りend rectの順で選ぶ。requestはsource data/frame key、expected target frame key、media ordinal、focal位置、維持Canvas位置を固定する。
 - `MediaGridMorphLazyGridHandoffTestHost.kt`はTEST_HARNESSだけで一枚の実`LazyVerticalGrid`、full-span header、既存interactive Morph Canvasを接続する。handoff中はuser scrollとanchor checkpointを抑止でき、target frame遅延中とrollback中もCanvasを維持する。
 - productionの`ClassifiedMediaGridContent`、`mediaGridPinchToResize`、resident Canvas、viewport、anchor、queue、publicationは変更しない。
 
-## 2026-07-30 TEST_HARNESS Morph gesture tracking／settle
+## 2026-07-30 TEST_HARNESS Morph gesture tracking／settle（履歴: 現行経路では不使用）
 
 - `MediaGridMorphInteraction.kt`はTEST_HARNESS限定controller、固定pointer ID入力、二本指初期距離基準progress、2次元focal correction、180ms線形settle、immutable exactly-once handoff requestを所有する。
 - gesture開始時のprepared pair snapshotを固定し、dead zoneへ戻ってprogress 0、反対方向へ越えた時だけ別pairのplanへ切り替える。pointer update／settle frameではrender model、画像、crop、text、viewport、queueを再準備しない。
 - `MediaGridMorphInteractiveTestLayer`だけが既存単一Canvasへ接続する。productionの`ClassifiedMediaGridContent`、`mediaGridPinchToResize`、LazyGrid列数、resident Canvas、viewport、anchor、scheduler、publicationは変更しない。実handoffはTEST_HARNESS hostだけへ接続する。
 
-## 2026-07-30 TEST_HARNESS単一Morph Canvas
+## 2026-07-30 TEST_HARNESS単一Morph Canvas（履歴: 現行経路では不使用）
 
 - `MediaGridMorph.kt`のtarget layoutとstart overscanは各列数のcell幅を高さにも使う。start visible cellだけは実測rectを維持する。
 - `MediaGridMorphCanvas.kt`はprepared pairと`MediaGridResidentCanvasPreparedIndex`から、slot画像参照とheader文字layoutを解決済みのbounded immutable render modelを作る。
 - `MediaGridMorphCanvasLayer`は`Disabled`をdefaultとし、`TestVisible`は`BuildConfig.TEST_HARNESS`でだけ使用できる。progress／correctionは一つのCanvasのdraw時だけ読み、画像はviewport単位の一つのoffscreen layerで加算合成し、header背景は不透明、文字だけをCrossfadeする。
 - productionの`ClassifiedMediaGridContent`、pinch、LazyGrid、resident Canvas、viewport、anchor、queue、publicationには接続しない。
 
-## 2026-07-30 bounded Morph prepared pair foundation
+## 2026-07-30 bounded Morph prepared pair foundation（履歴: 現行経路では不使用）
 
 - `MediaGridMorph.kt`はvisible media ordinal＋上下2行のbounded capture、隣接列数layout、行・column位置slot、media ordinal境界header band、immutable prepared pair、generation付きstale拒否cacheを所有する。
 - `TagHierarchyUiV2.kt`は初期有効layoutとscroll完全停止後だけmain threadで局所primitive／geometryをcaptureし、共有builderを`Dispatchers.Default`で実行する。pixel offset、scroll／fling、二本指eventごとには計画を作らない。
@@ -101,7 +101,7 @@ Current media-grid rendering is owned by `MediaGridSessionCoordinator` under `Ma
 - `MediaGridDirectPreview.kt` owns the single `MediaGridImagePreparer`. It performs candidate availability, file stat, source identity, and cache-key calculation off composition, reusing same-key/asset/size results and preparing visible cells plus at most one adjacent row from the prebuilt index column.
 - `AppContainer.kt` owns the one shared media-grid `ImageLoader`: crossfade is disabled, disk cache is `cacheDir/media_grid_coil_cache` at 128 MiB, memory cache is `min(totalMem / 8, 64 MiB)`, and decoder parallelism is limited to four; the normal controller still limits active requests to two.
 - The retired generator, store, scheduling state, cache restore, and viewport coordinator have no source, wrapper, test, or runtime reference. Existing retired cache files are left to Android's normal cache management.
-- `MediaGridMorph.kt` remains only for the existing pinch calculation/tests; no morph overlay is part of the product path.
+- `MediaGridMorph.kt` supplies the production claim-time capture, bounded adjacent plans, and pure geometry used by the unified single-surface Morph path; the former overlay source is not part of the product path.
 
 # 2026-08-01 Phase 2 production row Morph
 
@@ -115,7 +115,7 @@ Current media-grid rendering is owned by `MediaGridSessionCoordinator` under `Ma
 ## 2026-07-31 production Morph integration
 
 - `TagHierarchyUiV2.kt` connects the normal classified `LazyVerticalGrid` to the shared `MediaGridMorphGestureMode.Production` input and `MediaGridMorphProductionHost`; selection/progress paths remain disabled.
-- `MediaGridMorphProductionHost.kt` owns the bounded production request/command handoff, target geometry verification, rollback/cancel paths, checkpoint suppression, lifecycle invalidation, and temporary retained-image protection. It renders one `ProductionVisible` Canvas above the existing grid and removes it on terminal completion; Morph lock also suppresses toolbar actions and hides grid metadata overlays.
+- `MediaGridMorphProductionHost.kt` owns the bounded production request/command handoff, target geometry verification, rollback/cancel paths, checkpoint suppression, lifecycle invalidation, and temporary retained-image protection. It does not render a production Canvas; `MediaGridMorphProductionHandoffEffects` coordinates the existing grid's single-surface draw state and terminal handoff. Morph lock also suppresses toolbar actions and hides grid metadata overlays.
 - `MediaGridMorphInteraction.kt` uses direct initial-to-release scale for the one-step fallback when a prepared pair or resident viewport asset is unavailable. Production mode remains enabled on the normal grid even when the Canvas host cannot be created, so this fallback remains reachable. The old `mediaGridPinchToResize` modifier is no longer part of the production source.
 - Production acceptance coverage is in `MediaGridMorphLazyGridHandoffComposeTest` and `MediaGridRenderingContractTest`; the existing queue, publication, resident draw, and scroll-anchor paths remain separate.
 
@@ -189,10 +189,10 @@ Current media-grid rendering is owned by `MediaGridSessionCoordinator` under `Ma
 
 ## Current media-grid column change path
 
-- The product path keeps the normal `LazyVerticalGrid` visible throughout a two-pointer gesture and changes the saved column count only once on release.
-- `mediaGridColumnCountAfterPinchRelease` resolves the final accumulated distance ratio to no change or one adjacent column step; threshold, reversal, cancellation, and 2..12 bounds are pure-testable.
-- Pinch-start anchor selection prefers the media cell under the pinch center, then the nearest visible media cell. Stable item keys and relative center offsets are restored after the normal grid rebuild.
-- The product path does not create or call `MediaGridMorphSession`, `MediaGridMorphOverlay`, morph settle effects, or grid handoff effects. `MediaGridMorph.kt` remains for the existing pure calculation/tests; the former overlay source is removed.
+- The production path keeps the normal `LazyVerticalGrid` as the only layout surface and uses the shared `MediaGridMorphGestureMode.Production` input with `MediaGridMorphProductionHandoffEffects` for claim, Morph drawing, target verification, reveal, rollback, and completion.
+- A prepared direction is claimed only from a complete claim bundle containing the captured source viewport, required render set, prepared endpoints, and frozen row model. An unavailable or incomplete pair uses the captured-anchor release fallback.
+- Target rows and headers are derived from `MediaGridMorphExactTargetLayoutIndex`; the handoff verifies the actual target LazyGrid geometry before unlocking scroll/checkpoints. Exact handoff does not use the legacy anchor restore.
+- Successful handoff assets remain in bounded carryover until the new-column stable-idle pair is ready, so an immediate reverse gesture can still claim Morph. Cancellation, failure, and disposal release that protection.
 
 ## 2026-07 single-step media-grid resize（履歴: 現行経路では不使用）
 
@@ -350,9 +350,11 @@ MainActivity / Compose UI
 - `docs/app/src/test/java/com/lyco256/llm/MediaGridMorphTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/MediaGridMorphHandoffTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/MediaGridRenderingContractTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/MediaGridPreparedRenderTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/MediaGridPlaceholderRenderingTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/MediaGridMorphCanvasComposeTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/MediaGridMorphLazyGridHandoffComposeTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/MediaGridFramePublicationComposeTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/UiStateRenderingTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/SearchFilterDatabaseIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LikeListDatabaseMigrationTest.kt.md`

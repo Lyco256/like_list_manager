@@ -240,6 +240,7 @@ internal class MediaGridMorphInteractionController(
 ) {
     private var onProtectAssets: (LongArray) -> Unit = {}
     private var onReleaseAssets: (LongArray) -> Unit = {}
+    private var onCarryoverAssets: (LongArray) -> Unit = {}
     private data class Gesture(
         val identity: MediaGridMorphInteractionIdentity,
         val pairs: Map<MediaGridMorphDirection, MediaGridMorphPreparedPair>,
@@ -303,10 +304,12 @@ internal class MediaGridMorphInteractionController(
     fun setProtectionCallbacks(
         onProtect: (LongArray) -> Unit,
         onRelease: (LongArray) -> Unit,
+        onCarryover: (LongArray) -> Unit = onRelease,
     ) {
         check(protectedAssetIds == null) { "Protection callbacks cannot change during an active Morph" }
         onProtectAssets = onProtect
         onReleaseAssets = onRelease
+        onCarryoverAssets = onCarryover
     }
 
     fun recordFailure(reason: MediaGridMorphFailureReason) {
@@ -770,7 +773,7 @@ internal class MediaGridMorphInteractionController(
 
     fun acknowledgeTargetReveal(generation: Long) {
         if (currentSnapshot.phase != MediaGridMorphPhase.RevealingTarget || currentSnapshot.interactionGeneration != generation) return
-        resetToIdle(currentSnapshot.toColumnCount, generation)
+        resetToIdle(currentSnapshot.toColumnCount, generation, retainAssetsForImmediateReverse = true)
     }
 
     fun completeHandoff(generation: Long) {
@@ -779,7 +782,7 @@ internal class MediaGridMorphInteractionController(
             currentSnapshot.phase != MediaGridMorphPhase.AwaitingGridHandoff ||
             request.interactionGeneration != generation
         ) return
-        resetToIdle(request.toColumnCount, generation)
+        resetToIdle(request.toColumnCount, generation, retainAssetsForImmediateReverse = true)
     }
 
     fun cancelHandoff(generation: Long) {
@@ -856,8 +859,9 @@ internal class MediaGridMorphInteractionController(
         currentColumnCount: Int,
         generation: Long,
         failureReason: MediaGridMorphFailureReason? = null,
+        retainAssetsForImmediateReverse: Boolean = false,
     ) {
-        releaseProtectedAssets()
+        releaseProtectedAssets(retainAssetsForImmediateReverse)
         currentSnapshot = MediaGridMorphInteractionSnapshot(
             phase = MediaGridMorphPhase.Idle,
             direction = null,
@@ -912,10 +916,10 @@ internal class MediaGridMorphInteractionController(
         )
     }
 
-    private fun releaseProtectedAssets() {
+    private fun releaseProtectedAssets(retainForImmediateReverse: Boolean = false) {
         val assets = protectedAssetIds ?: return
         protectedAssetIds = null
-        onReleaseAssets(assets)
+        if (retainForImmediateReverse) onCarryoverAssets(assets) else onReleaseAssets(assets)
     }
 }
 

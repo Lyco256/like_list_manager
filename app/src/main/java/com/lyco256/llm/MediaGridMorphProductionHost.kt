@@ -31,9 +31,11 @@ internal class MediaGridMorphProductionHostState(
     val requestChannel = Channel<MediaGridMorphHandoffRequest>(Channel.UNLIMITED)
     val commandChannel = Channel<MediaGridMorphProductionCommand>(Channel.UNLIMITED)
     val coordinator = MediaGridMorphGridHandoffCoordinator()
+    private var carryoverAssetIds = LongArray(0)
     val controller = MediaGridMorphInteractionController { request -> requestChannel.trySend(request) }.also { controller ->
         controller.setProtectionCallbacks(
             onProtect = { assetIds ->
+            carryoverAssetIds = LongArray(0)
             retainedImageStore.updateProtection(
                 ownerToken = ownerToken,
                 visibleAssetIds = LongArray(0),
@@ -41,10 +43,19 @@ internal class MediaGridMorphProductionHostState(
             )
             },
             onRelease = {
+            carryoverAssetIds = LongArray(0)
             retainedImageStore.updateProtection(
                 ownerToken = ownerToken,
                 visibleAssetIds = LongArray(0),
                 activeAssetIds = LongArray(0),
+            )
+            },
+            onCarryover = { assetIds ->
+            carryoverAssetIds = assetIds.copyOf()
+            retainedImageStore.updateProtection(
+                ownerToken = ownerToken,
+                visibleAssetIds = LongArray(0),
+                activeAssetIds = carryoverAssetIds,
             )
             },
         )
@@ -70,6 +81,16 @@ internal class MediaGridMorphProductionHostState(
                 )
             }
         }
+    }
+
+    fun releaseCarryoverAfterStableIdleReady() {
+        if (carryoverAssetIds.isEmpty() || controller.snapshot().phase != MediaGridMorphPhase.Idle) return
+        carryoverAssetIds = LongArray(0)
+        retainedImageStore.updateProtection(
+            ownerToken = ownerToken,
+            visibleAssetIds = LongArray(0),
+            activeAssetIds = LongArray(0),
+        )
     }
 
     fun dispose() {

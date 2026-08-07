@@ -1,5 +1,11 @@
 # `MediaGridResidentCanvas.kt`
 
+## 2026-08-07 exact visual handoff observation
+
+- The TEST_HARNESS draw trace records source, target, and current LazyGrid item identities and rectangles, allowing direct source-to-first-Morph and progress-1-to-first-Normal comparison.
+- Morph observations also record each date/like-count section-header start/end/current height and both text alphas. The device regression therefore checks intermediate appearance/disappearance instead of inferring it only from endpoints.
+- Normal resident commands are invalidated by first-visible item index and scroll offset, so handoff `scrollToItem`/`scrollBy` corrections cannot leave pre-correction commands on screen.
+
 ## 2026-08-02 production Morph draw observation
 
 - The unified surface reads the current `MediaGridMorphInteractionSnapshot` State in the draw phase, so a valid claim's frozen model is available on the first Morph frame even when the modifier itself is not recomposed.

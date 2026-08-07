@@ -504,6 +504,9 @@ internal fun EnhancedClassifiedScreen(
     }
     if (displayMode == ClassifiedDisplayMode.Card) PreserveScrollAnchor(listState, "classified", itemKeys)
     LaunchedEffect(mediaGridSessionState.sessionKey, mediaGridSessionState.columnCount, mediaGridSessionState.frame, pinchCompletionGeneration) {
+        if (!shouldRestoreLegacyMediaGridPinchAnchor(pendingPinchAnchor, morphCheckpointSuppressed)) {
+            return@LaunchedEffect
+        }
         val anchor = pendingPinchAnchor ?: mediaGridSessionState.anchor ?: return@LaunchedEffect
         val frame = mediaGridSessionState.frame ?: return@LaunchedEffect
         if (frame.items.isEmpty()) return@LaunchedEffect
@@ -3834,7 +3837,6 @@ private fun ClassifiedMediaGridContent(
         residentPreparedIndex?.drawIndexVersion,
         morphTextResourceIndex.identity,
     ) {
-        if (!BuildConfig.TEST_HARNESS) return@LaunchedEffect
         val preparedIndex = residentPreparedIndex ?: return@LaunchedEffect
         val pairs = morphPreparationCache.snapshot()
             .filterValues { it.matchesIdentity(morphIdentity) }
@@ -3843,6 +3845,8 @@ private fun ClassifiedMediaGridContent(
             mediaGridMorphStableIdleFailureReason(pair, preparedIndex, morphTextResourceIndex)
                 ?.let { reason -> "$direction:$reason" }
         }
+        if (failureReasons.isEmpty()) morphHost?.releaseCarryoverAfterStableIdleReady()
+        if (!BuildConfig.TEST_HARNESS) return@LaunchedEffect
         MediaGridMorphTestTrace.recordIdleReadiness(
             MediaGridMorphIdleReadinessObservation(
                 generation = morphPairVersion,
@@ -3871,9 +3875,9 @@ private fun ClassifiedMediaGridContent(
                             identity = morphIdentity,
                             preparedPairsSnapshot = morphPreparedPairsSnapshot,
                             stopScroll = suspend { state.stopScroll() },
-                            onFallbackPinchFinished = { _, nextColumnCount ->
+                            onFallbackPinchFinished = { anchor, nextColumnCount ->
                                 if (BuildConfig.TEST_HARNESS) MediaGridMorphTestTrace.recordFallback()
-                                onPinchFinished(null, nextColumnCount)
+                                onPinchFinished(anchor, nextColumnCount)
                             },
                             pointerInProgress = morphPointerInProgress,
                             prepareClaimBundle = if (morphEnabled && residentPreparedIndex != null) {
@@ -3937,6 +3941,10 @@ private fun ClassifiedMediaGridContent(
                             mode = singleSurfaceMode,
                             morphModel = morphRowRenderModel,
                             progress = morphProgress,
+                            layoutIdentity = MediaGridResidentCanvasLayoutIdentity(
+                                firstVisibleItemIndex = state.firstVisibleItemIndex,
+                                firstVisibleItemScrollOffset = state.firstVisibleItemScrollOffset,
+                            ),
                             morphDrawObserver = morphDrawObserver,
                             morphSnapshot = morphController?.snapshotState,
                         )
@@ -3958,7 +3966,7 @@ private fun ClassifiedMediaGridContent(
                 },
             ) { item ->
                 when (item) {
-                    is MediaGridHeaderItem -> ClassifiedMediaGridHeader(item, visualsVisible = !morphVisualActive)
+                    is MediaGridHeaderItem -> ClassifiedMediaGridHeader(item)
                     is MediaGridCellItem -> ClassifiedMediaGridCell(
                         modifier = Modifier,
                         entry = item.entry,
@@ -3988,6 +3996,11 @@ private fun ClassifiedMediaGridContent(
         }
     }
 }
+
+internal fun shouldRestoreLegacyMediaGridPinchAnchor(
+    pendingPinchAnchor: ClassifiedMediaGridScrollAnchor?,
+    morphCheckpointSuppressed: Boolean,
+): Boolean = pendingPinchAnchor != null || !morphCheckpointSuppressed
 
 internal fun captureClassifiedMediaGridScrollAnchor(
     state: androidx.compose.foundation.lazy.grid.LazyGridState,
@@ -4030,16 +4043,7 @@ internal fun captureClassifiedMediaGridScrollAnchor(
 }
 
 @Composable
-private fun ClassifiedMediaGridHeader(item: MediaGridHeaderItem, visualsVisible: Boolean) {
-    if (!visualsVisible) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(40.dp)
-                .testTag(item.key),
-        )
-        return
-    }
+private fun ClassifiedMediaGridHeader(item: MediaGridHeaderItem) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
