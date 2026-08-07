@@ -323,6 +323,36 @@ class MediaGridMorphHandoffTest {
     }
 
     @Test
+    fun exactTargetIndexNeverFallsBackToOrdinalClamp() {
+        val base = request()
+        val targetFrame = frame(base.expectedTargetFrameKey, longArrayOf(21L, 22L, 23L))
+        val exactIndex = buildMediaGridMorphExactTargetLayoutIndex(
+            frame = targetFrame,
+            targetColumnCount = 3,
+            viewportWidthPx = 300,
+            viewportHeightPx = 300,
+            headerHeightPx = 0f,
+        )
+        val exactRequest = base.copy(
+            targetAnchor = base.targetAnchor.copy(assetId = 999L, mediaOrdinal = 999),
+            targetFocalMediaOrdinal = 999,
+            targetFocalItemIndex = 99,
+            exactTargetLayoutIndex = exactIndex,
+        )
+        val coordinator = MediaGridMorphGridHandoffCoordinator()
+        coordinator.start(exactRequest)
+        assertEquals(
+            MediaGridMorphGridHandoffCommand.RollbackColumnCount(2),
+            coordinator.observeFrame(targetFrame),
+        )
+        assertEquals(
+            MediaGridMorphGridHandoffFailureReason.TargetMediaUnavailable,
+            coordinator.snapshot().failureReason,
+        )
+        assertNull(coordinator.snapshot().resolvedTarget)
+    }
+
+    @Test
     fun staleDataCancelsWithoutRollbackAndInvalidTargetFrameRollsBackOnce() {
         val request = request()
         val stale = MediaGridMorphGridHandoffCoordinator()

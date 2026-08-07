@@ -310,12 +310,19 @@ internal class MediaGridMorphGridHandoffCoordinator {
         val targetAnchor = request.targetAnchor
         val targetOrdinal = request.targetFocalMediaOrdinal ?: targetAnchor.mediaOrdinal
         val exactIndex = request.targetFocalItemIndex
-        if (request.exactTargetLayoutIndex != null && exactIndex == null) {
-            return beginRollback(MediaGridMorphGridHandoffFailureReason.TargetMediaUnavailable)
+        val exactLayoutIndex = request.exactTargetLayoutIndex
+        if (exactLayoutIndex != null) {
+            val exactOrdinal = exactIndex?.let { frame.ordinalIndex.mediaOrdinalByItemIndex.getOrNull(it) }
+            if (exactIndex == null || exactOrdinal == null || exactOrdinal < 0) {
+                return beginRollback(MediaGridMorphGridHandoffFailureReason.TargetMediaUnavailable)
+            }
         }
-        val directIndex = exactIndex
-            ?: request.targetFocalMediaOrdinal?.let { frame.ordinalIndex.itemIndexByMediaOrdinal.getOrNull(it) }
-            ?: frame.ordinalIndex.itemIndexByAssetId[targetAnchor.assetId]
+        val directIndex = if (exactLayoutIndex != null) {
+            exactIndex
+        } else {
+            request.targetFocalMediaOrdinal?.let { frame.ordinalIndex.itemIndexByMediaOrdinal.getOrNull(it) }
+                ?: frame.ordinalIndex.itemIndexByAssetId[targetAnchor.assetId]
+        }
         val resolvedOrdinal: Int
         val resolvedAssetId: Long
         val resolvedItemIndex: Int
@@ -328,12 +335,14 @@ internal class MediaGridMorphGridHandoffCoordinator {
                 return beginRollback(MediaGridMorphGridHandoffFailureReason.TargetMediaUnavailable)
             }
             resolvedItemIndex = directIndex
-        } else {
+        } else if (exactLayoutIndex == null) {
             val ordinals = frame.ordinalIndex.assetIdByMediaOrdinal.indices
             if (ordinals.isEmpty()) return beginRollback(MediaGridMorphGridHandoffFailureReason.TargetMediaUnavailable)
             resolvedOrdinal = targetOrdinal.coerceIn(ordinals.first, ordinals.last)
             resolvedAssetId = frame.ordinalIndex.assetIdByMediaOrdinal[resolvedOrdinal]
             resolvedItemIndex = frame.ordinalIndex.itemIndexByMediaOrdinal[resolvedOrdinal]
+        } else {
+            return beginRollback(MediaGridMorphGridHandoffFailureReason.TargetMediaUnavailable)
         }
         current = current.copy(
             phase = MediaGridMorphGridHandoffPhase.PositioningTarget,

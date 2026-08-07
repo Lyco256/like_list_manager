@@ -587,17 +587,22 @@ internal fun buildMediaGridMorphRowRenderModel(
             )
         }
     }.orEmpty()
-    val headers = selected?.headerPlans?.filter { header ->
-        MediaGridMorphRequiredHeaderIdentity(
+    val headers = selected?.headerPlans?.map { header ->
+        val requiredHeader = MediaGridMorphRequiredHeaderIdentity(
             relativeRow = header.relativeRow,
             startKey = header.startKey,
             endKey = header.endKey,
         ) in required.requiredHeaderIdentities
-    }?.map { header ->
         MediaGridMorphRowRenderHeader(
             plan = header,
-            startText = header.startTitle?.let(textResources.layoutsByTitle::get),
-            endText = header.endTitle?.let(textResources.layoutsByTitle::get),
+            // Keep optional header geometry/background in the frozen model,
+            // while only required swept headers consume text layouts.
+            startText = header.startTitle
+                ?.takeIf { requiredHeader }
+                ?.let(textResources.layoutsByTitle::get),
+            endText = header.endTitle
+                ?.takeIf { requiredHeader }
+                ?.let(textResources.layoutsByTitle::get),
         )
     }.orEmpty()
     val protected = required.protectedAssetIds

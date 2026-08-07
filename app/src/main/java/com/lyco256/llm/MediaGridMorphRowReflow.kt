@@ -217,7 +217,6 @@ internal data class MediaGridMorphViewportPlanTemplate(
             relativeRowRange = relativeRange,
             targetAnchorRowIndex = exactTargetRowId ?: targetRowIndex,
             targetAnchorRowTop = achievableTargetRowTop,
-            usedOrdinalFractionFallback = false,
             rowPlans = rowPlans,
             headerPlans = headerPlans,
             exactTargetLayoutIndex = exactTargetLayoutIndex,
@@ -255,7 +254,6 @@ internal data class MediaGridMorphViewportPlanTemplate(
         relativeRowRange = IntRange.EMPTY,
         targetAnchorRowIndex = 0,
         targetAnchorRowTop = center.y,
-        usedOrdinalFractionFallback = false,
         rowPlans = emptyList(),
         headerPlans = emptyList(),
     )
@@ -399,7 +397,6 @@ internal data class MediaGridMorphViewportPlan(
     val relativeRowRange: IntRange,
     val targetAnchorRowIndex: Int,
     val targetAnchorRowTop: Float,
-    val usedOrdinalFractionFallback: Boolean,
     val rowPlans: List<MediaGridMorphRowPlan>,
     val headerPlans: List<MediaGridMorphHeaderPlan>,
     val exactTargetLayoutIndex: MediaGridMorphExactTargetLayoutIndex? = null,

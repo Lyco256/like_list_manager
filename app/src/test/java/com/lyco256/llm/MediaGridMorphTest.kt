@@ -1279,6 +1279,7 @@ class MediaGridMorphTest {
         val template = requireNotNull(pair.viewportPlanTemplate)
         val centers = mediaGridMorphPossibleFocalCenters(pair)
         assertEquals(template.sourceRows.distinctBy { it.rowKey }.size, centers.size)
+        assertEquals(centers.size, centers.distinct().size)
 
         val plan = MediaGridMorphPlan.selectRowReflow(pair, Offset(600f, 150f))
         val selected = requireNotNull(plan.viewportPlan)
@@ -1318,6 +1319,19 @@ class MediaGridMorphTest {
                 MediaGridMorphRequiredCellIdentity(it.relativeRow, it.column) !in required.requiredCellIdentities
             },
         )
+        fun crossesTopOrBottom(cell: MediaGridMorphCellPlan): Boolean = listOf(0f, 1f).any { progress ->
+            val rect = mediaGridMorphRowCellRect(selected, cell, progress)
+            (rect.top <= selected.viewport.top && rect.bottom > selected.viewport.top) ||
+                (rect.top < selected.viewport.bottom && rect.bottom >= selected.viewport.bottom)
+        }
+        selected.rowPlans.flatMap { it.cells }
+            .filter(::crossesTopOrBottom)
+            .forEach { cell ->
+                assertTrue(
+                    MediaGridMorphRequiredCellIdentity(cell.relativeRow, cell.column) in
+                        required.requiredCellIdentities,
+                )
+            }
         assertEquals(required.protectedAssetIds.size, required.protectedAssetIds.distinct().size)
     }
 
@@ -1419,12 +1433,11 @@ class MediaGridMorphTest {
     }
 
     @Test
-    fun rowReflowSelectsFocalOrdinalFirstAndUsesFractionOnlyWhenMissing() {
+    fun rowReflowSelectsFocalOrdinalAndRejectsMissingExactTargetRow() {
         val directCapture = withSourceRows(capture(4, 24), 4)
         val directPair = buildMediaGridMorphRowPreparedPairs(directCapture)
             .getValue(MediaGridMorphDirection.IncreaseColumns)
         val direct = requireNotNull(directPair.viewportPlanTemplate).select(Offset(750f, 450f))
-        assertFalse(direct.usedOrdinalFractionFallback)
         assertEquals(directCapture.sourceRows[1].cells[2].mediaOrdinal, direct.focalMediaOrdinal)
 
         val missingSourceRow = directCapture.sourceRows[1].copy(

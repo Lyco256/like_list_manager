@@ -62,6 +62,12 @@ import java.time.temporal.ChronoUnit
 import java.io.ByteArrayOutputStream
 import java.io.File
 
+private const val ProductionMorphWaitTimeoutMs = 15_000L
+private const val ProductionMorphMaxDrawEvents = 128
+private const val ProductionMorphMaxHandoffEvents = 64
+private const val ProductionMorphMaxHandoffCommands = 32
+private const val ProductionMorphMaxClaimEvents = 8
+
 class MainActivityComposeTest {
     @get:Rule
     val composeRule = createAndroidComposeRule<MainActivity>()
@@ -868,13 +874,13 @@ class MainActivityComposeTest {
         }
 
         composeRule.onNodeWithTag("tab_classified").performClick()
-        composeRule.waitUntil(30_000) {
+        composeRule.waitUntil(ProductionMorphWaitTimeoutMs) {
             composeRule.onAllNodesWithTag("classified_display_toggle").fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithTag("filter_open").performClick()
         composeRule.onNodeWithTag("filter_query").performTextReplacement(fixtureName)
         composeRule.onNodeWithTag("filter_apply").performClick()
-        composeRule.waitUntil(30_000) {
+        composeRule.waitUntil(ProductionMorphWaitTimeoutMs) {
             dataset.assetIds.any { assetId ->
                 composeRule.onAllNodesWithTag("media_grid_item_$assetId").fetchSemanticsNodes().isNotEmpty()
             } || composeRule.onAllNodesWithTag("clip_list").fetchSemanticsNodes().isNotEmpty()
@@ -882,22 +888,22 @@ class MainActivityComposeTest {
         if (composeRule.onAllNodesWithTag("classified_media_grid").fetchSemanticsNodes().isEmpty()) {
             composeRule.onNodeWithTag("classified_display_toggle").performClick()
         }
-        composeRule.waitUntil(30_000) {
+        composeRule.waitUntil(ProductionMorphWaitTimeoutMs) {
             dataset.assetIds.any { assetId ->
                 composeRule.onAllNodesWithTag("media_grid_item_$assetId").fetchSemanticsNodes().isNotEmpty()
             }
         }
-        composeRule.waitUntil(30_000) {
+        composeRule.waitUntil(ProductionMorphWaitTimeoutMs) {
             val session = mainViewModel().mediaGridSessionState.value
             !session.showInitialProgress && session.frame?.ordinalIndex?.assetIdByMediaOrdinal?.size == dataset.assetIds.size
         }
         retainProductionMatrixAssets(dataset.assetIds, dataset.paths, previewStore)
 
         applyProductionMatrixSort(matrixCase.sortBase)
-        waitForGridColumnCount(matrixCase.fromColumns)
+        waitForGridColumnCount(matrixCase.fromColumns, ProductionMorphWaitTimeoutMs)
         MediaGridMorphTestTrace.clear()
         prepareProductionMatrixLocation(matrixCase.location, dataset.assetIds.size)
-        waitForStableIdleReadiness(matrixCase.fromColumns)
+        waitForStableIdleReadiness(matrixCase.fromColumns, ProductionMorphWaitTimeoutMs)
         MediaGridMorphTestTrace.clear()
         var observationsBeforeUp = emptyList<MediaGridMorphDrawObservation>()
         pinchOnGrid(
@@ -928,16 +934,40 @@ class MainActivityComposeTest {
         val morphDraws = observationsBeforeUp.filter {
             it.drawMode == MediaGridSingleSurfaceMode.Morph && it.generation == claim.generation
         }
+        assertTrue(
+            "Too many pre-up draw events for $matrixCase",
+            observationsBeforeUp.size <= ProductionMorphMaxDrawEvents,
+        )
+        assertTrue(
+            "Too many pre-up Morph phases for $matrixCase",
+            observationsBeforeUp.map { it.phase }.distinct().size <= 8,
+        )
         assertTrue("FirstMorphDraw missing for $matrixCase: $observationsBeforeUp", morphDraws.isNotEmpty())
         assertTrue(morphDraws.map { it.frameNumber }.distinct().size >= 2)
         assertTrue(morphDraws.map { it.progress }.distinct().size >= 2)
         assertEquals(0, MediaGridMorphTestTrace.fallbackCount())
-        waitForGridColumnCount(matrixCase.toColumns)
-        waitForMorphCanvasRemoval()
+        waitForGridColumnCount(matrixCase.toColumns, ProductionMorphWaitTimeoutMs)
+        waitForMorphCanvasRemoval(ProductionMorphWaitTimeoutMs)
         assertEquals(
             "Unexpected rollback for $matrixCase: ${MediaGridMorphTestTrace.rollbackReasons()}",
             0,
             MediaGridMorphTestTrace.rollbackColumnCountCommandCount(),
+        )
+        assertTrue(
+            "Too many claim events for $matrixCase",
+            MediaGridMorphTestTrace.claimEvents().size <= ProductionMorphMaxClaimEvents,
+        )
+        assertTrue(
+            "Too many draw events for $matrixCase",
+            MediaGridMorphTestTrace.drawEvents().size <= ProductionMorphMaxDrawEvents,
+        )
+        assertTrue(
+            "Too many handoff events for $matrixCase",
+            MediaGridMorphTestTrace.handoffEvents().size <= ProductionMorphMaxHandoffEvents,
+        )
+        assertTrue(
+            "Too many handoff commands for $matrixCase",
+            MediaGridMorphTestTrace.handoffCommandEvents().size <= ProductionMorphMaxHandoffCommands,
         )
         val terminal = MediaGridMorphTestTrace.handoffEvents()
             .lastOrNull { it.generation == claim.generation }
@@ -3051,7 +3081,7 @@ class MainActivityComposeTest {
             }
         }
         composeRule.onNodeWithTag("sort_apply").performClick()
-        composeRule.waitUntil(30_000) {
+        composeRule.waitUntil(ProductionMorphWaitTimeoutMs) {
             val session = mainViewModel().mediaGridSessionState.value
             !session.showInitialProgress && session.frame?.key?.dataKey?.sort?.baseOrder == sortBase
         }
@@ -3118,9 +3148,9 @@ class MainActivityComposeTest {
         composeRule.waitForIdle()
     }
 
-    private fun waitForStableIdleReadiness(expectedColumnCount: Int) {
+    private fun waitForStableIdleReadiness(expectedColumnCount: Int, timeoutMillis: Long = 30_000L) {
         try {
-            composeRule.waitUntil(30_000) {
+            composeRule.waitUntil(timeoutMillis) {
                 val frameKey = mainViewModel().mediaGridSessionState.value.frame?.key ?: return@waitUntil false
                 MediaGridMorphTestTrace.idleReadinessEvents().any { event ->
                     event.ready &&
@@ -3179,17 +3209,17 @@ class MainActivityComposeTest {
     private fun gridItemBounds(tag: String): androidx.compose.ui.geometry.Rect =
         composeRule.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
 
-    private fun waitForMorphCanvasRemoval() {
-        composeRule.waitUntil(30_000) {
+    private fun waitForMorphCanvasRemoval(timeoutMillis: Long = 30_000L) {
+        composeRule.waitUntil(timeoutMillis) {
             composeRule.onAllNodesWithTag("media_grid_morph_canvas", useUnmergedTree = true)
                 .fetchSemanticsNodes()
                 .isEmpty()
         }
     }
 
-    private fun waitForGridColumnCount(expected: Int) {
+    private fun waitForGridColumnCount(expected: Int, timeoutMillis: Long = 30_000L) {
         try {
-            composeRule.waitUntil(30_000) {
+            composeRule.waitUntil(timeoutMillis) {
                 val session = mainViewModel().mediaGridSessionState.value
                 session.columnCount == expected &&
                     session.requestedColumnCount == expected &&

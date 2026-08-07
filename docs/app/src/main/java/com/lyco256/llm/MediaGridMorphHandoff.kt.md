@@ -5,6 +5,7 @@
 - The handoff request carries the exact target row ID, first item index, focal item index, row ordinals, exact layout index, local desired row top, and target scroll bounds.
 - Target Y correction is limited to one `ScrollBy`. Before reveal, the coordinator validates the complete visible target viewport: row IDs/ordinals, every cell item index and rect, and every visible header key/title/rect.
 - Visible geometry is captured in LazyGrid viewport-local coordinates; stale frame/viewport/identity paths rollback or cancel without fallback being counted as Morph success.
+- When an exact target index is present, an invalid or missing exact focal item index rolls back as `TargetMediaUnavailable`; it never ordinal-clamps into a Morph success.
 
 ## 2026-08-01 Phase 2 production handoff
 

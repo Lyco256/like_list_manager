@@ -8,7 +8,7 @@
 
 ## 2026-08-05 exact 4-to-5 production matrix
 
-The production coverage is split into exactly three representative 4-to-5 sequences: all slots change, a visible PostTime header, and a roughly four-row offset. Each claim asserts RequiredRenderSet counts, exact target row metadata, Morph-before-up, no fallback, no rollback, exact viewport validation, and terminal handoff completion. The four-row case also verifies that the first post-handoff underlying draw is the matching Normal frame.
+The production coverage is split into exactly three representative 4-to-5 sequences: all slots change, a visible PostTime header, and a roughly four-row offset. Each claim asserts RequiredRenderSet counts, exact target row metadata, Morph-before-up, no fallback, no rollback, exact viewport validation, and terminal handoff completion. The four-row case also verifies that the first post-handoff underlying draw is the matching Normal frame. These three flows use a 15-second per-wait cap and bounded draw/phase/handoff event assertions; they do not add a repeated location matrix.
 
 ## 2026-08-02 production claim-path regression
 
