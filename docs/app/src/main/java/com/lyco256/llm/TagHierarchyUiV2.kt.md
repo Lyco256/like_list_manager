@@ -1,5 +1,11 @@
 # `TagHierarchyUiV2.kt`
 
+## 2026-08-08 media-grid shared viewport hot path
+
+- `ClassifiedMediaGridContent`は一つのallocation-light viewport signature flowをcontroller通知、永続preview preload、idle Morph準備で共有する。通常scroll中に同じ`LazyGridLayoutInfo.visibleItemsInfo`を複数のsnapshot collectorから走査しない。
+- 永続preview preload対象はsignatureのfirst/last item境界から既存`mediaCellIndices`を絞り込み、pixel単位でvisible index listを作らない。
+- Morph header title一覧はframe keyごとに保持し、Morph stateの再composeごとに全frameをfilter/mapしない。
+
 ## 2026-08-07 media-grid scroll/Morph hot path
 
 - 通常スクロールのviewport通知は可視itemの境界・サイズだけを使い、セルごとのY座標やGeometry objectをpixel単位では生成しない。完全なGeometry signatureは境界変化時とスクロール停止後のMorph準備でだけ作る。

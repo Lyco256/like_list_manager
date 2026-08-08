@@ -1,5 +1,10 @@
 # `MediaGridResidentCanvas.kt`
 
+## 2026-08-08 allocation-free normal draw
+
+- unified single surfaceのNormal／Reveal drawは、`devenv`のresident Canvasと同様にdraw時の`LazyGridLayoutInfo`を直接走査する。scrollごとの`MediaGridResidentDrawCommand` list／object生成は行わない。
+- Morph branchは引き続きclaim時に固定したimmutable row render modelだけを描き、通常drawの軽量化でhandoff契約を変更しない。TEST_HARNESSのvisual observationだけは必要時に現在layoutから構築する。
+
 ## 2026-08-07 scroll hot path
 
 - 通常スクロール時のresident command再構築に必要なlayout情報は、親の`ClassifiedMediaGridContent`をpixelごとにrecomposeさせず、`drawWithCache`内で`LazyGridState.layoutInfo`を読むことでcacheを無効化する。

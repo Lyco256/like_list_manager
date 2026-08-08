@@ -2,11 +2,17 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 
 この文書は、全体構成、現状の実装、変更目的別入口、個別docs一覧だけを担当する。禁止事項、完了報告、検証手順は置かない。
 
+## 2026-08-08 media-grid scroll allocation reduction
+
+- 通常のresident描画は`devenv`相当の直接drawへ戻し、pixel単位のscrollごとに可視セル分のdraw command objectを再生成しない。Morph中だけimmutable row modelを描画する。
+- viewport境界走査はcontroller通知、永続preview preload、idle Morph準備で一つの軽量signature flowを共有する。preloadとMorph準備は境界更新後の値を使い、scroll snapshotを重複走査しない。
+- release settleは100ms。exact handoffと一枚surfaceは維持する。
+
 ## 2026-08-07 media-grid scroll/Morph performance
 
 - 通常viewport通知は可視境界・cellサイズだけを使い、可視セル全体のGeometryはpixel単位のスクロールでは構築しない。Geometryは境界変化時のidentity更新と、スクロール停止後のMorph準備captureに限定する。
 - `ClassifiedMediaGridContent`はスクロール位置をCompose親で直接監視せず、Morph identityは軽量viewportの境界変化で更新し、完全なMorph Geometryは停止後のcaptureで確定する。single-surfaceのdraw cache invalidationは`drawWithCache`内の`LazyGridState.layoutInfo`読み取りで処理する。
-- release settleは150ms。claim中のidentityは実LazyGrid captureから更新し、スクロール中の古いidle identityでMorphを誤判定しない。
+- release settleは現在100ms。claim中のidentityは実LazyGrid captureから更新し、スクロール中の古いidle identityでMorphを誤判定しない。
 
 ## 2026-08-05 RequiredRenderSet and exact target handoff
 

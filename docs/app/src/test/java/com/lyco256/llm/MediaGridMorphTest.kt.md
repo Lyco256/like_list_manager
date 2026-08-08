@@ -56,7 +56,7 @@
 - 初期距離÷現在距離、無効距離、既存dead zone／progressの0／0.25／0.5／0.75／1を検証する。
 - 同一gestureのclaim方向→dead zone→反対側→claim方向でpair/model/draw modeを固定し、progress 0から距離比へ連続復帰する。
 - 正規化2次元focal点、X／Y中心移動、slot外、非0 viewport originの開始時非jumpを検証する。
-- release progress 0.25／0.5、0／45／90／135／180msのrelease基準線形settle、current／target終端、exactly-once handoff、Awaiting維持、complete、stale generation拒否を検証する。
+- release progress 0.25／0.5、設定durationの0／1/4／1/2／3/4／完了時点におけるrelease基準線形settle、current／target終端、exactly-once handoff、Awaiting維持、complete、stale generation拒否を検証する。
 
 ## 2026-07-31 gesture arbitration／readiness
 

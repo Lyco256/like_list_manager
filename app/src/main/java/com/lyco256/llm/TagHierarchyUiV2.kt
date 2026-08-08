@@ -3657,16 +3657,25 @@ private fun ClassifiedMediaGridContent(
     val previewPreloader: MediaGridPreviewPreloader = remember(appContainer.mediaGridImageLoader) {
         MediaGridPreviewPreloader(context, appContainer.mediaGridImageLoader)
     }
+    val viewportSignatureFlow = remember(state, frame.key, columnCount) {
+        MutableStateFlow<MediaGridViewportSignature?>(null)
+    }
     DisposableEffect(previewPreloader) {
         onDispose { previewPreloader.cancelAll() }
     }
-    LaunchedEffect(previewPreloader, state, frame.key, columnCount) {
-        snapshotFlow {
-            state.layoutInfo.visibleItemsInfo
-                .map { it.index }
-                .filter { index -> frame.items.getOrNull(index) is MediaGridCellItem }
-                .distinct()
-        }.distinctUntilChanged().collectLatest { visibleIndices ->
+    LaunchedEffect(previewPreloader, frame.key, viewportSignatureFlow) {
+        viewportSignatureFlow.collectLatest { signature ->
+            val visibleIndices = if (
+                signature == null ||
+                signature.firstVisibleItemIndex < 0 ||
+                signature.lastVisibleItemIndex < signature.firstVisibleItemIndex
+            ) {
+                emptyList()
+            } else {
+                frame.mediaCellIndices.filter { itemIndex ->
+                    itemIndex in signature.firstVisibleItemIndex..signature.lastVisibleItemIndex
+                }
+            }
             val candidates = buildList {
                 appContainer.mediaGridImagePreparer.preparePersistentPreviews(
                     frame = frame,
@@ -3740,10 +3749,13 @@ private fun ClassifiedMediaGridContent(
     val morphPairsForTextResources = remember(morphPairVersion, morphIdentity) {
         morphPreparationCache.snapshot().filterValues { it.matchesIdentity(morphIdentity) }
     }
+    val morphHeaderTitles = remember(frame.key) {
+        frame.items.mapNotNull { (it as? MediaGridHeaderItem)?.label }
+    }
     val morphTextResourceIndex = rememberMediaGridMorphTextResourceIndex(
         pairs = morphPairsForTextResources,
         viewportWidthPx = morphIdentity.viewportSignature.viewportWidthPx,
-        additionalTitles = frame.items.filterIsInstance<MediaGridHeaderItem>().map { it.label },
+        additionalTitles = morphHeaderTitles,
     )
     val morphInteractionLocked = morphController?.interactionLocked?.value == true
     val morphSnapshot = morphController?.snapshotState?.value
@@ -3793,6 +3805,7 @@ private fun ClassifiedMediaGridContent(
                         includeGeometry = false,
                     )
                 }.distinctUntilChanged().collect { anchor ->
+                    viewportSignatureFlow.value = anchor
                     morphViewportSignatureState.value = buildMediaGridViewportSignature(
                         layout = state.layoutInfo,
                         frame = frame,
@@ -3817,24 +3830,18 @@ private fun ClassifiedMediaGridContent(
         residentPreparedIndex?.drawIndexVersion,
     ) {
         combine(
-            snapshotFlow {
-                buildMediaGridViewportSignature(
-                    layout = state.layoutInfo,
-                    frame = frame,
-                    columnCount = columnCount,
-                    includeGeometry = false,
-                )
-                    .takeIf {
-                        it.firstVisibleMediaOrdinal >= 0 &&
-                            it.lastVisibleMediaOrdinal >= it.firstVisibleMediaOrdinal &&
-                            it.viewportWidthPx > 0 &&
-                            it.viewportHeightPx > 0
-                    }
-            }.distinctUntilChanged(),
+            viewportSignatureFlow,
             snapshotFlow { state.isScrollInProgress }.distinctUntilChanged(),
             morphPointerInProgress,
         ) { signature, isScrollInProgress, pointerInProgress ->
-            signature?.takeUnless { isScrollInProgress || pointerInProgress }
+            signature
+                ?.takeIf {
+                    it.firstVisibleMediaOrdinal >= 0 &&
+                        it.lastVisibleMediaOrdinal >= it.firstVisibleMediaOrdinal &&
+                        it.viewportWidthPx > 0 &&
+                        it.viewportHeightPx > 0
+                }
+                ?.takeUnless { isScrollInProgress || pointerInProgress }
         }.distinctUntilChanged().collectLatest { signature ->
             if (signature == null) return@collectLatest
             val capture = captureMediaGridMorphInput(

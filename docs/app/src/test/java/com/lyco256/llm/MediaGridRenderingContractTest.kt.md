@@ -1,5 +1,10 @@
 # `MediaGridRenderingContractTest.kt`
 
+## 2026-08-08 normal draw allocation contract
+
+- production single surfaceのNormal／Reveal branchが`LazyGridLayoutInfo.visibleItemsInfo`を直接走査し、scrollごとの`MediaGridResidentDrawCommand` list／objectを生成しないことをsource contractで固定する。
+- Morph endpoint protectionとresident prepared image lookupは従来どおり維持する。
+
 ## 2026-08-07 shared renderer helper
 
 - The uniform-lattice static contract follows the shared cell-geometry helper used by both production drawing and endpoint observation.

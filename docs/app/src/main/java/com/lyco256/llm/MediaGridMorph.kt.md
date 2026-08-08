@@ -1,8 +1,8 @@
 # MediaGridMorph.kt
 
-## 2026-08-07 faster release handoff
+## 2026-08-08 faster release handoff
 
-- release後のsettle durationは150ms。frame同期とexact handoffの検証に必要な余裕を残しつつ、通常スクロールへ戻るまでを短縮する。
+- release後のsettle durationは100ms。frame同期のsettle描画と、その後のexact handoff検証を分離したまま、通常スクロールへ戻るまでを短縮する。
 
 ## 2026-08-07 current-column exact index
 

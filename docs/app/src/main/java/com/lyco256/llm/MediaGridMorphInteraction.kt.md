@@ -82,7 +82,7 @@ Current handoff correction: normal pointer-up/disappearance updates the last tra
 ## settleとhandoff
 
 - release progressが0.5未満ならcurrent、0.5以上ならtargetへ進む。
-- pointerのrelease `uptimeMillis`を開始時刻として一回保存し、composable runnerは`withFrameNanos`の時刻との差を使う。controllerのrelease時progress／correctionを基準に180msのelapsed fractionで線形補間する。
+- pointerのrelease `uptimeMillis`を開始時刻として一回保存し、composable runnerは`withFrameNanos`の時刻との差を使う。controllerのrelease時progress／correctionを基準に100msのelapsed fractionで線形補間する。
 - current完了はprogress／correction 0でIdleへ戻る。
 - target補正はrelease時の最後の中心を固定し、各progressで純粋関数から再計算する。完了時はprogress 1のCanvasを維持した`AwaitingGridHandoff`となる。
 - immutable `MediaGridMorphHandoffRequest`はinteraction generationごとに一回だけ生成・通知する。完了通知でto列数のIdle、取消通知でfrom列数のIdleへ戻る。
@@ -101,6 +101,6 @@ pointer updateとsettle frameではprepared pair、render model、画像解決�
 - Repeated 3↔4↔5 direction cycles remain in Tracking without settle or protection churn, and the protected union is released once on explicit release/cancel/dispose.
 - Cell rendering keeps Image-to-Image source-over-target crossfade opaque, uses one-sided alpha only for Image/Placeholder endpoints, and keeps Placeholder/Placeholder opaque. The RGB565 0011/1100 inverse fixture covers the midpoint lattice pixels.
 
-Testとproductionは同じ`MediaGridMorphInteractionController`、pointer state machine、scale、方向反転、focal correction、180ms settle、consume規則を共有する。
+Testとproductionは同じ`MediaGridMorphInteractionController`、pointer state machine、scale、方向反転、focal correction、100ms settle、consume規則を共有する。
 
 `MediaGridMorphGestureMode`は`Disabled`、`Test`、`Production`。TestだけTEST_HARNESS制限を受ける。productionではprepared pair/readiness不成立時に同じmodifier内のrelease時一段変更fallbackを実行し、Morph accept時はfallbackを発行しない。fallbackのscaleはgesture開始時距離とrelease時距離から直接計算する。

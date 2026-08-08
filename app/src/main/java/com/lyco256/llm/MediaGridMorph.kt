@@ -578,7 +578,7 @@ internal object MediaGridMorphDefaults {
     const val DeadZoneScale: Float = 1.02f
     const val ReleaseThreshold: Float = 0.5f
     // Keep release handoff shorter while retaining enough frames for exact target validation.
-    const val SettleDurationMillis: Long = 150L
+    const val SettleDurationMillis: Long = 100L
     const val OverscanRows: Int = 2
 }
 

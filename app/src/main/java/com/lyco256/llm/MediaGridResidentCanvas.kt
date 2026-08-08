@@ -343,21 +343,16 @@ internal fun Modifier.mediaGridResidentCanvas(
     }
 }
 
-private data class MediaGridResidentDrawCommand(
-    val image: MediaGridResidentCanvasPreparedImage,
-    val offset: IntOffset,
-    val size: IntSize,
-)
-
 internal data class MediaGridResidentCanvasLayoutIdentity(
     val firstVisibleItemIndex: Int,
     val firstVisibleItemScrollOffset: Int,
 )
 
 /**
- * Unified production surface. Resident commands are prepared in the
- * drawWithCache phase; the draw phase only iterates immutable commands or the
- * frozen Morph model. There is no overlay, second grid, zIndex, or translation.
+ * Unified production surface. Normal scrolling reads the current LazyGrid
+ * layout directly while drawing, matching the allocation-free resident path.
+ * Morph draws only its frozen model. There is no overlay, second grid, zIndex,
+ * or translation.
  */
 internal fun Modifier.mediaGridSingleSurface(
     state: LazyGridState,
@@ -372,40 +367,25 @@ internal fun Modifier.mediaGridSingleSurface(
 ): Modifier = drawWithCache {
     @Suppress("UNUSED_VARIABLE")
     val cacheInvalidationIdentity = layoutIdentity
-    val layout = state.layoutInfo
-    val commands = ArrayList<MediaGridResidentDrawCommand>(layout.visibleItemsInfo.size)
-    for (info in layout.visibleItemsInfo) {
-        val key = info.key as? String ?: continue
-        val assetId = assetIdByItemKey[key] ?: continue
-        val image = preparedIndex.preparedImageByAssetId[assetId] ?: continue
-        if (info.size.width <= 0 || info.size.height <= 0) continue
-        val left = info.offset.x
-        val top = info.offset.y - layout.viewportStartOffset
-        if (left + info.size.width <= 0 || top + info.size.height <= 0 || left >= size.width || top >= size.height) continue
-        commands += MediaGridResidentDrawCommand(
-            image = image,
-            offset = IntOffset(left, top),
-            size = IntSize(info.size.width, info.size.height),
-        )
-    }
-    val normalVisualItems = if (morphDrawObserver != null) {
-        layout.visibleItemsInfo.mapNotNull { info ->
-            val key = info.key as? String ?: return@mapNotNull null
-            val visualKey = assetIdByItemKey[key]?.let { "asset:$it" } ?: "header:$key"
-            val rect = mediaGridCanvasDestinationRect(info.offset, info.size, layout.viewportStartOffset)
-            val visibleWidth = minOf(rect.right, size.width) - maxOf(rect.left, 0f)
-            val visibleHeight = minOf(rect.bottom, size.height) - maxOf(rect.top, 0f)
-            if (visibleWidth <= 1f || visibleHeight <= 1f) {
-                return@mapNotNull null
-            }
-            MediaGridMorphVisualItemObservation(visualKey, rect)
-        }.sortedBy { it.key }
-    } else {
-        emptyList()
-    }
     onDrawWithContent {
         val currentMode = mode.value
         val snapshot = morphSnapshot?.value
+        val layout = state.layoutInfo
+        val normalVisualItems = if (morphDrawObserver != null) {
+            layout.visibleItemsInfo.mapNotNull { info ->
+                val key = info.key as? String ?: return@mapNotNull null
+                val visualKey = assetIdByItemKey[key]?.let { "asset:$it" } ?: "header:$key"
+                val rect = mediaGridCanvasDestinationRect(info.offset, info.size, layout.viewportStartOffset)
+                val visibleWidth = minOf(rect.right, size.width) - maxOf(rect.left, 0f)
+                val visibleHeight = minOf(rect.bottom, size.height) - maxOf(rect.top, 0f)
+                if (visibleWidth <= 1f || visibleHeight <= 1f) {
+                    return@mapNotNull null
+                }
+                MediaGridMorphVisualItemObservation(visualKey, rect)
+            }.sortedBy { it.key }
+        } else {
+            emptyList()
+        }
         if (morphDrawObserver != null && snapshot != null) {
             morphDrawObserver(
                 MediaGridMorphDrawObservation(
@@ -446,17 +426,25 @@ internal fun Modifier.mediaGridSingleSurface(
             MediaGridSingleSurfaceMode.RevealCurrent,
             MediaGridSingleSurfaceMode.RevealTarget,
             -> {
-                var index = 0
-                while (index < commands.size) {
-                    val command = commands[index]
-                    drawImage(
-                        image = command.image.image,
-                        srcOffset = command.image.srcOffset,
-                        srcSize = command.image.srcSize,
-                        dstOffset = command.offset,
-                        dstSize = command.size,
-                    )
-                    index++
+                clipRect(left = 0f, top = 0f, right = size.width, bottom = size.height) {
+                    for (info in layout.visibleItemsInfo) {
+                        val key = info.key as? String ?: continue
+                        val assetId = assetIdByItemKey[key] ?: continue
+                        val image = preparedIndex.preparedImageByAssetId[assetId] ?: continue
+                        val width = info.size.width
+                        val height = info.size.height
+                        if (width <= 0 || height <= 0) continue
+                        val left = info.offset.x
+                        val top = info.offset.y - layout.viewportStartOffset
+                        if (left + width <= 0 || top + height <= 0 || left >= size.width || top >= size.height) continue
+                        drawImage(
+                            image = image.image,
+                            srcOffset = image.srcOffset,
+                            srcSize = image.srcSize,
+                            dstOffset = IntOffset(left, top),
+                            dstSize = IntSize(width, height),
+                        )
+                    }
                 }
                 drawContent()
             }

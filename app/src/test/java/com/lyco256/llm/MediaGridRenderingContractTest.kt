@@ -190,7 +190,7 @@ class MediaGridRenderingContractTest {
     }
 
     @Test
-    fun productionMorphProtectsFullRowEndpointsAndKeepsDrawHotPathPure() {
+    fun productionMorphProtectsFullRowEndpointsAndKeepsNormalDrawAllocationFree() {
         val uiSource = locateSource("src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt").readText()
         val rendererSource = locateSource("src/main/java/com/lyco256/llm/MediaGridMorphRowRenderer.kt").readText()
         val surfaceSource = locateSource("src/main/java/com/lyco256/llm/MediaGridResidentCanvas.kt").readText()
@@ -203,13 +203,13 @@ class MediaGridRenderingContractTest {
         assertTrue(hostSource.contains("releaseCarryoverAfterStableIdleReady"))
         assertTrue(rendererSource.contains("cell.plan.startContent.assetIdOrNull()"))
         assertTrue(rendererSource.contains("cell.plan.endContent.assetIdOrNull()"))
-        assertTrue(surfaceSource.contains("val commands = ArrayList<MediaGridResidentDrawCommand>"))
+        assertTrue(!surfaceSource.contains("MediaGridResidentDrawCommand"))
         val singleSurfaceDraw = surfaceSource
             .substringAfter("internal fun Modifier.mediaGridSingleSurface")
             .substringAfter("onDrawWithContent")
-        assertTrue(singleSurfaceDraw.contains("while (index < commands.size)"))
-        assertTrue(!singleSurfaceDraw.contains("layout.visibleItemsInfo"))
-        assertTrue(!singleSurfaceDraw.contains("preparedImageByAssetId["))
+        assertTrue(singleSurfaceDraw.contains("for (info in layout.visibleItemsInfo)"))
+        assertTrue(singleSurfaceDraw.contains("preparedImageByAssetId[assetId]"))
+        assertTrue(!singleSurfaceDraw.contains("commands +="))
     }
 
     @Test
