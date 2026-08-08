@@ -577,7 +577,8 @@ private fun Rect.intersectsViewport(viewport: Rect): Boolean =
 internal object MediaGridMorphDefaults {
     const val DeadZoneScale: Float = 1.02f
     const val ReleaseThreshold: Float = 0.5f
-    const val SettleDurationMillis: Long = 180L
+    // Keep release handoff shorter while retaining enough frames for exact target validation.
+    const val SettleDurationMillis: Long = 150L
     const val OverscanRows: Int = 2
 }
 

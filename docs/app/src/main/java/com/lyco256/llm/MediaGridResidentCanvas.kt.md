@@ -1,5 +1,10 @@
 # `MediaGridResidentCanvas.kt`
 
+## 2026-08-07 scroll hot path
+
+- 通常スクロール時のresident command再構築に必要なlayout情報は、親の`ClassifiedMediaGridContent`をpixelごとにrecomposeさせず、`drawWithCache`内で`LazyGridState.layoutInfo`を読むことでcacheを無効化する。
+- 通常のdraw phaseは従来どおりimmutable commandだけを走査し、Morph中も同じ単一surfaceと事前解決済みmodelを使う。
+
 ## 2026-08-07 exact visual handoff observation
 
 - The TEST_HARNESS draw trace records source, target, and current LazyGrid item identities and rectangles, allowing direct source-to-first-Morph and progress-1-to-first-Normal comparison.

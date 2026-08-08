@@ -1002,14 +1002,20 @@ class MediaGridMorphTest {
         beginAtProgress(target, identity, pairs, 0.5f)
         target.releasePointers()
         val generation = target.snapshot().interactionGeneration
-        val expected = listOf(0L to 0.5f, 45L to 0.625f, 90L to 0.75f, 135L to 0.875f)
-        expected.forEach { (elapsed, progress) ->
+        val duration = MediaGridMorphDefaults.SettleDurationMillis
+        val expectedElapsed = listOf(0L, duration / 4L, duration / 2L, duration * 3L / 4L)
+        expectedElapsed.forEach { elapsed ->
             target.advanceSettleElapsed(generation, elapsed)
-            assertEquals(progress, target.snapshot().progress, 0.001f)
+            assertEquals(
+                0.5f + 0.5f * (elapsed.toFloat() / duration),
+                target.snapshot().progress,
+                0.001f,
+            )
         }
-        target.advanceSettleElapsed(generation, 157L)
-        assertEquals(0.5f + 0.5f * (157f / 180f), target.snapshot().progress, 0.001f)
-        target.advanceSettleElapsed(generation, 180L)
+        val partialElapsed = duration - 23L
+        target.advanceSettleElapsed(generation, partialElapsed)
+        assertEquals(0.5f + 0.5f * (partialElapsed.toFloat() / duration), target.snapshot().progress, 0.001f)
+        target.advanceSettleElapsed(generation, duration)
         assertEquals(MediaGridMorphPhase.AwaitingGridHandoff, target.snapshot().phase)
         assertEquals(1f, target.snapshot().progress, 0.001f)
         val expectedFinalCorrection = mediaGridMorphFocalCorrection(
@@ -1020,7 +1026,7 @@ class MediaGridMorphTest {
         assertEquals(expectedFinalCorrection.x, target.snapshot().correction.x, 0.001f)
         assertEquals(expectedFinalCorrection.y, target.snapshot().correction.y, 0.001f)
         assertEquals(1, requests.size)
-        target.advanceSettleElapsed(generation, 360L)
+        target.advanceSettleElapsed(generation, duration * 2L)
         assertEquals(1, requests.size)
         assertSame(requests.single(), target.snapshot().handoffRequest)
         target.completeHandoff(generation)
@@ -1032,11 +1038,11 @@ class MediaGridMorphTest {
         val releaseCorrection = current.snapshot().correction
         current.releasePointers()
         val currentGeneration = current.snapshot().interactionGeneration
-        current.advanceSettleElapsed(currentGeneration, 90L)
+        current.advanceSettleElapsed(currentGeneration, duration / 2L)
         assertEquals(0.125f, current.snapshot().progress, 0.001f)
         assertEquals(releaseCorrection.x / 2f, current.snapshot().correction.x, 0.001f)
         assertEquals(releaseCorrection.y / 2f, current.snapshot().correction.y, 0.001f)
-        current.advanceSettleElapsed(currentGeneration, 180L)
+        current.advanceSettleElapsed(currentGeneration, duration)
         assertEquals(MediaGridMorphPhase.RevealingCurrent, current.snapshot().phase)
         assertEquals(MediaGridMorphDrawMode.RevealCurrent, current.snapshot().drawMode)
         assertEquals(Offset.Zero, current.snapshot().correction)

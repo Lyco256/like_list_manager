@@ -3204,13 +3204,18 @@ internal fun buildMediaGridViewportSignature(
     layout: androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo,
     frame: MediaGridFrameData,
     columnCount: Int,
+    includeGeometry: Boolean = true,
 ): MediaGridViewportSignature {
     var firstItemIndex = Int.MAX_VALUE
     var lastItemIndex = Int.MIN_VALUE
     var firstMediaOrdinal = Int.MAX_VALUE
     var lastMediaOrdinal = Int.MIN_VALUE
     var cellSizePx = 0
-    val visibleItemGeometry = ArrayList<MediaGridViewportItemGeometry>(layout.visibleItemsInfo.size)
+    val visibleItemGeometry = if (includeGeometry) {
+        ArrayList<MediaGridViewportItemGeometry>(layout.visibleItemsInfo.size)
+    } else {
+        null
+    }
     val mediaOrdinalByItemIndex = frame.ordinalIndex.mediaOrdinalByItemIndex
     for (info in layout.visibleItemsInfo) {
         val itemIndex = info.index
@@ -3222,12 +3227,14 @@ internal fun buildMediaGridViewportSignature(
             if (mediaOrdinal > lastMediaOrdinal) lastMediaOrdinal = mediaOrdinal
             if (cellSizePx == 0) cellSizePx = info.size.width
         }
-        visibleItemGeometry += MediaGridViewportItemGeometry(
-            key = info.key.toString(),
-            offsetX = info.offset.x,
-            offsetY = info.offset.y,
-            width = info.size.width,
-            height = info.size.height,
+        visibleItemGeometry?.add(
+            MediaGridViewportItemGeometry(
+                key = info.key.toString(),
+                offsetX = info.offset.x,
+                offsetY = info.offset.y,
+                width = info.size.width,
+                height = info.size.height,
+            ),
         )
     }
     return MediaGridViewportSignature(
@@ -3240,7 +3247,7 @@ internal fun buildMediaGridViewportSignature(
         viewportHeightPx = (layout.viewportEndOffset - layout.viewportStartOffset).coerceAtLeast(0),
         cellSizePx = cellSizePx,
         columnCount = columnCount,
-        visibleItemGeometry = visibleItemGeometry,
+        visibleItemGeometry = visibleItemGeometry ?: emptyList(),
     )
 }
 
@@ -3693,7 +3700,20 @@ private fun ClassifiedMediaGridContent(
     val morphPairVersion by morphPreparationCache.publishedVersion.collectAsState()
     val morphPointerInProgress = remember(state) { MutableStateFlow(false) }
     val fallbackMorphHeaderHeightPx = with(LocalDensity.current) { 40.dp.toPx() }
-    val morphViewportSignature = buildMediaGridViewportSignature(state.layoutInfo, frame, columnCount)
+    val morphViewportSignatureState = remember(state) {
+        mutableStateOf<MediaGridViewportSignature?>(null)
+    }
+    val morphViewportSignature = morphViewportSignatureState.value ?: MediaGridViewportSignature(
+        renderKey = frame.key,
+        firstVisibleItemIndex = -1,
+        lastVisibleItemIndex = -1,
+        firstVisibleMediaOrdinal = -1,
+        lastVisibleMediaOrdinal = -1,
+        viewportWidthPx = 0,
+        viewportHeightPx = 0,
+        cellSizePx = 0,
+        columnCount = columnCount,
+    )
     val morphIdentity = MediaGridMorphInteractionIdentity(
         sourceRevision = frame.key.dataKey.sourceRevision,
         frameKey = frame.key,
@@ -3766,8 +3786,18 @@ private fun ClassifiedMediaGridContent(
         kotlinx.coroutines.coroutineScope {
             launch {
                 snapshotFlow {
-                    buildMediaGridViewportSignature(state.layoutInfo, frame, columnCount)
+                    buildMediaGridViewportSignature(
+                        layout = state.layoutInfo,
+                        frame = frame,
+                        columnCount = columnCount,
+                        includeGeometry = false,
+                    )
                 }.distinctUntilChanged().collect { anchor ->
+                    morphViewportSignatureState.value = buildMediaGridViewportSignature(
+                        layout = state.layoutInfo,
+                        frame = frame,
+                        columnCount = columnCount,
+                    )
                     effectiveController?.updateViewport(anchor.toAnchor())
                 }
             }
@@ -3788,13 +3818,17 @@ private fun ClassifiedMediaGridContent(
     ) {
         combine(
             snapshotFlow {
-                buildMediaGridViewportSignature(state.layoutInfo, frame, columnCount)
+                buildMediaGridViewportSignature(
+                    layout = state.layoutInfo,
+                    frame = frame,
+                    columnCount = columnCount,
+                    includeGeometry = false,
+                )
                     .takeIf {
                         it.firstVisibleMediaOrdinal >= 0 &&
                             it.lastVisibleMediaOrdinal >= it.firstVisibleMediaOrdinal &&
                             it.viewportWidthPx > 0 &&
-                            it.viewportHeightPx > 0 &&
-                            it.visibleItemGeometry.isNotEmpty()
+                            it.viewportHeightPx > 0
                     }
             }.distinctUntilChanged(),
             snapshotFlow { state.isScrollInProgress }.distinctUntilChanged(),
@@ -3803,24 +3837,26 @@ private fun ClassifiedMediaGridContent(
             signature?.takeUnless { isScrollInProgress || pointerInProgress }
         }.distinctUntilChanged().collectLatest { signature ->
             if (signature == null) return@collectLatest
-            val identity = MediaGridMorphPreparationIdentity(
-                sourceRevision = frame.key.dataKey.sourceRevision,
-                frameKey = frame.key,
-                columnCount = columnCount,
-                viewportSignature = signature,
-            )
-            val token = morphPreparationCache.request(
-                identity = identity,
-                isScrollInProgress = false,
-                isPointerInProgress = false,
-                preparedIndexVersion = residentPreparedIndex?.drawIndexVersion ?: Long.MIN_VALUE,
-            ) ?: return@collectLatest
             val capture = captureMediaGridMorphInput(
                 frame = frame,
                 layoutInfo = state.layoutInfo,
                 columnCount = columnCount,
                 fallbackHeaderHeightPx = fallbackMorphHeaderHeightPx,
                 preparedIndex = residentPreparedIndex,
+            ) ?: return@collectLatest
+            val captureIdentity = capture.identity
+            morphViewportSignatureState.value = captureIdentity.viewportSignature
+            val identity = MediaGridMorphPreparationIdentity(
+                sourceRevision = captureIdentity.sourceRevision,
+                frameKey = captureIdentity.frameKey,
+                columnCount = captureIdentity.columnCount,
+                viewportSignature = captureIdentity.viewportSignature,
+            )
+            val token = morphPreparationCache.request(
+                identity = identity,
+                isScrollInProgress = false,
+                isPointerInProgress = false,
+                preparedIndexVersion = residentPreparedIndex?.drawIndexVersion ?: Long.MIN_VALUE,
             ) ?: return@collectLatest
             val pairs = withContext(Dispatchers.Default) {
                 buildMediaGridMorphRowPreparedPairs(capture)
@@ -3889,13 +3925,15 @@ private fun ClassifiedMediaGridContent(
                                         fallbackHeaderHeightPx = fallbackMorphHeaderHeightPx,
                                         preparedIndex = residentPreparedIndex,
                                     )
+                                    val claimIdentity = capture?.identity?.toInteractionIdentity() ?: morphIdentity
+                                    morphController?.updateIdentity(claimIdentity)
                                     prepareMediaGridMorphClaim(
                                         capture = capture,
                                         preparedIndex = residentPreparedIndex,
                                         textResources = morphTextResourceIndex,
                                         candidate = candidate,
                                         requestedDirection = candidate.claimDirection,
-                                        latestIdentity = morphIdentity,
+                                        latestIdentity = claimIdentity,
                                         sourceViewportAnchor = MediaGridMorphSourceViewportAnchor(
                                             firstVisibleItemIndex = state.firstVisibleItemIndex,
                                             firstVisibleItemScrollOffset = state.firstVisibleItemScrollOffset,
@@ -3941,10 +3979,7 @@ private fun ClassifiedMediaGridContent(
                             mode = singleSurfaceMode,
                             morphModel = morphRowRenderModel,
                             progress = morphProgress,
-                            layoutIdentity = MediaGridResidentCanvasLayoutIdentity(
-                                firstVisibleItemIndex = state.firstVisibleItemIndex,
-                                firstVisibleItemScrollOffset = state.firstVisibleItemScrollOffset,
-                            ),
+                            layoutIdentity = MediaGridResidentCanvasLayoutIdentity(0, 0),
                             morphDrawObserver = morphDrawObserver,
                             morphSnapshot = morphController?.snapshotState,
                         )

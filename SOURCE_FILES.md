@@ -2,6 +2,12 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 
 この文書は、全体構成、現状の実装、変更目的別入口、個別docs一覧だけを担当する。禁止事項、完了報告、検証手順は置かない。
 
+## 2026-08-07 media-grid scroll/Morph performance
+
+- 通常viewport通知は可視境界・cellサイズだけを使い、可視セル全体のGeometryはpixel単位のスクロールでは構築しない。Geometryは境界変化時のidentity更新と、スクロール停止後のMorph準備captureに限定する。
+- `ClassifiedMediaGridContent`はスクロール位置をCompose親で直接監視せず、Morph identityは軽量viewportの境界変化で更新し、完全なMorph Geometryは停止後のcaptureで確定する。single-surfaceのdraw cache invalidationは`drawWithCache`内の`LazyGridState.layoutInfo`読み取りで処理する。
+- release settleは150ms。claim中のidentityは実LazyGrid captureから更新し、スクロール中の古いidle identityでMorphを誤判定しない。
+
 ## 2026-08-05 RequiredRenderSet and exact target handoff
 
 - `MediaGridMorphRequiredRenderSet.kt` is the single selected-plan contract for claim readiness, resident protection, rendering, and missing-image/header checks. It sweeps each cell/header from progress 0 to 1 against the local viewport; offscreen overscan is optional and is reported separately.

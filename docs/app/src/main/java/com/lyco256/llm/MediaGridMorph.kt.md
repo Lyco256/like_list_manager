@@ -1,5 +1,9 @@
 # MediaGridMorph.kt
 
+## 2026-08-07 faster release handoff
+
+- release後のsettle durationは150ms。frame同期とexact handoffの検証に必要な余裕を残しつつ、通常スクロールへ戻るまでを短縮する。
+
 ## 2026-08-07 current-column exact index
 
 - Claim capture builds the compact exact layout index for the current column count as well as both adjacent counts. Source canonical rows therefore use the real full-span-header boundaries instead of estimating a section offset from the bounded preceding-media window.

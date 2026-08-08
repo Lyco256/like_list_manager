@@ -1,5 +1,11 @@
 # `TagHierarchyUiV2.kt`
 
+## 2026-08-07 media-grid scroll/Morph hot path
+
+- 通常スクロールのviewport通知は可視itemの境界・サイズだけを使い、セルごとのY座標やGeometry objectをpixel単位では生成しない。完全なGeometry signatureは境界変化時とスクロール停止後のMorph準備でだけ作る。
+- `ClassifiedMediaGridContent`は`LazyGridState`のpixel単位の値をCompose本体で直接読まず、Morph用identityを軽量viewportの境界変化で更新し、完全なMorph Geometryはidle時のcapture結果で確定する。単一surfaceのdraw cache invalidationは`drawWithCache`内で`LazyGridState.layoutInfo`を読む。
+- スクロール中にpinchがclaimされた場合は実LazyGridから再captureしたidentityでclaimを検証し、idle時の古いMorph準備結果を誤って利用しない。
+
 ## 2026-08-07 immediate reverse resize
 
 - Stable-idle readiness now releases the previous successful handoff's bounded carryover protection only after the new-column source and both endpoint resources are complete.
