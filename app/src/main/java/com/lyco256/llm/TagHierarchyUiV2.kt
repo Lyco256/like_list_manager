@@ -3876,6 +3876,7 @@ private fun ClassifiedMediaGridContent(
                         columnCount = columnCount,
                     )
                 }.distinctUntilChanged().collect { anchor ->
+                    morphPreparationCache.cancelInFlight()
                     viewportAnchorFlow.value = anchor
                     effectiveController?.updateViewport(anchor.toAnchor())
                 }
@@ -3937,7 +3938,11 @@ private fun ClassifiedMediaGridContent(
                 .toLongArray()
             // A preparation that started while idle may finish after a drag has
             // begun. Do not publish its urgent work into the scroll hot path.
-            if (state.isScrollInProgress || morphPointerInProgress.value) {
+            if (
+                !morphPreparationCache.isCurrent(token) ||
+                state.isScrollInProgress ||
+                morphPointerInProgress.value
+            ) {
                 return@collectLatest
             }
             morphPreparationCache.requestUrgentAssetsIfChanged(identity, requiredAssetIds)?.let { ids ->
@@ -3952,7 +3957,15 @@ private fun ClassifiedMediaGridContent(
         morphIdentity,
         residentPreparedIndex?.drawIndexVersion,
         morphTextResourceIndex.identity,
+        state,
+        morphPointerInProgress,
     ) {
+        combine(
+            snapshotFlow { state.isScrollInProgress }.distinctUntilChanged(),
+            morphPointerInProgress,
+        ) { isScrollInProgress, isPointerInProgress ->
+            !isScrollInProgress && !isPointerInProgress
+        }.first { it }
         val preparedIndex = residentPreparedIndex ?: return@LaunchedEffect
         val pairs = morphPreparationCache.snapshot()
             .filterValues { it.matchesIdentity(morphIdentity) }

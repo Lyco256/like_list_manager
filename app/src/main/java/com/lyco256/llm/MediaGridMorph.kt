@@ -323,6 +323,7 @@ internal class MediaGridMorphPreparationCache {
     private val _publishedVersion = MutableStateFlow(0L)
     val publishedVersion = _publishedVersion
     private var lastRequestedIdentity: MediaGridMorphPreparationIdentity? = null
+    private var lastPublishedIdentity: MediaGridMorphPreparationIdentity? = null
     private var lastUrgentIdentity: MediaGridMorphPreparationIdentity? = null
     private var lastUrgentAssetIds = LongArray(0)
 
@@ -335,7 +336,10 @@ internal class MediaGridMorphPreparationCache {
         if (
             isScrollInProgress ||
             isPointerInProgress ||
-                identity == lastRequestedIdentity
+            (
+                identity == lastRequestedIdentity &&
+                    (latestToken.get() != null || identity == lastPublishedIdentity)
+                )
         ) return null
         val token = MediaGridMorphPreparationToken(
             generation = nextGeneration.incrementAndGet(),
@@ -359,6 +363,14 @@ internal class MediaGridMorphPreparationCache {
     }
 
     @Synchronized
+    fun cancelInFlight() {
+        latestToken.set(null)
+    }
+
+    @Synchronized
+    fun isCurrent(token: MediaGridMorphPreparationToken): Boolean = latestToken.get() == token
+
+    @Synchronized
     fun publish(
         token: MediaGridMorphPreparationToken,
         pairs: Map<MediaGridMorphDirection, MediaGridMorphPreparedPair>,
@@ -372,6 +384,7 @@ internal class MediaGridMorphPreparationCache {
             }
         ) return false
         published.set(pairs.toMap())
+        lastPublishedIdentity = token.identity
         _publishedVersion.value = token.generation
         return true
     }

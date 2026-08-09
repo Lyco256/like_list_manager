@@ -4,7 +4,8 @@
 
 - Normal scroll publishes only the primitive viewport anchor signature. Detailed Morph geometry, row pairs, required assets, exact target indexes, and header resources are prepared after scroll/pointer idle.
 - Resident production does not retain `MediaGridPreviewPreloader`; the fallback preloader, when enabled, derives visible item indexes from the bounded ordinal range rather than filtering the full frame dataset.
-- Morph readiness may re-evaluate against a newer resident draw publication, but the same idle preparation identity does not rebuild geometry.
+- Morph readiness may re-evaluate against a newer resident draw publication only after scroll/pointer idle, and the same idle preparation identity does not rebuild geometry.
+- Stale Morph preparation is invalidated when the lightweight anchor moves, preventing delayed urgent requests or pair publication from crossing into a new scroll sequence.
 
 ## 2026-08-08 media-grid shared viewport hot path
 

@@ -4,6 +4,7 @@
 
 - Morph geometry preparation is keyed by source/frame/columns/detailed viewport identity, not resident `drawIndexVersion`; draw-index publication only drives readiness re-evaluation.
 - Urgent Morph assets are normalized and deduplicated by preparation identity plus the required asset set, so repeated readiness work does not re-request the same set.
+- A viewport-anchor change cancels stale in-flight preparation before its urgent request or pair publish; an unpublished canceled identity can retry after idle.
 
 ## 2026-08-08 faster release handoff
 

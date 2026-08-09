@@ -721,6 +721,19 @@ class MediaGridMorphTest {
     }
 
     @Test
+    fun preparationCacheCancelsStaleInFlightWorkWhenViewportMoves() {
+        val cache = MediaGridMorphPreparationCache()
+        val identity = identity(columns = 4)
+        val token = cache.request(identity, false, false)
+
+        assertTrue(token != null)
+        assertTrue(cache.isCurrent(token!!))
+        cache.cancelInFlight()
+        assertTrue(!cache.isCurrent(token))
+        assertTrue(cache.request(identity, false, false) != null)
+    }
+
+    @Test
     fun preparationCacheDeduplicatesUrgentAssetsByIdentityAndStableSet() {
         val cache = MediaGridMorphPreparationCache()
         val identity = identity(columns = 4)
