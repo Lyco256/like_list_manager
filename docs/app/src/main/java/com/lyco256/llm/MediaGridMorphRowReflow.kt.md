@@ -1,5 +1,10 @@
 # `MediaGridMorphRowReflow.kt`
 
+## 2026-08-10 bounded selection index
+
+- Template生成時にactual visible row→canonical row、media ordinal→target row、target row→exact row ID/top、source/target header relative mappingをbounded arrayへ構築する。
+- `select()`はfocal row/cell、canonical validation、target row、row/header planをprimitive loopで選び、`filter`、`groupBy`、`indexOfFirst`、`associate`、`toMap`を使用しない。
+
 ## 2026-08-07 exact target sequence
 
 - Source canonical rows and target rows are materialized from `MediaGridMorphExactTargetLayoutIndex` row IDs and row-media ordinals. Exact asset IDs complete a row beyond the bounded captured resources, so a 4-to-5 endpoint cannot silently lose its rightmost cells.

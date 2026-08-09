@@ -178,6 +178,46 @@ class MediaGridRenderingContractTest {
     }
 
     @Test
+    fun productionClaimAndDrawUseThePhaseTwoBoundedHotPath() {
+        val uiSource = locateSource("src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt").readText()
+        val rowSource = locateSource("src/main/java/com/lyco256/llm/MediaGridMorphRowReflow.kt").readText()
+        val rendererSource = locateSource("src/main/java/com/lyco256/llm/MediaGridMorphRowRenderer.kt").readText()
+        val selection = rowSource.substringAfter("fun select(initialPinchCenter: Offset)")
+            .substringBefore("private fun emptyPlan")
+        listOf(".filter", ".groupBy", ".indexOfFirst", ".toMap", ".associate", ".mapNotNull").forEach {
+            assertTrue("claim selection still contains $it", !selection.contains(it))
+        }
+        assertTrue(rowSource.contains("MediaGridMorphViewportSelectionIndex"))
+        assertTrue(rowSource.contains("sourceCanonicalRowIndexByVisibleRow"))
+        assertTrue(rowSource.contains("targetRowIndexByMediaOrdinal"))
+        assertTrue(rowSource.contains("targetHeaderExactRowIdByHeaderIndex"))
+
+        val productionClaim = rendererSource.substringAfter("internal fun prepareMediaGridMorphClaim")
+            .substringBefore("internal fun mediaGridMorphStableIdleReady")
+        assertTrue(productionClaim.contains("preparedPairsSnapshot[direction]"))
+        assertTrue(productionClaim.contains("buildMediaGridMorphRowPreparedPairForClaim"))
+        assertTrue(!productionClaim.contains("buildMediaGridMorphRowPreparedPairs(capture)"))
+        val selectedBundle = rendererSource.substringAfter("private fun buildMediaGridMorphSelectedClaimBundle")
+            .substringBefore("/** Pure, bounded claim-time builder")
+        assertTrue(selectedBundle.contains("directions = mapOf(direction to selected)"))
+        assertTrue(rendererSource.contains("requiredRenderSet = requiredRenderSet"))
+        assertTrue(rendererSource.contains("requiredCellPlans"))
+        assertTrue(!uiSource.contains("frame.items.mapNotNull { (it as? MediaGridHeaderItem)?.label }"))
+
+        val draw = rendererSource.substringAfter("internal fun DrawScope.drawMediaGridMorphRow")
+            .substringBefore("private fun lerp(")
+        assertTrue(draw.contains("val currentCellSize ="))
+        assertTrue(draw.contains("val focalRowTop ="))
+        assertTrue(draw.contains("val targetAdjustment ="))
+        assertTrue(!draw.contains("mediaGridMorphRenderCellRect("))
+        assertTrue(!draw.contains("mediaGridMorphRenderHeaderRect("))
+        assertTrue(!draw.contains("mediaGridMorphCellBlend("))
+        assertTrue(!draw.contains("mediaGridMorphHeaderBlend("))
+        assertTrue(draw.contains("cell.transitionType"))
+        assertTrue(draw.contains("header.transitionType"))
+    }
+
+    @Test
     fun morphInteractionSharesOneModifierAcrossTestAndProduction() {
         val uiSource = locateSource("src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt").readText()
         val interactionSource = locateSource(

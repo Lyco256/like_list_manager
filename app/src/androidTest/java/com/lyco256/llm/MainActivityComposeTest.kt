@@ -889,6 +889,7 @@ class MainActivityComposeTest {
         )
         MediaGridMorphTestTrace.clear()
         var observationsBeforeUp = emptyList<MediaGridMorphDrawObservation>()
+        var performanceCountersBeforeUp: MediaGridMorphPerformanceCounters? = null
         pinchOnGrid(
             gridTag = "classified_media_grid",
             centerSpan = 260f,
@@ -896,6 +897,7 @@ class MainActivityComposeTest {
             centerYFraction = matrixCase.centerYFraction,
             onBeforePhysicalUp = {
                 observationsBeforeUp = MediaGridMorphTestTrace.drawEvents()
+                performanceCountersBeforeUp = MediaGridMorphTestTrace.performanceCounters()
             },
         )
         val claim = MediaGridMorphTestTrace.claimEvents().lastOrNull { it.generation > 0L }
@@ -934,12 +936,32 @@ class MainActivityComposeTest {
         )
         assertTrue(morphDraws.map { it.frameNumber }.distinct().size >= 2)
         assertTrue(morphDraws.map { it.progress }.distinct().size >= 2)
+        val claimPerformanceCounters = performanceCountersBeforeUp
+            ?: error("Morph performance counters were not captured for $matrixCase")
+        assertProductionMorphPerformanceCounters(
+            counters = claimPerformanceCounters,
+            direction = if (matrixCase.toColumns > matrixCase.fromColumns) {
+                MediaGridMorphDirection.IncreaseColumns
+            } else {
+                MediaGridMorphDirection.DecreaseColumns
+            },
+        )
         if (matrixCase.location == ProductionMorphMatrixLocation.HeaderBefore) {
             assertMorphingSubtitleAppearsOrDisappears(morphDraws, matrixCase)
         }
         assertEquals(0, MediaGridMorphTestTrace.fallbackCount())
         waitForGridColumnCount(matrixCase.toColumns, ProductionMorphWaitTimeoutMs)
         waitForMorphCanvasRemoval(ProductionMorphWaitTimeoutMs)
+        val morphFrameCounters = MediaGridMorphTestTrace.drawEvents()
+            .filter {
+                it.generation == claim.generation && it.drawMode == MediaGridSingleSurfaceMode.Morph
+            }
+            .mapNotNull(MediaGridMorphDrawObservation::performanceCounters)
+        assertTrue("Morph frame counters missing for $matrixCase", morphFrameCounters.isNotEmpty())
+        assertTrue(
+            "Morph preparation or draw helper work increased during animation for $matrixCase: $morphFrameCounters",
+            morphFrameCounters.all { it == claimPerformanceCounters },
+        )
         if (matrixCase.reverseAtSameLocation) {
             runProductionMorphReverseAtSameLocation(
                 matrixCase = matrixCase,
@@ -1004,6 +1026,30 @@ class MainActivityComposeTest {
                 it.directLayoutReevaluated
             },
         )
+    }
+
+    private fun assertProductionMorphPerformanceCounters(
+        counters: MediaGridMorphPerformanceCounters,
+        direction: MediaGridMorphDirection,
+    ) {
+        assertEquals(0, counters.claimPairBuilds)
+        assertEquals(1, counters.selectedPlanBuilds)
+        assertTrue("RequiredRenderSet must be built once or less: $counters", counters.requiredRenderSetBuilds <= 1)
+        assertEquals(1, counters.requiredRenderSetBuilds)
+        assertEquals(1, counters.renderModelBuilds)
+        when (direction) {
+            MediaGridMorphDirection.IncreaseColumns -> {
+                assertEquals(1, counters.increaseRenderModelBuilds)
+                assertEquals(0, counters.decreaseRenderModelBuilds)
+            }
+            MediaGridMorphDirection.DecreaseColumns -> {
+                assertEquals(0, counters.increaseRenderModelBuilds)
+                assertEquals(1, counters.decreaseRenderModelBuilds)
+            }
+        }
+        assertEquals(0, counters.textLayoutMeasures)
+        assertEquals(0, counters.drawRectHelperCalls)
+        assertEquals(0, counters.drawBlendHelperCalls)
     }
 
     private fun runProductionMorphReverseAtSameLocation(

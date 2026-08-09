@@ -1,5 +1,12 @@
 # `MediaGridMorphRowRenderer.kt`
 
+## 2026-08-10 selected model and primitive draw
+
+- Production claimはcache pairのselected direction一件だけをplan化し、一つのRequiredRenderSetをcompleteness/model/protectionへ共有する。
+- Cellは`SameImage`等5種、headerは`SameTitle`等5種のtransition typeをclaim時に確定する。
+- Production drawはframe共通のcell size、focal top、target adjustmentを一回計算し、cell/header loopではFloat座標とalphaを直接計算する。Rect/CellBlend/HeaderBlend helperはpure test・診断用だけに残す。
+- Morph text resourceはbounded pairのsource/target/current visible header titleだけを計測し、frame全header走査を行わない。
+
 ## 2026-08-07 shared endpoint geometry
 
 - Cell and header rectangle calculation is shared by production drawing and TEST_HARNESS source/target viewport observations, preventing the regression assertion from using a separate geometry formula.

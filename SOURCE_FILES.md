@@ -2,6 +2,13 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 
 この文書は、全体構成、現状の実装、変更目的別入口、個別docs一覧だけを担当する。禁止事項、完了報告、検証手順は置かない。
 
+## 2026-08-10 media-grid Morph claim/draw hot path
+
+- Production claimはstable-idle cacheのidentity一致pairを再利用し、一gestureでlockしたdirection一件だけのplan、RequiredRenderSet、render model、Asset保護を構築する。live captureからのpair再構築はcache不一致時のselected directionだけに限定する。
+- `MediaGridMorphViewportPlanTemplate`はvisible row→canonical row、media ordinal→target row、exact row/header位置のbounded indexをidle時に構築し、claim selectionはprimitive loopだけで行う。
+- Morph textはcurrent bounded pairのheaderだけを計測する。row render modelはcell/header transition typeを保持し、production draw loopはRect/blend helperを生成せずFloat primitiveで描画する。
+- TEST_HARNESSはclaim pair、selected plan、RequiredRenderSet、direction別model、text measure、draw helperのcounterを記録する。
+
 ## 2026-08-08 media-grid scroll allocation reduction
 
 - 通常のresident描画は`devenv`相当の直接drawへ戻し、pixel単位のscrollごとに可視セル分のdraw command objectを再生成しない。Morph中だけimmutable row modelを描画する。

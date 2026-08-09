@@ -54,6 +54,23 @@ internal data class MediaGridMorphHeaderPlan(
     val endKey: String? = null,
 )
 
+/** Bounded lookup data prepared once with the idle viewport template. */
+internal data class MediaGridMorphViewportSelectionIndex(
+    val actualVisibleSourceRows: List<MediaGridMorphCapturedRow>,
+    val sourceCanonicalRowIndexByVisibleRow: IntArray,
+    val targetMediaOrdinalBase: Int,
+    val targetRowIndexByMediaOrdinal: IntArray,
+    val targetExactRowIdByRowIndex: IntArray,
+    val targetExactRowTopByRowIndex: FloatArray,
+    val sourceHeaderCanonicalRowIndexByHeaderIndex: IntArray,
+    val targetHeaderRowIndexByHeaderIndex: IntArray,
+    val targetHeaderExactRowIdByHeaderIndex: IntArray,
+    val targetHeaderTopByHeaderIndex: FloatArray,
+) {
+    fun targetRowIndex(mediaOrdinal: Int): Int =
+        targetRowIndexByMediaOrdinal.getOrNull(mediaOrdinal - targetMediaOrdinalBase) ?: -1
+}
+
 /**
  * Immutable, bounded plan template. It deliberately contains rows and screen
  * columns, never dataset-item start/end rect correspondences.
@@ -75,50 +92,79 @@ internal data class MediaGridMorphViewportPlanTemplate(
     val mediaOrdinalRange: IntRange,
     val headerHeightPx: Float,
     val exactTargetLayoutIndex: MediaGridMorphExactTargetLayoutIndex? = null,
+    val selectionIndex: MediaGridMorphViewportSelectionIndex,
 ) {
     fun select(initialPinchCenter: Offset): MediaGridMorphViewportPlan {
         // Only rows actually intersecting the captured source viewport may
         // select a plan or participate in source validation.  The canonical
         // row list is intentionally allowed to contain bounded overscan rows
         // that are not one-to-one with this list.
-        val visibleSourceRows = sourceRows.filter { it.isActualVisibleSourceRow }
+        val visibleSourceRows = selectionIndex.actualVisibleSourceRows
         if (visibleSourceRows.isEmpty()) return emptyPlan(initialPinchCenter)
-        val visibleSourceRow = visibleSourceRows.firstOrNull { row ->
-            initialPinchCenter.y >= row.top && initialPinchCenter.y <= row.bottom
-        } ?: visibleSourceRows.minByOrNull { row ->
-            abs((row.top + row.bottom) / 2f - initialPinchCenter.y)
-        } ?: return emptyPlan(initialPinchCenter)
-        val visibleRowsByKey = visibleSourceRows.groupBy { it.rowKey }
-        val canonicalRowsByKey = sourceCanonicalRows.groupBy { it.rowKey }
-        visibleSourceRows.forEach { row ->
-            val key = row.rowKey ?: return emptyPlan(initialPinchCenter)
-            val matches = canonicalRowsByKey[key].orEmpty()
-            if (matches.size != 1 || !sourceRowMatchesCanonical(row, matches.single())) {
+        var visibleSourceRowIndex = -1
+        var nearestDistance = Float.POSITIVE_INFINITY
+        var containingRowFound = false
+        var visibleIndex = 0
+        while (visibleIndex < visibleSourceRows.size) {
+            val row = visibleSourceRows[visibleIndex]
+            val canonicalIndex = selectionIndex.sourceCanonicalRowIndexByVisibleRow.getOrElse(visibleIndex) { -1 }
+            if (canonicalIndex !in sourceCanonicalRows.indices ||
+                !sourceRowMatchesCanonical(row, sourceCanonicalRows[canonicalIndex])
+            ) {
                 return emptyPlan(initialPinchCenter)
             }
+            if (initialPinchCenter.y >= row.top && initialPinchCenter.y <= row.bottom) {
+                if (!containingRowFound) {
+                    visibleSourceRowIndex = visibleIndex
+                    containingRowFound = true
+                }
+            } else if (!containingRowFound) {
+                val distance = abs((row.top + row.bottom) / 2f - initialPinchCenter.y)
+                if (distance < nearestDistance) {
+                    nearestDistance = distance
+                    visibleSourceRowIndex = visibleIndex
+                }
+            }
+            visibleIndex++
         }
-        val sourceCanonicalRowIndex = visibleSourceRow.rowKey?.let { key ->
-            sourceCanonicalRows.indexOfFirst { it.rowKey == key }
-        } ?: -1
+        if (visibleSourceRowIndex !in visibleSourceRows.indices) return emptyPlan(initialPinchCenter)
+        val visibleSourceRow = visibleSourceRows[visibleSourceRowIndex]
+        val sourceCanonicalRowIndex = selectionIndex.sourceCanonicalRowIndexByVisibleRow[visibleSourceRowIndex]
         if (sourceCanonicalRowIndex < 0) return emptyPlan(initialPinchCenter)
-        val focalCell = visibleSourceRow.cells.minByOrNull { cell ->
+        var focalCell: MediaGridMorphCapturedCell? = null
+        var focalDistance = Float.POSITIVE_INFINITY
+        var focalCellIndex = 0
+        while (focalCellIndex < visibleSourceRow.cells.size) {
+            val cell = visibleSourceRow.cells[focalCellIndex]
             val dx = cell.rect.center.x - initialPinchCenter.x
             val dy = cell.rect.center.y - initialPinchCenter.y
-            dx * dx + dy * dy
-        } ?: return emptyPlan(initialPinchCenter)
+            val distance = dx * dx + dy * dy
+            if (distance < focalDistance) {
+                focalDistance = distance
+                focalCell = cell
+            }
+            focalCellIndex++
+        }
+        focalCell ?: return emptyPlan(initialPinchCenter)
         val fixedFocalCenterY = viewport.top + initialPinchCenter.y
         val sourceCellSize = (viewport.width / fromColumnCount.coerceAtLeast(1)).coerceAtLeast(1f)
         val targetCellSize = (viewport.width / toColumnCount.coerceAtLeast(1)).coerceAtLeast(1f)
         val focalV = ((fixedFocalCenterY - visibleSourceRow.top) / sourceCellSize).coerceIn(0f, 1f)
 
-        val directTargetRowIndex = targetRows.indexOfFirst { row ->
-            row.cells.any { it.mediaOrdinal == focalCell.mediaOrdinal }
-        }
         val targetOrdinal = focalCell.mediaOrdinal
-        val targetRowIndex = directTargetRowIndex.takeIf { it >= 0 } ?: return emptyPlan(initialPinchCenter)
-        val targetFocalCell = targetRows[targetRowIndex].cells
-            .firstOrNull { it.mediaOrdinal == targetOrdinal }
-            ?: return emptyPlan(initialPinchCenter)
+        val targetRowIndex = selectionIndex.targetRowIndex(targetOrdinal)
+            .takeIf { it in targetRows.indices } ?: return emptyPlan(initialPinchCenter)
+        var targetFocalCell: MediaGridMorphCapturedCell? = null
+        var targetCellIndex = 0
+        while (targetCellIndex < targetRows[targetRowIndex].cells.size) {
+            val candidate = targetRows[targetRowIndex].cells[targetCellIndex]
+            if (candidate.mediaOrdinal == targetOrdinal) {
+                targetFocalCell = candidate
+                break
+            }
+            targetCellIndex++
+        }
+        targetFocalCell ?: return emptyPlan(initialPinchCenter)
         val idealTargetRowTop = fixedFocalCenterY - focalV * targetCellSize
         val exactIndex = exactTargetLayoutIndex ?: return emptyPlan(initialPinchCenter)
         val exactTargetRowId = exactIndex.rowIdForMediaOrdinal(targetOrdinal) ?: return emptyPlan(initialPinchCenter)
@@ -153,31 +199,12 @@ internal data class MediaGridMorphViewportPlanTemplate(
             exactTargetRowTopAtScrollZero = exactTargetRowTopAtScrollZero,
             targetCellSize = targetCellSize,
         )
-        val startHeaderHeights = headerPlans.associate { it.relativeRow to it.startHeightPx }
-        val endHeaderHeights = headerPlans.associate { it.relativeRow to it.endHeightPx }
-        val exactTargetRowOffsets = targetRows.mapNotNull { row ->
-            val exactRowId = exactTargetLayoutIndex?.let { index ->
-                row.cells.firstOrNull()?.mediaOrdinal?.let(index::rowIdForMediaOrdinal)
-            }
-            val exactTop = exactRowId?.let { rowId -> exactTargetLayoutIndex?.rowTopAtScrollZero(rowId) }
-            if (
-                exactRowId == null ||
-                    exactTop == null ||
-                    exactTargetRowId == null ||
-                    exactTargetRowTopAtScrollZero == null
-            ) {
-                null
-            } else {
-                val relative = exactRowId - exactTargetRowId
-                relative to (exactTop - exactTargetRowTopAtScrollZero - relative * targetCellSize)
-            }
-        }.toMap()
-        val rowPlans = (minRelative..maxRelative).map { relativeRow ->
+        val rowPlans = ArrayList<MediaGridMorphRowPlan>((maxRelative - minRelative + 1).coerceAtLeast(0))
+        var relativeRow = minRelative
+        while (relativeRow <= maxRelative) {
             val canonicalSource = sourceCanonicalRows.getOrNull(sourceCanonicalRowIndex + relativeRow)
             val source = canonicalSource?.let { candidate ->
-                val visible = candidate.rowKey?.let { key ->
-                    visibleRowsByKey[key]?.singleOrNull()
-                }
+                val visible = visibleSourceRowForCanonicalIndex(sourceCanonicalRowIndex + relativeRow)
                 if (visible == null) candidate else MediaGridMorphAlignedRow(
                     rowIndex = candidate.rowIndex,
                     cells = visible.cells,
@@ -186,17 +213,23 @@ internal data class MediaGridMorphViewportPlanTemplate(
                 )
             }
             val target = targetRows.getOrNull(targetRowIndex + relativeRow)
-            MediaGridMorphRowPlan(
+            rowPlans += MediaGridMorphRowPlan(
                 relativeRow = relativeRow,
                 cells = buildCellPlans(
                     relativeRow = relativeRow,
                     source = source,
                     target = target,
-                    startHeaderOffsetPx = mediaGridMorphHeaderOffsetBefore(relativeRow, startHeaderHeights),
-                    endHeaderOffsetPx = exactTargetRowOffsets[relativeRow]
-                        ?: mediaGridMorphHeaderOffsetBefore(relativeRow, endHeaderHeights),
+                    startHeaderOffsetPx = headerOffsetBefore(relativeRow, headerPlans, useStart = true),
+                    endHeaderOffsetPx = exactTargetRowOffset(
+                        relativeRow = relativeRow,
+                        targetRowIndex = targetRowIndex,
+                        exactTargetRowId = exactTargetRowId,
+                        exactTargetRowTopAtScrollZero = exactTargetRowTopAtScrollZero,
+                        targetCellSize = targetCellSize,
+                    ) ?: headerOffsetBefore(relativeRow, headerPlans, useStart = false),
                 ),
             )
+            relativeRow++
         }
         return MediaGridMorphViewportPlan(
             sourceRevision = sourceRevision,
@@ -207,8 +240,8 @@ internal data class MediaGridMorphViewportPlanTemplate(
             initialPinchCenter = initialPinchCenter,
             focalMediaOrdinal = focalCell.mediaOrdinal,
             focalAssetId = focalCell.assetId,
-            targetFocalMediaOrdinal = targetFocalCell?.mediaOrdinal,
-            targetFocalAssetId = targetFocalCell?.assetId,
+            targetFocalMediaOrdinal = targetFocalCell.mediaOrdinal,
+            targetFocalAssetId = targetFocalCell.assetId,
             sourceCellSize = sourceCellSize,
             targetCellSize = targetCellSize,
             fixedFocalCenterY = fixedFocalCenterY,
@@ -233,6 +266,38 @@ internal data class MediaGridMorphViewportPlanTemplate(
             targetMaxScroll = exactIndex.maxScrollPx,
             targetRowTopAdjustment = targetRowTopAdjustment,
         )
+    }
+
+    private fun visibleSourceRowForCanonicalIndex(canonicalIndex: Int): MediaGridMorphCapturedRow? {
+        var index = 0
+        while (index < selectionIndex.sourceCanonicalRowIndexByVisibleRow.size) {
+            if (selectionIndex.sourceCanonicalRowIndexByVisibleRow[index] == canonicalIndex) {
+                return selectionIndex.actualVisibleSourceRows.getOrNull(index)
+            }
+            index++
+        }
+        return null
+    }
+
+    private fun exactTargetRowOffset(
+        relativeRow: Int,
+        targetRowIndex: Int,
+        exactTargetRowId: Int,
+        exactTargetRowTopAtScrollZero: Float,
+        targetCellSize: Float,
+    ): Float? {
+        var rowIndex = 0
+        while (rowIndex < selectionIndex.targetExactRowIdByRowIndex.size) {
+            val rowId = selectionIndex.targetExactRowIdByRowIndex[rowIndex]
+            if (rowId >= 0 && rowId - exactTargetRowId == relativeRow) {
+                val top = selectionIndex.targetExactRowTopByRowIndex.getOrElse(rowIndex) { Float.NaN }
+                if (top.isFinite()) {
+                    return top - exactTargetRowTopAtScrollZero - relativeRow * targetCellSize
+                }
+            }
+            rowIndex++
+        }
+        return null
     }
 
     private fun emptyPlan(center: Offset): MediaGridMorphViewportPlan = MediaGridMorphViewportPlan(
@@ -266,12 +331,12 @@ internal data class MediaGridMorphViewportPlanTemplate(
         endHeaderOffsetPx: Float,
     ): List<MediaGridMorphCellPlan> {
         val count = max(fromColumnCount, toColumnCount)
-        val sourceByColumn = source?.cells?.associateBy { it.column }.orEmpty()
-        val targetByColumn = target?.cells?.associateBy { it.column }.orEmpty()
-        return (0 until count).map { column ->
-            val captured = sourceByColumn[column]
-            val targetCell = targetByColumn[column]
-            MediaGridMorphCellPlan(
+        val result = ArrayList<MediaGridMorphCellPlan>(count)
+        var column = 0
+        while (column < count) {
+            val captured = cellAtColumn(source, column)
+            val targetCell = cellAtColumn(target, column)
+            result += MediaGridMorphCellPlan(
                 relativeRow = relativeRow,
                 column = column,
                 startContent = captured?.let { MediaGridMorphSlotContent.Image(it.assetId) }
@@ -286,7 +351,19 @@ internal data class MediaGridMorphViewportPlanTemplate(
                 sourceItemKey = captured?.itemKey,
                 sourcePreparedImageIdentity = captured?.preparedImageIdentity,
             )
+            column++
         }
+        return result
+    }
+
+    private fun cellAtColumn(row: MediaGridMorphAlignedRow?, column: Int): MediaGridMorphCapturedCell? {
+        val cells = row?.cells ?: return null
+        var index = 0
+        while (index < cells.size) {
+            if (cells[index].column == column) return cells[index]
+            index++
+        }
+        return null
     }
 
     private fun buildHeaderPlans(
@@ -301,29 +378,13 @@ internal data class MediaGridMorphViewportPlanTemplate(
         exactTargetRowTopAtScrollZero: Float?,
         targetCellSize: Float,
     ): List<MediaGridMorphHeaderPlan> {
-        val sourceByRelative = sourceHeaders.mapNotNull { header ->
-            val rowIndex = sourceRows.indexOfFirst { row ->
-                row.cells.any { it.mediaOrdinal == header.firstMediaOrdinal }
-            }
-            if (rowIndex < 0) null else (rowIndex - sourceRowIndex) to header
-        }.toMap()
-        val targetByRelative = targetRows.mapNotNull { row ->
-            val header = row.headerBefore ?: return@mapNotNull null
-            val exactRowId = exactTargetLayoutIndex?.let { index ->
-                row.cells.firstOrNull()?.mediaOrdinal?.let(index::rowIdForMediaOrdinal)
-            }
-            val relative = if (exactRowId != null && exactTargetRowId != null) {
-                exactRowId - exactTargetRowId
-            } else {
-                row.rowIndex - targetRowIndex
-            }
-            relative to header
-        }.toMap()
-        val rawPlans = (relativeRange.first..relativeRange.last + 1).mapNotNull { relative ->
-            val source = sourceByRelative[relative]
-            val target = targetByRelative[relative]
-            if (source == null && target == null) return@mapNotNull null
-            MediaGridMorphHeaderPlan(
+        val rawPlans = ArrayList<MediaGridMorphHeaderPlan>()
+        var relative = relativeRange.first
+        while (relative <= relativeRange.last + 1) {
+            val source = sourceHeaderAtRelative(relative, sourceRowIndex)
+            val targetHeaderIndex = targetHeaderIndexAtRelative(relative, targetRowIndex, exactTargetRowId)
+            val target = targetHeaders.getOrNull(targetHeaderIndex)
+            if (source != null || target != null) rawPlans += MediaGridMorphHeaderPlan(
                 relativeRow = relative,
                 startHeightPx = source?.rect?.height ?: 0f,
                 endHeightPx = target?.let { headerHeightPx } ?: 0f,
@@ -335,35 +396,99 @@ internal data class MediaGridMorphViewportPlanTemplate(
                 startKey = source?.key,
                 endKey = target?.key,
             )
+            relative++
         }
-        val startHeights = rawPlans.associate { it.relativeRow to it.startHeightPx }
-        val endHeights = rawPlans.associate { it.relativeRow to it.endHeightPx }
-        return rawPlans.map { plan ->
-            val targetHeaderFirstOrdinal = plan.endKey?.let { key ->
-                targetRows.firstOrNull { it.headerBefore?.key == key }
-                    ?.headerBefore?.firstMediaOrdinal
-            }
-            val exactTargetHeader = if (targetHeaderFirstOrdinal != null) {
-                exactTargetLayoutIndex?.headers?.firstOrNull {
-                    it.key == plan.endKey && it.firstMediaOrdinal == targetHeaderFirstOrdinal
-                }
-            } else null
+        val result = ArrayList<MediaGridMorphHeaderPlan>(rawPlans.size)
+        var planIndex = 0
+        while (planIndex < rawPlans.size) {
+            val plan = rawPlans[planIndex]
+            val targetHeaderIndex = targetHeaderIndexAtRelative(plan.relativeRow, targetRowIndex, exactTargetRowId)
+            val exactHeaderTop = selectionIndex.targetHeaderTopByHeaderIndex
+                .getOrElse(targetHeaderIndex) { Float.NaN }
             val exactEndOffset = if (
-                exactTargetHeader != null &&
+                exactHeaderTop.isFinite() &&
                     exactTargetRowTopAtScrollZero != null &&
                     exactTargetRowId != null
             ) {
-                exactTargetHeader.topAtScrollZero - exactTargetRowTopAtScrollZero -
+                exactHeaderTop - exactTargetRowTopAtScrollZero -
                     plan.relativeRow * targetCellSize
             } else {
                 null
             }
-            plan.copy(
-                startOffsetBeforePx = mediaGridMorphHeaderOffsetBefore(plan.relativeRow, startHeights) - plan.startHeightPx,
+            result += plan.copy(
+                startOffsetBeforePx = headerOffsetBefore(plan.relativeRow, rawPlans, useStart = true) - plan.startHeightPx,
                 endOffsetBeforePx = exactEndOffset
-                    ?: mediaGridMorphHeaderOffsetBefore(plan.relativeRow, endHeights) - plan.endHeightPx,
+                    ?: headerOffsetBefore(plan.relativeRow, rawPlans, useStart = false) - plan.endHeightPx,
             )
+            planIndex++
         }
+        return result
+    }
+
+    private fun sourceHeaderAtRelative(
+        relative: Int,
+        sourceRowIndex: Int,
+    ): MediaGridMorphCapturedHeaderRect? {
+        var index = 0
+        while (index < sourceHeaders.size) {
+            val canonicalIndex = selectionIndex.sourceHeaderCanonicalRowIndexByHeaderIndex
+                .getOrElse(index) { -1 }
+            if (canonicalIndex >= 0 && canonicalIndex - sourceRowIndex == relative) return sourceHeaders[index]
+            index++
+        }
+        return null
+    }
+
+    private fun targetHeaderIndexAtRelative(
+        relative: Int,
+        targetRowIndex: Int,
+        exactTargetRowId: Int?,
+    ): Int {
+        var index = 0
+        while (index < targetHeaders.size) {
+            val rowIndex = selectionIndex.targetHeaderRowIndexByHeaderIndex.getOrElse(index) { -1 }
+            val exactRowId = selectionIndex.targetHeaderExactRowIdByHeaderIndex.getOrElse(index) { -1 }
+            val headerRelative = if (exactRowId >= 0 && exactTargetRowId != null) {
+                exactRowId - exactTargetRowId
+            } else {
+                rowIndex - targetRowIndex
+            }
+            if (rowIndex >= 0 && headerRelative == relative) return index
+            index++
+        }
+        return -1
+    }
+
+    private fun headerOffsetBefore(
+        relativeRow: Int,
+        plans: List<MediaGridMorphHeaderPlan>,
+        useStart: Boolean,
+    ): Float {
+        var total = 0f
+        if (relativeRow > 0) {
+            var row = 1
+            while (row <= relativeRow) {
+                var index = 0
+                while (index < plans.size) {
+                    val plan = plans[index]
+                    if (plan.relativeRow == row) total += if (useStart) plan.startHeightPx else plan.endHeightPx
+                    index++
+                }
+                row++
+            }
+        } else if (relativeRow < 0) {
+            var row = relativeRow + 1
+            while (row <= 0) {
+                var index = 0
+                while (index < plans.size) {
+                    val plan = plans[index]
+                    if (plan.relativeRow == row) total -= if (useStart) plan.startHeightPx else plan.endHeightPx
+                    index++
+                }
+                row++
+            }
+        }
+        return total
     }
 }
 
@@ -372,12 +497,25 @@ private fun sourceRowMatchesCanonical(
     canonical: MediaGridMorphAlignedRow?,
 ): Boolean {
     if (canonical == null || visible.rowKey != canonical.rowKey) return false
-    val visibleCells = visible.cells.sortedBy { it.column }
-    val canonicalByColumn = canonical.cells.associateBy { it.column }
-    return visibleCells.all { actual ->
-        val expected = canonicalByColumn[actual.column] ?: return@all false
-        actual.mediaOrdinal == expected.mediaOrdinal && actual.assetId == expected.assetId
+    var visibleIndex = 0
+    while (visibleIndex < visible.cells.size) {
+        val actual = visible.cells[visibleIndex]
+        var canonicalIndex = 0
+        var expected: MediaGridMorphCapturedCell? = null
+        while (canonicalIndex < canonical.cells.size) {
+            val candidate = canonical.cells[canonicalIndex]
+            if (candidate.column == actual.column) {
+                expected = candidate
+                break
+            }
+            canonicalIndex++
+        }
+        if (expected == null || actual.mediaOrdinal != expected.mediaOrdinal || actual.assetId != expected.assetId) {
+            return false
+        }
+        visibleIndex++
     }
+    return true
 }
 
 internal data class MediaGridMorphViewportPlan(
@@ -421,6 +559,16 @@ internal fun buildMediaGridMorphViewportPlanTemplate(
     )
     val sourceLayout = buildMediaGridMorphExactTargetRows(capture, capture.identity.columnCount)
     val targetLayout = buildMediaGridMorphExactTargetRows(capture, toColumnCount)
+    val exactTargetLayoutIndex = capture.exactTargetLayoutIndexes[toColumnCount]
+    val selectionIndex = buildMediaGridMorphViewportSelectionIndex(
+        sourceRows = sourceRows,
+        sourceCanonicalRows = sourceLayout.first,
+        targetRows = targetLayout.first,
+        sourceHeaders = capture.visibleHeaderRects,
+        targetHeaders = targetLayout.second,
+        mediaOrdinalRange = capture.mediaOrdinalRange,
+        exactTargetLayoutIndex = exactTargetLayoutIndex,
+    )
     return MediaGridMorphViewportPlanTemplate(
         sourceRevision = capture.identity.sourceRevision,
         sourceFrameKey = capture.identity.frameKey,
@@ -436,8 +584,132 @@ internal fun buildMediaGridMorphViewportPlanTemplate(
         totalMediaCount = capture.totalMediaCount,
         mediaOrdinalRange = capture.mediaOrdinalRange,
         headerHeightPx = capture.headerHeightPx,
-        exactTargetLayoutIndex = capture.exactTargetLayoutIndexes[toColumnCount],
+        exactTargetLayoutIndex = exactTargetLayoutIndex,
+        selectionIndex = selectionIndex,
     )
+}
+
+private fun buildMediaGridMorphViewportSelectionIndex(
+    sourceRows: List<MediaGridMorphCapturedRow>,
+    sourceCanonicalRows: List<MediaGridMorphAlignedRow>,
+    targetRows: List<MediaGridMorphAlignedRow>,
+    sourceHeaders: List<MediaGridMorphCapturedHeaderRect>,
+    targetHeaders: List<MediaGridMorphAlignedHeader>,
+    mediaOrdinalRange: IntRange,
+    exactTargetLayoutIndex: MediaGridMorphExactTargetLayoutIndex?,
+): MediaGridMorphViewportSelectionIndex {
+    val visibleRows = ArrayList<MediaGridMorphCapturedRow>()
+    var sourceRowIndex = 0
+    while (sourceRowIndex < sourceRows.size) {
+        val row = sourceRows[sourceRowIndex]
+        if (row.isActualVisibleSourceRow) visibleRows += row
+        sourceRowIndex++
+    }
+    val canonicalByVisible = IntArray(visibleRows.size) { -1 }
+    var visibleIndex = 0
+    while (visibleIndex < visibleRows.size) {
+        val key = visibleRows[visibleIndex].rowKey
+        var match = -1
+        var canonicalIndex = 0
+        while (canonicalIndex < sourceCanonicalRows.size) {
+            if (key != null && sourceCanonicalRows[canonicalIndex].rowKey == key) {
+                if (match >= 0) {
+                    match = -1
+                    break
+                }
+                match = canonicalIndex
+            }
+            canonicalIndex++
+        }
+        canonicalByVisible[visibleIndex] = match
+        visibleIndex++
+    }
+
+    val ordinalBase = mediaOrdinalRange.first
+    val targetRowByOrdinal = IntArray((mediaOrdinalRange.last - ordinalBase + 1).coerceAtLeast(0)) { -1 }
+    val exactRowIds = IntArray(targetRows.size) { -1 }
+    val exactRowTops = FloatArray(targetRows.size) { Float.NaN }
+    var targetRowIndex = 0
+    while (targetRowIndex < targetRows.size) {
+        val row = targetRows[targetRowIndex]
+        var cellIndex = 0
+        while (cellIndex < row.cells.size) {
+            val ordinal = row.cells[cellIndex].mediaOrdinal
+            val offset = ordinal - ordinalBase
+            if (offset in targetRowByOrdinal.indices) targetRowByOrdinal[offset] = targetRowIndex
+            cellIndex++
+        }
+        val firstOrdinal = row.cells.firstOrNull()?.mediaOrdinal
+        val exactRowId = firstOrdinal?.let { exactTargetLayoutIndex?.rowIdForMediaOrdinal(it) }
+        if (exactRowId != null) {
+            exactRowIds[targetRowIndex] = exactRowId
+            exactRowTops[targetRowIndex] = exactTargetLayoutIndex?.rowTopAtScrollZero(exactRowId) ?: Float.NaN
+        }
+        targetRowIndex++
+    }
+
+    val sourceHeaderRows = IntArray(sourceHeaders.size) { -1 }
+    var sourceHeaderIndex = 0
+    while (sourceHeaderIndex < sourceHeaders.size) {
+        val ordinal = sourceHeaders[sourceHeaderIndex].firstMediaOrdinal
+        var canonicalIndex = 0
+        while (canonicalIndex < sourceCanonicalRows.size) {
+            if (rowContainsMediaOrdinal(sourceCanonicalRows[canonicalIndex], ordinal)) {
+                sourceHeaderRows[sourceHeaderIndex] = canonicalIndex
+                break
+            }
+            canonicalIndex++
+        }
+        sourceHeaderIndex++
+    }
+
+    val targetHeaderRows = IntArray(targetHeaders.size) { -1 }
+    val targetHeaderExactRows = IntArray(targetHeaders.size) { -1 }
+    val targetHeaderTops = FloatArray(targetHeaders.size) { Float.NaN }
+    var targetHeaderIndex = 0
+    while (targetHeaderIndex < targetHeaders.size) {
+        val header = targetHeaders[targetHeaderIndex]
+        var rowIndex = 0
+        while (rowIndex < targetRows.size) {
+            val rowHeader = targetRows[rowIndex].headerBefore
+            if (rowHeader?.key == header.key && rowHeader.firstMediaOrdinal == header.firstMediaOrdinal) {
+                targetHeaderRows[targetHeaderIndex] = rowIndex
+                val exactRowId = exactRowIds.getOrElse(rowIndex) { -1 }
+                targetHeaderExactRows[targetHeaderIndex] = exactRowId
+                if (exactRowId >= 0) {
+                    targetHeaderTops[targetHeaderIndex] = exactTargetLayoutIndex
+                        ?.headerForRow(exactRowId)
+                        ?.takeIf { it.key == header.key && it.firstMediaOrdinal == header.firstMediaOrdinal }
+                        ?.topAtScrollZero
+                        ?: Float.NaN
+                }
+                break
+            }
+            rowIndex++
+        }
+        targetHeaderIndex++
+    }
+    return MediaGridMorphViewportSelectionIndex(
+        actualVisibleSourceRows = visibleRows,
+        sourceCanonicalRowIndexByVisibleRow = canonicalByVisible,
+        targetMediaOrdinalBase = ordinalBase,
+        targetRowIndexByMediaOrdinal = targetRowByOrdinal,
+        targetExactRowIdByRowIndex = exactRowIds,
+        targetExactRowTopByRowIndex = exactRowTops,
+        sourceHeaderCanonicalRowIndexByHeaderIndex = sourceHeaderRows,
+        targetHeaderRowIndexByHeaderIndex = targetHeaderRows,
+        targetHeaderExactRowIdByHeaderIndex = targetHeaderExactRows,
+        targetHeaderTopByHeaderIndex = targetHeaderTops,
+    )
+}
+
+private fun rowContainsMediaOrdinal(row: MediaGridMorphAlignedRow, mediaOrdinal: Int): Boolean {
+    var index = 0
+    while (index < row.cells.size) {
+        if (row.cells[index].mediaOrdinal == mediaOrdinal) return true
+        index++
+    }
+    return false
 }
 
 private fun buildMediaGridMorphExactTargetRows(

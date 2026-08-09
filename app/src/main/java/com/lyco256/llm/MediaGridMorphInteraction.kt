@@ -378,7 +378,7 @@ internal class MediaGridMorphInteractionController(
         currentIdentity = bundle.identity
         gesture = Gesture(
             identity = bundle.identity,
-            pairs = bundle.directions.mapValues { it.value.plan.preparedPair },
+            pairs = mapOf(direction to active.plan.preparedPair),
             claimBundle = bundle,
             firstPointerId = bundle.firstPointerId,
             secondPointerId = bundle.secondPointerId,
@@ -466,9 +466,10 @@ internal class MediaGridMorphInteractionController(
                 mediaGridMorphProgressForScale(scale, direction)
             }
         }
-        val nextCorrection = plan?.let {
-            mediaGridMorphFocalCorrection(it, nextProgress, activeGesture.initialCenter)
-        } ?: Offset.Zero
+        val nextCorrection = when {
+            plan == null || plan.viewportPlan != null -> Offset.Zero
+            else -> mediaGridMorphFocalCorrection(plan, nextProgress, activeGesture.initialCenter)
+        }
         publish(
             phase = MediaGridMorphPhase.Tracking,
             direction = direction,

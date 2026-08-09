@@ -966,6 +966,19 @@ internal fun buildMediaGridMorphRowPreparedPairs(
     return buildMediaGridMorphPreparedPairsInternal(capture, includeLegacyGeometry = false)
 }
 
+/** Claim fallback builder. The stable-idle cache path never calls this. */
+internal fun buildMediaGridMorphRowPreparedPairForClaim(
+    capture: MediaGridMorphCapture,
+    direction: MediaGridMorphDirection,
+): MediaGridMorphPreparedPair? {
+    if (BuildConfig.TEST_HARNESS) MediaGridMorphTestTrace.recordClaimPairBuild()
+    return buildMediaGridMorphPreparedPairInternal(
+        capture = capture,
+        direction = direction,
+        includeLegacyGeometry = false,
+    )
+}
+
 private fun buildMediaGridMorphPreparedPairsInternal(
     capture: MediaGridMorphCapture,
     includeLegacyGeometry: Boolean,
@@ -973,48 +986,59 @@ private fun buildMediaGridMorphPreparedPairsInternal(
     if (capture.media.isEmpty()) return emptyMap()
     val pairs = LinkedHashMap<MediaGridMorphDirection, MediaGridMorphPreparedPair>(2)
     for (direction in MediaGridMorphDirection.entries) {
-        val target = mediaGridMorphTargetColumnCount(capture.identity.columnCount, direction)
-        if (target == capture.identity.columnCount) continue
-        val start = if (includeLegacyGeometry) {
-            buildMediaGridMorphLayout(capture, capture.identity.columnCount, useCapturedGeometry = true)
-        } else {
-            MediaGridMorphLayoutSnapshot(
-                columnCount = capture.identity.columnCount,
-                viewport = capture.viewport,
-                media = emptyList(),
-                headers = emptyList(),
-                mediaOrdinalRange = capture.mediaOrdinalRange,
-            )
+        buildMediaGridMorphPreparedPairInternal(capture, direction, includeLegacyGeometry)?.let {
+            pairs[direction] = it
         }
-        val end = if (includeLegacyGeometry) {
-            buildMediaGridMorphLayout(capture, target, useCapturedGeometry = false)
-        } else {
-            MediaGridMorphLayoutSnapshot(
-                columnCount = target,
-                viewport = capture.viewport,
-                media = emptyList(),
-                headers = emptyList(),
-                mediaOrdinalRange = capture.mediaOrdinalRange,
-            )
-        }
-        val viewportPlanTemplate = capture.sourceRows.takeIf { it.isNotEmpty() }
-            ?.let { buildMediaGridMorphViewportPlanTemplate(capture, target) }
-        pairs[direction] = MediaGridMorphPreparedPair(
-            sourceRevision = capture.identity.sourceRevision,
-            frameKey = capture.identity.frameKey,
-            fromColumnCount = capture.identity.columnCount,
-            toColumnCount = target,
-            viewport = capture.viewport,
-            viewportSignature = capture.identity.viewportSignature,
-            startLayout = start,
-            targetLayout = end,
-            slots = if (includeLegacyGeometry) buildMediaGridMorphSlots(start, end) else emptyList(),
-            headers = if (includeLegacyGeometry) buildMediaGridMorphHeaderBands(start, end) else emptyList(),
-            mediaOrdinalRange = capture.mediaOrdinalRange,
-            viewportPlanTemplate = viewportPlanTemplate,
-        )
     }
     return pairs.toMap()
+}
+
+private fun buildMediaGridMorphPreparedPairInternal(
+    capture: MediaGridMorphCapture,
+    direction: MediaGridMorphDirection,
+    includeLegacyGeometry: Boolean,
+): MediaGridMorphPreparedPair? {
+    if (capture.media.isEmpty()) return null
+    val target = mediaGridMorphTargetColumnCount(capture.identity.columnCount, direction)
+    if (target == capture.identity.columnCount) return null
+    val start = if (includeLegacyGeometry) {
+        buildMediaGridMorphLayout(capture, capture.identity.columnCount, useCapturedGeometry = true)
+    } else {
+        MediaGridMorphLayoutSnapshot(
+            columnCount = capture.identity.columnCount,
+            viewport = capture.viewport,
+            media = emptyList(),
+            headers = emptyList(),
+            mediaOrdinalRange = capture.mediaOrdinalRange,
+        )
+    }
+    val end = if (includeLegacyGeometry) {
+        buildMediaGridMorphLayout(capture, target, useCapturedGeometry = false)
+    } else {
+        MediaGridMorphLayoutSnapshot(
+            columnCount = target,
+            viewport = capture.viewport,
+            media = emptyList(),
+            headers = emptyList(),
+            mediaOrdinalRange = capture.mediaOrdinalRange,
+        )
+    }
+    val viewportPlanTemplate = capture.sourceRows.takeIf { it.isNotEmpty() }
+        ?.let { buildMediaGridMorphViewportPlanTemplate(capture, target) }
+    return MediaGridMorphPreparedPair(
+        sourceRevision = capture.identity.sourceRevision,
+        frameKey = capture.identity.frameKey,
+        fromColumnCount = capture.identity.columnCount,
+        toColumnCount = target,
+        viewport = capture.viewport,
+        viewportSignature = capture.identity.viewportSignature,
+        startLayout = start,
+        targetLayout = end,
+        slots = if (includeLegacyGeometry) buildMediaGridMorphSlots(start, end) else emptyList(),
+        headers = if (includeLegacyGeometry) buildMediaGridMorphHeaderBands(start, end) else emptyList(),
+        mediaOrdinalRange = capture.mediaOrdinalRange,
+        viewportPlanTemplate = viewportPlanTemplate,
+    )
 }
 
 private fun buildMediaGridMorphLayout(

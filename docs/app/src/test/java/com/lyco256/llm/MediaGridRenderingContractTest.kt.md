@@ -1,5 +1,11 @@
 # `MediaGridRenderingContractTest.kt`
 
+## 2026-08-10 Phase 2 claim/draw contract
+
+- Production claimがcached selected pairを使い、複数pair builderを呼ばないことを固定する。
+- Template selectionから`filter/groupBy/indexOfFirst/toMap/associate/mapNotNull`を排除し、draw loopからRect/blend helperを排除したことを静的に検査する。
+- frame全header title収集の再導入を拒否する。
+
 ## 2026-08-09 Phase 1 scroll contract
 
 - Static contracts keep normal scroll on the anchor-only path, reject full-dataset visible-index filtering for fallback preload, and keep detailed Morph capture out of the scroll observer.

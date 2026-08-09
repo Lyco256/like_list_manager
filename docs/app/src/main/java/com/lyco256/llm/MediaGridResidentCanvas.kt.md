@@ -1,5 +1,10 @@
 # `MediaGridResidentCanvas.kt`
 
+## 2026-08-10 Phase 2 TEST_HARNESS counters
+
+- claim pair、selected plan、RequiredRenderSet、direction別render model、text layout measure、draw Rect/blend helper callを記録する。
+- 各Morph draw observationはそのframe時点のcounter snapshotを保持し、handoff後の次idle準備とanimation中の増加を区別する。
+
 ## 2026-08-09 Phase 1 TEST_HARNESS counters
 
 - The TEST_HARNESS trace counts lightweight viewport signatures and the heavy Morph capture, row-pair, urgent-request, PreviewPreloader reconcile, and exact-target-index paths. The continuous fling regression requires only lightweight signatures during motion and zero heavy-path activity.

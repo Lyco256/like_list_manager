@@ -1,5 +1,10 @@
 # `MediaGridMorphInteraction.kt`
 
+## 2026-08-10 locked production direction
+
+- Production claim後のgestureはselected pair/model一件だけを保持する。反対側へ戻ってもlocked directionのprogress 0を維持し、反対direction plan/modelを選択しない。
+- row-reflowのpointer updateは既存plan/modelを再利用し、correctionを常に`Offset.Zero`として再計算を避ける。
+
 ## 2026-08-07 immediate reverse protection
 
 - A successful target handoff transfers the claimed asset union to an immediate-reverse carryover callback instead of releasing it like a cancellation.

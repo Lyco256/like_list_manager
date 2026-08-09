@@ -15,11 +15,39 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 
+internal enum class MediaGridMorphCellTransitionType {
+    SameImage,
+    ImageToImage,
+    ImageToPlaceholder,
+    PlaceholderToImage,
+    PlaceholderToPlaceholder,
+}
+
 internal data class MediaGridMorphRowRenderCell(
     val plan: MediaGridMorphCellPlan,
     val startImage: MediaGridResidentCanvasPreparedImage?,
     val endImage: MediaGridResidentCanvasPreparedImage?,
+    val transitionType: MediaGridMorphCellTransitionType = mediaGridMorphCellTransitionType(
+        plan.startContent,
+        plan.endContent,
+    ),
 )
+
+internal fun mediaGridMorphCellTransitionType(
+    start: MediaGridMorphSlotContent,
+    end: MediaGridMorphSlotContent,
+): MediaGridMorphCellTransitionType {
+    val startImage = start as? MediaGridMorphSlotContent.Image
+    val endImage = end as? MediaGridMorphSlotContent.Image
+    return when {
+        startImage != null && endImage != null && startImage.assetId == endImage.assetId ->
+            MediaGridMorphCellTransitionType.SameImage
+        startImage != null && endImage != null -> MediaGridMorphCellTransitionType.ImageToImage
+        startImage != null -> MediaGridMorphCellTransitionType.ImageToPlaceholder
+        endImage != null -> MediaGridMorphCellTransitionType.PlaceholderToImage
+        else -> MediaGridMorphCellTransitionType.PlaceholderToPlaceholder
+    }
+}
 
 internal data class MediaGridMorphCellBlend(
     val drawPlaceholder: Boolean,
@@ -46,7 +74,30 @@ internal data class MediaGridMorphRowRenderHeader(
     val plan: MediaGridMorphHeaderPlan,
     val startText: TextLayoutResult?,
     val endText: TextLayoutResult?,
+    val transitionType: MediaGridMorphHeaderTransitionType = mediaGridMorphHeaderTransitionType(
+        plan.startTitle,
+        plan.endTitle,
+    ),
 )
+
+internal enum class MediaGridMorphHeaderTransitionType {
+    SameTitle,
+    Crossfade,
+    StartOnly,
+    EndOnly,
+    NoText,
+}
+
+internal fun mediaGridMorphHeaderTransitionType(
+    startTitle: String?,
+    endTitle: String?,
+): MediaGridMorphHeaderTransitionType = when {
+    startTitle != null && startTitle == endTitle -> MediaGridMorphHeaderTransitionType.SameTitle
+    startTitle != null && endTitle != null -> MediaGridMorphHeaderTransitionType.Crossfade
+    startTitle != null -> MediaGridMorphHeaderTransitionType.StartOnly
+    endTitle != null -> MediaGridMorphHeaderTransitionType.EndOnly
+    else -> MediaGridMorphHeaderTransitionType.NoText
+}
 
 internal data class MediaGridMorphHeaderBlend(
     val heightPx: Float,
@@ -277,7 +328,6 @@ internal sealed interface MediaGridMorphClaimPreparationResult {
 internal fun rememberMediaGridMorphTextResourceIndex(
     pairs: Map<MediaGridMorphDirection, MediaGridMorphPreparedPair>,
     viewportWidthPx: Int,
-    additionalTitles: List<String> = emptyList(),
 ): MediaGridMorphTextResourceIndex {
     val colors = androidx.compose.material3.MaterialTheme.colorScheme
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -289,21 +339,24 @@ internal fun rememberMediaGridMorphTextResourceIndex(
         fontWeight = FontWeight.SemiBold,
     )
     val titles = remember(pairs, viewportWidthPx) {
-        buildList {
-            additionalTitles.forEach { it.takeIf(String::isNotBlank)?.let(::add) }
-            pairs.values.forEach { pair ->
-                pair.viewportPlanTemplate?.sourceHeaders?.forEach { it.title.takeIf(String::isNotBlank)?.let(::add) }
-                pair.viewportPlanTemplate?.targetHeaders?.forEach { it.title.takeIf(String::isNotBlank)?.let(::add) }
-                pair.viewportPlanTemplate?.targetRows?.forEach { it.headerBefore?.title?.takeIf(String::isNotBlank)?.let(::add) }
-                pair.headers.forEach { header ->
-                    header.startTitle?.takeIf(String::isNotBlank)?.let(::add)
-                    header.endTitle?.takeIf(String::isNotBlank)?.let(::add)
-                }
+        val boundedTitles = LinkedHashSet<String>()
+        pairs.values.forEach { pair ->
+            pair.viewportPlanTemplate?.sourceHeaders?.forEach {
+                it.title.takeIf(String::isNotBlank)?.let(boundedTitles::add)
             }
-        }.distinct()
+            pair.viewportPlanTemplate?.targetHeaders?.forEach {
+                it.title.takeIf(String::isNotBlank)?.let(boundedTitles::add)
+            }
+            pair.headers.forEach { header ->
+                header.startTitle?.takeIf(String::isNotBlank)?.let(boundedTitles::add)
+                header.endTitle?.takeIf(String::isNotBlank)?.let(boundedTitles::add)
+            }
+        }
+        boundedTitles.toList()
     }
     val textLayouts = remember(titles, style, textMeasurer, density.density, density.fontScale, viewportWidthPx) {
         titles.associateWith { title ->
+            if (BuildConfig.TEST_HARNESS) MediaGridMorphTestTrace.recordTextLayoutMeasure()
             textMeasurer.measure(
                 text = title,
                 style = style,
@@ -373,6 +426,87 @@ internal data class MediaGridMorphClaimBundle(
     }
 }
 
+private fun buildMediaGridMorphDirectionClaimBundle(
+    pair: MediaGridMorphPreparedPair,
+    direction: MediaGridMorphDirection,
+    center: androidx.compose.ui.geometry.Offset,
+    preparedIndex: MediaGridResidentCanvasPreparedIndex,
+    textResources: MediaGridMorphTextResourceIndex,
+): MediaGridMorphDirectionClaimBundle {
+    if (BuildConfig.TEST_HARNESS) MediaGridMorphTestTrace.recordSelectedPlanBuild(direction)
+    val plan = if (pair.viewportPlanTemplate != null) {
+        MediaGridMorphPlan.selectRowReflow(pair, center)
+    } else {
+        MediaGridMorphPlan.select(pair, center)
+    }
+    if (BuildConfig.TEST_HARNESS) MediaGridMorphTestTrace.recordRequiredRenderSetBuild()
+    val requiredRenderSet = plan.requiredRenderSet()
+    val completeness = mediaGridMorphSelectedPlanCompleteness(
+        plan = plan,
+        preparedIndex = preparedIndex,
+        textResources = textResources,
+        requiredRenderSet = requiredRenderSet,
+    )
+    if (BuildConfig.TEST_HARNESS) MediaGridMorphTestTrace.recordRenderModelBuild(direction)
+    val model = buildMediaGridMorphRowRenderModel(
+        plan = plan,
+        preparedIndex = preparedIndex,
+        textResources = textResources,
+        completeness = completeness,
+        requiredRenderSet = requiredRenderSet,
+    )
+    return MediaGridMorphDirectionClaimBundle(
+        direction = direction,
+        targetColumnCount = pair.toColumnCount,
+        plan = plan,
+        renderModel = model,
+        completeness = completeness,
+        protectedAssetIds = model.protectedAssetIds,
+        requiredRenderSet = requiredRenderSet,
+    )
+}
+
+/** Production builder: one locked direction, one plan, one model, one protection set. */
+private fun buildMediaGridMorphSelectedClaimBundle(
+    identity: MediaGridMorphInteractionIdentity,
+    pair: MediaGridMorphPreparedPair,
+    direction: MediaGridMorphDirection,
+    preparedIndex: MediaGridResidentCanvasPreparedIndex,
+    textResources: MediaGridMorphTextResourceIndex,
+    generation: Long,
+    firstPointerId: Long,
+    secondPointerId: Long,
+    firstPosition: androidx.compose.ui.geometry.Offset,
+    secondPosition: androidx.compose.ui.geometry.Offset,
+    sourceViewportAnchor: MediaGridMorphSourceViewportAnchor?,
+    initialDistance: Float,
+    fixedInitialCenter: androidx.compose.ui.geometry.Offset,
+): MediaGridMorphClaimBundle? {
+    val claimDistance = distanceBetween(firstPosition, secondPosition)
+    if (!claimDistance.isFinite() || claimDistance <= 0f || !initialDistance.isFinite() || initialDistance <= 0f) return null
+    if (!pair.matchesIdentity(identity)) return null
+    val selected = buildMediaGridMorphDirectionClaimBundle(
+        pair = pair,
+        direction = direction,
+        center = fixedInitialCenter,
+        preparedIndex = preparedIndex,
+        textResources = textResources,
+    )
+    return MediaGridMorphClaimBundle(
+        generation = generation,
+        identity = identity,
+        firstPointerId = firstPointerId,
+        secondPointerId = secondPointerId,
+        initialDistance = initialDistance,
+        fixedInitialCenter = fixedInitialCenter,
+        preparedIndexIdentity = preparedIndex.drawIndexVersion,
+        textResourceIdentity = textResources.identity,
+        directions = mapOf(direction to selected),
+        protectedAssetUnion = selected.protectedAssetIds,
+        sourceViewportAnchor = sourceViewportAnchor,
+    )
+}
+
 /** Pure, bounded claim-time builder. It performs no IO, decode, or text measurement. */
 internal fun buildMediaGridMorphClaimBundle(
     capture: MediaGridMorphCapture,
@@ -399,22 +533,12 @@ internal fun buildMediaGridMorphClaimBundle(
     val directions = LinkedHashMap<MediaGridMorphDirection, MediaGridMorphDirectionClaimBundle>(pairs.size)
     pairs.forEach { (direction, pair) ->
         if (!pair.matchesIdentity(identity)) return@forEach
-        val plan = if (pair.viewportPlanTemplate != null) {
-            MediaGridMorphPlan.selectRowReflow(pair, center)
-        } else {
-            MediaGridMorphPlan.select(pair, center)
-        }
-        val completeness = mediaGridMorphSelectedPlanCompleteness(plan, preparedIndex, textResources)
-        val requiredRenderSet = plan.requiredRenderSet()
-        val model = buildMediaGridMorphRowRenderModel(plan, preparedIndex, textResources, completeness)
-        directions[direction] = MediaGridMorphDirectionClaimBundle(
+        directions[direction] = buildMediaGridMorphDirectionClaimBundle(
+            pair = pair,
             direction = direction,
-            targetColumnCount = pair.toColumnCount,
-            plan = plan,
-            renderModel = model,
-            completeness = completeness,
-            protectedAssetIds = model.protectedAssetIds,
-            requiredRenderSet = requiredRenderSet,
+            center = center,
+            preparedIndex = preparedIndex,
+            textResources = textResources,
         )
     }
     val union = LinkedHashSet<Long>()
@@ -441,6 +565,7 @@ internal fun buildMediaGridMorphClaimBundle(
  */
 internal fun prepareMediaGridMorphClaim(
     capture: MediaGridMorphCapture?,
+    preparedPairsSnapshot: Map<MediaGridMorphDirection, MediaGridMorphPreparedPair>,
     preparedIndex: MediaGridResidentCanvasPreparedIndex,
     textResources: MediaGridMorphTextResourceIndex,
     candidate: MediaGridMorphCandidate,
@@ -511,8 +636,32 @@ internal fun prepareMediaGridMorphClaim(
             baseReport(MediaGridMorphClaimReadinessReason.PreparedIndexChanged),
         )
     }
-    val bundle = buildMediaGridMorphClaimBundle(
-        capture = capture,
+    val direction = requestedDirection ?: return MediaGridMorphClaimPreparationResult.Unavailable(
+        MediaGridMorphClaimReadinessReason.DirectionUnavailable,
+        baseReport(MediaGridMorphClaimReadinessReason.DirectionUnavailable),
+    )
+    val liveIdentity = capture.identity.toInteractionIdentity()
+    if (latestIdentity == null || liveIdentity != latestIdentity) {
+        return MediaGridMorphClaimPreparationResult.Unavailable(
+            MediaGridMorphClaimReadinessReason.StaleIdentity,
+            baseReport(MediaGridMorphClaimReadinessReason.StaleIdentity),
+        )
+    }
+    val pair = preparedPairsSnapshot[direction]
+        ?.takeIf { it.matchesIdentity(liveIdentity) }
+        ?: buildMediaGridMorphRowPreparedPairForClaim(capture, direction)
+        ?: return MediaGridMorphClaimPreparationResult.Unavailable(
+            MediaGridMorphClaimReadinessReason.DirectionUnavailable,
+            baseReport(MediaGridMorphClaimReadinessReason.DirectionUnavailable),
+        )
+    val fixedCenter = androidx.compose.ui.geometry.Offset(
+        (claimFirst.x + claimSecond.x) / 2f,
+        (claimFirst.y + claimSecond.y) / 2f,
+    )
+    val bundle = buildMediaGridMorphSelectedClaimBundle(
+        identity = liveIdentity,
+        pair = pair,
+        direction = direction,
         preparedIndex = preparedIndex,
         textResources = textResources,
         generation = candidate.generation,
@@ -521,27 +670,13 @@ internal fun prepareMediaGridMorphClaim(
         firstPosition = claimFirst,
         secondPosition = claimSecond,
         sourceViewportAnchor = sourceViewportAnchor,
-        initialDistanceOverride = candidate.initialDistance,
-        fixedInitialCenterOverride = androidx.compose.ui.geometry.Offset(
-            (claimFirst.x + claimSecond.x) / 2f,
-            (claimFirst.y + claimSecond.y) / 2f,
-        ),
+        initialDistance = candidate.initialDistance,
+        fixedInitialCenter = fixedCenter,
     ) ?: return MediaGridMorphClaimPreparationResult.Unavailable(
         MediaGridMorphClaimReadinessReason.DirectionUnavailable,
         baseReport(MediaGridMorphClaimReadinessReason.DirectionUnavailable),
     )
-    if (latestIdentity == null || bundle.identity != latestIdentity) {
-        val selected = requestedDirection?.let(bundle.directions::get)
-        return MediaGridMorphClaimPreparationResult.Unavailable(
-            MediaGridMorphClaimReadinessReason.StaleIdentity,
-            baseReport(
-                MediaGridMorphClaimReadinessReason.StaleIdentity,
-                selected?.plan,
-                selected?.completeness,
-            ),
-        )
-    }
-    val selected = requestedDirection?.let(bundle.directions::get)
+    val selected = bundle.directions[direction]
         ?: return MediaGridMorphClaimPreparationResult.Unavailable(
             MediaGridMorphClaimReadinessReason.DirectionUnavailable,
             baseReport(MediaGridMorphClaimReadinessReason.DirectionUnavailable),
@@ -623,10 +758,11 @@ internal fun mediaGridMorphSelectedPlanCompleteness(
     plan: MediaGridMorphPlan,
     preparedIndex: MediaGridResidentCanvasPreparedIndex,
     textResources: MediaGridMorphTextResourceIndex,
+    requiredRenderSet: MediaGridMorphRequiredRenderSet = plan.requiredRenderSet(),
 ): MediaGridMorphImageCompleteness {
     val selected = plan.viewportPlan
     if (selected == null) {
-        val required = plan.requiredRenderSet()
+        val required = requiredRenderSet
         val source = required.requiredSourceAssetIds
         val target = required.requiredTargetAssetIds
         val unresolved = (source + target).firstOrNull { it !in preparedIndex.preparedImageByAssetId }
@@ -647,15 +783,12 @@ internal fun mediaGridMorphSelectedPlanCompleteness(
             missingHeaderTitle = missingHeaderTitle,
         )
     }
-    val required = plan.requiredRenderSet()
-    val requiredCells = selected.rowPlans
-        .flatMap { it.cells }
-        .filter { MediaGridMorphRequiredCellIdentity(it.relativeRow, it.column) in required.requiredCellIdentities }
+    val required = requiredRenderSet
+    val requiredCells = required.requiredCellPlans
     val source = required.requiredSourceAssetIds
     val target = required.requiredTargetAssetIds
     val geometryComplete = selected.viewport.width > 0f && selected.viewport.height > 0f &&
-        requiredCells.map { MediaGridMorphRequiredCellIdentity(it.relativeRow, it.column) }.toSet() ==
-        required.requiredCellIdentities
+        requiredCells.size == required.requiredCellIdentities.size
     var sourceViewportComplete = true
     requiredCells.forEach { cell ->
         val sourceIdentity = cell.sourcePreparedImageIdentity
@@ -697,26 +830,22 @@ internal fun buildMediaGridMorphRowRenderModel(
         preparedIndex,
         textResources,
     ),
+    requiredRenderSet: MediaGridMorphRequiredRenderSet = plan.requiredRenderSet(),
 ): MediaGridMorphRowRenderModel {
     val selected = plan.viewportPlan
-    val required = plan.requiredRenderSet()
-    val cells = selected?.rowPlans?.flatMap { row ->
-        row.cells.filter { cell ->
-            MediaGridMorphRequiredCellIdentity(cell.relativeRow, cell.column) in required.requiredCellIdentities
-        }.map { cell ->
+    val required = requiredRenderSet
+    val cells = selected?.let {
+        required.requiredCellPlans.map { cell ->
             MediaGridMorphRowRenderCell(
                 plan = cell,
                 startImage = (cell.startContent as? MediaGridMorphSlotContent.Image)?.let { preparedIndex.preparedImageByAssetId[it.assetId] },
                 endImage = (cell.endContent as? MediaGridMorphSlotContent.Image)?.let { preparedIndex.preparedImageByAssetId[it.assetId] },
+                transitionType = mediaGridMorphCellTransitionType(cell.startContent, cell.endContent),
             )
         }
     }.orEmpty()
-    val headers = selected?.headerPlans?.map { header ->
-        val requiredHeader = MediaGridMorphRequiredHeaderIdentity(
-            relativeRow = header.relativeRow,
-            startKey = header.startKey,
-            endKey = header.endKey,
-        ) in required.requiredHeaderIdentities
+    val headers = selected?.headerPlans?.mapIndexed { headerIndex, header ->
+        val requiredHeader = required.requiredHeaderPlanIndexes.getOrElse(headerIndex) { false }
         MediaGridMorphRowRenderHeader(
             plan = header,
             // Keep optional header geometry/background in the frozen model,
@@ -727,6 +856,7 @@ internal fun buildMediaGridMorphRowRenderModel(
             endText = header.endTitle
                 ?.takeIf { requiredHeader }
                 ?.let(textResources.layoutsByTitle::get),
+            transitionType = mediaGridMorphHeaderTransitionType(header.startTitle, header.endTitle),
         )
     }.orEmpty()
     val protected = required.protectedAssetIds
@@ -774,51 +904,117 @@ internal fun DrawScope.drawMediaGridMorphRow(
     val viewport = model.viewport
     val viewportWidth = viewport.width.coerceAtMost(size.width)
     val viewportHeight = viewport.height.coerceAtMost(size.height)
+    val currentCellSize = lerp(model.sourceCellSize, model.targetCellSize, p)
+    val focalRowTop = model.fixedFocalCenterY - model.focalV * currentCellSize
+    val targetAdjustment = model.targetRowTopAdjustment * p
     clipRect(0f, 0f, viewportWidth, viewportHeight) {
         var cellIndex = 0
         while (cellIndex < model.cells.size) {
             val cell = model.cells[cellIndex]
-            val cellRect = mediaGridMorphRenderCellRect(model, cell.plan, p)
-            val left = cellRect.left - viewport.left
-            val top = cellRect.top - viewport.top
-            val right = cellRect.right - viewport.left
-            val bottom = cellRect.bottom - viewport.top
-            val drawWidth = cellRect.width
-            val drawHeight = cellRect.height
+            val cellPlan = cell.plan
+            val sourceRect = cellPlan.sourceRect
+            val left: Float
+            val top: Float
+            val drawWidth: Float
+            val drawHeight: Float
+            if (p <= 0f && sourceRect != null) {
+                left = sourceRect.left - viewport.left
+                top = sourceRect.top - viewport.top
+                drawWidth = sourceRect.width
+                drawHeight = sourceRect.height
+            } else {
+                left = cellPlan.column * currentCellSize
+                top = focalRowTop +
+                    cellPlan.relativeRow * currentCellSize +
+                    lerp(cellPlan.startHeaderOffsetPx, cellPlan.endHeaderOffsetPx, p) +
+                    targetAdjustment - viewport.top
+                drawWidth = currentCellSize
+                drawHeight = currentCellSize
+            }
+            val right = left + drawWidth
+            val bottom = top + drawHeight
             val width = drawWidth.roundToInt().coerceAtLeast(1)
             val height = drawHeight.roundToInt().coerceAtLeast(1)
             clipRect(left, top, right, bottom) {
-                val blend = mediaGridMorphCellBlend(cell.plan.startContent, cell.plan.endContent, p)
-                fun drawPlaceholder() {
+                val drawPlaceholder = when (cell.transitionType) {
+                    MediaGridMorphCellTransitionType.ImageToPlaceholder,
+                    MediaGridMorphCellTransitionType.PlaceholderToImage,
+                    MediaGridMorphCellTransitionType.PlaceholderToPlaceholder,
+                    -> true
+                    MediaGridMorphCellTransitionType.SameImage,
+                    MediaGridMorphCellTransitionType.ImageToImage,
+                    -> false
+                }
+                if (drawPlaceholder) {
                     drawRect(
                         model.placeholderColor,
                         androidx.compose.ui.geometry.Offset(left, top),
                         androidx.compose.ui.geometry.Size(drawWidth, drawHeight),
                     )
                 }
-                fun drawPrepared(image: MediaGridResidentCanvasPreparedImage, alpha: Float) {
+                val startAlpha = when (cell.transitionType) {
+                    MediaGridMorphCellTransitionType.SameImage,
+                    MediaGridMorphCellTransitionType.ImageToImage,
+                    -> 1f
+                    MediaGridMorphCellTransitionType.ImageToPlaceholder -> 1f - p
+                    MediaGridMorphCellTransitionType.PlaceholderToImage,
+                    MediaGridMorphCellTransitionType.PlaceholderToPlaceholder,
+                    -> -1f
+                }
+                if (startAlpha >= 0f) {
+                    cell.startImage?.let { image ->
                         drawImage(
                             image.image,
                             image.srcOffset,
                             image.srcSize,
                             androidx.compose.ui.unit.IntOffset(left.roundToInt(), top.roundToInt()),
                             androidx.compose.ui.unit.IntSize(width, height),
-                            alpha = alpha,
+                            alpha = startAlpha,
                         )
+                    }
                 }
-                if (blend.drawPlaceholder) drawPlaceholder()
-                blend.startAlpha?.let { alpha -> cell.startImage?.let { drawPrepared(it, alpha) } }
-                blend.endAlpha?.let { alpha -> cell.endImage?.let { drawPrepared(it, alpha) } }
+                val endAlpha = when (cell.transitionType) {
+                    MediaGridMorphCellTransitionType.ImageToImage,
+                    MediaGridMorphCellTransitionType.PlaceholderToImage,
+                    -> p
+                    MediaGridMorphCellTransitionType.SameImage,
+                    MediaGridMorphCellTransitionType.ImageToPlaceholder,
+                    MediaGridMorphCellTransitionType.PlaceholderToPlaceholder,
+                    -> -1f
+                }
+                if (endAlpha >= 0f) {
+                    cell.endImage?.let { image ->
+                        drawImage(
+                            image.image,
+                            image.srcOffset,
+                            image.srcSize,
+                            androidx.compose.ui.unit.IntOffset(left.roundToInt(), top.roundToInt()),
+                            androidx.compose.ui.unit.IntSize(width, height),
+                            alpha = endAlpha,
+                        )
+                    }
+                }
             }
             cellIndex++
         }
         var headerIndex = 0
         while (headerIndex < model.headers.size) {
             val header = model.headers[headerIndex]
-            val blend = mediaGridMorphHeaderBlend(header.plan, p)
-            val headerRect = mediaGridMorphRenderHeaderRect(model, header.plan, p)
-            val top = headerRect.top - viewport.top
-            val drawHeight = headerRect.height
+            val headerPlan = header.plan
+            val sourceRect = headerPlan.sourceRect
+            val top = if (p <= 0f && sourceRect != null) {
+                sourceRect.top - viewport.top
+            } else {
+                focalRowTop +
+                    headerPlan.relativeRow * currentCellSize +
+                    lerp(headerPlan.startOffsetBeforePx, headerPlan.endOffsetBeforePx, p) +
+                    targetAdjustment - viewport.top
+            }
+            val drawHeight = if (p <= 0f && sourceRect != null) {
+                sourceRect.height
+            } else {
+                lerp(headerPlan.startHeightPx, headerPlan.endHeightPx, p)
+            }
             val left = 0f
             val right = left + viewportWidth
             val bottom = top + drawHeight
@@ -831,14 +1027,42 @@ internal fun DrawScope.drawMediaGridMorphRow(
                 clipRect(left, top, right, bottom) {
                     val textX = left + model.horizontalTextPaddingPx
                     val textY = top + model.verticalTextPaddingPx
-                    blend.startTextAlpha?.let { alpha ->
+                    val startTextAlpha = when (header.transitionType) {
+                        MediaGridMorphHeaderTransitionType.SameTitle -> 1f
+                        MediaGridMorphHeaderTransitionType.Crossfade,
+                        MediaGridMorphHeaderTransitionType.StartOnly,
+                        -> 1f - p
+                        MediaGridMorphHeaderTransitionType.EndOnly,
+                        MediaGridMorphHeaderTransitionType.NoText,
+                        -> -1f
+                    }
+                    if (startTextAlpha >= 0f) {
                         header.startText?.let {
-                            drawText(it, color = model.textColor, topLeft = androidx.compose.ui.geometry.Offset(textX, textY), alpha = alpha)
+                            drawText(
+                                it,
+                                color = model.textColor,
+                                topLeft = androidx.compose.ui.geometry.Offset(textX, textY),
+                                alpha = startTextAlpha,
+                            )
                         }
                     }
-                    blend.endTextAlpha?.let { alpha ->
+                    val endTextAlpha = when (header.transitionType) {
+                        MediaGridMorphHeaderTransitionType.Crossfade,
+                        MediaGridMorphHeaderTransitionType.EndOnly,
+                        -> p
+                        MediaGridMorphHeaderTransitionType.SameTitle,
+                        MediaGridMorphHeaderTransitionType.StartOnly,
+                        MediaGridMorphHeaderTransitionType.NoText,
+                        -> -1f
+                    }
+                    if (endTextAlpha >= 0f) {
                         header.endText?.let {
-                            drawText(it, color = model.textColor, topLeft = androidx.compose.ui.geometry.Offset(textX, textY), alpha = alpha)
+                            drawText(
+                                it,
+                                color = model.textColor,
+                                topLeft = androidx.compose.ui.geometry.Offset(textX, textY),
+                                alpha = endTextAlpha,
+                            )
                         }
                     }
                 }

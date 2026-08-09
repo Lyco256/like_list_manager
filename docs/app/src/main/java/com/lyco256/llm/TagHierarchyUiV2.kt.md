@@ -1,5 +1,10 @@
 # `TagHierarchyUiV2.kt`
 
+## 2026-08-10 cached claim and bounded text
+
+- Production claimはlive capture identityを検証し、`MediaGridMorphPreparationCache`のselected pairを`prepareMediaGridMorphClaim`へ渡す。
+- Morph header textはcurrent bounded pairsから収集し、`frame.items`全体のheader titleを計測しない。
+
 ## 2026-08-09 Phase 1 scroll hot path
 
 - Normal scroll publishes only the primitive viewport anchor signature. Detailed Morph geometry, row pairs, required assets, exact target indexes, and header resources are prepared after scroll/pointer idle.

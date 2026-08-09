@@ -3821,13 +3821,9 @@ private fun ClassifiedMediaGridContent(
     val morphPairsForTextResources = remember(morphPairVersion, morphIdentity) {
         morphPreparationCache.snapshot().filterValues { it.matchesIdentity(morphIdentity) }
     }
-    val morphHeaderTitles = remember(frame.key) {
-        frame.items.mapNotNull { (it as? MediaGridHeaderItem)?.label }
-    }
     val morphTextResourceIndex = rememberMediaGridMorphTextResourceIndex(
         pairs = morphPairsForTextResources,
         viewportWidthPx = morphIdentity.viewportSignature.viewportWidthPx,
-        additionalTitles = morphHeaderTitles,
     )
     val morphInteractionLocked = morphController?.interactionLocked?.value == true
     val morphSnapshot = morphController?.snapshotState?.value
@@ -4022,6 +4018,7 @@ private fun ClassifiedMediaGridContent(
                                     morphController?.updateIdentity(claimIdentity)
                                     prepareMediaGridMorphClaim(
                                         capture = capture,
+                                        preparedPairsSnapshot = morphPreparationCache.snapshot(),
                                         preparedIndex = residentPreparedIndex,
                                         textResources = morphTextResourceIndex,
                                         candidate = candidate,

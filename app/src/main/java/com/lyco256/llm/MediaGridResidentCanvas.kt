@@ -47,6 +47,7 @@ internal data class MediaGridMorphDrawObservation(
     val sourceVisualItems: List<MediaGridMorphVisualItemObservation> = emptyList(),
     val targetVisualItems: List<MediaGridMorphVisualItemObservation> = emptyList(),
     val headerTransitions: List<MediaGridMorphHeaderTransitionObservation> = emptyList(),
+    val performanceCounters: MediaGridMorphPerformanceCounters? = null,
 )
 
 internal data class MediaGridMorphVisualItemObservation(
@@ -98,6 +99,18 @@ internal data class MediaGridMorphHandoffCommandObservation(
     val directLayoutReevaluated: Boolean,
 )
 
+internal data class MediaGridMorphPerformanceCounters(
+    val claimPairBuilds: Int,
+    val selectedPlanBuilds: Int,
+    val requiredRenderSetBuilds: Int,
+    val renderModelBuilds: Int,
+    val increaseRenderModelBuilds: Int,
+    val decreaseRenderModelBuilds: Int,
+    val textLayoutMeasures: Int,
+    val drawRectHelperCalls: Int,
+    val drawBlendHelperCalls: Int,
+)
+
 internal object MediaGridMorphTestTrace {
     private val drawEvents = CopyOnWriteArrayList<MediaGridMorphDrawObservation>()
     private val claimEvents = CopyOnWriteArrayList<MediaGridMorphClaimObservation>()
@@ -113,6 +126,15 @@ internal object MediaGridMorphTestTrace {
     private val morphUrgentAssetRequests = AtomicInteger()
     private val previewPreloaderReconciles = AtomicInteger()
     private val exactTargetLayoutIndexBuilds = AtomicInteger()
+    private val claimPairBuilds = AtomicInteger()
+    private val selectedPlanBuilds = AtomicInteger()
+    private val requiredRenderSetBuilds = AtomicInteger()
+    private val renderModelBuilds = AtomicInteger()
+    private val increaseRenderModelBuilds = AtomicInteger()
+    private val decreaseRenderModelBuilds = AtomicInteger()
+    private val textLayoutMeasures = AtomicInteger()
+    private val drawRectHelperCalls = AtomicInteger()
+    private val drawBlendHelperCalls = AtomicInteger()
     @Volatile private var fallbackCount = 0
     private var nextFrameNumber = 0L
 
@@ -131,12 +153,23 @@ internal object MediaGridMorphTestTrace {
         morphUrgentAssetRequests.set(0)
         previewPreloaderReconciles.set(0)
         exactTargetLayoutIndexBuilds.set(0)
+        claimPairBuilds.set(0)
+        selectedPlanBuilds.set(0)
+        requiredRenderSetBuilds.set(0)
+        renderModelBuilds.set(0)
+        increaseRenderModelBuilds.set(0)
+        decreaseRenderModelBuilds.set(0)
+        textLayoutMeasures.set(0)
+        drawRectHelperCalls.set(0)
+        drawBlendHelperCalls.set(0)
         fallbackCount = 0
         nextFrameNumber = 0L
     }
 
     fun recordDraw(event: MediaGridMorphDrawObservation) {
-        if (BuildConfig.TEST_HARNESS) drawEvents += event
+        if (BuildConfig.TEST_HARNESS) {
+            drawEvents += event.copy(performanceCounters = performanceCounters())
+        }
     }
 
     fun recordFallback() {
@@ -206,6 +239,39 @@ internal object MediaGridMorphTestTrace {
         if (BuildConfig.TEST_HARNESS) morphPairBuilds.incrementAndGet()
     }
 
+    fun recordClaimPairBuild() {
+        if (BuildConfig.TEST_HARNESS) claimPairBuilds.incrementAndGet()
+    }
+
+    fun recordSelectedPlanBuild(direction: MediaGridMorphDirection) {
+        if (BuildConfig.TEST_HARNESS) selectedPlanBuilds.incrementAndGet()
+    }
+
+    fun recordRequiredRenderSetBuild() {
+        if (BuildConfig.TEST_HARNESS) requiredRenderSetBuilds.incrementAndGet()
+    }
+
+    fun recordRenderModelBuild(direction: MediaGridMorphDirection) {
+        if (!BuildConfig.TEST_HARNESS) return
+        renderModelBuilds.incrementAndGet()
+        when (direction) {
+            MediaGridMorphDirection.IncreaseColumns -> increaseRenderModelBuilds.incrementAndGet()
+            MediaGridMorphDirection.DecreaseColumns -> decreaseRenderModelBuilds.incrementAndGet()
+        }
+    }
+
+    fun recordTextLayoutMeasure() {
+        if (BuildConfig.TEST_HARNESS) textLayoutMeasures.incrementAndGet()
+    }
+
+    fun recordDrawRectHelperCall() {
+        if (BuildConfig.TEST_HARNESS) drawRectHelperCalls.incrementAndGet()
+    }
+
+    fun recordDrawBlendHelperCall() {
+        if (BuildConfig.TEST_HARNESS) drawBlendHelperCalls.incrementAndGet()
+    }
+
     fun recordMorphUrgentAssetRequest() {
         if (BuildConfig.TEST_HARNESS) morphUrgentAssetRequests.incrementAndGet()
     }
@@ -224,6 +290,18 @@ internal object MediaGridMorphTestTrace {
     fun morphUrgentAssetRequestCount(): Int = morphUrgentAssetRequests.get()
     fun previewPreloaderReconcileCount(): Int = previewPreloaderReconciles.get()
     fun exactTargetLayoutIndexBuildCount(): Int = exactTargetLayoutIndexBuilds.get()
+
+    fun performanceCounters(): MediaGridMorphPerformanceCounters = MediaGridMorphPerformanceCounters(
+        claimPairBuilds = claimPairBuilds.get(),
+        selectedPlanBuilds = selectedPlanBuilds.get(),
+        requiredRenderSetBuilds = requiredRenderSetBuilds.get(),
+        renderModelBuilds = renderModelBuilds.get(),
+        increaseRenderModelBuilds = increaseRenderModelBuilds.get(),
+        decreaseRenderModelBuilds = decreaseRenderModelBuilds.get(),
+        textLayoutMeasures = textLayoutMeasures.get(),
+        drawRectHelperCalls = drawRectHelperCalls.get(),
+        drawBlendHelperCalls = drawBlendHelperCalls.get(),
+    )
 }
 
 internal data class MediaGridResidentCanvasImage(

@@ -1,5 +1,10 @@
 # `app/src/androidTest/java/com/lyco256/llm/MainActivityComposeTest.kt`
 
+## 2026-08-10 production Morph claim/draw counters
+
+- headerなし／あり4→5の既存代表gestureで、stable-idle後claim pair build 0、selected plan 1、RequiredRenderSet 1、selected direction model 1、反対direction model 0、claim text measure 0を確認する。
+- 各Morph draw frameのcounter snapshotがclaim時から増えず、Rect/blend helper callが0のままであることを、既存のsource/target geometry・header Crossfade・exact handoff回帰と同時に検証する。
+
 ## 2026-08-09 continuous fling hot-path counters
 
 - The production fling regression asserts that full Morph capture, row-pair preparation, urgent requests, resident PreviewPreloader reconciliation, and exact target index construction remain zero during motion while lightweight viewport signatures continue to publish. After idle, preparation is allowed and the existing Morph/pinch behavior remains covered.

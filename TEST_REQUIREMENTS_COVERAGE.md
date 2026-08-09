@@ -1,5 +1,18 @@
 # 実機レベル統合テスト強化 カバレッジ
 
+## 2026-08-10 Morph claim/draw hot-path coverage
+
+| Requirement | Evidence | Status |
+|---|---|---|
+| identity一致idle pairをclaimで再利用し、fallback rebuildはselected directionだけ | `prepareMediaGridMorphClaim`, `buildMediaGridMorphRowPreparedPairForClaim` | implemented; unit/static passed |
+| production bundleはlocked direction一件だけのplan/model/protectionを保持 | `buildMediaGridMorphSelectedClaimBundle`, `MediaGridMorphInteractionController.claimPointers` | implemented; unit/static passed |
+| claim selectionのbounded precomputed index | `MediaGridMorphViewportSelectionIndex`, `MediaGridMorphViewportPlanTemplate.select` | implemented; unit/static passed |
+| RequiredRenderSet一回共有とbounded header text | `buildMediaGridMorphDirectionClaimBundle`, `rememberMediaGridMorphTextResourceIndex` | implemented; unit/static passed |
+| draw loopのtransition事前判定とRect/blend helper除去 | `MediaGridMorphCellTransitionType`, `MediaGridMorphHeaderTransitionType`, `drawMediaGridMorphRow` | implemented; unit/static passed |
+| headerなし／ありproduction counterとgeometry/handoff回帰 | `MainActivityComposeTest.productionMorphAllSlotsChangeIsStableIdleAndMorphsBeforePhysicalUp`, `productionMorphHeaderVisibleIsStableIdleAndMorphsBeforePhysicalUp` | safe integration passed (`OK (189 tests)`) |
+
+最終検証は指定順で完了した。`scripts\run-safe-integration-check.cmd` は `Preflight / Build / UnitTest / Lint / Install / IntegrationTest / Success`（`OK (189 tests)`）、続く `scripts\run-safe-debug-check.cmd -InstallToDevice` は `Preflight / Build / UnitTest / Lint / Install / Success`。Macrobenchmarkは要件どおり実行していない。
+
 ## 2026-08-02 exact source viewport and current-return gate
 
 | Requirement | Evidence | Status |

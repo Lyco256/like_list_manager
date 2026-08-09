@@ -28,6 +28,8 @@ internal data class MediaGridMorphRequiredRenderSet(
     val protectedAssetIds: Set<Long>,
     val optionalCellCount: Int,
     val optionalHeaderCount: Int,
+    val requiredCellPlans: List<MediaGridMorphCellPlan> = emptyList(),
+    val requiredHeaderPlanIndexes: BooleanArray = BooleanArray(0),
 ) {
     val requiredSourceImageCount: Int get() = requiredSourceAssetIds.size
     val requiredTargetImageCount: Int get() = requiredTargetAssetIds.size
@@ -76,6 +78,8 @@ internal fun MediaGridMorphPlan.requiredRenderSet(): MediaGridMorphRequiredRende
     val targetTitles = LinkedHashSet<String>()
     val cells = LinkedHashSet<MediaGridMorphRequiredCellIdentity>()
     val headers = LinkedHashSet<MediaGridMorphRequiredHeaderIdentity>()
+    val requiredCellPlans = ArrayList<MediaGridMorphCellPlan>()
+    val requiredHeaderPlanIndexes = BooleanArray(selected.headerPlans.size)
 
     selected.rowPlans.forEach { row ->
         row.cells.forEach { cell ->
@@ -83,14 +87,16 @@ internal fun MediaGridMorphPlan.requiredRenderSet(): MediaGridMorphRequiredRende
             val endRect = mediaGridMorphRowCellRect(selected, cell, 1f)
             if (!sweptIntersectsViewport(sweptRect(startRect, endRect), selected.viewport)) return@forEach
             cells += MediaGridMorphRequiredCellIdentity(cell.relativeRow, cell.column)
+            requiredCellPlans += cell
             cell.startContent.assetIdOrNull()?.let(source::add)
             cell.endContent.assetIdOrNull()?.let(target::add)
         }
     }
-    selected.headerPlans.forEach { header ->
+    selected.headerPlans.forEachIndexed { headerIndex, header ->
         val startRect = mediaGridMorphRowHeaderRect(selected, header, 0f)
         val endRect = mediaGridMorphRowHeaderRect(selected, header, 1f)
-        if (!sweptIntersectsViewport(sweptRect(startRect, endRect), selected.viewport)) return@forEach
+        if (!sweptIntersectsViewport(sweptRect(startRect, endRect), selected.viewport)) return@forEachIndexed
+        requiredHeaderPlanIndexes[headerIndex] = true
         headers += MediaGridMorphRequiredHeaderIdentity(
             relativeRow = header.relativeRow,
             startKey = header.startKey,
@@ -109,6 +115,8 @@ internal fun MediaGridMorphPlan.requiredRenderSet(): MediaGridMorphRequiredRende
         protectedAssetIds = (source + target).toSet(),
         optionalCellCount = (selected.rowPlans.sumOf { it.cells.size } - cells.size).coerceAtLeast(0),
         optionalHeaderCount = (selected.headerPlans.size - headers.size).coerceAtLeast(0),
+        requiredCellPlans = requiredCellPlans,
+        requiredHeaderPlanIndexes = requiredHeaderPlanIndexes,
     )
 }
 
