@@ -1,5 +1,9 @@
 # `MediaGridRenderingContractTest.kt`
 
+## 2026-08-09 Phase 1 scroll contract
+
+- Static contracts keep normal scroll on the anchor-only path, reject full-dataset visible-index filtering for fallback preload, and keep detailed Morph capture out of the scroll observer.
+
 ## 2026-08-08 normal draw allocation contract
 
 - production single surfaceのNormal／Reveal branchが`LazyGridLayoutInfo.visibleItemsInfo`を直接走査し、scrollごとの`MediaGridResidentDrawCommand` list／objectを生成しないことをsource contractで固定する。

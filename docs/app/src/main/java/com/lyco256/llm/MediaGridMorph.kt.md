@@ -1,5 +1,10 @@
 # MediaGridMorph.kt
 
+## 2026-08-09 Phase 1 preparation identity
+
+- Morph geometry preparation is keyed by source/frame/columns/detailed viewport identity, not resident `drawIndexVersion`; draw-index publication only drives readiness re-evaluation.
+- Urgent Morph assets are normalized and deduplicated by preparation identity plus the required asset set, so repeated readiness work does not re-request the same set.
+
 ## 2026-08-08 faster release handoff
 
 - release後のsettle durationは100ms。frame同期のsettle描画と、その後のexact handoff検証を分離したまま、通常スクロールへ戻るまでを短縮する。

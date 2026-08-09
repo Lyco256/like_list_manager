@@ -1,5 +1,8 @@
 package com.lyco256.llm.data
 
+import com.lyco256.llm.BuildConfig
+import com.lyco256.llm.MediaGridMorphTestTrace
+
 import android.content.Context
 import android.graphics.BitmapFactory
 import coil.ImageLoader
@@ -327,6 +330,7 @@ internal class MediaGridPreviewPreloader(
     private val active = java.util.concurrent.ConcurrentHashMap<String, Disposable>()
 
     fun reconcile(candidates: Collection<MediaGridPreparedCandidate>) {
+        if (BuildConfig.TEST_HARNESS) MediaGridMorphTestTrace.recordPreviewPreloaderReconcile()
         val plan = buildMediaGridPreviewPreloadPlan(active.keys, candidates)
         plan.cancelKeys.forEach { key ->
             active.remove(key)?.dispose()

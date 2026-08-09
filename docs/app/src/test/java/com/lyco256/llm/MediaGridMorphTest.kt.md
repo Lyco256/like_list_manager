@@ -1,5 +1,9 @@
 # `MediaGridMorphTest.kt`
 
+## 2026-08-09 Phase 1 preparation cache contract
+
+- The preparation-cache test verifies urgent asset requests are stable-set deduplicated per preparation identity and reissued only when the asset set or identity changes.
+
 ## 2026-08-07 immediate reverse handoff
 
 - A fixed synthetic 4-to-5 claim verifies that successful handoff completion sends the protected asset union to carryover rather than release.

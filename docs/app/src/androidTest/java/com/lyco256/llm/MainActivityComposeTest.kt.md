@@ -1,5 +1,9 @@
 # `app/src/androidTest/java/com/lyco256/llm/MainActivityComposeTest.kt`
 
+## 2026-08-09 continuous fling hot-path counters
+
+- The production fling regression asserts that full Morph capture, row-pair preparation, urgent requests, resident PreviewPreloader reconciliation, and exact target index construction remain zero during motion while lightweight viewport signatures continue to publish. After idle, preparation is allowed and the existing Morph/pinch behavior remains covered.
+
 ## 2026-08-07 start and exact-handoff regression
 
 - The same three representative 4-to-5 sequences now compare the underlying source viewport with the first Morph model and compare the progress-1 Morph endpoint with the first Idle Normal frame by item/header identity and rectangle.

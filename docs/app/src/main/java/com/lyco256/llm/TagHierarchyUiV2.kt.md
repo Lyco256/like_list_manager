@@ -1,5 +1,11 @@
 # `TagHierarchyUiV2.kt`
 
+## 2026-08-09 Phase 1 scroll hot path
+
+- Normal scroll publishes only the primitive viewport anchor signature. Detailed Morph geometry, row pairs, required assets, exact target indexes, and header resources are prepared after scroll/pointer idle.
+- Resident production does not retain `MediaGridPreviewPreloader`; the fallback preloader, when enabled, derives visible item indexes from the bounded ordinal range rather than filtering the full frame dataset.
+- Morph readiness may re-evaluate against a newer resident draw publication, but the same idle preparation identity does not rebuild geometry.
+
 ## 2026-08-08 media-grid shared viewport hot path
 
 - `ClassifiedMediaGridContent`は一つのallocation-light viewport signature flowをcontroller通知、永続preview preload、idle Morph準備で共有する。通常scroll中に同じ`LazyGridLayoutInfo.visibleItemsInfo`を複数のsnapshot collectorから走査しない。

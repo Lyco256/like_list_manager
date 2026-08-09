@@ -107,6 +107,12 @@ internal object MediaGridMorphTestTrace {
     private val exactTargetViewportGenerations = CopyOnWriteArrayList<Long>()
     private val rollbackColumnCountCommands = AtomicInteger()
     private val rollbackReasons = CopyOnWriteArrayList<String>()
+    private val lightweightViewportSignatureBuilds = AtomicInteger()
+    private val fullMorphCaptures = AtomicInteger()
+    private val morphPairBuilds = AtomicInteger()
+    private val morphUrgentAssetRequests = AtomicInteger()
+    private val previewPreloaderReconciles = AtomicInteger()
+    private val exactTargetLayoutIndexBuilds = AtomicInteger()
     @Volatile private var fallbackCount = 0
     private var nextFrameNumber = 0L
 
@@ -119,6 +125,12 @@ internal object MediaGridMorphTestTrace {
         exactTargetViewportGenerations.clear()
         rollbackColumnCountCommands.set(0)
         rollbackReasons.clear()
+        lightweightViewportSignatureBuilds.set(0)
+        fullMorphCaptures.set(0)
+        morphPairBuilds.set(0)
+        morphUrgentAssetRequests.set(0)
+        previewPreloaderReconciles.set(0)
+        exactTargetLayoutIndexBuilds.set(0)
         fallbackCount = 0
         nextFrameNumber = 0L
     }
@@ -181,6 +193,37 @@ internal object MediaGridMorphTestTrace {
     fun rollbackColumnCountCommandCount(): Int = rollbackColumnCountCommands.get()
 
     fun rollbackReasons(): List<String> = rollbackReasons.toList()
+
+    fun recordLightweightViewportSignatureBuild() {
+        if (BuildConfig.TEST_HARNESS) lightweightViewportSignatureBuilds.incrementAndGet()
+    }
+
+    fun recordFullMorphCapture() {
+        if (BuildConfig.TEST_HARNESS) fullMorphCaptures.incrementAndGet()
+    }
+
+    fun recordMorphPairBuild() {
+        if (BuildConfig.TEST_HARNESS) morphPairBuilds.incrementAndGet()
+    }
+
+    fun recordMorphUrgentAssetRequest() {
+        if (BuildConfig.TEST_HARNESS) morphUrgentAssetRequests.incrementAndGet()
+    }
+
+    fun recordPreviewPreloaderReconcile() {
+        if (BuildConfig.TEST_HARNESS) previewPreloaderReconciles.incrementAndGet()
+    }
+
+    fun recordExactTargetLayoutIndexBuild() {
+        if (BuildConfig.TEST_HARNESS) exactTargetLayoutIndexBuilds.incrementAndGet()
+    }
+
+    fun lightweightViewportSignatureBuildCount(): Int = lightweightViewportSignatureBuilds.get()
+    fun fullMorphCaptureCount(): Int = fullMorphCaptures.get()
+    fun morphPairBuildCount(): Int = morphPairBuilds.get()
+    fun morphUrgentAssetRequestCount(): Int = morphUrgentAssetRequests.get()
+    fun previewPreloaderReconcileCount(): Int = previewPreloaderReconciles.get()
+    fun exactTargetLayoutIndexBuildCount(): Int = exactTargetLayoutIndexBuilds.get()
 }
 
 internal data class MediaGridResidentCanvasImage(

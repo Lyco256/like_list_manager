@@ -294,28 +294,6 @@ class MainActivityComposeTest {
             composeRule.onAllNodesWithTag(photoPlaceholderTag).fetchSemanticsNodes().isEmpty()
         }
         assertTrue(composeRule.onAllNodesWithTag(photoPlaceholderTag).fetchSemanticsNodes().isEmpty())
-        val persistentPreview = previewStore.previewFile(assetIds.getValue("grid-photo"))
-        val previewCandidate = buildMediaGridImageCandidates(
-            MediaGridImageCandidateInput(
-                assetId = assetIds.getValue("grid-photo"),
-                mediaKey = "grid-photo",
-                localPath = photoPath,
-                previewUrl = null,
-                remoteUrl = null,
-                displayUrl = photoPath,
-                persistentPreview = MediaGridPersistentPreviewMetadata(
-                    filePath = persistentPreview.absolutePath,
-                    length = persistentPreview.length(),
-                    lastModified = persistentPreview.lastModified(),
-                ),
-            ),
-        ).first()
-        assertEquals(MediaGridImageSourceKind.PersistentPreview, previewCandidate.kind)
-        val previewMemoryKey = mediaGridImageCacheKey(previewCandidate, 256, 256)
-        composeRule.waitUntil(30_000) {
-            (composeRule.activity.application as LikeListManagerApp).container.mediaGridImageLoader.memoryCache
-                ?.get(coil.memory.MemoryCache.Key(previewMemoryKey)) != null
-        }
         val videoPlaceholderTag = "media_grid_placeholder_${assetIds.getValue("grid-video")}"
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithTag(videoPlaceholderTag).fetchSemanticsNodes().isEmpty()
@@ -1345,8 +1323,31 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("classified_media_grid").performScrollToIndex(assetIds.size / 2)
         composeRule.waitForIdle()
         slowDragDownOnScreen()
-        fastFlingThenRetouchOnScreen()
+        MediaGridMorphTestTrace.clear()
+        var fullCapturesDuringFling = -1
+        var pairBuildsDuringFling = -1
+        var urgentRequestsDuringFling = -1
+        var previewReconcilesDuringFling = -1
+        var exactIndexBuildsDuringFling = -1
+        var lightweightSignaturesDuringFling = -1
+        fastFlingThenRetouchOnScreen {
+            fullCapturesDuringFling = MediaGridMorphTestTrace.fullMorphCaptureCount()
+            pairBuildsDuringFling = MediaGridMorphTestTrace.morphPairBuildCount()
+            urgentRequestsDuringFling = MediaGridMorphTestTrace.morphUrgentAssetRequestCount()
+            previewReconcilesDuringFling = MediaGridMorphTestTrace.previewPreloaderReconcileCount()
+            exactIndexBuildsDuringFling = MediaGridMorphTestTrace.exactTargetLayoutIndexBuildCount()
+            lightweightSignaturesDuringFling = MediaGridMorphTestTrace.lightweightViewportSignatureBuildCount()
+        }
+        assertEquals(0, fullCapturesDuringFling)
+        assertEquals(0, pairBuildsDuringFling)
+        assertEquals(0, urgentRequestsDuringFling)
+        assertEquals(0, previewReconcilesDuringFling)
+        assertEquals(0, exactIndexBuildsDuringFling)
+        assertTrue("fling should publish lightweight viewport signatures", lightweightSignaturesDuringFling > 0)
         composeRule.waitForIdle()
+        assertTrue(MediaGridMorphTestTrace.fullMorphCaptureCount() > 0)
+        assertTrue(MediaGridMorphTestTrace.morphPairBuildCount() > 0)
+        assertTrue(MediaGridMorphTestTrace.exactTargetLayoutIndexBuildCount() > 0)
 
         val visibleAfterFling = visibleGridAssetIds(assetIds)
         assertTrue("fling should advance to a later media range", visibleAfterFling.maxOrNull() ?: 0L > assetIds[assetIds.size / 2])
@@ -3099,7 +3100,7 @@ class MainActivityComposeTest {
         composeRule.waitForIdle()
     }
 
-    private fun fastFlingThenRetouchOnScreen() {
+    private fun fastFlingThenRetouchOnScreen(onDuringScroll: (() -> Unit)? = null) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val metrics = composeRule.activity.resources.displayMetrics
         val downTime = SystemClock.uptimeMillis()
@@ -3121,6 +3122,7 @@ class MainActivityComposeTest {
             }
             check(instrumentation.uiAutomation.injectInputEvent(event, true))
             event.recycle()
+            if (index == steps / 2) onDuringScroll?.invoke()
         }
         val retouchTime = SystemClock.uptimeMillis()
         listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP).forEachIndexed { index, action ->

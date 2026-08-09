@@ -81,6 +81,7 @@ internal fun buildMediaGridMorphExactTargetLayoutIndex(
     viewportHeightPx: Int,
     headerHeightPx: Float,
 ): MediaGridMorphExactTargetLayoutIndex {
+    if (BuildConfig.TEST_HARNESS) MediaGridMorphTestTrace.recordExactTargetLayoutIndexBuild()
     val columns = targetColumnCount.coerceAtLeast(1)
     val cellSize = (viewportWidthPx.toFloat() / columns).coerceAtLeast(1f)
     val width = viewportWidthPx.coerceAtLeast(columns)

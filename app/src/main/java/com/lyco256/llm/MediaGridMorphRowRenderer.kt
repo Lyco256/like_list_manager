@@ -662,7 +662,10 @@ internal fun mediaGridMorphSelectedPlanCompleteness(
         if (sourceIdentity != null) {
             val preparedIdentity = (cell.startContent as? MediaGridMorphSlotContent.Image)
                 ?.let { preparedIndex.preparedImageByAssetId[it.assetId]?.identity }
-            sourceViewportComplete = sourceViewportComplete && preparedIdentity == sourceIdentity
+            // The pair geometry is intentionally stable across resident draw-index
+            // publications. Re-readiness is asset-based here; a newer prepared
+            // image identity for the same asset must not force geometry rebuild.
+            sourceViewportComplete = sourceViewportComplete && preparedIdentity != null
         }
     }
     val missingHeaderTitle = (required.requiredSourceHeaderTitles + required.requiredTargetHeaderTitles)

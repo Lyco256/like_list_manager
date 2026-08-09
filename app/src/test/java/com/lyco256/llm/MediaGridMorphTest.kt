@@ -4,6 +4,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -717,6 +718,29 @@ class MediaGridMorphTest {
         assertNull(cache.request(identity, false, false))
         assertNull(cache.request(identity, true, false))
         assertNull(cache.request(identity, false, true))
+    }
+
+    @Test
+    fun preparationCacheDeduplicatesUrgentAssetsByIdentityAndStableSet() {
+        val cache = MediaGridMorphPreparationCache()
+        val identity = identity(columns = 4)
+
+        assertArrayEquals(
+            longArrayOf(1L, 2L, 3L),
+            cache.requestUrgentAssetsIfChanged(identity, longArrayOf(3L, 1L, 2L, 1L)),
+        )
+        assertNull(cache.requestUrgentAssetsIfChanged(identity, longArrayOf(2L, 3L, 1L)))
+        assertArrayEquals(
+            longArrayOf(1L, 2L, 4L),
+            cache.requestUrgentAssetsIfChanged(identity, longArrayOf(4L, 2L, 1L)),
+        )
+        assertArrayEquals(
+            longArrayOf(1L, 2L, 4L),
+            cache.requestUrgentAssetsIfChanged(
+                identity.copy(viewportSignature = identity.viewportSignature.copy(firstVisibleMediaOrdinal = 1)),
+                longArrayOf(4L, 2L, 1L),
+            ),
+        )
     }
 
     @Test

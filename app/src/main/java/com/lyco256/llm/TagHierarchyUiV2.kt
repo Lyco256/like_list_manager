@@ -3192,6 +3192,19 @@ internal data class MediaGridViewportSignature(
     val visibleItemGeometry: List<MediaGridViewportItemGeometry> = emptyList(),
 )
 
+/** Lightweight viewport state used by the normal scroll hot path. */
+internal data class MediaGridViewportAnchorSignature(
+    val renderKey: MediaGridRenderKey,
+    val firstVisibleItemIndex: Int,
+    val lastVisibleItemIndex: Int,
+    val firstVisibleMediaOrdinal: Int,
+    val lastVisibleMediaOrdinal: Int,
+    val viewportWidthPx: Int,
+    val viewportHeightPx: Int,
+    val cellSizePx: Int,
+    val columnCount: Int,
+)
+
 internal data class MediaGridViewportItemGeometry(
     val key: String,
     val offsetX: Int,
@@ -3251,6 +3264,42 @@ internal fun buildMediaGridViewportSignature(
     )
 }
 
+internal fun buildMediaGridViewportAnchorSignature(
+    layout: androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo,
+    frame: MediaGridFrameData,
+    columnCount: Int,
+): MediaGridViewportAnchorSignature {
+    if (BuildConfig.TEST_HARNESS) MediaGridMorphTestTrace.recordLightweightViewportSignatureBuild()
+    var firstItemIndex = Int.MAX_VALUE
+    var lastItemIndex = Int.MIN_VALUE
+    var firstMediaOrdinal = Int.MAX_VALUE
+    var lastMediaOrdinal = Int.MIN_VALUE
+    var cellSizePx = 0
+    val mediaOrdinalByItemIndex = frame.ordinalIndex.mediaOrdinalByItemIndex
+    for (info in layout.visibleItemsInfo) {
+        val itemIndex = info.index
+        if (itemIndex < firstItemIndex) firstItemIndex = itemIndex
+        if (itemIndex > lastItemIndex) lastItemIndex = itemIndex
+        val mediaOrdinal = mediaOrdinalByItemIndex.getOrNull(itemIndex) ?: -1
+        if (mediaOrdinal >= 0) {
+            if (mediaOrdinal < firstMediaOrdinal) firstMediaOrdinal = mediaOrdinal
+            if (mediaOrdinal > lastMediaOrdinal) lastMediaOrdinal = mediaOrdinal
+            if (cellSizePx == 0) cellSizePx = info.size.width
+        }
+    }
+    return MediaGridViewportAnchorSignature(
+        renderKey = frame.key,
+        firstVisibleItemIndex = if (firstItemIndex == Int.MAX_VALUE) -1 else firstItemIndex,
+        lastVisibleItemIndex = if (lastItemIndex == Int.MIN_VALUE) -1 else lastItemIndex,
+        firstVisibleMediaOrdinal = if (firstMediaOrdinal == Int.MAX_VALUE) -1 else firstMediaOrdinal,
+        lastVisibleMediaOrdinal = if (lastMediaOrdinal == Int.MIN_VALUE) -1 else lastMediaOrdinal,
+        viewportWidthPx = layout.viewportSize.width,
+        viewportHeightPx = (layout.viewportEndOffset - layout.viewportStartOffset).coerceAtLeast(0),
+        cellSizePx = cellSizePx,
+        columnCount = columnCount,
+    )
+}
+
 internal fun MediaGridViewportSignature.toAnchor(): MediaGridViewportAnchor = MediaGridViewportAnchor(
     renderKey = renderKey,
     firstVisibleItemIndex = firstVisibleItemIndex,
@@ -3262,6 +3311,33 @@ internal fun MediaGridViewportSignature.toAnchor(): MediaGridViewportAnchor = Me
     cellSizePx = cellSizePx,
     columnCount = columnCount,
 )
+
+internal fun MediaGridViewportAnchorSignature.toAnchor(): MediaGridViewportAnchor = MediaGridViewportAnchor(
+    renderKey = renderKey,
+    firstVisibleItemIndex = firstVisibleItemIndex,
+    lastVisibleItemIndex = lastVisibleItemIndex,
+    firstVisibleMediaOrdinal = firstVisibleMediaOrdinal,
+    lastVisibleMediaOrdinal = lastVisibleMediaOrdinal,
+    viewportWidthPx = viewportWidthPx,
+    viewportHeightPx = viewportHeightPx,
+    cellSizePx = cellSizePx,
+    columnCount = columnCount,
+)
+
+internal fun visibleMediaGridItemIndices(
+    frame: MediaGridFrameData,
+    anchor: MediaGridViewportAnchorSignature,
+): List<Int> {
+    if (
+        anchor.firstVisibleMediaOrdinal < 0 ||
+        anchor.lastVisibleMediaOrdinal < anchor.firstVisibleMediaOrdinal
+    ) return emptyList()
+    return buildList(anchor.lastVisibleMediaOrdinal - anchor.firstVisibleMediaOrdinal + 1) {
+        for (ordinal in anchor.firstVisibleMediaOrdinal..anchor.lastVisibleMediaOrdinal) {
+            frame.ordinalIndex.itemIndexByMediaOrdinal.getOrNull(ordinal)?.let(::add)
+        }
+    }
+}
 
 internal fun mediaGridFrameMatches(frameKey: MediaGridRenderKey?, currentKey: MediaGridRenderKey): Boolean =
     frameKey == currentKey
@@ -3654,34 +3730,30 @@ private fun ClassifiedMediaGridContent(
     val effectiveControllerState = if (controller == null) {
         fallbackControllerState
     } else controllerState
-    val previewPreloader: MediaGridPreviewPreloader = remember(appContainer.mediaGridImageLoader) {
-        MediaGridPreviewPreloader(context, appContainer.mediaGridImageLoader)
-    }
-    val viewportSignatureFlow = remember(state, frame.key, columnCount) {
-        MutableStateFlow<MediaGridViewportSignature?>(null)
+    val previewPreloader = if (
+        residentCanvasMode == MediaGridResidentCanvasMode.Disabled || retainedImageStore == null
+    ) {
+        remember(appContainer.mediaGridImageLoader) {
+            MediaGridPreviewPreloader(context, appContainer.mediaGridImageLoader)
+        }
+    } else null
+    val viewportAnchorFlow = remember(state, frame.key, columnCount) {
+        MutableStateFlow<MediaGridViewportAnchorSignature?>(null)
     }
     DisposableEffect(previewPreloader) {
-        onDispose { previewPreloader.cancelAll() }
+        onDispose { previewPreloader?.cancelAll() }
     }
-    LaunchedEffect(previewPreloader, frame.key, viewportSignatureFlow) {
-        viewportSignatureFlow.collectLatest { signature ->
-            val visibleIndices = if (
-                signature == null ||
-                signature.firstVisibleItemIndex < 0 ||
-                signature.lastVisibleItemIndex < signature.firstVisibleItemIndex
-            ) {
-                emptyList()
-            } else {
-                frame.mediaCellIndices.filter { itemIndex ->
-                    itemIndex in signature.firstVisibleItemIndex..signature.lastVisibleItemIndex
-                }
-            }
+    LaunchedEffect(previewPreloader, frame.key, viewportAnchorFlow) {
+        if (previewPreloader == null) return@LaunchedEffect
+        viewportAnchorFlow.collectLatest { anchor ->
             val candidates = buildList {
-                appContainer.mediaGridImagePreparer.preparePersistentPreviews(
-                    frame = frame,
-                    indices = visibleIndices,
-                    emit = { add(it) },
-                )
+                anchor?.let { visibleMediaGridItemIndices(frame, it) }?.let { visibleIndices ->
+                    appContainer.mediaGridImagePreparer.preparePersistentPreviews(
+                        frame = frame,
+                        indices = visibleIndices,
+                        emit = { add(it) },
+                    )
+                }
             }
             previewPreloader.reconcile(candidates)
         }
@@ -3798,19 +3870,13 @@ private fun ClassifiedMediaGridContent(
         kotlinx.coroutines.coroutineScope {
             launch {
                 snapshotFlow {
-                    buildMediaGridViewportSignature(
+                    buildMediaGridViewportAnchorSignature(
                         layout = state.layoutInfo,
                         frame = frame,
                         columnCount = columnCount,
-                        includeGeometry = false,
                     )
                 }.distinctUntilChanged().collect { anchor ->
-                    viewportSignatureFlow.value = anchor
-                    morphViewportSignatureState.value = buildMediaGridViewportSignature(
-                        layout = state.layoutInfo,
-                        frame = frame,
-                        columnCount = columnCount,
-                    )
+                    viewportAnchorFlow.value = anchor
                     effectiveController?.updateViewport(anchor.toAnchor())
                 }
             }
@@ -3827,10 +3893,9 @@ private fun ClassifiedMediaGridContent(
         columnCount,
         morphPreparationCache,
         morphPointerInProgress,
-        residentPreparedIndex?.drawIndexVersion,
     ) {
         combine(
-            viewportSignatureFlow,
+            viewportAnchorFlow,
             snapshotFlow { state.isScrollInProgress }.distinctUntilChanged(),
             morphPointerInProgress,
         ) { signature, isScrollInProgress, pointerInProgress ->
@@ -3863,14 +3928,22 @@ private fun ClassifiedMediaGridContent(
                 identity = identity,
                 isScrollInProgress = false,
                 isPointerInProgress = false,
-                preparedIndexVersion = residentPreparedIndex?.drawIndexVersion ?: Long.MIN_VALUE,
             ) ?: return@collectLatest
             val pairs = withContext(Dispatchers.Default) {
                 buildMediaGridMorphRowPreparedPairs(capture)
             }
-            effectiveController?.requestMorphUrgentAssets(
-                pairs.values.flatMap { it.requiredMorphAssetIds().asIterable() }.toLongArray(),
-            )
+            val requiredAssetIds = pairs.values
+                .flatMap { it.requiredMorphAssetIds().asIterable() }
+                .toLongArray()
+            // A preparation that started while idle may finish after a drag has
+            // begun. Do not publish its urgent work into the scroll hot path.
+            if (state.isScrollInProgress || morphPointerInProgress.value) {
+                return@collectLatest
+            }
+            morphPreparationCache.requestUrgentAssetsIfChanged(identity, requiredAssetIds)?.let { ids ->
+                if (BuildConfig.TEST_HARNESS) MediaGridMorphTestTrace.recordMorphUrgentAssetRequest()
+                effectiveController?.requestMorphUrgentAssets(ids)
+            }
             morphPreparationCache.publish(token, pairs)
         }
     }

@@ -1,5 +1,9 @@
 # `MediaGridResidentCanvas.kt`
 
+## 2026-08-09 Phase 1 TEST_HARNESS counters
+
+- The TEST_HARNESS trace counts lightweight viewport signatures and the heavy Morph capture, row-pair, urgent-request, PreviewPreloader reconcile, and exact-target-index paths. The continuous fling regression requires only lightweight signatures during motion and zero heavy-path activity.
+
 ## 2026-08-08 allocation-free normal draw
 
 - unified single surfaceのNormal／Reveal drawは、`devenv`のresident Canvasと同様にdraw時の`LazyGridLayoutInfo`を直接走査する。scrollごとの`MediaGridResidentDrawCommand` list／object生成は行わない。

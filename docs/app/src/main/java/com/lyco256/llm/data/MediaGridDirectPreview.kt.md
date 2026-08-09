@@ -1,5 +1,9 @@
 # `MediaGridDirectPreview.kt`
 
+## 2026-08-09 resident preloader boundary
+
+- `MediaGridPreviewPreloader` remains a fallback-only component. Resident production uses the retained image store and does not reconcile the full frame dataset during scroll; fallback reconciliation is limited to visible media ordinals.
+
 ## 第14実装
 
 候補順は有効raw slot→永続JPEG→local WebP→preview URL→remote URL→重複しないdisplayです。raw metadata検査とsource freshness確認はIO上のprepared metadata作成時に行い、Composableではpackを開きません。

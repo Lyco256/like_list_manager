@@ -310,7 +310,6 @@ internal data class MediaGridMorphPlan(
 internal data class MediaGridMorphPreparationToken(
     val generation: Long,
     val identity: MediaGridMorphPreparationIdentity,
-    val preparedIndexVersion: Long,
 )
 
 /**
@@ -324,29 +323,39 @@ internal class MediaGridMorphPreparationCache {
     private val _publishedVersion = MutableStateFlow(0L)
     val publishedVersion = _publishedVersion
     private var lastRequestedIdentity: MediaGridMorphPreparationIdentity? = null
-    private var lastRequestedPreparedIndexVersion: Long = Long.MIN_VALUE
+    private var lastUrgentIdentity: MediaGridMorphPreparationIdentity? = null
+    private var lastUrgentAssetIds = LongArray(0)
 
     @Synchronized
     fun request(
         identity: MediaGridMorphPreparationIdentity,
         isScrollInProgress: Boolean,
         isPointerInProgress: Boolean,
-        preparedIndexVersion: Long = 0L,
     ): MediaGridMorphPreparationToken? {
         if (
             isScrollInProgress ||
-                isPointerInProgress ||
-                (identity == lastRequestedIdentity && preparedIndexVersion == lastRequestedPreparedIndexVersion)
+            isPointerInProgress ||
+                identity == lastRequestedIdentity
         ) return null
         val token = MediaGridMorphPreparationToken(
             generation = nextGeneration.incrementAndGet(),
             identity = identity,
-            preparedIndexVersion = preparedIndexVersion,
         )
         lastRequestedIdentity = identity
-        lastRequestedPreparedIndexVersion = preparedIndexVersion
         latestToken.set(token)
         return token
+    }
+
+    @Synchronized
+    fun requestUrgentAssetsIfChanged(
+        identity: MediaGridMorphPreparationIdentity,
+        assetIds: LongArray,
+    ): LongArray? {
+        val normalized = assetIds.distinct().sorted().toLongArray()
+        if (identity == lastUrgentIdentity && normalized.contentEquals(lastUrgentAssetIds)) return null
+        lastUrgentIdentity = identity
+        lastUrgentAssetIds = normalized
+        return normalized
     }
 
     @Synchronized
@@ -593,6 +602,7 @@ internal fun captureMediaGridMorphInput(
     fallbackHeaderHeightPx: Float,
     preparedIndex: MediaGridResidentCanvasPreparedIndex? = null,
 ): MediaGridMorphCapture? {
+    if (BuildConfig.TEST_HARNESS) MediaGridMorphTestTrace.recordFullMorphCapture()
     val signature = buildMediaGridViewportSignature(layoutInfo, frame, columnCount)
     if (
         signature.firstVisibleMediaOrdinal < 0 ||
@@ -930,14 +940,18 @@ internal fun mediaGridMorphOrdinalRange(
 /** Pure Default-dispatcher builder shared by production and tests. */
 internal fun buildMediaGridMorphPreparedPairs(
     capture: MediaGridMorphCapture,
-): Map<MediaGridMorphDirection, MediaGridMorphPreparedPair> =
-    buildMediaGridMorphPreparedPairsInternal(capture, includeLegacyGeometry = true)
+): Map<MediaGridMorphDirection, MediaGridMorphPreparedPair> {
+    if (BuildConfig.TEST_HARNESS) MediaGridMorphTestTrace.recordMorphPairBuild()
+    return buildMediaGridMorphPreparedPairsInternal(capture, includeLegacyGeometry = true)
+}
 
 /** TEST_HARNESS row-reflow pair builder; no generic dataset slot geometry is created. */
 internal fun buildMediaGridMorphRowPreparedPairs(
     capture: MediaGridMorphCapture,
-): Map<MediaGridMorphDirection, MediaGridMorphPreparedPair> =
-    buildMediaGridMorphPreparedPairsInternal(capture, includeLegacyGeometry = false)
+): Map<MediaGridMorphDirection, MediaGridMorphPreparedPair> {
+    if (BuildConfig.TEST_HARNESS) MediaGridMorphTestTrace.recordMorphPairBuild()
+    return buildMediaGridMorphPreparedPairsInternal(capture, includeLegacyGeometry = false)
+}
 
 private fun buildMediaGridMorphPreparedPairsInternal(
     capture: MediaGridMorphCapture,
