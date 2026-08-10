@@ -128,6 +128,7 @@ internal data class MediaGridMorphCandidate(
     val initialDistance: Float,
     val initialCentroid: Offset,
     val generation: Long,
+    val initialViewportState: MediaGridMorphCandidateViewportState? = null,
     val claimBundle: MediaGridMorphClaimBundle? = null,
     val claimFirstPosition: Offset? = null,
     val claimSecondPosition: Offset? = null,
@@ -935,6 +936,7 @@ internal fun Modifier.mediaGridMorphGestureInput(
     fallbackColumnCount: () -> Int = { identity?.currentColumnCount ?: 0 },
     fallbackAnchorAtCenter: (Offset) -> ClassifiedMediaGridScrollAnchor? = { null },
     pointerInProgress: MutableStateFlow<Boolean>? = null,
+    candidateViewportState: (() -> MediaGridMorphCandidateViewportState?)? = null,
     prepareClaimBundle: ((MediaGridMorphCandidate) -> MediaGridMorphClaimPreparationResult)? = null,
     captureOnClaim: (() -> MediaGridMorphCapture?)? = null,
     isPairReady: (MediaGridMorphPreparedPair) -> Boolean = { true },
@@ -955,6 +957,7 @@ internal fun Modifier.mediaGridMorphGestureInput(
     val latestClaimFailureReason by rememberUpdatedState(claimFailureReason)
     val latestMorphClaimAssets by rememberUpdatedState(onMorphClaimAssets)
     val latestPrepareClaimBundle by rememberUpdatedState(prepareClaimBundle)
+    val latestCandidateViewportState by rememberUpdatedState(candidateViewportState)
     val touchSlop = LocalViewConfiguration.current.touchSlop
     return pointerInput(mode, controller) {
         coroutineScope {
@@ -1066,6 +1069,7 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                 initialDistance = initialDistance,
                                 initialCentroid = midpoint(firstPressed.position, secondPressed.position),
                                 generation = nextCandidateGeneration,
+                                initialViewportState = latestCandidateViewportState?.invoke(),
                             )
                             // Claim preparation is intentionally deferred until
                             // the direction threshold is crossed. At that point
@@ -1179,7 +1183,13 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                     // fallback, but it must not authorize a
                                     // Morph claim when a production preparer
                                     // is available; never claim a stale bundle.
-                                    val cachedPairs = latestPairs()
+                                    val cachedPairs = if (
+                                        mode == MediaGridMorphGestureMode.Production && latestPrepareClaimBundle != null
+                                    ) {
+                                        emptyMap()
+                                    } else {
+                                        latestPairs()
+                                    }
                                     val productionClaimAllowed = if (mode != MediaGridMorphGestureMode.Production) {
                                         true
                                     } else if (latestPrepareClaimBundle != null) {
@@ -1223,7 +1233,8 @@ internal fun Modifier.mediaGridMorphGestureInput(
                                     } else null
                                     val claimIdentity = claimBundle?.identity ?: claimCapture?.identity?.toInteractionIdentity() ?: latestIdentity
                                     val claimBundleIdentityMatches = claimBundle != null && (
-                                        mediaGridMorphClaimBundleMatchesIdentity(claimBundle, latestIdentity)
+                                        claimPreparation is MediaGridMorphClaimPreparationResult.Ready ||
+                                            mediaGridMorphClaimBundleMatchesIdentity(claimBundle, latestIdentity)
                                     )
                                     val availablePairs = when {
                                         claimBundle != null -> claimBundle.directions.mapValues { it.value.plan.preparedPair }

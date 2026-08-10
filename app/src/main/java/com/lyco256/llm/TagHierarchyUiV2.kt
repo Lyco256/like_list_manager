@@ -3777,7 +3777,12 @@ private fun ClassifiedMediaGridContent(
             )
         }
     } else null
-    val morphPreparationCache = remember(state) { MediaGridMorphPreparationCache() }
+    val morphPreparationCache = remember(state, frame.key, columnCount, selectionMode, showProgress) {
+        MediaGridMorphPreparationCache()
+    }
+    DisposableEffect(morphPreparationCache) {
+        onDispose { morphPreparationCache.invalidate() }
+    }
     val morphPairVersion by morphPreparationCache.publishedVersion.collectAsState()
     val morphPointerInProgress = remember(state) { MutableStateFlow(false) }
     val fallbackMorphHeaderHeightPx = with(LocalDensity.current) { 40.dp.toPx() }
@@ -3813,16 +3818,16 @@ private fun ClassifiedMediaGridContent(
         if (residentPreparedIndex == null) {
             emptyMap()
         } else {
-            morphPreparationCache.snapshot().filterValues { pair ->
+            morphPreparationCache.preparedPairsSnapshot().filterValues { pair ->
                 pair.matchesIdentity(morphIdentity)
             }
         }
     }
-    val morphPairsForTextResources = remember(morphPairVersion, morphIdentity) {
-        morphPreparationCache.snapshot().filterValues { it.matchesIdentity(morphIdentity) }
+    val morphStableSnapshotForText = remember(morphPairVersion, morphIdentity) {
+        morphPreparationCache.snapshot()?.takeIf { it.identity.toInteractionIdentity() == morphIdentity }
     }
     val morphTextResourceIndex = rememberMediaGridMorphTextResourceIndex(
-        pairs = morphPairsForTextResources,
+        requiredTitles = morphStableSnapshotForText?.requiredHeaderTitles.orEmpty(),
         viewportWidthPx = morphIdentity.viewportSignature.viewportWidthPx,
     )
     val morphInteractionLocked = morphController?.interactionLocked?.value == true
@@ -3872,7 +3877,7 @@ private fun ClassifiedMediaGridContent(
                         columnCount = columnCount,
                     )
                 }.distinctUntilChanged().collect { anchor ->
-                    morphPreparationCache.cancelInFlight()
+                    morphPreparationCache.invalidate()
                     viewportAnchorFlow.value = anchor
                     effectiveController?.updateViewport(anchor.toAnchor())
                 }
@@ -3890,12 +3895,14 @@ private fun ClassifiedMediaGridContent(
         columnCount,
         morphPreparationCache,
         morphPointerInProgress,
+        morphEnabled,
     ) {
         combine(
             viewportAnchorFlow,
             snapshotFlow { state.isScrollInProgress }.distinctUntilChanged(),
             morphPointerInProgress,
-        ) { signature, isScrollInProgress, pointerInProgress ->
+            morphPreparationCache.invalidationVersion,
+        ) { signature, isScrollInProgress, pointerInProgress, invalidationVersion ->
             signature
                 ?.takeIf {
                     it.firstVisibleMediaOrdinal >= 0 &&
@@ -3903,15 +3910,21 @@ private fun ClassifiedMediaGridContent(
                         it.viewportWidthPx > 0 &&
                         it.viewportHeightPx > 0
                 }
-                ?.takeUnless { isScrollInProgress || pointerInProgress }
-        }.distinctUntilChanged().collectLatest { signature ->
-            if (signature == null) return@collectLatest
+                ?.takeUnless { isScrollInProgress || pointerInProgress || !morphEnabled }
+                ?.let { it to invalidationVersion }
+        }.distinctUntilChanged().collectLatest { trigger ->
+            val signature = trigger?.first ?: return@collectLatest
+            // Require a short quiet window before doing stable-idle work. A
+            // pointer-down can precede LazyGrid's scroll flag by a frame.
+            kotlinx.coroutines.delay(32L)
+            if (state.isScrollInProgress || morphPointerInProgress.value) return@collectLatest
+            val preparedIndexAtCapture = residentPreparedIndex ?: return@collectLatest
             val capture = captureMediaGridMorphInput(
                 frame = frame,
                 layoutInfo = state.layoutInfo,
                 columnCount = columnCount,
                 fallbackHeaderHeightPx = fallbackMorphHeaderHeightPx,
-                preparedIndex = residentPreparedIndex,
+                preparedIndex = preparedIndexAtCapture,
             ) ?: return@collectLatest
             val captureIdentity = capture.identity
             morphViewportSignatureState.value = captureIdentity.viewportSignature
@@ -3921,17 +3934,33 @@ private fun ClassifiedMediaGridContent(
                 columnCount = captureIdentity.columnCount,
                 viewportSignature = captureIdentity.viewportSignature,
             )
+            val sourceViewportAnchor = MediaGridMorphSourceViewportAnchor(
+                firstVisibleItemIndex = state.firstVisibleItemIndex,
+                firstVisibleItemScrollOffset = state.firstVisibleItemScrollOffset,
+            )
+            val lightweightSignature = buildMediaGridViewportAnchorSignature(
+                layout = state.layoutInfo,
+                frame = frame,
+                columnCount = columnCount,
+            )
+            if (lightweightSignature != signature) return@collectLatest
             val token = morphPreparationCache.request(
                 identity = identity,
                 isScrollInProgress = false,
                 isPointerInProgress = false,
+                sourceViewportAnchor = sourceViewportAnchor,
+                lightweightViewportSignature = lightweightSignature,
             ) ?: return@collectLatest
-            val pairs = withContext(Dispatchers.Default) {
-                buildMediaGridMorphRowPreparedPairs(capture)
+            val snapshot = withContext(Dispatchers.Default) {
+                val pairs = buildMediaGridMorphRowPreparedPairs(capture)
+                buildMediaGridMorphStableIdleReadySnapshot(
+                    token = token,
+                    capture = capture,
+                    pairs = pairs,
+                    preparedIndex = preparedIndexAtCapture,
+                )
             }
-            val requiredAssetIds = pairs.values
-                .flatMap { it.requiredMorphAssetIds().asIterable() }
-                .toLongArray()
+            if (snapshot == null) return@collectLatest
             // A preparation that started while idle may finish after a drag has
             // begun. Do not publish its urgent work into the scroll hot path.
             if (
@@ -3941,11 +3970,11 @@ private fun ClassifiedMediaGridContent(
             ) {
                 return@collectLatest
             }
-            morphPreparationCache.requestUrgentAssetsIfChanged(identity, requiredAssetIds)?.let { ids ->
+            morphPreparationCache.requestUrgentAssetsIfChanged(identity, snapshot.requiredAssetIds)?.let { ids ->
                 if (BuildConfig.TEST_HARNESS) MediaGridMorphTestTrace.recordMorphUrgentAssetRequest()
                 effectiveController?.requestMorphUrgentAssets(ids)
             }
-            morphPreparationCache.publish(token, pairs)
+            morphPreparationCache.publish(token, snapshot)
         }
     }
     LaunchedEffect(
@@ -3962,23 +3991,47 @@ private fun ClassifiedMediaGridContent(
         ) { isScrollInProgress, isPointerInProgress ->
             !isScrollInProgress && !isPointerInProgress
         }.first { it }
-        val preparedIndex = residentPreparedIndex ?: return@LaunchedEffect
-        val pairs = morphPreparationCache.snapshot()
-            .filterValues { it.matchesIdentity(morphIdentity) }
-        if (pairs.isEmpty()) return@LaunchedEffect
-        val failureReasons = pairs.mapNotNull { (direction, pair) ->
-            mediaGridMorphStableIdleFailureReason(pair, preparedIndex, morphTextResourceIndex)
-                ?.let { reason -> "$direction:$reason" }
+        if (
+            state.isScrollInProgress ||
+            morphPointerInProgress.value ||
+            morphController?.snapshotState?.value?.phase != MediaGridMorphPhase.Idle
+        ) {
+            return@LaunchedEffect
         }
-        if (failureReasons.isEmpty()) morphHost?.releaseCarryoverAfterStableIdleReady()
+        val preparedIndex = residentPreparedIndex ?: return@LaunchedEffect
+        val snapshot = morphPreparationCache.snapshot()
+            ?.takeIf { it.identity.toInteractionIdentity() == morphIdentity }
+            ?: return@LaunchedEffect
+        val readiness = mediaGridMorphResourceReadiness(
+            requiredAssetIds = snapshot.requiredAssetIds,
+            requiredTitles = snapshot.requiredHeaderTitles,
+            preparedIndex = preparedIndex,
+            textResources = morphTextResourceIndex,
+        )
+        if (
+            snapshot.resourceReadiness.requiredAssetCount > 0 &&
+            snapshot.resourceReadiness.requiredAssetCount == snapshot.resourceReadiness.resolvedAssetCount &&
+            readiness.resolvedAssetCount < readiness.requiredAssetCount
+        ) {
+            morphPreparationCache.invalidate()
+            return@LaunchedEffect
+        }
+        val updated = morphPreparationCache.updateResourceReadiness(snapshot.generation, readiness)
+            ?: return@LaunchedEffect
+        val failureReasons = buildList {
+            if (!updated.geometryReady) add("GeometryIncomplete:stable-idle-snapshot")
+            readiness.firstMissingAssetId?.let { add("MissingSourceImage:asset=$it") }
+            readiness.firstMissingTitle?.let { add("MissingHeaderText:title=$it") }
+        }
+        if (updated.isStableIdleReady) morphHost?.releaseCarryoverAfterStableIdleReady()
         if (!BuildConfig.TEST_HARNESS) return@LaunchedEffect
         MediaGridMorphTestTrace.recordIdleReadiness(
             MediaGridMorphIdleReadinessObservation(
-                generation = morphPairVersion,
+                generation = updated.generation,
                 identity = morphIdentity,
-                directionCount = pairs.size,
-                readyDirectionCount = pairs.size - failureReasons.size,
-                ready = failureReasons.isEmpty() && pairs.isNotEmpty(),
+                directionCount = updated.directions.size,
+                readyDirectionCount = if (updated.isStableIdleReady) updated.directions.size else 0,
+                ready = updated.isStableIdleReady,
                 failureReasons = failureReasons,
             ),
         )
@@ -4005,30 +4058,77 @@ private fun ClassifiedMediaGridContent(
                                 onPinchFinished(anchor, nextColumnCount)
                             },
                             pointerInProgress = morphPointerInProgress,
-                            prepareClaimBundle = if (morphEnabled && residentPreparedIndex != null) {
-                                { candidate ->
-                                    val capture = captureMediaGridMorphInput(
-                                        frame = frame,
-                                        layoutInfo = state.layoutInfo,
-                                        columnCount = columnCount,
-                                        fallbackHeaderHeightPx = fallbackMorphHeaderHeightPx,
-                                        preparedIndex = residentPreparedIndex,
-                                    )
-                                    val claimIdentity = capture?.identity?.toInteractionIdentity() ?: morphIdentity
-                                    morphController?.updateIdentity(claimIdentity)
-                                    prepareMediaGridMorphClaim(
-                                        capture = capture,
-                                        preparedPairsSnapshot = morphPreparationCache.snapshot(),
-                                        preparedIndex = residentPreparedIndex,
-                                        textResources = morphTextResourceIndex,
-                                        candidate = candidate,
-                                        requestedDirection = candidate.claimDirection,
-                                        latestIdentity = claimIdentity,
+                            candidateViewportState = if (morphEnabled) {
+                                {
+                                    MediaGridMorphCandidateViewportState(
                                         sourceViewportAnchor = MediaGridMorphSourceViewportAnchor(
                                             firstVisibleItemIndex = state.firstVisibleItemIndex,
                                             firstVisibleItemScrollOffset = state.firstVisibleItemScrollOffset,
                                         ),
+                                        lightweightViewportSignature = buildMediaGridViewportAnchorSignature(
+                                            layout = state.layoutInfo,
+                                            frame = frame,
+                                            columnCount = columnCount,
+                                        ),
                                     )
+                                }
+                            } else null,
+                            prepareClaimBundle = if (morphEnabled && residentPreparedIndex != null) {
+                                { candidate ->
+                                    val currentViewportState = MediaGridMorphCandidateViewportState(
+                                        sourceViewportAnchor = MediaGridMorphSourceViewportAnchor(
+                                            firstVisibleItemIndex = state.firstVisibleItemIndex,
+                                            firstVisibleItemScrollOffset = state.firstVisibleItemScrollOffset,
+                                        ),
+                                        lightweightViewportSignature = buildMediaGridViewportAnchorSignature(
+                                            layout = state.layoutInfo,
+                                            frame = frame,
+                                            columnCount = columnCount,
+                                        ),
+                                    )
+                                    val fast = prepareMediaGridMorphStableIdleClaim(
+                                        snapshot = morphPreparationCache.snapshot(),
+                                        currentFrameKey = frame.key,
+                                        currentColumnCount = columnCount,
+                                        currentViewportState = currentViewportState,
+                                        preparedIndex = residentPreparedIndex,
+                                        textResources = morphTextResourceIndex,
+                                        candidate = candidate,
+                                        requestedDirection = candidate.claimDirection,
+                                    )
+                                    if (fast != null) {
+                                        (fast as? MediaGridMorphClaimPreparationResult.Ready)?.bundle?.identity?.let {
+                                            morphController?.updateIdentity(it)
+                                        }
+                                        fast
+                                    } else {
+                                        if (BuildConfig.TEST_HARNESS) {
+                                            MediaGridMorphTestTrace.recordClaimLiveCaptureFallback()
+                                            MediaGridMorphTestTrace.recordClaimTimeFullCapture()
+                                        }
+                                        val capture = captureMediaGridMorphInput(
+                                            frame = frame,
+                                            layoutInfo = state.layoutInfo,
+                                            columnCount = columnCount,
+                                            fallbackHeaderHeightPx = fallbackMorphHeaderHeightPx,
+                                            preparedIndex = residentPreparedIndex,
+                                        )
+                                        val claimIdentity = capture?.identity?.toInteractionIdentity() ?: morphIdentity
+                                        morphController?.updateIdentity(claimIdentity)
+                                        prepareMediaGridMorphClaim(
+                                            capture = capture,
+                                            preparedPairsSnapshot = emptyMap(),
+                                            preparedIndex = residentPreparedIndex,
+                                            textResources = morphTextResourceIndex,
+                                            candidate = candidate,
+                                            requestedDirection = candidate.claimDirection,
+                                            latestIdentity = claimIdentity,
+                                            sourceViewportAnchor = MediaGridMorphSourceViewportAnchor(
+                                                firstVisibleItemIndex = state.firstVisibleItemIndex,
+                                                firstVisibleItemScrollOffset = state.firstVisibleItemScrollOffset,
+                                            ),
+                                        )
+                                    }
                                 }
                             } else null,
                             isPairReady = if (residentPreparedIndex != null) {

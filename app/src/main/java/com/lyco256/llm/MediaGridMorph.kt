@@ -93,6 +93,11 @@ internal data class MediaGridMorphSourceViewportAnchor(
     val firstVisibleItemScrollOffset: Int,
 )
 
+internal data class MediaGridMorphCandidateViewportState(
+    val sourceViewportAnchor: MediaGridMorphSourceViewportAnchor,
+    val lightweightViewportSignature: MediaGridViewportAnchorSignature,
+)
+
 /** One actual source row captured from LazyGridLayoutInfo at Morph claim. */
 internal data class MediaGridMorphCapturedRow(
     val visibleRow: Int,
@@ -310,7 +315,94 @@ internal data class MediaGridMorphPlan(
 internal data class MediaGridMorphPreparationToken(
     val generation: Long,
     val identity: MediaGridMorphPreparationIdentity,
+    val sourceViewportAnchor: MediaGridMorphSourceViewportAnchor? = null,
+    val lightweightViewportSignature: MediaGridViewportAnchorSignature? = null,
 )
+
+internal data class MediaGridMorphResourceReadiness(
+    val requiredAssetCount: Int,
+    val resolvedAssetCount: Int,
+    val firstMissingAssetId: Long?,
+    val requiredTitleCount: Int,
+    val resolvedTitleCount: Int,
+    val firstMissingTitle: String?,
+) {
+    val isReady: Boolean
+        get() = requiredAssetCount == resolvedAssetCount &&
+            requiredTitleCount == resolvedTitleCount
+
+    companion object {
+        val Empty = MediaGridMorphResourceReadiness(
+            requiredAssetCount = 0,
+            resolvedAssetCount = 0,
+            firstMissingAssetId = null,
+            requiredTitleCount = 0,
+            resolvedTitleCount = 0,
+            firstMissingTitle = null,
+        )
+    }
+}
+
+/** One immutable selected plan for one distinct visible source row. */
+internal data class MediaGridMorphPreparedFocalEntry(
+    val sourceRowKey: MediaGridMorphSourceRowKey,
+    val pinchYMinInclusive: Float,
+    val pinchYMaxExclusive: Float,
+    val plan: MediaGridMorphPlan,
+    val requiredRenderSet: MediaGridMorphRequiredRenderSet,
+    val requiredSourceAssetIds: LongArray,
+    val requiredTargetAssetIds: LongArray,
+    val requiredHeaderTitles: List<String>,
+    val geometryComplete: Boolean,
+    val sourceViewportComplete: Boolean,
+    val exactTargetRowId: Int?,
+    val exactTargetRowFirstItemIndex: Int?,
+    val exactTargetRowMediaOrdinals: IntArray,
+) {
+    val geometryReady: Boolean get() = geometryComplete && sourceViewportComplete
+}
+
+internal data class MediaGridMorphStableIdleDirectionSnapshot(
+    val direction: MediaGridMorphDirection,
+    val pair: MediaGridMorphPreparedPair,
+    val focalEntries: List<MediaGridMorphPreparedFocalEntry>,
+    val focalEntryUpperBounds: FloatArray,
+) {
+    /** Bounded primitive lookup; no row, plan, or RequiredRenderSet is rebuilt. */
+    fun focalEntryForPinchY(pinchY: Float): MediaGridMorphPreparedFocalEntry? {
+        if (!pinchY.isFinite() || focalEntries.isEmpty()) return null
+        var index = 0
+        while (index < focalEntryUpperBounds.size) {
+            if (pinchY < focalEntryUpperBounds[index]) return focalEntries.getOrNull(index)
+            index++
+        }
+        return focalEntries.lastOrNull()
+    }
+}
+
+/**
+ * The one bounded, non-Compose stable-idle cache entry for the current
+ * viewport. It owns immutable geometry and only copies membership state when
+ * resident images or measured titles become ready.
+ */
+internal data class MediaGridMorphStableIdleReadySnapshot(
+    val identity: MediaGridMorphPreparationIdentity,
+    val sourceViewportAnchor: MediaGridMorphSourceViewportAnchor,
+    val lightweightViewportSignature: MediaGridViewportAnchorSignature,
+    val capture: MediaGridMorphCapture,
+    val directions: Map<MediaGridMorphDirection, MediaGridMorphStableIdleDirectionSnapshot>,
+    val requiredAssetIds: LongArray,
+    val requiredHeaderTitles: List<String>,
+    val resourceReadiness: MediaGridMorphResourceReadiness,
+    val generation: Long,
+) {
+    val geometryReady: Boolean
+        get() = directions.isNotEmpty() && directions.values.all { direction ->
+            direction.focalEntries.isNotEmpty() && direction.focalEntries.all(MediaGridMorphPreparedFocalEntry::geometryReady)
+        }
+
+    val isStableIdleReady: Boolean get() = geometryReady && resourceReadiness.isReady
+}
 
 /**
  * Non-Compose cache. Publishing prepared pairs never invalidates the LazyGrid.
@@ -319,9 +411,11 @@ internal data class MediaGridMorphPreparationToken(
 internal class MediaGridMorphPreparationCache {
     private val nextGeneration = AtomicLong(0L)
     private val latestToken = AtomicReference<MediaGridMorphPreparationToken?>(null)
-    private val published = AtomicReference<Map<MediaGridMorphDirection, MediaGridMorphPreparedPair>>(emptyMap())
+    private val published = AtomicReference<MediaGridMorphStableIdleReadySnapshot?>(null)
     private val _publishedVersion = MutableStateFlow(0L)
     val publishedVersion = _publishedVersion
+    private val _invalidationVersion = MutableStateFlow(0L)
+    val invalidationVersion = _invalidationVersion
     private var lastRequestedIdentity: MediaGridMorphPreparationIdentity? = null
     private var lastPublishedIdentity: MediaGridMorphPreparationIdentity? = null
     private var lastUrgentIdentity: MediaGridMorphPreparationIdentity? = null
@@ -332,6 +426,8 @@ internal class MediaGridMorphPreparationCache {
         identity: MediaGridMorphPreparationIdentity,
         isScrollInProgress: Boolean,
         isPointerInProgress: Boolean,
+        sourceViewportAnchor: MediaGridMorphSourceViewportAnchor? = null,
+        lightweightViewportSignature: MediaGridViewportAnchorSignature? = null,
     ): MediaGridMorphPreparationToken? {
         if (
             isScrollInProgress ||
@@ -344,6 +440,8 @@ internal class MediaGridMorphPreparationCache {
         val token = MediaGridMorphPreparationToken(
             generation = nextGeneration.incrementAndGet(),
             identity = identity,
+            sourceViewportAnchor = sourceViewportAnchor,
+            lightweightViewportSignature = lightweightViewportSignature,
         )
         lastRequestedIdentity = identity
         latestToken.set(token)
@@ -368,28 +466,57 @@ internal class MediaGridMorphPreparationCache {
     }
 
     @Synchronized
+    fun invalidate() {
+        latestToken.set(null)
+        published.set(null)
+        lastRequestedIdentity = null
+        lastPublishedIdentity = null
+        lastUrgentIdentity = null
+        lastUrgentAssetIds = LongArray(0)
+        val generation = nextGeneration.incrementAndGet()
+        _publishedVersion.value = generation
+        _invalidationVersion.value = generation
+    }
+
+    @Synchronized
     fun isCurrent(token: MediaGridMorphPreparationToken): Boolean = latestToken.get() == token
 
     @Synchronized
     fun publish(
         token: MediaGridMorphPreparationToken,
-        pairs: Map<MediaGridMorphDirection, MediaGridMorphPreparedPair>,
+        snapshot: MediaGridMorphStableIdleReadySnapshot,
     ): Boolean {
         if (latestToken.get() != token) return false
-        if (pairs.values.any {
-                it.sourceRevision != token.identity.sourceRevision ||
-                    it.frameKey != token.identity.frameKey ||
-                    it.fromColumnCount != token.identity.columnCount ||
-                    it.viewportSignature != token.identity.viewportSignature
+        if (snapshot.generation != token.generation || snapshot.identity != token.identity) return false
+        if (snapshot.directions.values.any { directionSnapshot ->
+                val pair = directionSnapshot.pair
+                pair.sourceRevision != token.identity.sourceRevision ||
+                    pair.frameKey != token.identity.frameKey ||
+                    pair.fromColumnCount != token.identity.columnCount ||
+                    pair.viewportSignature != token.identity.viewportSignature
             }
         ) return false
-        published.set(pairs.toMap())
+        published.set(snapshot)
         lastPublishedIdentity = token.identity
         _publishedVersion.value = token.generation
         return true
     }
 
-    fun snapshot(): Map<MediaGridMorphDirection, MediaGridMorphPreparedPair> = published.get()
+    @Synchronized
+    fun updateResourceReadiness(
+        generation: Long,
+        readiness: MediaGridMorphResourceReadiness,
+    ): MediaGridMorphStableIdleReadySnapshot? {
+        val current = published.get()?.takeIf { it.generation == generation } ?: return null
+        val updated = current.copy(resourceReadiness = readiness)
+        published.set(updated)
+        return updated
+    }
+
+    fun snapshot(): MediaGridMorphStableIdleReadySnapshot? = published.get()
+
+    fun preparedPairsSnapshot(): Map<MediaGridMorphDirection, MediaGridMorphPreparedPair> =
+        published.get()?.directions?.mapValues { it.value.pair }.orEmpty()
 }
 
 internal fun MediaGridMorphPreparedPair.matchesIdentity(

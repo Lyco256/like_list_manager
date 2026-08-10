@@ -1,6 +1,13 @@
 # `TagHierarchyUiV2.kt`
 
-## 2026-08-10 cached claim and bounded text
+## 2026-08-10 Stable-idle Ready Snapshot integration
+
+- idle capture後にdirection pair、visible focal-row entry、RequiredRenderSet、required Asset/title unionを一つのSnapshotとしてbackground構築し、現在viewport一件だけをpublishする。
+- `drawIndexVersion`／text resource更新effectはSnapshotのrequired union membershipだけを更新する。Ready追加ではgeometry cacheを破棄せず、ready済みrequired sourceが消えた明示invalidated状態ではSnapshotを破棄してidle再準備する。
+- production claimはcandidate/current/Snapshotのframe・data・column・viewport・first index・scroll offset・lightweight signature一致時にfast pathを使い、`captureMediaGridMorphInput()`を呼ばない。不一致時だけlive captureし、requested direction一件を安全に構築する。
+- Morph header textはSnapshotのrequired title unionから準備し、pairsやframe全体を再走査しない。
+
+## 2026-08-10 cached pair claim（Phase 2履歴）
 
 - Production claimはlive capture identityを検証し、`MediaGridMorphPreparationCache`のselected pairを`prepareMediaGridMorphClaim`へ渡す。
 - Morph header textはcurrent bounded pairsから収集し、`frame.items`全体のheader titleを計測しない。
@@ -9,8 +16,9 @@
 
 - Normal scroll publishes only the primitive viewport anchor signature. Detailed Morph geometry, row pairs, required assets, exact target indexes, and header resources are prepared after scroll/pointer idle.
 - Resident production does not retain `MediaGridPreviewPreloader`; the fallback preloader, when enabled, derives visible item indexes from the bounded ordinal range rather than filtering the full frame dataset.
-- Morph readiness may re-evaluate against a newer resident draw publication only after scroll/pointer idle, and the same idle preparation identity does not rebuild geometry.
+- Morph readiness may re-evaluate against a newer resident draw publication only after a short scroll/pointer quiet window and while the Morph controller is Idle; the same idle preparation identity does not rebuild geometry.
 - Stale Morph preparation is invalidated when the lightweight anchor moves, preventing delayed urgent requests or pair publication from crossing into a new scroll sequence.
+- The current viewport snapshot is explicitly invalidated on anchor changes and composition disposal.
 
 ## 2026-08-08 media-grid shared viewport hot path
 

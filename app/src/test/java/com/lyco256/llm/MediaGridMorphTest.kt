@@ -773,14 +773,165 @@ class MediaGridMorphTest {
         val cache = MediaGridMorphPreparationCache()
         val oldCapture = capture(columns = 4, count = 20)
         val newCapture = capture(columns = 4, count = 20, firstVisibleOrdinal = 1)
-        val oldToken = cache.request(oldCapture.identity, false, false)!!
-        val newToken = cache.request(newCapture.identity, false, false)!!
+        fun lightweight(capture: MediaGridMorphCapture) = capture.identity.viewportSignature.let { signature ->
+            MediaGridViewportAnchorSignature(
+                renderKey = signature.renderKey,
+                firstVisibleItemIndex = signature.firstVisibleItemIndex,
+                lastVisibleItemIndex = signature.lastVisibleItemIndex,
+                firstVisibleMediaOrdinal = signature.firstVisibleMediaOrdinal,
+                lastVisibleMediaOrdinal = signature.lastVisibleMediaOrdinal,
+                viewportWidthPx = signature.viewportWidthPx,
+                viewportHeightPx = signature.viewportHeightPx,
+                cellSizePx = signature.cellSizePx,
+                columnCount = signature.columnCount,
+            )
+        }
+        val anchor = MediaGridMorphSourceViewportAnchor(0, 0)
+        val oldToken = cache.request(
+            oldCapture.identity,
+            false,
+            false,
+            anchor,
+            lightweight(oldCapture),
+        )!!
+        val newToken = cache.request(
+            newCapture.identity,
+            false,
+            false,
+            anchor,
+            lightweight(newCapture),
+        )!!
+        assertFalse(cache.isCurrent(oldToken))
+        assertTrue(cache.isCurrent(newToken))
+    }
 
-        assertFalse(cache.publish(oldToken, buildMediaGridMorphPreparedPairs(oldCapture)))
-        assertTrue(cache.publish(newToken, buildMediaGridMorphPreparedPairs(newCapture)))
-        assertEquals(
-            1,
-            cache.snapshot().values.first().viewportSignature.firstVisibleMediaOrdinal,
+    @Test
+    fun stableIdleSnapshotKeepsOnePreparedEntryPerVisibleRowAndPrimitiveYLookup() {
+        val captured = withSourceRows(capture(columns = 4, count = 20), 4)
+        val cache = MediaGridMorphPreparationCache()
+        val anchor = MediaGridMorphSourceViewportAnchor(0, 0)
+        val lightweight = lightweight(captured.identity)
+        val token = cache.request(captured.identity, false, false, anchor, lightweight)!!
+        val snapshot = buildMediaGridMorphStableIdleReadySnapshot(
+            token = token,
+            capture = captured,
+            pairs = buildMediaGridMorphRowPreparedPairs(captured),
+            preparedIndex = MediaGridResidentCanvasPreparedIndex(0L, emptyMap()),
+        )!!
+
+        assertTrue(cache.publish(token, snapshot))
+        assertEquals(1L, cache.snapshot()?.generation)
+        snapshot.directions.values.forEach { direction ->
+            val distinctRows = direction.pair.viewportPlanTemplate!!
+                .selectionIndex.actualVisibleSourceRows
+                .mapNotNull { it.rowKey }
+                .distinct()
+            assertEquals(distinctRows.size, direction.focalEntries.size)
+            direction.focalEntries.forEach { entry ->
+                val selected = direction.focalEntryForPinchY(entry.plan.viewportPlan!!.fixedFocalCenterY)
+                assertEquals(entry.sourceRowKey, selected?.sourceRowKey)
+                assertSame(entry.plan, selected?.plan)
+                assertSame(entry.requiredRenderSet, selected?.requiredRenderSet)
+            }
+        }
+        assertTrue(snapshot.requiredAssetIds.isNotEmpty())
+        assertTrue(snapshot.requiredAssetIds.size <= 4 * 12 * snapshot.directions.size)
+    }
+
+    @Test
+    fun resourceMembershipUpdateKeepsStableIdleGeometryObjects() {
+        val captured = withSourceRows(capture(columns = 4, count = 20), 4)
+        val cache = MediaGridMorphPreparationCache()
+        val token = cache.request(
+            captured.identity,
+            false,
+            false,
+            MediaGridMorphSourceViewportAnchor(0, 0),
+            lightweight(captured.identity),
+        )!!
+        val snapshot = buildMediaGridMorphStableIdleReadySnapshot(
+            token,
+            captured,
+            buildMediaGridMorphRowPreparedPairs(captured),
+            MediaGridResidentCanvasPreparedIndex(0L, emptyMap()),
+        )!!
+        assertTrue(cache.publish(token, snapshot))
+        val beforeDirection = snapshot.directions.values.first()
+        val beforeEntry = beforeDirection.focalEntries.first()
+        val readiness = mediaGridMorphResourceReadiness(
+            snapshot.requiredAssetIds,
+            snapshot.requiredHeaderTitles,
+            MediaGridResidentCanvasPreparedIndex(1L, emptyMap()),
+            textResources = null,
+            recordRecheck = false,
+        )
+        val updated = cache.updateResourceReadiness(snapshot.generation, readiness)!!
+
+        assertSame(snapshot.capture, updated.capture)
+        assertSame(beforeDirection, updated.directions.values.first())
+        assertSame(beforeEntry.plan, updated.directions.values.first().focalEntries.first().plan)
+        assertSame(beforeEntry.requiredRenderSet, updated.directions.values.first().focalEntries.first().requiredRenderSet)
+        assertEquals(snapshot.requiredAssetIds.size, updated.resourceReadiness.requiredAssetCount)
+        assertEquals(0, updated.resourceReadiness.resolvedAssetCount)
+    }
+
+    @Test
+    fun onePixelScrollOffsetRejectsStableIdleFastPathBeforeResourceWork() {
+        val captured = withSourceRows(capture(columns = 4, count = 20), 4)
+        val cache = MediaGridMorphPreparationCache()
+        val stableViewport = MediaGridMorphCandidateViewportState(
+            MediaGridMorphSourceViewportAnchor(0, 0),
+            lightweight(captured.identity),
+        )
+        val token = cache.request(
+            captured.identity,
+            false,
+            false,
+            stableViewport.sourceViewportAnchor,
+            stableViewport.lightweightViewportSignature,
+        )!!
+        val snapshot = buildMediaGridMorphStableIdleReadySnapshot(
+            token,
+            captured,
+            buildMediaGridMorphRowPreparedPairs(captured),
+            MediaGridResidentCanvasPreparedIndex(0L, emptyMap()),
+        )!!
+        val candidate = MediaGridMorphCandidate(
+            firstPointerId = 1L,
+            secondPointerId = 2L,
+            firstInitialPosition = Offset(100f, 100f),
+            secondInitialPosition = Offset(300f, 100f),
+            initialDistance = 200f,
+            initialCentroid = Offset(200f, 100f),
+            generation = 1L,
+            initialViewportState = stableViewport,
+            claimFirstPosition = Offset(120f, 100f),
+            claimSecondPosition = Offset(280f, 100f),
+            claimDirection = MediaGridMorphDirection.IncreaseColumns,
+        )
+        val textResources = MediaGridMorphTextResourceIndex(
+            identity = MediaGridMorphTextResourceIdentity(emptyList(), 1f, 1f, 1200),
+            layoutsByTitle = emptyMap(),
+            surfaceColor = Color.Transparent,
+            placeholderColor = Color.Transparent,
+            textColor = Color.Transparent,
+            horizontalTextPaddingPx = 0f,
+            verticalTextPaddingPx = 0f,
+        )
+
+        assertNull(
+            prepareMediaGridMorphStableIdleClaim(
+                snapshot = snapshot,
+                currentFrameKey = captured.identity.frameKey,
+                currentColumnCount = 4,
+                currentViewportState = stableViewport.copy(
+                    sourceViewportAnchor = stableViewport.sourceViewportAnchor.copy(firstVisibleItemScrollOffset = 1),
+                ),
+                preparedIndex = MediaGridResidentCanvasPreparedIndex(0L, emptyMap()),
+                textResources = textResources,
+                candidate = candidate,
+                requestedDirection = MediaGridMorphDirection.IncreaseColumns,
+            ),
         )
     }
 
@@ -2098,6 +2249,21 @@ class MediaGridMorphTest {
         )
         return MediaGridMorphPreparationIdentity(revision, frameKey, columns, signature)
     }
+
+    private fun lightweight(identity: MediaGridMorphPreparationIdentity): MediaGridViewportAnchorSignature =
+        identity.viewportSignature.let { signature ->
+            MediaGridViewportAnchorSignature(
+                renderKey = signature.renderKey,
+                firstVisibleItemIndex = signature.firstVisibleItemIndex,
+                lastVisibleItemIndex = signature.lastVisibleItemIndex,
+                firstVisibleMediaOrdinal = signature.firstVisibleMediaOrdinal,
+                lastVisibleMediaOrdinal = signature.lastVisibleMediaOrdinal,
+                viewportWidthPx = signature.viewportWidthPx,
+                viewportHeightPx = signature.viewportHeightPx,
+                cellSizePx = signature.cellSizePx,
+                columnCount = signature.columnCount,
+            )
+        }
 
     private fun headerBand(start: String?, end: String?) = MediaGridMorphHeaderBand(
         startKey = start,

@@ -1,5 +1,11 @@
 # `MediaGridMorphInteraction.kt`
 
+## 2026-08-10 candidate viewport identity
+
+- 二本指candidate開始時はsource anchorとlightweight viewport signatureだけを記録する。pointer downやcandidate phase自体はStable-idle snapshotを無効化しない。
+- claim時のanchor／signatureがcandidate開始時およびReady Snapshotと一致する場合だけfast pathを許可する。実scroll offsetが1pxでも変化した場合はlive capture fallbackへ進む。
+- production preparerがlive fallback identityを検証して返したReady bundleは、そのlive identityでcontrollerへatomic claimできる。
+
 ## 2026-08-10 locked production direction
 
 - Production claim後のgestureはselected pair/model一件だけを保持する。反対側へ戻ってもlocked directionのprogress 0を維持し、反対direction plan/modelを選択しない。

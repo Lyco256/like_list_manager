@@ -277,7 +277,13 @@ class MediaGridMorphLazyGridHandoffComposeTest {
                 val density = LocalDensity.current
                 MaterialTheme {
                     textResources = rememberMediaGridMorphTextResourceIndex(
-                        pairs = mapOf(fixture.direction to fixture.pair),
+                        requiredTitles = (
+                            fixture.pair.viewportPlanTemplate?.sourceHeaders.orEmpty().map { it.title } +
+                                fixture.pair.viewportPlanTemplate?.targetHeaders.orEmpty().map { it.title } +
+                                fixture.pair.headers.flatMap { listOfNotNull(it.startTitle, it.endTitle) }
+                            )
+                            .filter(String::isNotBlank)
+                            .distinct(),
                         viewportWidthPx = WidthPx,
                     )
                     LazyVerticalGrid(

@@ -1,5 +1,9 @@
 # `MediaGridMorphLazyGridHandoffComposeTest.kt`
 
+## 2026-08-10 Snapshot title resource input
+
+- production handoff fixtureはpair再走査APIではなく、bounded source/target header title unionをtext resource indexへ渡す。Morph geometry、handoff、viewport補正の期待値は変更しない。
+
 ## 2026-08-07 resident layout identity
 
 - The single-surface fixture supplies the same first-visible index/offset cache identity as production after the resident command invalidation fix.

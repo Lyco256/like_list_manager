@@ -1,5 +1,11 @@
 # MediaGridMorph.kt
 
+## 2026-08-10 Stable-idle Ready Snapshot
+
+- `MediaGridMorphStableIdleReadySnapshot`は現在viewport一件だけをNon-Compose cacheへ保持し、idle capture、source anchor、lightweight signature、direction pair、distinct visible rowごとのfocal entry、required Asset/title union、resource readiness、generationを一体化する。
+- focal entryはpinch Y境界、selected plan、RequiredRenderSet、required source/target Asset、header title、geometry/source completeness、exact target row identityを固定する。claimは`FloatArray`境界をprimitive loopし、planとRequiredRenderSetを再構築しない。
+- cacheはBitmapをcopyせず、過去viewport LRUやdataset件数比例の新規cacheを持たない。frame/data/column/viewport/scroll identity変更とrequired source invalidationで現在snapshotだけを破棄する。
+
 ## 2026-08-10 selected claim pair
 
 - Stable-idleで公開済みのidentity一致pairをproduction claimが直接使用する。cache不一致時だけ`buildMediaGridMorphRowPreparedPairForClaim`がrequested direction一件を再構築する。

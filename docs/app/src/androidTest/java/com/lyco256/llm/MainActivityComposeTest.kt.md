@@ -1,8 +1,14 @@
 # `app/src/androidTest/java/com/lyco256/llm/MainActivityComposeTest.kt`
 
-## 2026-08-10 production Morph claim/draw counters
+## 2026-08-10 production Stable-idle fast path counters
 
-- headerなし／あり4→5の既存代表gestureで、stable-idle後claim pair build 0、selected plan 1、RequiredRenderSet 1、selected direction model 1、反対direction model 0、claim text measure 0を確認する。
+- stable-idle後の代表4→5 claimはfast-path hit 1、live fallback／claim-time full capture 0、claim時pair／plan／RequiredRenderSet／text measure 0、selected direction render model 1を確認する。
+- missing required imageを同じidentityでReady公開した区間はresource membership recheckだけが増え、stable snapshot、focal entry、pair、plan、RequiredRenderSet、full captureが増えないことを確認する。
+- 既存の先頭one-finger overscroll→同一gesture二本指pinch回帰は実offsetが変わらないpointer状態だけではSnapshotを無効化せず、fast-path 1、live/full capture 0でMorphを継続することを確認する。実offset 1px差のstale拒否は`MediaGridMorphTest`で固定する。
+
+## 2026-08-10 production Morph claim/draw counters（Phase 2履歴）
+
+- headerなし／あり4→5の既存代表gestureで、Phase 2時点ではstable-idle後claim pair build 0、selected plan 1、RequiredRenderSet 1、selected direction model 1、反対direction model 0、claim text measure 0を確認していた。Phase 3の現行期待値は上記fast-path節を正とする。
 - 各Morph draw frameのcounter snapshotがclaim時から増えず、Rect/blend helper callが0のままであることを、既存のsource/target geometry・header Crossfade・exact handoff回帰と同時に検証する。
 
 ## 2026-08-09 continuous fling hot-path counters

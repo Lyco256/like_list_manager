@@ -510,6 +510,7 @@ class MainActivityComposeTest {
             }
         }
         assetIds.forEach { assertTrue(residentStore.hasEligibleDrawHandle(it)) }
+        waitForStableIdleReadiness(4)
 
         MediaGridMorphTestTrace.clear()
         var observationsBeforeUp = emptyList<MediaGridMorphDrawObservation>()
@@ -534,6 +535,14 @@ class MainActivityComposeTest {
         assertTrue(morphDraw.hasActiveRenderModel)
         assertTrue(morphDraw.protectedAssetCount > 0)
         assertTrue(morphDraw.progress > 0f)
+        val pointerOnlyClaimCounters = MediaGridMorphTestTrace.performanceCounters()
+        assertEquals(1, pointerOnlyClaimCounters.claimFastPathHits)
+        assertEquals(0, pointerOnlyClaimCounters.claimLiveCaptureFallbacks)
+        assertEquals(0, pointerOnlyClaimCounters.claimTimeFullCaptures)
+        assertEquals(0, pointerOnlyClaimCounters.claimPairBuilds)
+        assertEquals(0, pointerOnlyClaimCounters.selectedPlanBuilds)
+        assertEquals(0, pointerOnlyClaimCounters.requiredRenderSetBuilds)
+        assertEquals(1, pointerOnlyClaimCounters.renderModelBuilds)
         assertEquals(0, MediaGridMorphTestTrace.fallbackCount())
         assertEquals(4, mainViewModel().mediaGridSessionState.value.columnCount)
 
@@ -665,12 +674,27 @@ class MainActivityComposeTest {
             ),
         ).first()
         val missingCacheKey = mediaGridImageCacheKey(missingSource, 256, 256)
-        missingPreview.delete()
-        File(paths[missingIndex]).delete()
-        imageLoader.memoryCache?.remove(
-            coil.memory.MemoryCache.Key(missingCacheKey),
-        )
-        residentStore.invalidateAsset(missingAssetId)
+        fun removeMissingAsset() {
+            missingPreview.delete()
+            File(paths[missingIndex]).delete()
+            imageLoader.memoryCache?.remove(
+                coil.memory.MemoryCache.Key(missingCacheKey),
+            )
+            residentStore.invalidateAsset(missingAssetId)
+        }
+        fun restoreMissingAsset() {
+            File(paths[missingIndex]).writeBytes(
+                bitmapBytes(8, 8, android.graphics.Color.MAGENTA),
+            )
+            runBlocking { previewStore.generate(missingAssetId, File(paths[missingIndex])) { true } }
+            retainProductionMatrixAssets(
+                assetIds,
+                paths,
+                previewStore,
+                retainedIndices = assetIds.indices.toSet(),
+            )
+        }
+        removeMissingAsset()
 
         MediaGridMorphTestTrace.clear()
         waitForStableIdleReadinessFailure(
@@ -680,6 +704,28 @@ class MainActivityComposeTest {
                 MediaGridMorphClaimReadinessReason.MissingTargetImage,
             ),
         )
+        MediaGridMorphTestTrace.clear()
+        restoreMissingAsset()
+        waitForStableIdleReadiness(4)
+        val readyPublicationCounters = MediaGridMorphTestTrace.performanceCounters()
+        assertEquals(0, readyPublicationCounters.stableIdleSnapshotBuilds)
+        assertEquals(0, readyPublicationCounters.focalEntryBuilds)
+        assertEquals(0, readyPublicationCounters.claimPairBuilds)
+        assertEquals(0, readyPublicationCounters.selectedPlanBuilds)
+        assertEquals(0, readyPublicationCounters.requiredRenderSetBuilds)
+        assertTrue(readyPublicationCounters.resourceMembershipRechecks > 0)
+        assertEquals(0, MediaGridMorphTestTrace.fullMorphCaptureCount())
+        assertEquals(0, MediaGridMorphTestTrace.morphPairBuildCount())
+
+        removeMissingAsset()
+        waitForStableIdleReadinessFailure(
+            expectedColumnCount = 4,
+            expectedReasons = setOf(
+                MediaGridMorphClaimReadinessReason.MissingSourceImage,
+                MediaGridMorphClaimReadinessReason.MissingTargetImage,
+            ),
+        )
+        MediaGridMorphTestTrace.clear()
         var unavailableDraws = emptyList<MediaGridMorphDrawObservation>()
         pinchOnGrid(
             gridTag = "classified_media_grid",
@@ -700,17 +746,7 @@ class MainActivityComposeTest {
         assertTrue(MediaGridMorphTestTrace.fallbackCount() > 0)
         waitForGridColumnCount(5)
         waitForMorphCanvasRemoval()
-
-        File(paths[missingIndex]).writeBytes(
-            bitmapBytes(8, 8, android.graphics.Color.MAGENTA),
-        )
-        runBlocking { previewStore.generate(missingAssetId, File(paths[missingIndex])) { true } }
-        retainProductionMatrixAssets(
-            assetIds,
-            paths,
-            previewStore,
-            retainedIndices = assetIds.indices.toSet(),
-        )
+        restoreMissingAsset()
         waitForStableIdleReadiness(5)
         MediaGridMorphTestTrace.clear()
         var readyDraws = emptyList<MediaGridMorphDrawObservation>()
@@ -1033,9 +1069,8 @@ class MainActivityComposeTest {
         direction: MediaGridMorphDirection,
     ) {
         assertEquals(0, counters.claimPairBuilds)
-        assertEquals(1, counters.selectedPlanBuilds)
-        assertTrue("RequiredRenderSet must be built once or less: $counters", counters.requiredRenderSetBuilds <= 1)
-        assertEquals(1, counters.requiredRenderSetBuilds)
+        assertEquals(0, counters.selectedPlanBuilds)
+        assertEquals(0, counters.requiredRenderSetBuilds)
         assertEquals(1, counters.renderModelBuilds)
         when (direction) {
             MediaGridMorphDirection.IncreaseColumns -> {
@@ -1050,6 +1085,12 @@ class MainActivityComposeTest {
         assertEquals(0, counters.textLayoutMeasures)
         assertEquals(0, counters.drawRectHelperCalls)
         assertEquals(0, counters.drawBlendHelperCalls)
+        assertEquals(0, counters.stableIdleSnapshotBuilds)
+        assertEquals(0, counters.focalEntryBuilds)
+        assertEquals(1, counters.resourceMembershipRechecks)
+        assertEquals(1, counters.claimFastPathHits)
+        assertEquals(0, counters.claimLiveCaptureFallbacks)
+        assertEquals(0, counters.claimTimeFullCaptures)
     }
 
     private fun runProductionMorphReverseAtSameLocation(

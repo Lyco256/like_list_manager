@@ -109,6 +109,12 @@ internal data class MediaGridMorphPerformanceCounters(
     val textLayoutMeasures: Int,
     val drawRectHelperCalls: Int,
     val drawBlendHelperCalls: Int,
+    val stableIdleSnapshotBuilds: Int,
+    val focalEntryBuilds: Int,
+    val resourceMembershipRechecks: Int,
+    val claimFastPathHits: Int,
+    val claimLiveCaptureFallbacks: Int,
+    val claimTimeFullCaptures: Int,
 )
 
 internal object MediaGridMorphTestTrace {
@@ -135,6 +141,12 @@ internal object MediaGridMorphTestTrace {
     private val textLayoutMeasures = AtomicInteger()
     private val drawRectHelperCalls = AtomicInteger()
     private val drawBlendHelperCalls = AtomicInteger()
+    private val stableIdleSnapshotBuilds = AtomicInteger()
+    private val focalEntryBuilds = AtomicInteger()
+    private val resourceMembershipRechecks = AtomicInteger()
+    private val claimFastPathHits = AtomicInteger()
+    private val claimLiveCaptureFallbacks = AtomicInteger()
+    private val claimTimeFullCaptures = AtomicInteger()
     @Volatile private var fallbackCount = 0
     private var nextFrameNumber = 0L
 
@@ -162,6 +174,12 @@ internal object MediaGridMorphTestTrace {
         textLayoutMeasures.set(0)
         drawRectHelperCalls.set(0)
         drawBlendHelperCalls.set(0)
+        stableIdleSnapshotBuilds.set(0)
+        focalEntryBuilds.set(0)
+        resourceMembershipRechecks.set(0)
+        claimFastPathHits.set(0)
+        claimLiveCaptureFallbacks.set(0)
+        claimTimeFullCaptures.set(0)
         fallbackCount = 0
         nextFrameNumber = 0L
     }
@@ -272,6 +290,30 @@ internal object MediaGridMorphTestTrace {
         if (BuildConfig.TEST_HARNESS) drawBlendHelperCalls.incrementAndGet()
     }
 
+    fun recordStableIdleSnapshotBuild() {
+        if (BuildConfig.TEST_HARNESS) stableIdleSnapshotBuilds.incrementAndGet()
+    }
+
+    fun recordFocalEntryBuild() {
+        if (BuildConfig.TEST_HARNESS) focalEntryBuilds.incrementAndGet()
+    }
+
+    fun recordResourceMembershipRecheck() {
+        if (BuildConfig.TEST_HARNESS) resourceMembershipRechecks.incrementAndGet()
+    }
+
+    fun recordClaimFastPathHit() {
+        if (BuildConfig.TEST_HARNESS) claimFastPathHits.incrementAndGet()
+    }
+
+    fun recordClaimLiveCaptureFallback() {
+        if (BuildConfig.TEST_HARNESS) claimLiveCaptureFallbacks.incrementAndGet()
+    }
+
+    fun recordClaimTimeFullCapture() {
+        if (BuildConfig.TEST_HARNESS) claimTimeFullCaptures.incrementAndGet()
+    }
+
     fun recordMorphUrgentAssetRequest() {
         if (BuildConfig.TEST_HARNESS) morphUrgentAssetRequests.incrementAndGet()
     }
@@ -301,6 +343,12 @@ internal object MediaGridMorphTestTrace {
         textLayoutMeasures = textLayoutMeasures.get(),
         drawRectHelperCalls = drawRectHelperCalls.get(),
         drawBlendHelperCalls = drawBlendHelperCalls.get(),
+        stableIdleSnapshotBuilds = stableIdleSnapshotBuilds.get(),
+        focalEntryBuilds = focalEntryBuilds.get(),
+        resourceMembershipRechecks = resourceMembershipRechecks.get(),
+        claimFastPathHits = claimFastPathHits.get(),
+        claimLiveCaptureFallbacks = claimLiveCaptureFallbacks.get(),
+        claimTimeFullCaptures = claimTimeFullCaptures.get(),
     )
 }
 

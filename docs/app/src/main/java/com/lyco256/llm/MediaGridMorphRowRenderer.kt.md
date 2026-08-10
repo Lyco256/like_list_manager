@@ -1,5 +1,13 @@
 # `MediaGridMorphRowRenderer.kt`
 
+## 2026-08-10 Stable-idle claim fast path
+
+- stable idle時に各directionのdistinct visible source rowを一度だけplan選択し、RequiredRenderSet、geometry/source completeness、required Asset/titleを`MediaGridMorphPreparedFocalEntry`へ固定する。
+- prepared image／text更新時はSnapshotのbounded required unionだけをmembership確認し、pair、plan、RequiredRenderSet、source row、exact target indexを再構築しない。
+- identity一致claimはinitial pinch Yをprimitive lookupし、selected entryのresource membershipを最終確認してrender model一件だけを構築する。capture、pair build、plan select、RequiredRenderSet build、text measureは行わない。
+- text resource indexはReady Snapshotのrequired title unionだけを受け取り、pairs全体を再走査しない。同じtitle/style/width/density/fontScaleはComposeの既存rememberで再計測しない。
+- stale時は従来のlive captureからrequested direction一件だけを構築するfallbackを維持する。
+
 ## 2026-08-10 selected model and primitive draw
 
 - Production claimはcache pairのselected direction一件だけをplan化し、一つのRequiredRenderSetをcompleteness/model/protectionへ共有する。

@@ -2,6 +2,13 @@ Codexは通常、作業開始時に `CODEX_START.md` からこの文書へ来る
 
 この文書は、全体構成、現状の実装、変更目的別入口、個別docs一覧だけを担当する。禁止事項、完了報告、検証手順は置かない。
 
+## 2026-08-10 media-grid Stable-idle claim fast path
+
+- stable idle preparationはcapture、source anchor／lightweight signature、direction pair、visible focal-rowごとのselected plan／RequiredRenderSet、required Asset/title union、resource readinessを現在viewport一件の`MediaGridMorphStableIdleReadySnapshot`へまとめる。
+- prepared image／text Ready公開はbounded membershipだけを更新し、geometry、pair、plan、RequiredRenderSet、exact target indexを再構築しない。text measure対象はSnapshotのrequired title unionを正とする。
+- 通常claimはcandidate/current/Snapshotのframe・data・column・viewport・first index・scroll offset・lightweight signature一致後、pinch Yからcached focal entryをprimitive lookupする。full captureはstale時のrequested-direction live fallbackだけに残す。
+- TEST_HARNESSはsnapshot/focal/resource/fast/fallback/full-capture counterを記録し、stable-idle claimと同一identityのprepared Ready公開を区別する。
+
 ## 2026-08-10 media-grid Morph claim/draw hot path
 
 - Production claimはstable-idle cacheのidentity一致pairを再利用し、一gestureでlockしたdirection一件だけのplan、RequiredRenderSet、render model、Asset保護を構築する。live captureからのpair再構築はcache不一致時のselected directionだけに限定する。

@@ -1,5 +1,11 @@
 # `MediaGridMorphTest.kt`
 
+## 2026-08-10 Phase 3 Ready Snapshot contract
+
+- pure coverageはdistinct visible row一件ごとのfocal entry、pinch Y primitive lookup、plan／RequiredRenderSet identity再利用、bounded required Asset unionを固定する。
+- resource readiness copy後もcapture、direction snapshot、focal entry、plan、RequiredRenderSetが同一objectであることを確認し、membership更新がgeometryを再構築しない契約を固定する。
+- Stable-idle anchorからscroll offsetだけを1px変えたclaimはresource処理前にfast pathを拒否し、live fallback対象になる。
+
 ## 2026-08-09 Phase 1 preparation cache contract
 
 - The preparation-cache test verifies urgent asset requests are stable-set deduplicated per preparation identity and reissued only when the asset set or identity changes.
