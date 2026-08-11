@@ -2,6 +2,11 @@
 
 最初に確認するもの:
 
+文書の使い分け:
+
+* 現在の実装を把握する: `SOURCE_FILES.md`、対象ソース、対応する `docs/`、必要に応じて `GOALS.md` と `TEST_REQUIREMENTS_COVERAGE.md`
+* 実装順序、ブランチ、当時の要件・意図、廃止経路、過去の検証記録を確認する: `ARCHIVE.md`（通常の作業では読まない）
+
 ```powershell
 git status --short --branch
 git log -1 --oneline
@@ -27,6 +32,6 @@ git diff -- <path>
 * テスト追加・修正: 対象機能docs → 既存テスト → 必要な場合だけ `TEST_REQUIREMENTS_COVERAGE.md`
 * build、test、lint、実機上書き: `SAFE_DEBUG_ROUTINE.md`
 * 実機統合テスト、安全境界、実機データ保護: `SAFE_DEBUG_ROUTINE.md` と `TEST_REQUIREMENTS_COVERAGE.md`
-* 古い設計経緯や将来案: 必要な場合だけ `LikeTagger_requirements.md`
+* 古い設計経緯や将来案: 必要な場合だけ `ARCHIVE.md`
 
 ソースを触る時だけ、対応する `docs/<source path>.md` と実ソースを読む。関連docsは、実際に影響する場合だけ読む。
