@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -34,6 +36,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
@@ -71,6 +74,7 @@ import androidx.compose.material.icons.outlined.Input
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -111,6 +115,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -186,12 +191,22 @@ internal const val ClassifiedMediaGridMaxColumnCount = 12
 internal const val ClassifiedMediaGridDefaultColumnCount = 4
 private const val ClassifiedMediaGridPinchScaleStep = 1.12f
 private const val ClassifiedMediaGridToolbarZIndex = 1f
+private val TagManagementRowSpacing = 8.dp
+private val TagManagementRowHalfSpacing = 4.dp
+private val TagManagementIndentWidth = 14.dp
 
 internal data class VisibleTagRow(
     val node: TagTreeNode,
     val depth: Int,
     val parentGroupId: Long?,
     val indexInParent: Int,
+    val guideSegments: List<TagTreeGuideSegment> = emptyList(),
+)
+
+internal data class TagTreeGuideSegment(
+    val ancestorDepth: Int,
+    val connectsAbove: Boolean,
+    val connectsBelow: Boolean,
 )
 
 internal sealed interface TagListItem {
@@ -209,6 +224,7 @@ internal sealed interface TagListItem {
         val index: Int,
         val depth: Int,
         val heightPx: Float,
+        val guideSegments: List<TagTreeGuideSegment> = emptyList(),
     ) : TagListItem {
         override val key: String = "drag-placeholder:${parentGroupId ?: "root"}:$index"
     }
@@ -240,27 +256,115 @@ private data class ScrollAnchor(
     val offset: Int,
 )
 
+internal data class ClipTagDraftState(
+    val persistedTagIds: Set<Long>,
+    val draftTagIds: Set<Long> = persistedTagIds,
+    val isApplying: Boolean = false,
+    val errorMessage: String? = null,
+    private val awaitingPersistedTagIds: Set<Long>? = null,
+) {
+    val isDirty: Boolean get() = draftTagIds != persistedTagIds
+    val canApply: Boolean get() = isDirty && !isApplying
+
+    fun edit(tagIds: Set<Long>): ClipTagDraftState = copy(
+        draftTagIds = tagIds,
+        errorMessage = null,
+    )
+
+    fun beginApply(): ClipTagDraftState = if (canApply) {
+        copy(isApplying = true, errorMessage = null)
+    } else {
+        this
+    }
+
+    fun applySucceeded(): ClipTagDraftState {
+        val committedTagIds = draftTagIds
+        return copy(
+            persistedTagIds = committedTagIds,
+            isApplying = false,
+            errorMessage = null,
+            awaitingPersistedTagIds = committedTagIds.takeIf { persistedTagIds != committedTagIds },
+        )
+    }
+
+    fun applyFailed(message: String?): ClipTagDraftState = copy(
+        isApplying = false,
+        errorMessage = message ?: "タグの適用に失敗しました",
+    )
+
+    fun reconcilePersisted(tagIds: Set<Long>): ClipTagDraftState {
+        val awaiting = awaitingPersistedTagIds
+        if (awaiting != null) {
+            return if (tagIds == awaiting) {
+                copy(
+                    persistedTagIds = tagIds,
+                    awaitingPersistedTagIds = null,
+                )
+            } else {
+                this
+            }
+        }
+        if (tagIds == persistedTagIds) return this
+        return if (isDirty || isApplying) {
+            copy(persistedTagIds = tagIds)
+        } else {
+            copy(persistedTagIds = tagIds, draftTagIds = tagIds)
+        }
+    }
+
+    companion object {
+        fun fromPersisted(tagIds: Set<Long>): ClipTagDraftState = ClipTagDraftState(tagIds)
+    }
+}
+
+internal fun reconcileClipTagDrafts(
+    drafts: Map<Long, ClipTagDraftState>,
+    persistedTagIdsByClip: Map<Long, Set<Long>>,
+): Map<Long, ClipTagDraftState> = persistedTagIdsByClip.mapValues { (clipId, persistedTagIds) ->
+    drafts[clipId]?.reconcilePersisted(persistedTagIds)
+        ?: ClipTagDraftState.fromPersisted(persistedTagIds)
+}
+
 @Composable
 fun EnhancedClipListScreen(
     title: String,
     clips: List<ClipWithDetails>,
     hierarchy: TagHierarchy,
+    authorSavedCountByAuthor: Map<TweetAuthorKey, Int> = emptyMap(),
     emptyText: String,
     listState: LazyListState,
     modifier: Modifier = Modifier,
+    isInitialLoading: Boolean = false,
     requireTagConfirmation: Boolean = false,
     onTagsChange: (ClipEntity, Set<Long>) -> Unit,
+    onTagsApply: (ClipEntity, Set<Long>, (String?) -> Unit) -> Unit = { clip, tagIds, complete ->
+        onTagsChange(clip, tagIds)
+        complete(null)
+    },
     onSummaryChange: (ClipEntity, String) -> Unit,
     onOcrSave: (ClipEntity, String) -> Unit,
     onOcrDetect: (ClipWithDetails, (String) -> Unit, (String) -> Unit) -> Unit,
     onDelete: (ClipEntity) -> Unit,
     onAuthorClick: (ClipEntity) -> Unit = {},
 ) {
-    val pendingTagIds = remember { mutableStateMapOf<Long, Set<Long>>() }
+    var tagDrafts by remember { mutableStateOf(emptyMap<Long, ClipTagDraftState>()) }
+    val persistedTagIdsByClip = remember(clips) {
+        clips.associate { clip -> clip.clip.id to clip.tags.map { it.id }.toSet() }
+    }
+    LaunchedEffect(persistedTagIdsByClip) {
+        tagDrafts = reconcileClipTagDrafts(tagDrafts, persistedTagIdsByClip)
+    }
     val itemKeys = remember(clips) { clips.map { it.clip.id } }
     PreserveScrollAnchor(listState, title, itemKeys)
     Column(modifier.fillMaxSize().padding(12.dp)) {
-        if (clips.isEmpty()) {
+        if (isInitialLoading) {
+            Box(
+                Modifier.fillMaxSize().testTag("unclassified_initial_loading"),
+                contentAlignment = Alignment.Center,
+            ) {
+                androidx.compose.material3.CircularProgressIndicator()
+            }
+        } else if (clips.isEmpty()) {
             HierarchyEmptyState(emptyText)
         } else {
             Box(Modifier.fillMaxSize()) {
@@ -270,26 +374,38 @@ fun EnhancedClipListScreen(
                     modifier = Modifier.fillMaxSize().testTag("clip_list"),
                 ) {
                     items(clips, key = { it.clip.id }) { clip ->
-                        val selectedTagIds = if (requireTagConfirmation) {
-                            pendingTagIds[clip.clip.id] ?: clip.tags.map { it.id }.toSet()
-                        } else {
-                            clip.tags.map { it.id }.toSet()
-                        }
+                        val persistedTagIds = clip.tags.map { it.id }.toSet()
+                        val tagDraft = (tagDrafts[clip.clip.id]
+                            ?: ClipTagDraftState.fromPersisted(persistedTagIds))
+                            .reconcilePersisted(persistedTagIds)
                         EnhancedTweetCard(
                             clip = clip,
+                            authorSavedCount = authorSavedCountByAuthor[clip.clip.authorKey()] ?: 0,
                             hierarchy = hierarchy,
-                            selectedTagIds = selectedTagIds,
-                            requireTagConfirmation = requireTagConfirmation,
+                            selectedTagIds = tagDraft.draftTagIds,
+                            tagApplyEnabled = tagDraft.canApply,
+                            tagApplying = tagDraft.isApplying,
+                            tagApplyError = tagDraft.errorMessage,
                             onTagSelectionChange = { tagIds ->
-                                if (requireTagConfirmation) {
-                                    pendingTagIds[clip.clip.id] = tagIds
-                                } else {
-                                    onTagsChange(clip.clip, tagIds)
+                                if (!tagDraft.isApplying) {
+                                    tagDrafts = tagDrafts + (clip.clip.id to tagDraft.edit(tagIds))
                                 }
                             },
-                            onTagConfirmation = {
-                                onTagsChange(clip.clip, selectedTagIds)
-                                pendingTagIds.remove(clip.clip.id)
+                            onTagApply = {
+                                val applying = tagDraft.beginApply()
+                                if (applying.isApplying) {
+                                    tagDrafts = tagDrafts + (clip.clip.id to applying)
+                                    onTagsApply(clip.clip, applying.draftTagIds) { error ->
+                                        val latest = tagDrafts[clip.clip.id] ?: applying
+                                        tagDrafts = tagDrafts + (
+                                            clip.clip.id to if (error == null) {
+                                                latest.applySucceeded()
+                                            } else {
+                                                latest.applyFailed(error)
+                                            }
+                                        )
+                                    }
+                                }
                             },
                             onSummaryChange = onSummaryChange,
                             onOcrSave = onOcrSave,
@@ -320,8 +436,11 @@ internal fun EnhancedClassifiedScreen(
     modifier: Modifier = Modifier,
     onApplyFilters: (TweetFilterState) -> Unit,
     onApplySort: (ClassifiedSortState) -> Unit,
-    onClearAllFilters: () -> Unit,
     onTagsChange: (ClipEntity, Set<Long>) -> Unit,
+    onTagsApply: (ClipEntity, Set<Long>, (String?) -> Unit) -> Unit = { clip, tagIds, complete ->
+        onTagsChange(clip, tagIds)
+        complete(null)
+    },
     onSummaryChange: (ClipEntity, String) -> Unit,
     onOcrSave: (ClipEntity, String) -> Unit,
     onOcrDetect: (ClipWithDetails, (String) -> Unit, (String) -> Unit) -> Unit,
@@ -360,8 +479,8 @@ internal fun EnhancedClassifiedScreen(
         modifier = modifier,
         onApplyFilters = onApplyFilters,
         onApplySort = onApplySort,
-        onClearAllFilters = onClearAllFilters,
         onTagsChange = onTagsChange,
+        onTagsApply = onTagsApply,
         onSummaryChange = onSummaryChange,
         onOcrSave = onOcrSave,
         onOcrDetect = onOcrDetect,
@@ -387,8 +506,11 @@ internal fun EnhancedClassifiedScreen(
     modifier: Modifier = Modifier,
     onApplyFilters: (TweetFilterState) -> Unit,
     onApplySort: (ClassifiedSortState) -> Unit,
-    onClearAllFilters: () -> Unit,
     onTagsChange: (ClipEntity, Set<Long>) -> Unit,
+    onTagsApply: (ClipEntity, Set<Long>, (String?) -> Unit) -> Unit = { clip, tagIds, complete ->
+        onTagsChange(clip, tagIds)
+        complete(null)
+    },
     onSummaryChange: (ClipEntity, String) -> Unit,
     onOcrSave: (ClipEntity, String) -> Unit,
     onOcrDetect: (ClipWithDetails, (String) -> Unit, (String) -> Unit) -> Unit,
@@ -399,10 +521,16 @@ internal fun EnhancedClassifiedScreen(
     val appContainer = (context.applicationContext as LikeListManagerApp).container
     var filterDialogOpen by remember { mutableStateOf(false) }
     var sortDialogOpen by remember { mutableStateOf(false) }
-    var clearConfirmationOpen by remember { mutableStateOf(false) }
     var selectedMediaGridClipIds by remember { mutableStateOf(emptySet<Long>()) }
     var mediaGridSelectionMode by remember { mutableStateOf(false) }
     var bulkTagDialogOpen by remember { mutableStateOf(false) }
+    var tagDrafts by remember { mutableStateOf(emptyMap<Long, ClipTagDraftState>()) }
+    val persistedTagIdsByClassifiedClip = remember(uiState.classified) {
+        uiState.classified.associate { clip -> clip.clip.id to clip.tags.map { it.id }.toSet() }
+    }
+    LaunchedEffect(persistedTagIdsByClassifiedClip) {
+        tagDrafts = reconcileClipTagDrafts(tagDrafts, persistedTagIdsByClassifiedClip)
+    }
     val itemKeys = remember(displayMode, uiState.clips, uiState.filters, uiState.sort, uiState.tagHierarchy) {
         if (displayMode == ClassifiedDisplayMode.Card) uiState.classified.map { it.clip.id } else emptyList()
     }
@@ -579,7 +707,6 @@ internal fun EnhancedClassifiedScreen(
                 onOpen = { filterDialogOpen = true },
                 onOpenSort = { sortDialogOpen = true },
                 onToggleDisplayMode = onToggleDisplayMode,
-                onClear = { clearConfirmationOpen = true },
                 interactionEnabled = !morphCheckpointSuppressed,
             )
         }
@@ -643,11 +770,39 @@ internal fun EnhancedClassifiedScreen(
                     modifier = Modifier.fillMaxSize().testTag("clip_list"),
                 ) {
                     items(uiState.classified, key = { it.clip.id }) { clip ->
+                        val persistedTagIds = clip.tags.map { it.id }.toSet()
+                        val tagDraft = (tagDrafts[clip.clip.id]
+                            ?: ClipTagDraftState.fromPersisted(persistedTagIds))
+                            .reconcilePersisted(persistedTagIds)
                         EnhancedTweetCard(
                             clip = clip,
+                            authorSavedCount = uiState.authorSavedCountByAuthor[clip.clip.authorKey()] ?: 0,
                             hierarchy = uiState.tagHierarchy,
-                            selectedTagIds = clip.tags.map { it.id }.toSet(),
-                            onTagSelectionChange = { onTagsChange(clip.clip, it) },
+                            selectedTagIds = tagDraft.draftTagIds,
+                            tagApplyEnabled = tagDraft.canApply,
+                            tagApplying = tagDraft.isApplying,
+                            tagApplyError = tagDraft.errorMessage,
+                            onTagSelectionChange = { tagIds ->
+                                if (!tagDraft.isApplying) {
+                                    tagDrafts = tagDrafts + (clip.clip.id to tagDraft.edit(tagIds))
+                                }
+                            },
+                            onTagApply = {
+                                val applying = tagDraft.beginApply()
+                                if (applying.isApplying) {
+                                    tagDrafts = tagDrafts + (clip.clip.id to applying)
+                                    onTagsApply(clip.clip, applying.draftTagIds) { error ->
+                                        val latest = tagDrafts[clip.clip.id] ?: applying
+                                        tagDrafts = tagDrafts + (
+                                            clip.clip.id to if (error == null) {
+                                                latest.applySucceeded()
+                                            } else {
+                                                latest.applyFailed(error)
+                                            }
+                                        )
+                                    }
+                                }
+                            },
                             onSummaryChange = onSummaryChange,
                             onOcrSave = onOcrSave,
                             onOcrDetect = onOcrDetect,
@@ -676,24 +831,6 @@ internal fun EnhancedClassifiedScreen(
             initialSort = uiState.sort,
             onApply = onApplySort,
             onDismiss = { sortDialogOpen = false },
-        )
-    }
-    if (clearConfirmationOpen) {
-        AlertDialog(
-            onDismissRequest = { clearConfirmationOpen = false },
-            title = { Text("すべての条件をクリアしますか？") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        clearConfirmationOpen = false
-                        onClearAllFilters()
-                    },
-                    modifier = Modifier.testTag("filter_clear_confirm"),
-                ) { Text("クリア") }
-            },
-            dismissButton = {
-                TextButton(onClick = { clearConfirmationOpen = false }) { Text("キャンセル") }
-            },
         )
     }
     if (bulkTagDialogOpen && selectedVisibleMediaGridClipIds.isNotEmpty()) {
@@ -726,8 +863,13 @@ internal fun EnhancedClassifiedScreen(
 fun MediaGridTweetDialog(
     state: MediaGridTweetDialogState,
     hierarchy: TagHierarchy,
+    authorSavedCountByAuthor: Map<TweetAuthorKey, Int> = emptyMap(),
     onDismiss: () -> Unit,
     onTagsChange: (ClipEntity, Set<Long>) -> Unit,
+    onTagsApply: (ClipEntity, Set<Long>, (String?) -> Unit) -> Unit = { clip, tagIds, complete ->
+        onTagsChange(clip, tagIds)
+        complete(null)
+    },
     onSummaryChange: (ClipEntity, String) -> Unit,
     onOcrSave: (ClipEntity, String) -> Unit,
     onOcrDetect: (ClipWithDetails, (String) -> Unit, (String) -> Unit) -> Unit,
@@ -738,60 +880,113 @@ fun MediaGridTweetDialog(
     BackHandler(onBack = onDismiss)
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = true),
     ) {
-        Surface(
+        Box(
             modifier = Modifier
-                .fillMaxWidth(0.96f)
-                .fillMaxHeight(0.9f)
-                .testTag("media_grid_tweet_dialog"),
-            shape = RoundedCornerShape(12.dp),
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
+                .clickable(onClick = onDismiss)
+                .testTag("media_grid_tweet_dialog_scrim"),
         ) {
-            Column(Modifier.fillMaxSize()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 8.dp, vertical = 16.dp)
+                    .padding(top = 48.dp),
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable(onClick = {})
+                        .testTag("media_grid_tweet_dialog"),
+                    shape = RoundedCornerShape(12.dp),
                 ) {
-                    Text("ツイート", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.testTag("media_grid_tweet_dialog_close"),
-                    ) {
-                        Icon(Icons.Filled.Close, contentDescription = "閉じる")
+                    when (state) {
+                        MediaGridTweetDialogState.Closed -> Unit
+                        MediaGridTweetDialogState.Loading -> Box(
+                            Modifier.fillMaxSize().testTag("media_grid_tweet_dialog_loading"),
+                            contentAlignment = Alignment.Center,
+                        ) { Text("読み込み中…") }
+                        MediaGridTweetDialogState.NotFound -> Column(
+                            Modifier.fillMaxSize().testTag("media_grid_tweet_dialog_error").padding(24.dp),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text("ツイートを読み込めませんでした")
+                            Spacer(Modifier.height(16.dp))
+                            Button(onClick = onDismiss) { Text("閉じる") }
+                        }
+                        is MediaGridTweetDialogState.Loaded -> {
+                            val persistedTagIds = state.clip.tags.map { it.id }.toSet()
+                            var tagDraft by remember(state.clip.clip.id) {
+                                mutableStateOf(ClipTagDraftState.fromPersisted(persistedTagIds))
+                            }
+                            LaunchedEffect(persistedTagIds) {
+                                tagDraft = tagDraft.reconcilePersisted(persistedTagIds)
+                            }
+                            val effectiveTagDraft = tagDraft.reconcilePersisted(persistedTagIds)
+                            Box(
+                                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp),
+                            ) {
+                                EnhancedTweetCard(
+                                    clip = state.clip,
+                                    authorSavedCount = authorSavedCountByAuthor[state.clip.clip.authorKey()] ?: 0,
+                                    hierarchy = hierarchy,
+                                    selectedTagIds = effectiveTagDraft.draftTagIds,
+                                    tagApplyEnabled = effectiveTagDraft.canApply,
+                                    tagApplying = effectiveTagDraft.isApplying,
+                                    tagApplyError = effectiveTagDraft.errorMessage,
+                                    onTagSelectionChange = { tagIds ->
+                                        if (!effectiveTagDraft.isApplying) {
+                                            tagDraft = effectiveTagDraft.edit(tagIds)
+                                        }
+                                    },
+                                    onTagApply = {
+                                        val applying = effectiveTagDraft.beginApply()
+                                        if (applying.isApplying) {
+                                            tagDraft = applying
+                                            onTagsApply(state.clip.clip, applying.draftTagIds) { error ->
+                                                tagDraft = if (error == null) {
+                                                    tagDraft.applySucceeded()
+                                                } else {
+                                                    tagDraft.applyFailed(error)
+                                                }
+                                            }
+                                        }
+                                    },
+                                    onSummaryChange = onSummaryChange,
+                                    onOcrSave = onOcrSave,
+                                    onOcrDetect = onOcrDetect,
+                                    onDelete = {
+                                        onDismiss()
+                                        onDelete(it)
+                                    },
+                                    onAuthorClick = onAuthorClick,
+                                )
+                            }
+                        }
                     }
                 }
-                when (state) {
-                    MediaGridTweetDialogState.Closed -> Unit
-                    MediaGridTweetDialogState.Loading -> Box(
-                        Modifier.fillMaxSize().testTag("media_grid_tweet_dialog_loading"),
-                        contentAlignment = Alignment.Center,
-                    ) { Text("読み込み中…") }
-                    MediaGridTweetDialogState.NotFound -> Column(
-                        Modifier.fillMaxSize().testTag("media_grid_tweet_dialog_error").padding(24.dp),
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally,
+            }
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 8.dp, end = 8.dp),
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 6.dp,
+                    shadowElevation = 6.dp,
+                ) {
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("media_grid_tweet_dialog_close"),
                     ) {
-                        Text("ツイートを読み込めませんでした")
-                        Spacer(Modifier.height(16.dp))
-                        Button(onClick = onDismiss) { Text("閉じる") }
-                    }
-                    is MediaGridTweetDialogState.Loaded -> Box(
-                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp),
-                    ) {
-                        EnhancedTweetCard(
-                            clip = state.clip,
-                            hierarchy = hierarchy,
-                            selectedTagIds = state.clip.tags.map { it.id }.toSet(),
-                            onTagSelectionChange = { onTagsChange(state.clip.clip, it) },
-                            onSummaryChange = onSummaryChange,
-                            onOcrSave = onOcrSave,
-                            onOcrDetect = onOcrDetect,
-                            onDelete = {
-                                onDismiss()
-                                onDelete(it)
-                            },
-                            onAuthorClick = onAuthorClick,
-                        )
+                        Icon(Icons.Filled.Close, contentDescription = "閉じる")
                     }
                 }
             }
@@ -964,7 +1159,7 @@ fun EnhancedTagListScreen(
         ) {
             LazyColumn(
                 state = listState,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
                 modifier = Modifier
                     .fillMaxSize()
                     .testTag("tag_list")
@@ -1020,11 +1215,14 @@ fun EnhancedTagListScreen(
 @Composable
 private fun EnhancedTweetCard(
     clip: ClipWithDetails,
+    authorSavedCount: Int,
     hierarchy: TagHierarchy,
     selectedTagIds: Set<Long>,
-    requireTagConfirmation: Boolean = false,
+    tagApplyEnabled: Boolean,
+    tagApplying: Boolean,
+    tagApplyError: String?,
     onTagSelectionChange: (Set<Long>) -> Unit,
-    onTagConfirmation: () -> Unit = {},
+    onTagApply: () -> Unit,
     onSummaryChange: (ClipEntity, String) -> Unit,
     onOcrSave: (ClipEntity, String) -> Unit,
     onOcrDetect: (ClipWithDetails, (String) -> Unit, (String) -> Unit) -> Unit,
@@ -1069,6 +1267,12 @@ private fun EnhancedTweetCard(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(clip.clip.authorName, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            formatAuthorSavedCount(authorSavedCount),
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.testTag("clip_author_saved_count_${clip.clip.id}"),
+                        )
                         clip.clip.likeCount?.let { likeCount ->
                             Spacer(Modifier.width(8.dp))
                             Box {
@@ -1081,7 +1285,7 @@ private fun EnhancedTweetCard(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                                 ) {
-                                    Text(formatLikeCount(likeCount), style = MaterialTheme.typography.bodySmall)
+                                    Text("♡${formatLikeCount(likeCount)}", style = MaterialTheme.typography.bodySmall)
                                     if (clip.clip.hasProvisionalLikeCount()) {
                                         Icon(
                                             Icons.Filled.ErrorOutline,
@@ -1184,34 +1388,41 @@ private fun EnhancedTweetCard(
                 )
             }
             Spacer(Modifier.height(8.dp))
-            TagHierarchySelector(
-                hierarchy = hierarchy,
-                selectedTagIds = selectedTagIds,
-                onToggleTag = { tagId ->
-                    val selected = selectedTagIds.toMutableSet()
-                    if (!selected.add(tagId)) selected.remove(tagId)
-                    onTagSelectionChange(selected)
-                },
-                onOpenGroup = { groupId ->
-                    selectionPath.clear()
-                    selectionPath.add(groupId)
-                    selectionOpen = true
-                },
-            )
-            Spacer(Modifier.height(6.dp))
+            tagApplyError?.let { error ->
+                Text(
+                    text = error,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.testTag("tag_apply_error_${clip.clip.id}"),
+                )
+                Spacer(Modifier.height(6.dp))
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (requireTagConfirmation) {
-                    Button(
-                        onClick = onTagConfirmation,
-                        enabled = hierarchy.tags.isNotEmpty() && selectedTagIds.isNotEmpty(),
-                        modifier = Modifier.testTag("classify_${clip.clip.id}"),
-                    ) {
-                        Text("タグを付ける")
-                    }
+                TagHierarchySelector(
+                    hierarchy = hierarchy,
+                    selectedTagIds = selectedTagIds,
+                    onToggleTag = { tagId ->
+                        val selected = selectedTagIds.toMutableSet()
+                        if (!selected.add(tagId)) selected.remove(tagId)
+                        onTagSelectionChange(selected)
+                    },
+                    onOpenGroup = { groupId ->
+                        selectionPath.clear()
+                        selectionPath.add(groupId)
+                        selectionOpen = true
+                    },
+                    modifier = Modifier.weight(1f).testTag("tag_selector_${clip.clip.id}"),
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    onClick = onTagApply,
+                    enabled = tagApplyEnabled,
+                    modifier = Modifier.testTag("classify_${clip.clip.id}"),
+                ) {
+                    Text(if (tagApplying) "適用中…" else "適用")
                 }
             }
         }
@@ -1321,24 +1532,30 @@ private fun TagHierarchySelector(
     mixedTagIds: Set<Long> = emptySet(),
     onToggleTag: (Long) -> Unit,
     onOpenGroup: (Long) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val roots = hierarchy.children(null)
     if (roots.isEmpty()) {
-        Text("タグリストでタグを追加すると、ここから選べます", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            "タグリストでタグを追加すると、ここから選べます",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = modifier,
+        )
         return
     }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            items(roots, key = { it.ref().saveableKey() }) { node ->
-                TagHierarchyChip(
-                    node = node,
-                    hierarchy = hierarchy,
-                    selectedTagIds = selectedTagIds,
-                    mixedTagIds = mixedTagIds,
-                    onToggleTag = onToggleTag,
-                    onOpenGroup = onOpenGroup,
-                )
-            }
+    LazyRow(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        items(roots, key = { it.ref().saveableKey() }) { node ->
+            TagHierarchyChip(
+                node = node,
+                hierarchy = hierarchy,
+                selectedTagIds = selectedTagIds,
+                mixedTagIds = mixedTagIds,
+                onToggleTag = onToggleTag,
+                onOpenGroup = onOpenGroup,
+            )
         }
     }
 }
@@ -1415,7 +1632,7 @@ private fun TagSelectionDialog(
 }
 
 @Composable
-private fun TagFilterSummaryRow(
+internal fun TagFilterSummaryRow(
     uiState: MainUiState,
     hierarchy: TagHierarchy,
     displayMode: ClassifiedDisplayMode,
@@ -1423,7 +1640,6 @@ private fun TagFilterSummaryRow(
     onOpen: () -> Unit,
     onOpenSort: () -> Unit,
     onToggleDisplayMode: () -> Unit,
-    onClear: () -> Unit,
     interactionEnabled: Boolean,
 ) {
     val filters = uiState.filters
@@ -1470,11 +1686,11 @@ private fun TagFilterSummaryRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        FilledTonalButton(
+        ClassifiedToolbarButton(
             onClick = { if (interactionEnabled) onOpen() },
             enabled = interactionEnabled,
+            highlighted = filters.hasActiveFilters,
             modifier = Modifier.width(36.dp).height(32.dp).testTag("filter_open"),
-            contentPadding = PaddingValues(0.dp),
         ) {
             Icon(
                 Icons.Filled.FilterList,
@@ -1482,11 +1698,11 @@ private fun TagFilterSummaryRow(
                 modifier = Modifier.size(18.dp),
             )
         }
-        FilledTonalButton(
+        ClassifiedToolbarButton(
             onClick = { if (interactionEnabled) onOpenSort() },
             enabled = interactionEnabled,
+            highlighted = uiState.sort != ClassifiedSortState(),
             modifier = Modifier.width(36.dp).height(32.dp).testTag("sort_open"),
-            contentPadding = PaddingValues(0.dp),
         ) {
             Icon(
                 Icons.Filled.Sort,
@@ -1494,11 +1710,11 @@ private fun TagFilterSummaryRow(
                 modifier = Modifier.size(18.dp),
             )
         }
-        FilledTonalButton(
+        ClassifiedToolbarButton(
             onClick = { if (interactionEnabled) onToggleDisplayMode() },
             enabled = interactionEnabled,
+            highlighted = null,
             modifier = Modifier.width(36.dp).height(32.dp).testTag("classified_display_toggle"),
-            contentPadding = PaddingValues(0.dp),
         ) {
             Icon(
                 imageVector = if (displayMode == ClassifiedDisplayMode.Card) Icons.Filled.GridView else Icons.Filled.ViewList,
@@ -1506,15 +1722,35 @@ private fun TagFilterSummaryRow(
                 modifier = Modifier.size(18.dp),
             )
         }
-        TextButton(
-            onClick = { if (interactionEnabled) onClear() },
-            enabled = interactionEnabled && filters.hasActiveFilters,
-            modifier = Modifier.width(44.dp).height(32.dp).testTag("filter_clear"),
-            contentPadding = PaddingValues(0.dp),
-        ) {
-            Text("クリア", style = MaterialTheme.typography.labelMedium, maxLines = 1)
-        }
     }
+}
+
+@Composable
+private fun ClassifiedToolbarButton(
+    onClick: () -> Unit,
+    enabled: Boolean,
+    highlighted: Boolean?,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val containerColor = if (highlighted == true) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
+    val contentColor = if (highlighted == true) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.semantics {
+            if (highlighted != null) stateDescription = if (highlighted) "適用中" else "未適用"
+        },
+        colors = ButtonDefaults.buttonColors(
+            containerColor = containerColor,
+            contentColor = contentColor,
+            disabledContainerColor = containerColor,
+            disabledContentColor = contentColor.copy(alpha = 0.38f),
+        ),
+        elevation = null,
+        contentPadding = PaddingValues(0.dp),
+        content = { content() },
+    )
 }
 
 internal fun filterConditionSummary(
@@ -1567,12 +1803,10 @@ private fun SearchFilterDialog(
     var filters by remember(initialFilters) { mutableStateOf(initialFilters) }
     var dateEndpoint by remember { mutableStateOf<DateFilterEndpoint?>(null) }
     var authorDialogOpen by remember { mutableStateOf(false) }
+    var tagPopupOpen by remember { mutableStateOf(false) }
     var discardConfirmationOpen by remember { mutableStateOf(false) }
     var clearConfirmationOpen by remember { mutableStateOf(false) }
-    val path = remember { mutableStateListOf<Long>() }
-    val currentParentId = path.lastOrNull()
-    val currentGroup = currentParentId?.let { hierarchy.groups.firstOrNull { group -> group.id == it } }
-    val children = hierarchy.children(currentParentId)
+    val expandedTagGroups = remember { mutableStateMapOf<Long, Boolean>() }
     val matchingCount = remember(uiState.clips, hierarchy, filters) {
         filterClipsForSearch(uiState.clips, hierarchy, filters).size
     }
@@ -1586,21 +1820,18 @@ private fun SearchFilterDialog(
         filters = filters.copy(searchTargets = next)
     }
     fun cycleTag(ref: TagNodeRef) {
-        val current = filters.tagFilters[ref] ?: TagFilterState.NONE
-        val next = when (current) {
-            TagFilterState.NONE -> TagFilterState.INCLUDED
-            TagFilterState.INCLUDED -> if (ref.type == TagNodeType.GROUP) TagFilterState.EXCLUDED else TagFilterState.REQUIRED
-            TagFilterState.REQUIRED -> TagFilterState.EXCLUDED
-            TagFilterState.EXCLUDED -> TagFilterState.NONE
-        }
+        val next = nextFilterTagState(ref, filters.tagFilters[ref] ?: TagFilterState.NONE)
         filters = filters.copy(tagFilters = filters.tagFilters.toMutableMap().apply {
             if (next == TagFilterState.NONE) remove(ref) else put(ref, next)
         })
     }
-    BackHandler { requestDismiss() }
+    BackHandler(enabled = !tagPopupOpen) { requestDismiss() }
     Dialog(
         onDismissRequest = ::requestDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnClickOutside = false,
+        ),
     ) {
         Surface(Modifier.fillMaxSize().testTag("filter_dialog"), shape = RoundedCornerShape(0.dp)) {
             Column(Modifier.fillMaxSize().padding(12.dp)) {
@@ -1619,6 +1850,7 @@ private fun SearchFilterDialog(
                         .weight(1f)
                         .padding(top = 8.dp)
                         .testTag("filter_options_list"),
+                    contentPadding = PaddingValues(bottom = 96.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     item {
@@ -1745,15 +1977,14 @@ private fun SearchFilterDialog(
                     }
                     item { Divider() }
                     item {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (path.isNotEmpty()) {
-                                IconButton(onClick = { path.removeAt(path.lastIndex) }) {
-                                    Icon(Icons.Filled.ArrowBack, contentDescription = "上のグループへ戻る")
-                                }
-                            }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Column(Modifier.weight(1f)) {
                                 Text("タグ条件", style = MaterialTheme.typography.titleSmall)
-                                Text(currentGroup?.name ?: "ルート", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    if (filters.tagFilters.isEmpty()) "未選択" else "${filters.tagFilters.size}件選択中",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             }
                             TextButton(
                                 onClick = { filters = filters.copy(tagFilters = emptyMap()) },
@@ -1761,67 +1992,28 @@ private fun SearchFilterDialog(
                                 modifier = Modifier.testTag("filter_tag_clear"),
                             ) { Text("タグ条件クリア") }
                         }
-                        Text("含: 緑 / 必: 青 / 除: オレンジ。グループは含む・排除のみです。", style = MaterialTheme.typography.bodySmall)
-                    }
-                    if (children.isEmpty()) {
-                        item { HierarchyEmptyState("この階層には条件を設定できる項目がありません") }
-                    } else {
-                        item {
-                            LazyVerticalGrid(
-                                columns = GridCells.Adaptive(144.dp),
-                                modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                gridItems(children, key = { it.ref().saveableKey() }) { node ->
-                                    val ref = node.ref()
-                                    val state = filters.tagFilters[ref] ?: TagFilterState.NONE
-                                    val selected = state != TagFilterState.NONE
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        FilterChip(
-                                            selected = selected,
-                                            onClick = { cycleTag(ref) },
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .testTag("filter_tag_condition_${ref.type.name.lowercase()}_${ref.id}"),
-                                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = tagFilterColor(state)),
-                                            label = {
-                                                Column(horizontalAlignment = Alignment.Start) {
-                                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                                        if (node is TagGroupNode) {
-                                                            Icon(Icons.Filled.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
-                                                            Spacer(Modifier.width(6.dp))
-                                                        } else {
-                                                            Icon(
-                                                                Icons.Filled.LocalOffer,
-                                                                contentDescription = null,
-                                                                tint = tagColor((node as TagLeafNode).tag.colorId),
-                                                                modifier = Modifier.size(18.dp),
-                                                            )
-                                                            Spacer(Modifier.width(6.dp))
-                                                        }
-                                                        Text("${state.shortLabel()}${node.name}")
-                                                    }
-                                                    Text(
-                                                        "${node.count} 件",
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    )
-                                                }
-                                            },
+                        FilledTonalButton(
+                            onClick = { tagPopupOpen = true },
+                            modifier = Modifier.fillMaxWidth().testTag("filter_tag_popup_open"),
+                        ) {
+                            Text("タグを選択")
+                        }
+                        FilterTagStateLegend()
+                        if (filters.tagFilters.isNotEmpty()) {
+                            SelectedTagConditionsRow(
+                                hierarchy = hierarchy,
+                                filters = filters.tagFilters,
+                                onCycle = { ref ->
+                                    filters.tagFilters[ref]?.let { current ->
+                                        filters = filters.copy(
+                                            tagFilters = filters.tagFilters + (ref to nextSelectedFilterTagState(ref, current)),
                                         )
-                                        if (node is TagGroupNode) {
-                                            IconButton(onClick = { path.add(node.id) }) {
-                                                Icon(
-                                                    Icons.Filled.ArrowBack,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.graphicsLayer(rotationZ = 180f),
-                                                )
-                                            }
-                                        }
                                     }
-                                }
-                            }
+                                },
+                                onRemove = { ref ->
+                                    filters = filters.copy(tagFilters = filters.tagFilters - ref)
+                                },
+                            )
                         }
                     }
                 }
@@ -1841,6 +2033,16 @@ private fun SearchFilterDialog(
                 }
             }
         }
+    }
+    if (tagPopupOpen) {
+        FilterTagTreePopup(
+            hierarchy = hierarchy,
+            filters = filters.tagFilters,
+            expandedGroups = expandedTagGroups,
+            onCycle = ::cycleTag,
+            onClear = { filters = filters.copy(tagFilters = emptyMap()) },
+            onDismiss = { tagPopupOpen = false },
+        )
     }
     dateEndpoint?.let { endpoint ->
         val selectedDate = if (endpoint == DateFilterEndpoint.Start) filters.startDate else filters.endDate
@@ -2134,6 +2336,299 @@ private fun SortConfigDialog(
     }
 }
 
+internal fun nextFilterTagState(ref: TagNodeRef, current: TagFilterState): TagFilterState = when (current) {
+    TagFilterState.NONE -> TagFilterState.INCLUDED
+    TagFilterState.INCLUDED -> if (ref.type == TagNodeType.GROUP) TagFilterState.EXCLUDED else TagFilterState.REQUIRED
+    TagFilterState.REQUIRED -> TagFilterState.EXCLUDED
+    TagFilterState.EXCLUDED -> TagFilterState.NONE
+}
+
+/** Cycles an already-selected condition without making removal an accidental tap target. */
+internal fun nextSelectedFilterTagState(ref: TagNodeRef, current: TagFilterState): TagFilterState =
+    when (ref.type) {
+        TagNodeType.TAG -> when (current) {
+            TagFilterState.NONE -> TagFilterState.INCLUDED
+            TagFilterState.INCLUDED -> TagFilterState.REQUIRED
+            TagFilterState.REQUIRED -> TagFilterState.EXCLUDED
+            TagFilterState.EXCLUDED -> TagFilterState.INCLUDED
+        }
+        TagNodeType.GROUP -> when (current) {
+            TagFilterState.NONE -> TagFilterState.INCLUDED
+            TagFilterState.INCLUDED -> TagFilterState.EXCLUDED
+            TagFilterState.REQUIRED -> TagFilterState.EXCLUDED
+            TagFilterState.EXCLUDED -> TagFilterState.INCLUDED
+        }
+    }
+
+internal fun TagHierarchy.filterConditionPath(ref: TagNodeRef): String? {
+    val node = nodeFor(ref) ?: return null
+    val groupsById = groups.associateBy { it.id }
+    val ancestors = mutableListOf<String>()
+    val visited = mutableSetOf<Long>()
+    var parentId = node.parentGroupId
+    while (parentId != null && visited.add(parentId)) {
+        val parent = groupsById[parentId] ?: break
+        ancestors += parent.name
+        parentId = parent.parentGroupId
+    }
+    return (ancestors.asReversed() + node.name).joinToString(" / ")
+}
+
+@Composable
+internal fun SelectedTagConditionsRow(
+    hierarchy: TagHierarchy,
+    filters: Map<TagNodeRef, TagFilterState>,
+    onCycle: (TagNodeRef) -> Unit,
+    onRemove: (TagNodeRef) -> Unit,
+) {
+    val conditions = filters.entries.mapNotNull { (ref, state) ->
+        if (state == TagFilterState.NONE) null
+        else hierarchy.filterConditionPath(ref)?.let { path -> Triple(ref, state, path) }
+    }
+    LazyRow(
+        modifier = Modifier.fillMaxWidth().testTag("filter_selected_tag_conditions"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(vertical = 6.dp),
+    ) {
+        items(conditions, key = { (ref, _, _) -> ref.saveableKey() }) { (ref, state, path) ->
+            val typeLabel = if (ref.type == TagNodeType.GROUP) "グループ" else "タグ"
+            val stateColors = tagFilterColors(state)
+            val stateLabel = when (state) {
+                TagFilterState.NONE -> ""
+                TagFilterState.INCLUDED -> "含む"
+                TagFilterState.REQUIRED -> "必須"
+                TagFilterState.EXCLUDED -> "排除"
+            }
+            Surface(
+                modifier = Modifier
+                    .widthIn(max = 280.dp)
+                    .testTag("filter_selected_condition_${ref.type.name.lowercase()}_${ref.id}")
+                    .semantics { stateDescription = stateLabel }
+                    .clickable { onCycle(ref) },
+                color = stateColors.container,
+                contentColor = stateColors.content,
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Row(
+                    modifier = Modifier.padding(start = 10.dp, end = 2.dp, top = 4.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Column(Modifier.weight(1f, fill = false)) {
+                        Text(path, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(stateLabel, style = MaterialTheme.typography.labelSmall)
+                    }
+                    IconButton(
+                        onClick = { onRemove(ref) },
+                        modifier = Modifier.size(32.dp).testTag("filter_selected_remove_${ref.type.name.lowercase()}_${ref.id}"),
+                    ) {
+                        Icon(Icons.Filled.Close, contentDescription = "${typeLabel}条件「$path」を削除")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun FilterTagStateLegend(modifier: Modifier = Modifier) {
+    FlowRow(
+        modifier = modifier.fillMaxWidth().testTag("filter_tag_state_legend"),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        FilterTagStateLegendItem(TagFilterState.INCLUDED, "含む")
+        FilterTagStateLegendItem(TagFilterState.REQUIRED, "必須")
+        FilterTagStateLegendItem(TagFilterState.EXCLUDED, "排除")
+    }
+}
+
+@Composable
+private fun FilterTagStateLegendItem(state: TagFilterState, label: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Box(
+            Modifier
+                .size(8.dp)
+                .background(tagFilterColors(state).container, CircleShape)
+                .testTag("filter_tag_state_dot_${state.name.lowercase()}"),
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.testTag("filter_tag_state_label_${state.name.lowercase()}"),
+        )
+    }
+}
+
+@Composable
+private fun FilterTagTreePopup(
+    hierarchy: TagHierarchy,
+    filters: Map<TagNodeRef, TagFilterState>,
+    expandedGroups: MutableMap<Long, Boolean>,
+    onCycle: (TagNodeRef) -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = true),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .fillMaxHeight(0.82f)
+                .testTag("filter_tag_popup"),
+            shape = RoundedCornerShape(20.dp),
+            tonalElevation = 6.dp,
+        ) {
+            Column(Modifier.fillMaxSize().padding(16.dp)) {
+                Text("タグを選択", style = MaterialTheme.typography.titleLarge)
+                FilterTagStateLegend()
+                Divider()
+                if (hierarchy.groups.isEmpty() && hierarchy.tags.isEmpty()) {
+                    HierarchyEmptyState("条件を設定できるタグやグループがありません")
+                } else {
+                    SelectableTagTree(
+                        hierarchy = hierarchy,
+                        expandedGroups = expandedGroups,
+                        groupSelectable = true,
+                        isSelected = { ref -> (filters[ref] ?: TagFilterState.NONE) != TagFilterState.NONE },
+                        stateLabel = { "" },
+                        selectedColors = { ref -> tagFilterColors(filters[ref] ?: TagFilterState.NONE) },
+                        onTagClick = onCycle,
+                        onGroupClick = onCycle,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Divider()
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    TextButton(
+                        onClick = onClear,
+                        enabled = filters.isNotEmpty(),
+                        modifier = Modifier.weight(1f).testTag("filter_tag_popup_clear"),
+                    ) { Text("条件をクリア") }
+                    Button(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f).testTag("filter_tag_popup_done"),
+                    ) { Text("決定") }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A reusable, scrollable hierarchy surface. Expansion and selection are deliberately separate,
+ * and callers decide whether groups are selectable and what a tag click means.
+ */
+@Composable
+internal fun SelectableTagTree(
+    hierarchy: TagHierarchy,
+    expandedGroups: MutableMap<Long, Boolean>,
+    groupSelectable: Boolean,
+    isSelected: (TagNodeRef) -> Boolean,
+    stateLabel: (TagNodeRef) -> String,
+    selectedColors: (TagNodeRef) -> TagFilterColors,
+    onTagClick: (TagNodeRef) -> Unit,
+    onGroupClick: (TagNodeRef) -> Unit,
+    modifier: Modifier = Modifier,
+    treeTestTag: String = "filter_tag_tree_list",
+    rowTestTag: (TagNodeRef) -> String = { ref -> "filter_tag_tree_row_${ref.type.name.lowercase()}_${ref.id}" },
+    groupExpandTestTag: (Long) -> String = { id -> "filter_tag_expand_group_$id" },
+    conditionTestTag: (TagNodeRef) -> String = { ref -> "filter_tag_condition_${ref.type.name.lowercase()}_${ref.id}" },
+) {
+    val listState = rememberLazyListState()
+    val rows = hierarchy.visibleRows(expandedGroups.filterValues { it }.keys)
+    Box(modifier.fillMaxWidth()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize().testTag(treeTestTag),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            contentPadding = PaddingValues(vertical = 8.dp),
+        ) {
+            items(rows, key = { it.node.ref().saveableKey() }) { row ->
+                val node = row.node
+                val ref = node.ref()
+                val selected = isSelected(ref)
+                val stateColors = selectedColors(ref)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = (row.depth * 18).dp)
+                        .testTag(rowTestTag(ref)),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (node is TagGroupNode) {
+                        val expanded = expandedGroups[node.id] == true
+                        IconButton(
+                            onClick = { expandedGroups[node.id] = !expanded },
+                            modifier = Modifier.size(40.dp).testTag(groupExpandTestTag(node.id)),
+                        ) {
+                            Icon(
+                                Icons.Filled.KeyboardArrowRight,
+                                contentDescription = if (expanded) "${node.name}を折りたたむ" else "${node.name}を展開",
+                                modifier = Modifier.graphicsLayer(rotationZ = if (expanded) 90f else 0f),
+                            )
+                        }
+                    } else {
+                        Spacer(Modifier.width(40.dp))
+                    }
+                    FilterChip(
+                        selected = selected,
+                        onClick = {
+                            if (node is TagGroupNode) {
+                                if (groupSelectable) onGroupClick(ref)
+                                else expandedGroups[node.id] = expandedGroups[node.id] != true
+                            } else {
+                                onTagClick(ref)
+                            }
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag(conditionTestTag(ref)),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = stateColors.container,
+                            selectedLabelColor = stateColors.content,
+                            selectedLeadingIconColor = stateColors.content,
+                        ),
+                        leadingIcon = {
+                            if (node is TagGroupNode) {
+                                Icon(Icons.Filled.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
+                            } else {
+                                Icon(
+                                    Icons.Filled.LocalOffer,
+                                    contentDescription = null,
+                                    tint = if (selected) stateColors.content else tagColor((node as TagLeafNode).tag.colorId),
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        },
+                        label = {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text(node.name, modifier = Modifier.weight(1f))
+                                Text(
+                                    "${node.count}件",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (selected) stateColors.content else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        },
+                    )
+                }
+            }
+        }
+        LazyListScrollbar(listState)
+    }
+}
+
 @Composable
 private fun AuthorFilterDialog(
     authors: List<TweetAuthorOption>,
@@ -2210,11 +2705,16 @@ private fun AuthorFilterDialog(
     )
 }
 
-private fun tagFilterColor(state: TagFilterState): Color = when (state) {
-    TagFilterState.NONE -> Color.Transparent
-    TagFilterState.INCLUDED -> Color(0xFF2E7D32)
-    TagFilterState.REQUIRED -> Color(0xFF1565C0)
-    TagFilterState.EXCLUDED -> Color(0xFFE65100)
+internal data class TagFilterColors(
+    val container: Color,
+    val content: Color,
+)
+
+internal fun tagFilterColors(state: TagFilterState): TagFilterColors = when (state) {
+    TagFilterState.NONE -> TagFilterColors(Color.Transparent, Color.Unspecified)
+    TagFilterState.INCLUDED -> TagFilterColors(Color(0xFF2E7D32), Color.White)
+    TagFilterState.REQUIRED -> TagFilterColors(Color(0xFFC62828), Color.White)
+    TagFilterState.EXCLUDED -> TagFilterColors(Color(0xFF616161), Color.White)
 }
 
 private fun LocalDate.toPickerMillis(): Long = atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
@@ -2310,7 +2810,7 @@ private fun TagHierarchyChip(
 }
 
 @Composable
-private fun TagManagementRow(
+internal fun TagManagementRow(
     modifier: Modifier = Modifier,
     row: VisibleTagRow,
     hierarchy: TagHierarchy,
@@ -2334,7 +2834,15 @@ private fun TagManagementRow(
         isGroupDropTarget -> MaterialTheme.colorScheme.primaryContainer
         else -> MaterialTheme.colorScheme.surface
     }
-    Column(modifier.fillMaxWidth()) {
+    Column(
+        modifier
+            .fillMaxWidth()
+            .drawTagTreeGuides(
+                segments = row.guideSegments,
+                color = MaterialTheme.colorScheme.outlineVariant,
+            )
+            .padding(vertical = TagManagementRowHalfSpacing),
+    ) {
         Card(
             colors = CardDefaults.cardColors(containerColor = rowColor),
             modifier = Modifier
@@ -2345,9 +2853,12 @@ private fun TagManagementRow(
                 .graphicsLayer { },
         ) {
             Row(
-                Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                Modifier
+                    .heightIn(min = 40.dp)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // Compact row content: node kind remains identifiable by icon and hierarchy.
                 if (row.node is TagGroupNode) {
                     IconButton(
                         onClick = onToggleExpanded,
@@ -2357,47 +2868,51 @@ private fun TagManagementRow(
                             Icons.Filled.KeyboardArrowRight,
                             contentDescription = "展開",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp).graphicsLayer(rotationZ = if (expanded[row.node.id] == true) 90f else 0f),
+                            modifier = Modifier.size(18.dp).graphicsLayer(
+                                rotationZ = if (expanded[row.node.id] == true) 90f else 0f,
+                            ),
                         )
                     }
                     Icon(
                         Icons.Filled.Folder,
                         contentDescription = null,
                         tint = if (expanded[row.node.id] == true) tagColor(row.node.group.colorId) else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(24.dp),
+                        modifier = Modifier.size(20.dp),
                     )
-                    Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.width(6.dp))
                 } else {
                     val tag = (row.node as TagLeafNode).tag
                     Icon(
                         Icons.Filled.LocalOffer,
                         contentDescription = null,
                         tint = tagColor(tag.colorId),
-                        modifier = Modifier.size(24.dp),
+                        modifier = Modifier.size(20.dp),
                     )
-                    Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.width(6.dp))
                 }
-                Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            row.node.name,
-                            fontWeight = FontWeight.SemiBold,
-                            style = if (row.node.name.length > 16) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "${row.node.count}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Text(
-                        if (row.node is TagGroupNode) "グループ" else "タグ",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    row.node.name,
+                    fontWeight = FontWeight.SemiBold,
+                    style = if (row.node.name.length > 16) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("tag_row_name_${row.node.ref().type.name.lowercase()}_${row.node.id}"),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "${row.node.count}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    modifier = Modifier.testTag("tag_row_count_${row.node.ref().type.name.lowercase()}_${row.node.id}"),
+                )
+                Spacer(Modifier.width(4.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    modifier = Modifier.testTag("tag_row_actions_${row.node.ref().type.name.lowercase()}_${row.node.id}"),
+                ) {
                     if (row.node is TagGroupNode) {
                         Box {
                             IconButton(
@@ -2465,6 +2980,7 @@ private fun TagManagementRow(
                         )
                     }
                 }
+                // End compact row content.
             }
         }
     }
@@ -2510,7 +3026,7 @@ private fun TagManagementRow(
     if (addAllOpen && row.node is TagLeafNode) {
         AddAllTagsDialog(
             source = row.node.tag,
-            targets = hierarchy.tags.map { it.tag }.filter { it.id != row.node.id },
+            hierarchy = hierarchy,
             onDismiss = { addAllOpen = false },
             onAddAll = { onAddAll(row.node.tag, it); addAllOpen = false },
         )
@@ -2523,12 +3039,31 @@ private fun TagPlaceholderSpacer(
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
+    val guideColor = MaterialTheme.colorScheme.outlineVariant
     Spacer(
         modifier
-            .padding(start = (item.depth * 14).dp)
             .fillMaxWidth()
-            .height(with(density) { item.heightPx.toDp() }),
+            .height(with(density) { item.heightPx.toDp() } + TagManagementRowSpacing)
+            .drawTagTreeGuides(item.guideSegments, guideColor),
     )
+}
+
+private fun Modifier.drawTagTreeGuides(
+    segments: List<TagTreeGuideSegment>,
+    color: Color,
+): Modifier = drawBehind {
+    val halfItemSpacing = TagManagementRowHalfSpacing.toPx()
+    val indentWidth = TagManagementIndentWidth.toPx()
+    val strokeWidth = 2.dp.toPx()
+    segments.forEach { segment ->
+        val x = (segment.ancestorDepth * indentWidth) + (indentWidth / 2f)
+        drawLine(
+            color = color,
+            start = Offset(x, if (segment.connectsAbove) 0f else halfItemSpacing),
+            end = Offset(x, if (segment.connectsBelow) size.height else size.height - halfItemSpacing),
+            strokeWidth = strokeWidth,
+        )
+    }
 }
 
 @Composable
@@ -2554,22 +3089,29 @@ private fun TagDragPreview(state: DragState, dragLayerBounds: Rect?) {
             color = MaterialTheme.colorScheme.surface,
         ) {
             Row(
-                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 10.dp),
+                modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
                     if (state.isGroup) Icons.Filled.Folder else Icons.Filled.LocalOffer,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
                 )
-                Spacer(Modifier.width(8.dp))
-                Text(state.label, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    state.label,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
     }
 }
 
-private fun TagHierarchy.visibleRows(expandedGroups: Set<Long>): List<VisibleTagRow> = buildList {
+internal fun TagHierarchy.visibleRows(expandedGroups: Set<Long>): List<VisibleTagRow> = buildList {
     fun visit(parentGroupId: Long?, depth: Int) {
         children(parentGroupId).forEachIndexed { index, node ->
             add(VisibleTagRow(node = node, depth = depth, parentGroupId = parentGroupId, indexInParent = index))
@@ -2579,6 +3121,22 @@ private fun TagHierarchy.visibleRows(expandedGroups: Set<Long>): List<VisibleTag
         }
     }
     visit(null, 0)
+}.withVisibleTagTreeGuides()
+
+internal fun calculateTagTreeGuideSegments(depths: List<Int>): List<List<TagTreeGuideSegment>> =
+    depths.mapIndexed { rowIndex, depth ->
+        List(depth) { ancestorDepth ->
+            TagTreeGuideSegment(
+                ancestorDepth = ancestorDepth,
+                connectsAbove = rowIndex > 0 && depths[rowIndex - 1] > ancestorDepth,
+                connectsBelow = rowIndex < depths.lastIndex && depths[rowIndex + 1] > ancestorDepth,
+            )
+        }
+    }
+
+private fun List<VisibleTagRow>.withVisibleTagTreeGuides(): List<VisibleTagRow> {
+    val segmentsByRow = calculateTagTreeGuideSegments(map(VisibleTagRow::depth))
+    return mapIndexed { index, row -> row.copy(guideSegments = segmentsByRow[index]) }
 }
 
 private fun TagHierarchy.nodeFor(ref: TagNodeRef): TagTreeNode? = when (ref.type) {
@@ -2594,11 +3152,12 @@ internal fun buildTagListItems(
 ): List<TagListItem> {
     if (dragState == null) {
         val counts = mutableMapOf<Long?, Int>()
-        return visibleRows.map { row ->
+        val items = visibleRows.map { row ->
             val index = counts.getOrDefault(row.parentGroupId, 0)
             counts[row.parentGroupId] = index + 1
             TagListItem.Row(row, index)
         }
+        return items.withDisplayTagTreeGuides()
     }
 
     if (visibleRows.none { it.node.ref() == dragState.node }) return buildTagListItems(visibleRows, null)
@@ -2619,7 +3178,23 @@ internal fun buildTagListItems(
         heightPx = dragState.itemHeight,
     )
     items.add(placeholderInsertIndex(items, visualParentId, visualIndex), placeholder)
-    return items
+    return items.withDisplayTagTreeGuides()
+}
+
+private fun List<TagListItem>.withDisplayTagTreeGuides(): List<TagListItem> {
+    val depths = map { item ->
+        when (item) {
+            is TagListItem.Row -> item.row.depth
+            is TagListItem.Placeholder -> item.depth
+        }
+    }
+    val segmentsByItem = calculateTagTreeGuideSegments(depths)
+    return mapIndexed { index, item ->
+        when (item) {
+            is TagListItem.Row -> item.copy(row = item.row.copy(guideSegments = segmentsByItem[index]))
+            is TagListItem.Placeholder -> item.copy(guideSegments = segmentsByItem[index])
+        }
+    }
 }
 
 private fun List<VisibleTagRow>.withoutDraggedSubtree(node: TagNodeRef): List<VisibleTagRow> {
@@ -2986,6 +3561,9 @@ private fun BoxScope.ScrollToTopButton(listState: LazyListState, hasItems: Boole
     }
 }
 
+internal fun formatAuthorSavedCount(count: Int): String =
+    String.format(Locale.JAPAN, "%,d件", count)
+
 internal fun formatLikeCount(count: Long): String = when {
     count < 10_000 -> String.format(Locale.JAPAN, "%,d", count)
     else -> {
@@ -3008,7 +3586,10 @@ private fun formatLikeFetchedAt(value: String?): String {
 
 internal fun String.withoutTrailingMediaUrl(hasAssets: Boolean): String {
     if (!hasAssets) return this
-    return replace(Regex("""(?:\s+https://t\.co/[A-Za-z0-9_]+)+\s*$"""), "").trimEnd()
+    return replace(
+        Regex("""(?:^|\s+)https://t\.co/[A-Za-z0-9_]+(?:\s+https://t\.co/[A-Za-z0-9_]+)*\s*$"""),
+        "",
+    ).trimEnd()
 }
 
 @Composable
@@ -3019,6 +3600,7 @@ fun EnhancedMediaGrid(assets: List<AssetEntity>) {
     }.take(4)
     val savedPhotos = shown.filter { it.asset.type == "photo" && it.asset.localPath != null }
     var initialViewerPage by remember { mutableStateOf<Int?>(null) }
+    val singleImagePresentation = shown.singleOrNull()?.asset?.singleCardMediaPresentation()
 
     Column(
         modifier = Modifier.padding(horizontal = 16.dp),
@@ -3028,8 +3610,14 @@ fun EnhancedMediaGrid(assets: List<AssetEntity>) {
             1 -> EnhancedMediaCell(
                 displayAsset = shown[0],
                 viewerIndex = savedPhotos.viewerIndexFor(shown[0]),
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxWidth().aspectRatio(shown[0].asset.displayAspectRatio()),
+                contentScale = if (singleImagePresentation?.crop == true) {
+                    ContentScale.Crop
+                } else {
+                    ContentScale.Fit
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(checkNotNull(singleImagePresentation).aspectRatio),
                 onOpenViewer = { initialViewerPage = it },
             )
             2 -> Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -4013,6 +4601,27 @@ private fun ClassifiedMediaGridContent(
             snapshot.resourceReadiness.requiredAssetCount == snapshot.resourceReadiness.resolvedAssetCount &&
             readiness.resolvedAssetCount < readiness.requiredAssetCount
         ) {
+            // The published snapshot is discarded before a replacement can be
+            // prepared with the changed resident index. Keep the harness
+            // observable in this transition as a not-ready result; otherwise
+            // callers waiting for stable-idle readiness only see an empty
+            // cache and cannot distinguish a missing resource from no work.
+            if (BuildConfig.TEST_HARNESS) {
+                val failureReasons = buildList {
+                    readiness.firstMissingAssetId?.let { add("MissingSourceImage:asset=$it") }
+                    readiness.firstMissingTitle?.let { add("MissingHeaderText:title=$it") }
+                }
+                MediaGridMorphTestTrace.recordIdleReadiness(
+                    MediaGridMorphIdleReadinessObservation(
+                        generation = snapshot.generation,
+                        identity = morphIdentity,
+                        directionCount = snapshot.directions.size,
+                        readyDirectionCount = 0,
+                        ready = false,
+                        failureReasons = failureReasons,
+                    ),
+                )
+            }
             morphPreparationCache.invalidate()
             return@LaunchedEffect
         }
@@ -4513,10 +5122,35 @@ private data class DisplayAsset(
     val url: String,
 )
 
+internal data class SingleCardMediaPresentation(
+    val aspectRatio: Float,
+    val crop: Boolean,
+)
+
+private const val SINGLE_CARD_MEDIA_MIN_ASPECT_RATIO = 3f / 4f
+
 private fun AssetEntity.displayAspectRatio(): Float {
     val safeWidth = width?.takeIf { it > 0 } ?: return 16f / 10f
     val safeHeight = height?.takeIf { it > 0 } ?: return 16f / 10f
     return (safeWidth.toFloat() / safeHeight.toFloat()).coerceIn(0.35f, 3.2f)
+}
+
+internal fun AssetEntity.singleCardMediaPresentation(): SingleCardMediaPresentation {
+    val safeWidth = width?.takeIf { it > 0 }
+    val safeHeight = height?.takeIf { it > 0 }
+    if (safeWidth == null || safeHeight == null) {
+        return SingleCardMediaPresentation(
+            aspectRatio = displayAspectRatio(),
+            crop = false,
+        )
+    }
+    val sourceAspectRatio = safeWidth.toFloat() / safeHeight.toFloat()
+    return SingleCardMediaPresentation(
+        aspectRatio = sourceAspectRatio
+            .coerceIn(0.35f, 3.2f)
+            .coerceAtLeast(SINGLE_CARD_MEDIA_MIN_ASPECT_RATIO),
+        crop = sourceAspectRatio < SINGLE_CARD_MEDIA_MIN_ASPECT_RATIO,
+    )
 }
 
 @Composable

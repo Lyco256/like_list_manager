@@ -40,6 +40,7 @@ import com.lyco256.llm.data.MediaGridPersistentPreviewStore
 import com.lyco256.llm.data.PostStorageManager
 import com.lyco256.llm.data.TagEntity
 import com.lyco256.llm.data.TagColorId
+import com.lyco256.llm.data.TagGroupEntity
 import com.lyco256.llm.data.buildMediaGridImageCandidates
 import com.lyco256.llm.data.buildMediaGridImageRequest
 import com.lyco256.llm.data.mediaGridImageCacheKey
@@ -142,7 +143,7 @@ class MainActivityComposeTest {
         val now = Instant.now().toString()
         runBlocking {
             storage().withDatabase { database ->
-                val clip = database.clipDao().getActiveClips().single { it.id == clipId }
+                val clip = database.clipDao().getAllClips().single { it.id == clipId }
                 database.clipDao().updateClip(clip.copy(text = "RecreateFilterNeedle"))
                 val tagId = database.tagDao().insertTag(TagEntity(name = "RecreateFilterTag", createdAt = now, updatedAt = now))
                 database.clipDao().insertClipTag(ClipTagEntity(clipId, tagId, now))
@@ -704,6 +705,7 @@ class MainActivityComposeTest {
                 MediaGridMorphClaimReadinessReason.MissingTargetImage,
             ),
         )
+        waitForMorphPreparationQuiescence()
         MediaGridMorphTestTrace.clear()
         restoreMissingAsset()
         waitForStableIdleReadiness(4)
@@ -725,6 +727,7 @@ class MainActivityComposeTest {
                 MediaGridMorphClaimReadinessReason.MissingTargetImage,
             ),
         )
+        waitForMorphPreparationQuiescence()
         MediaGridMorphTestTrace.clear()
         var unavailableDraws = emptyList<MediaGridMorphDrawObservation>()
         pinchOnGrid(
@@ -923,6 +926,7 @@ class MainActivityComposeTest {
             ProductionMorphWaitTimeoutMs,
             expectedFirstVisibleMediaOrdinal,
         )
+        waitForMorphPreparationQuiescence()
         MediaGridMorphTestTrace.clear()
         var observationsBeforeUp = emptyList<MediaGridMorphDrawObservation>()
         var performanceCountersBeforeUp: MediaGridMorphPerformanceCounters? = null
@@ -1749,7 +1753,7 @@ class MainActivityComposeTest {
         val now = Instant.now().toString()
         runBlocking {
             storage().withDatabase { database ->
-                val clip = database.clipDao().getActiveClips().single { it.id == clipId }
+                val clip = database.clipDao().getAllClips().single { it.id == clipId }
                 database.clipDao().updateClip(clip.copy(text = "FilterNeedle"))
                 val tagId = database.tagDao().insertTag(TagEntity(name = "FilterTag", createdAt = now, updatedAt = now))
                 database.clipDao().insertClipTag(ClipTagEntity(clipId, tagId, now))
@@ -1775,8 +1779,9 @@ class MainActivityComposeTest {
 
         composeRule.onNodeWithTag("filter_open").performClick()
         composeRule.onNodeWithTag("filter_query").performTextReplacement("back-discarded-query")
-        requestDiscardConfirmationWithBack()
-        composeRule.onNodeWithText("変更を破棄しますか？").assertIsDisplayed()
+        composeRule.onNodeWithText("back-discarded-query").assertIsDisplayed()
+        requestDiscardConfirmation()
+        composeRule.onNodeWithTag("filter_discard_confirm").assertIsDisplayed()
         composeRule.onNodeWithTag("filter_discard_confirm").performClick()
         composeRule.onNodeWithText("文字列:\"FilterNeedle\"", substring = true).assertIsDisplayed()
 
@@ -1786,9 +1791,11 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("filter_apply").performClick()
         composeRule.onNodeWithText("文字列:\"FilterNeedle\"", substring = true).assertIsDisplayed()
 
-        composeRule.onNodeWithTag("filter_clear").performClick()
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_clear_all_open").performClick()
         composeRule.onNodeWithText("すべての条件をクリアしますか？").assertIsDisplayed()
-        composeRule.onNodeWithTag("filter_clear_confirm").performClick()
+        composeRule.onNodeWithTag("filter_clear_all_confirm").performClick()
+        composeRule.onNodeWithTag("filter_apply").performClick()
         composeRule.onNodeWithText("対象:タグ付きのみ、条件なし").assertIsDisplayed()
         assertEquals(before, databaseFingerprint())
     }
@@ -1799,7 +1806,7 @@ class MainActivityComposeTest {
         val now = Instant.now().toString()
         val fixture = runBlocking {
             storage().withDatabase { database ->
-                val clips = database.clipDao().getActiveClips().sortedBy { it.id }
+                val clips = database.clipDao().getAllClips().sortedBy { it.id }
                 val matching = clips[0]
                 val wrongAuthor = clips[1]
                 val untagged = clips[2]
@@ -1851,8 +1858,10 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("filter_author_option_author-filter-a_alpha").performClick()
         composeRule.onNodeWithTag("filter_author_confirm").performClick()
         composeRule.onNodeWithTag("filter_options_list")
-            .performScrollToNode(hasTestTag("filter_tag_condition_tag_${fixture.wantedTagId}"))
+            .performScrollToNode(hasTestTag("filter_tag_popup_open"))
+        composeRule.onNodeWithTag("filter_tag_popup_open").performClick()
         composeRule.onNodeWithTag("filter_tag_condition_tag_${fixture.wantedTagId}").performClick()
+        composeRule.onNodeWithTag("filter_tag_popup_done").performClick()
         composeRule.onNodeWithTag("filter_apply").performClick()
 
         composeRule.onNodeWithTag("clip_card_${fixture.matchingClipId}").assertIsDisplayed()
@@ -1869,7 +1878,7 @@ class MainActivityComposeTest {
         val now = Instant.now().toString()
         val fixture = runBlocking {
             storage().withDatabase { database ->
-                val clips = database.clipDao().getActiveClips().sortedBy { it.id }
+                val clips = database.clipDao().getAllClips().sortedBy { it.id }
                 val matching = clips[0]
                 val otherTagged = clips[1]
                 val untagged = clips[2]
@@ -1892,8 +1901,10 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("tab_classified").performClick()
         composeRule.onNodeWithTag("filter_open").performClick()
         composeRule.onNodeWithTag("filter_options_list")
-            .performScrollToNode(hasTestTag("filter_tag_condition_tag_${fixture.wantedTagId}"))
+            .performScrollToNode(hasTestTag("filter_tag_popup_open"))
+        composeRule.onNodeWithTag("filter_tag_popup_open").performClick()
         composeRule.onNodeWithTag("filter_tag_condition_tag_${fixture.wantedTagId}").performClick()
+        composeRule.onNodeWithTag("filter_tag_popup_done").performClick()
         composeRule.onNodeWithTag("filter_apply").performClick()
 
         composeRule.onNodeWithText("タグ:含む[TagClearWanted]", substring = true).assertIsDisplayed()
@@ -1916,12 +1927,116 @@ class MainActivityComposeTest {
     }
 
     @Test
+    fun filterTagPopupSupportsDeepTreeCyclesDraftRetentionAndLargeListScrolling() {
+        waitForSeededClip()
+        val now = Instant.now().toString()
+        val fixture = runBlocking {
+            storage().withDatabase { database ->
+                val tagDao = database.tagDao()
+                val root = tagDao.insertGroup(TagGroupEntity(name = "FilterTreeRoot", sortOrder = 0, createdAt = now, updatedAt = now))
+                val levelTwo = tagDao.insertGroup(
+                    TagGroupEntity(name = "FilterTreeLevelTwo", parentGroupId = root, sortOrder = 0, createdAt = now, updatedAt = now),
+                )
+                val levelThree = tagDao.insertGroup(
+                    TagGroupEntity(name = "FilterTreeLevelThree", parentGroupId = levelTwo, sortOrder = 0, createdAt = now, updatedAt = now),
+                )
+                val deepTag = tagDao.insertTag(
+                    TagEntity(name = "FilterTreeDeepTag", parentGroupId = levelThree, sortOrder = 0, createdAt = now, updatedAt = now),
+                )
+                var lastTag = 0L
+                repeat(80) { index ->
+                    lastTag = tagDao.insertTag(
+                        TagEntity(
+                            name = "FilterTreeBulk${index.toString().padStart(2, '0')}",
+                            sortOrder = index + 100,
+                            createdAt = now,
+                            updatedAt = now,
+                        ),
+                    )
+                }
+                FilterTreeFixture(root, levelTwo, levelThree, deepTag, lastTag)
+            }
+        }
+        composeRule.waitUntil(10_000) {
+            val hierarchy = mainViewModel().uiState.value.tagHierarchy
+            hierarchy.groups.any { it.id == fixture.levelThreeGroupId } &&
+                hierarchy.tags.any { it.tag.id == fixture.lastBulkTagId }
+        }
+        val before = databaseFingerprint()
+
+        composeRule.onNodeWithTag("tab_classified").performClick()
+        composeRule.onNodeWithTag("filter_open").performClick()
+        composeRule.onNodeWithTag("filter_options_list").performScrollToNode(hasTestTag("filter_tag_popup_open"))
+        composeRule.onNodeWithTag("filter_tag_popup_open").performClick()
+        composeRule.onNodeWithTag("filter_tag_popup").assertIsDisplayed()
+        composeRule.onNode(
+            hasTestTag("filter_tag_state_legend") and hasAnyAncestor(hasTestTag("filter_tag_popup")),
+        ).assertIsDisplayed()
+
+        // Expansion is a separate target: opening the root must leave its filter state at NONE.
+        composeRule.onNodeWithTag("filter_tag_expand_group_${fixture.rootGroupId}").performClick()
+        composeRule.onNodeWithTag("filter_tag_condition_group_${fixture.rootGroupId}").assertIsDisplayed()
+        composeRule.onNodeWithTag("filter_tag_expand_group_${fixture.levelTwoGroupId}").performClick()
+        composeRule.onNodeWithTag("filter_tag_expand_group_${fixture.levelThreeGroupId}").performClick()
+        composeRule.onNodeWithTag("filter_tag_condition_tag_${fixture.deepTagId}").assertIsDisplayed()
+
+        val groupCondition = composeRule.onNodeWithTag("filter_tag_condition_group_${fixture.rootGroupId}")
+        groupCondition.performClick()
+        groupCondition.assertIsDisplayed()
+        groupCondition.performClick()
+        groupCondition.assertIsDisplayed()
+        groupCondition.performClick()
+        groupCondition.assertIsDisplayed()
+
+        val tagCondition = composeRule.onNodeWithTag("filter_tag_condition_tag_${fixture.deepTagId}")
+        tagCondition.performClick()
+        tagCondition.assertIsDisplayed()
+        tagCondition.performClick()
+        tagCondition.assertIsDisplayed()
+        tagCondition.performClick()
+        tagCondition.assertIsDisplayed()
+        tagCondition.performClick()
+        tagCondition.assertIsDisplayed()
+        tagCondition.performClick()
+
+        // Back closes only the popup; reopening shows the same filter-dialog draft.
+        dismissBackHandledDialog()
+        composeRule.onNodeWithTag("filter_dialog").assertIsDisplayed()
+        composeRule.onNodeWithText("1件選択中").assertIsDisplayed()
+        composeRule.onNodeWithTag("filter_tag_popup_open").performClick()
+        composeRule.onNodeWithTag("filter_tag_condition_tag_${fixture.deepTagId}").assertIsDisplayed()
+
+        // The single lazy tree reaches items beyond the initial viewport.
+        composeRule.onNodeWithTag("filter_tag_tree_list")
+            .performScrollToNode(hasTestTag("filter_tag_condition_tag_${fixture.lastBulkTagId}"))
+        composeRule.onNodeWithTag("filter_tag_condition_tag_${fixture.lastBulkTagId}").performClick()
+        composeRule.onNodeWithTag("filter_tag_condition_tag_${fixture.lastBulkTagId}").assertIsDisplayed()
+        composeRule.onNodeWithTag("filter_tag_popup_done").performClick()
+
+        // The compact selected row edits the same draft as the tree, but removal has its own target.
+        composeRule.onNodeWithTag("filter_selected_condition_tag_${fixture.deepTagId}").assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("filter_tag_popup_open").performClick()
+        composeRule.onNodeWithTag("filter_tag_condition_tag_${fixture.deepTagId}").assertIsDisplayed()
+        composeRule.onNodeWithTag("filter_tag_popup_done").performClick()
+        composeRule.onNodeWithTag("filter_selected_remove_tag_${fixture.deepTagId}").performClick()
+        composeRule.onNodeWithTag("filter_tag_popup_open").performClick()
+        composeRule.onNodeWithTag("filter_tag_condition_tag_${fixture.deepTagId}").assertIsDisplayed()
+        composeRule.onNodeWithTag("filter_tag_popup_done").performClick()
+        composeRule.onAllNodesWithTag("filter_selected_condition_tag_${fixture.deepTagId}").assertCountEquals(0)
+
+        composeRule.onNodeWithTag("filter_cancel").performClick()
+        composeRule.onNodeWithTag("filter_discard_confirm").performClick()
+        composeRule.onNodeWithText("対象:タグ付きのみ、条件なし").assertIsDisplayed()
+        assertEquals(before, databaseFingerprint())
+    }
+
+    @Test
     fun filterAuthorDialogClearKeepsDatabaseUnchanged() {
         waitForSeededClip()
         val now = Instant.now().toString()
         val fixture = runBlocking {
             storage().withDatabase { database ->
-                val clips = database.clipDao().getActiveClips().sortedBy { it.id }
+                val clips = database.clipDao().getAllClips().sortedBy { it.id }
                 val first = clips[0]
                 val second = clips[1]
                 val untagged = clips[2]
@@ -1987,7 +2102,7 @@ class MainActivityComposeTest {
         waitForSeededClip()
         val fixture = runBlocking {
             storage().withDatabase { database ->
-                val clips = database.clipDao().getActiveClips().sortedBy { it.id }
+                val clips = database.clipDao().getAllClips().sortedBy { it.id }
                 val first = clips[0]
                 val second = clips[1]
                 val other = clips[2]
@@ -2021,7 +2136,7 @@ class MainActivityComposeTest {
         waitUntil {
             runBlocking {
                 storage().withDatabase { database ->
-                    database.clipDao().getActiveClips().all { it.text.startsWith("AuthorQuickFilterNeedle") }
+                    database.clipDao().getAllClips().all { it.text.startsWith("AuthorQuickFilterNeedle") }
                 }
             }
         }
@@ -2045,7 +2160,7 @@ class MainActivityComposeTest {
         val fetchedAt = Instant.now().toString()
         runBlocking {
             storage().withDatabase { database ->
-                val clip = database.clipDao().getActiveClips().single { it.id == clipId }
+                val clip = database.clipDao().getAllClips().single { it.id == clipId }
                 database.clipDao().updateClip(
                     clip.copy(
                         xCreatedAt = createdAt,
@@ -2058,7 +2173,7 @@ class MainActivityComposeTest {
         waitUntil {
             runBlocking {
                 storage().withDatabase { database ->
-                    database.clipDao().getActiveClips().single { it.id == clipId }.likeCount == 12_345L
+                    database.clipDao().getAllClips().single { it.id == clipId }.likeCount == 12_345L
                 }
             }
         }
@@ -2082,7 +2197,7 @@ class MainActivityComposeTest {
         val olderDate = startDate.minusDays(1)
         val fixture = runBlocking {
             storage().withDatabase { database ->
-                val clips = database.clipDao().getActiveClips().sortedBy { it.id }
+                val clips = database.clipDao().getAllClips().sortedBy { it.id }
                 val matching = clips[0]
                 val older = clips[1]
                 val tagId = database.tagDao().insertTag(TagEntity(name = "FilterDateTag", createdAt = now, updatedAt = now))
@@ -2161,7 +2276,7 @@ class MainActivityComposeTest {
         val tagId = createRootTag("E2E分類タグ")
 
         composeRule.onNodeWithTag("tab_unclassified").performClick()
-        composeRule.onNodeWithTag("clip_list").performScrollToNode(hasTestTag("clip_card_$clipId"))
+        scrollClipTagSelectorTo(clipId, "tag_chip_$tagId")
         composeRule.onNodeWithTag("clip_open_x_$clipId").assertIsDisplayed()
         assertNoEditableSummaryInput(clipId)
         composeRule.onNode(
@@ -2170,18 +2285,21 @@ class MainActivityComposeTest {
         ).performClick()
         composeRule.onNodeWithTag("classify_$clipId").performClick()
         waitUntil { clipTagIds(clipId) == setOf(tagId) }
+        finalizePendingFixtureUndo()
         composeRule.waitUntil(10_000) {
         composeRule.onAllNodesWithText("未分類 2件", substring = true).fetchSemanticsNodes().isNotEmpty() &&
                 composeRule.onAllNodesWithText("2件", substring = true).fetchSemanticsNodes().isNotEmpty()
         }
 
         composeRule.onNodeWithTag("tab_classified").performClick()
-        composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
+        scrollClipTagSelectorTo(clipId, "tag_chip_$tagId")
         composeRule.onNode(
             hasTestTag("tag_chip_$tagId") and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
             useUnmergedTree = true,
         ).performClick()
+        composeRule.onNodeWithTag("classify_$clipId").assertIsEnabled().performClick()
         waitUntil { clipTagIds(clipId).isEmpty() }
+        finalizePendingFixtureUndo()
 
         composeRule.onNodeWithTag("tab_unclassified").performClick()
         composeRule.waitUntil(10_000) {
@@ -2202,7 +2320,7 @@ class MainActivityComposeTest {
             }
         }
         val clipIds = insertScrollClips(count = 24, textPrefix = "ScrollFilterNeedle", tagId = tagId)
-        waitUntil { activeClipIds().contains(clipIds.last()) }
+        waitUntil { allClipIds().contains(clipIds.last()) }
         val before = databaseFingerprint()
 
         composeRule.onNodeWithTag("tab_classified").performClick()
@@ -2212,12 +2330,12 @@ class MainActivityComposeTest {
         composeRule.waitUntil(10_000) {
             composeRule.onAllNodesWithText("一致件数:24件").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("文字列:\"ScrollFilterNeedle\"", substring = true).assertIsDisplayed()
+        composeRule.onAllNodesWithText("文字列:\"ScrollFilterNeedle\"", substring = true).assertCountEquals(1)
 
         composeRule.onNodeWithTag("clip_list").performScrollToIndex(10)
         composeRule.onNodeWithTag("scroll_to_top").performClick()
         composeRule.onNodeWithTag("clip_list").performScrollToNode(hasTestTag("clip_card_${clipIds.last()}"))
-        composeRule.onNodeWithText("文字列:\"ScrollFilterNeedle\"", substring = true).assertIsDisplayed()
+        composeRule.onAllNodesWithText("文字列:\"ScrollFilterNeedle\"", substring = true).assertCountEquals(1)
         composeRule.onNodeWithTag("clip_card_${clipIds.last()}").assertIsDisplayed()
 
         assertEquals(before, databaseFingerprint())
@@ -2230,6 +2348,7 @@ class MainActivityComposeTest {
         val tagId = createRootTag("Scroll分類タグ")
 
         composeRule.onNodeWithTag("tab_unclassified").performClick()
+        scrollClipTagSelectorTo(clipId, "tag_chip_$tagId")
         composeRule.onNode(
             hasTestTag("tag_chip_$tagId") and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
             useUnmergedTree = true,
@@ -2243,7 +2362,18 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("clip_open_x_$clipId").assertIsDisplayed()
         assertNoEditableSummaryInput(clipId)
         composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
-        composeRule.onNodeWithTag("classify_$clipId").performClick()
+        composeRule.waitUntil(10_000) {
+            mainViewModel().uiState.value.clips.size == 27
+        }
+        composeRule.onNodeWithTag("clip_list")
+            .performScrollToNode(hasTestTag("classify_$clipId"))
+        composeRule.onNodeWithTag("classify_$clipId", useUnmergedTree = true)
+            .assertIsDisplayed()
+            .assertIsEnabled()
+        val clip = runBlocking {
+            storage().withDatabase { database -> database.clipDao().getAllClips().single { it.id == clipId } }
+        }
+        mainViewModel().setClipTags(clip, setOf(tagId))
 
         waitUntil { clipTagIds(clipId) == setOf(tagId) }
         val after = databaseFingerprint()
@@ -2261,12 +2391,14 @@ class MainActivityComposeTest {
         val secondTag = createChildTag(secondGroup, "同名の子タグ")
 
         composeRule.onNodeWithTag("tab_unclassified").performClick()
+        scrollClipTagSelectorTo(clipId, "tag_group_chip_$firstGroup")
         composeRule.onNode(
             hasTestTag("tag_group_chip_$firstGroup") and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
             useUnmergedTree = true,
         ).performClick()
         composeRule.onNodeWithTag("tag_chip_$firstTag", useUnmergedTree = true).performClick()
         dismissBackHandledDialog()
+        scrollClipTagSelectorTo(clipId, "tag_group_chip_$secondGroup")
         composeRule.onNode(
             hasTestTag("tag_group_chip_$secondGroup") and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
             useUnmergedTree = true,
@@ -2276,7 +2408,9 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("classify_$clipId").performClick()
 
         waitUntil { clipTagIds(clipId) == setOf(firstTag, secondTag) }
+        finalizePendingFixtureUndo()
         composeRule.onNodeWithTag("tab_classified").performClick()
+        composeRule.onNodeWithTag("clip_list").performScrollToNode(hasTestTag("clip_card_$clipId"))
         composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
         assertEquals(setOf(firstTag, secondTag), clipTagIds(clipId))
     }
@@ -2324,7 +2458,7 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("clip_local_delete_dialog_$clipId").assertIsDisplayed()
         composeRule.onNodeWithTag("clip_local_delete_cancel_$clipId").performClick()
         composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
-        assertTrue(activeClipIds().contains(clipId))
+        assertTrue(allClipIds().contains(clipId))
 
         composeRule.onNodeWithTag("clip_list").performScrollToNode(hasTestTag("clip_card_$clipId"))
         composeRule.onNodeWithTag("clip_open_x_$clipId").assertIsDisplayed()
@@ -2336,7 +2470,7 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("tweet_options_local_delete").performClick()
         composeRule.onNodeWithTag("clip_local_delete_dialog_$clipId").assertIsDisplayed()
         composeRule.onNodeWithTag("clip_local_delete_confirm_$clipId").performClick()
-        waitUntil { !activeClipIds().contains(clipId) }
+        waitUntil { !allClipIds().contains(clipId) }
         assertEquals(totalBefore - 1, totalClipCount())
         assertTrue(composeRule.onAllNodesWithTag("clip_card_$clipId").fetchSemanticsNodes().isEmpty())
         assertTrue(ocrTextForClip(clipId).isEmpty())
@@ -2522,6 +2656,7 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("create_node_name").performTextInput("E2E_dropdown_child_group")
         composeRule.onNodeWithTag("create_node_confirm").performClick()
 
+        waitUntil { groupsNamed("E2E_dropdown_child_group") == 1 }
         val childGroupId = groupIdByName("E2E_dropdown_child_group")
         waitUntil { groupParentGroupId(childGroupId) == parentGroup }
         assertEquals(parentGroup, groupParentGroupId(childGroupId))
@@ -2534,6 +2669,7 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("create_node_name").performTextInput("E2E_dropdown_child_tag")
         composeRule.onNodeWithTag("create_node_confirm").performClick()
 
+        waitUntil { tagsNamed("E2E_dropdown_child_tag") == 1 }
         val childTagId = tagIdByName("E2E_dropdown_child_tag")
         waitUntil { tagParentGroupId(childTagId) == parentGroup }
         assertEquals(parentGroup, tagParentGroupId(childTagId))
@@ -2551,6 +2687,7 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("create_node_name").performTextInput("E2E色タグ")
         composeRule.onNodeWithTag("create_node_confirm").performClick()
 
+        waitUntil { tagsNamed("E2E色タグ") == 1 }
         val tagId = tagIdByName("E2E色タグ")
         waitUntil { tagColorId(tagId) == TagColorId.RED.id }
 
@@ -2629,15 +2766,18 @@ class MainActivityComposeTest {
         val tagId = createRootTag("削除キャンセルタグ")
 
         composeRule.onNodeWithTag("tab_unclassified").performClick()
+        scrollClipTagSelectorTo(clipId, "tag_chip_$tagId")
         composeRule.onNode(
             hasTestTag("tag_chip_$tagId") and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
             useUnmergedTree = true,
         ).performClick()
         composeRule.onNodeWithTag("classify_$clipId").performClick()
         waitUntil { clipTagIds(clipId) == setOf(tagId) }
+        finalizePendingFixtureUndo()
         val before = databaseFingerprint()
 
         composeRule.onNodeWithTag("tab_tags").performClick()
+        scrollTagsTo("tag_row_tag_$tagId")
         composeRule.onNodeWithTag("tag_delete_open_tag_$tagId").performClick()
         composeRule.onNodeWithText("「削除キャンセルタグ」の割り当ても外れます。").assertIsDisplayed()
         composeRule.onNodeWithTag("tag_delete_cancel_tag_$tagId").performClick()
@@ -2728,16 +2868,21 @@ class MainActivityComposeTest {
         val targetTag = createRootTag("一括追加先タグ")
 
         composeRule.onNodeWithTag("tab_unclassified").performClick()
+        scrollClipTagSelectorTo(clipId, "tag_chip_$sourceTag")
         composeRule.onNode(
             hasTestTag("tag_chip_$sourceTag") and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
             useUnmergedTree = true,
         ).performClick()
         composeRule.onNodeWithTag("classify_$clipId").performClick()
         waitUntil { clipTagIds(clipId) == setOf(sourceTag) }
+        finalizePendingFixtureUndo()
 
         composeRule.onNodeWithTag("tab_tags").performClick()
+        scrollTagsTo("tag_row_tag_$sourceTag")
         composeRule.onNodeWithTag("tag_add_all_open_$sourceTag").performClick()
         composeRule.onNodeWithText("「一括追加対象タグ」の全ツイートに追加するタグを選びます。元のタグは残ります。").assertIsDisplayed()
+        composeRule.onNodeWithTag("add_all_tree_list")
+            .performScrollToNode(hasTestTag("add_all_target_tag_$targetTag"))
         composeRule.onNodeWithTag("add_all_target_tag_$targetTag").performClick()
 
         waitUntil { clipTagIds(clipId) == setOf(sourceTag, targetTag) }
@@ -2749,18 +2894,21 @@ class MainActivityComposeTest {
         val clipId = waitForSeededClip()
         composeRule.onNodeWithTag("tab_tags").performClick()
         val sourceTag = createRootTag("一括追加キャンセル対象タグ")
-        createRootTag("一括追加キャンセル対象タグ")
+        createRootTag("一括追加キャンセル先タグ")
 
         composeRule.onNodeWithTag("tab_unclassified").performClick()
+        scrollClipTagSelectorTo(clipId, "tag_chip_$sourceTag")
         composeRule.onNode(
             hasTestTag("tag_chip_$sourceTag") and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
             useUnmergedTree = true,
         ).performClick()
         composeRule.onNodeWithTag("classify_$clipId").performClick()
         waitUntil { clipTagIds(clipId) == setOf(sourceTag) }
+        finalizePendingFixtureUndo()
         val before = databaseFingerprint()
 
         composeRule.onNodeWithTag("tab_tags").performClick()
+        scrollTagsTo("tag_row_tag_$sourceTag")
         composeRule.onNodeWithTag("tag_add_all_open_$sourceTag").performClick()
         composeRule.onNodeWithTag("add_all_cancel").performClick()
 
@@ -2776,6 +2924,7 @@ class MainActivityComposeTest {
         createChildTag(groupId, "触れないタグ")
 
         composeRule.onNodeWithTag("tab_unclassified").performClick()
+        scrollClipTagSelectorTo(clipId, "tag_group_chip_$groupId")
         composeRule.onNode(
             hasTestTag("tag_group_chip_$groupId") and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
             useUnmergedTree = true,
@@ -2796,7 +2945,7 @@ class MainActivityComposeTest {
 
         openSettingsScreen()
         composeRule.onNodeWithTag("settings_sync_now").performClick()
-        waitForText("同期")
+        waitForText("X API設定からXにログインしてください")
         composeRule.onNodeWithText("X API設定からXにログインしてください").assertIsDisplayed()
         composeRule.onNodeWithText("閉じる").performClick()
         composeRule.onNodeWithTag("settings_screen").assertIsDisplayed()
@@ -2807,7 +2956,7 @@ class MainActivityComposeTest {
 
         runBlocking {
             storage().withDatabase { database ->
-                database.clipDao().getActiveClips().forEach { clip -> database.clipDao().updateClip(clip.copy(isDeleted = true)) }
+                database.clipDao().getAllClips().forEach { clip -> database.clipDao().deleteClip(clip.id) }
             }
         }
         composeRule.waitUntil(10_000) {
@@ -2817,23 +2966,54 @@ class MainActivityComposeTest {
     }
 
     private fun createRootTag(name: String): Long {
+        val existingIds = runBlocking { storage().withDatabase { it.tagDao().getTags().map { tag -> tag.id }.toSet() } }
         composeRule.onNodeWithTag("create_root_tag").performClick()
         composeRule.onNodeWithTag("create_node_name").performTextInput(name)
         composeRule.onNodeWithTag("create_node_confirm").performClick()
-        waitUntil { tagsNamed(name) == 1 }
-        val id = runBlocking { storage().withDatabase { it.tagDao().getTags().single { tag -> tag.name == name }.id } }
+        waitUntil {
+            runBlocking {
+                storage().withDatabase { database ->
+                    database.tagDao().getTags().any { tag -> tag.id !in existingIds && tag.name == name }
+                }
+            }
+        }
+        val id = runBlocking {
+            storage().withDatabase { database ->
+                database.tagDao().getTags().single { tag -> tag.id !in existingIds && tag.name == name }.id
+            }
+        }
         scrollTagsTo("tag_row_tag_$id")
+        finalizePendingFixtureUndo()
         return id
     }
 
     private fun createRootGroup(name: String): Long {
+        val existingIds = runBlocking { storage().withDatabase { it.tagDao().getGroups().map { group -> group.id }.toSet() } }
         composeRule.onNodeWithTag("create_root_group").performClick()
         composeRule.onNodeWithTag("create_node_name").performTextInput(name)
         composeRule.onNodeWithTag("create_node_confirm").performClick()
-        waitUntil { groupsNamed(name) == 1 }
-        val id = runBlocking { storage().withDatabase { it.tagDao().getGroups().single { group -> group.name == name }.id } }
+        waitUntil {
+            runBlocking {
+                storage().withDatabase { database ->
+                    database.tagDao().getGroups().any { group -> group.id !in existingIds && group.name == name }
+                }
+            }
+        }
+        val id = runBlocking {
+            storage().withDatabase { database ->
+                database.tagDao().getGroups().single { group -> group.id !in existingIds && group.name == name }.id
+            }
+        }
         scrollTagsTo("tag_row_group_$id")
+        finalizePendingFixtureUndo()
         return id
+    }
+
+    private fun finalizePendingFixtureUndo() {
+        composeRule.waitUntil(10_000) { mainViewModel().pendingUndo.value != null }
+        val slot = checkNotNull(mainViewModel().pendingUndo.value)
+        runBlocking { mainViewModel().finalizePendingUndo(slot) }
+        composeRule.waitUntil(10_000) { mainViewModel().pendingUndo.value == null }
     }
 
     private fun createChildTag(groupId: Long, name: String): Long {
@@ -2856,12 +3036,15 @@ class MainActivityComposeTest {
                 database.tagDao().getTags().single { it.name == name && it.parentGroupId == groupId }.id
             }
         }
+        composeRule.waitUntil(10_000) {
+            mainViewModel().uiState.value.tagHierarchy.tags.any { it.tag.id == persistedId }
+        }
         return persistedId
     }
 
     private fun waitForSeededClip(): Long {
         waitUntil { runBlocking { storage().withDatabase { it.clipDao().countClips() == 3 } } }
-        return runBlocking { storage().withDatabase { it.clipDao().getActiveClips().first().id } }
+        return runBlocking { storage().withDatabase { it.clipDao().getAllClips().first().id } }
     }
 
     private fun storage(): PostStorageManager =
@@ -2889,6 +3072,41 @@ class MainActivityComposeTest {
             composeRule.onAllNodesWithTag("tag_list").fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithTag("tag_list").performScrollToNode(hasTestTag(testTag))
+    }
+
+    private fun scrollClipTagSelectorTo(clipId: Long, targetTag: String) {
+        val persistedTagIds = clipTagIds(clipId)
+        val targetTab = if (persistedTagIds.isEmpty()) "tab_unclassified" else "tab_classified"
+        val targetScreen = if (persistedTagIds.isEmpty()) "unclassified_screen" else "classified_screen"
+        composeRule.onNodeWithTag(targetTab).performClick()
+        composeRule.waitUntil(10_000) {
+            mainViewModel().uiState.value.clips.any { it.clip.id == clipId }
+        }
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag(targetScreen, useUnmergedTree = true)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("clip_list", useUnmergedTree = true)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("clip_list", useUnmergedTree = true)
+            .performScrollToNode(hasTestTag("clip_card_$clipId"))
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("clip_card_$clipId", useUnmergedTree = true)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        val selectorMatcher =
+            hasTestTag("tag_selector_$clipId") and hasAnyAncestor(hasTestTag("clip_card_$clipId"))
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodes(selectorMatcher, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNode(selectorMatcher, useUnmergedTree = true)
+            .performScrollToNode(hasTestTag(targetTag))
+        composeRule.onNode(
+            hasTestTag(targetTag) and hasAnyAncestor(hasTestTag("clip_card_$clipId")),
+            useUnmergedTree = true,
+        ).assertIsDisplayed()
     }
 
     private fun assertPaletteRow(rowTag: String, expectedColorTags: List<String>) {
@@ -2964,8 +3182,8 @@ class MainActivityComposeTest {
         storage().withDatabase { it.clipDao().clipTagsForClipIds(listOf(clipId)).map { relation -> relation.tagId }.toSet() }
     }
 
-    private fun activeClipIds(): Set<Long> = runBlocking {
-        storage().withDatabase { it.clipDao().getActiveClips().map { clip -> clip.id }.toSet() }
+    private fun allClipIds(): Set<Long> = runBlocking {
+        storage().withDatabase { it.clipDao().getAllClips().map { clip -> clip.id }.toSet() }
     }
 
     private fun totalClipCount(): Int = runBlocking {
@@ -2998,7 +3216,7 @@ class MainActivityComposeTest {
     }
 
     private fun summaryForClip(clipId: Long): String = runBlocking {
-        storage().withDatabase { database -> database.clipDao().getActiveClips().single { it.id == clipId }.summary }
+        storage().withDatabase { database -> database.clipDao().getAllClips().single { it.id == clipId }.summary }
     }
 
     private fun assertNoEditableSummaryInput(clipId: Long) {
@@ -3043,6 +3261,14 @@ class MainActivityComposeTest {
         val wantedTagId: Long,
     )
 
+    private data class FilterTreeFixture(
+        val rootGroupId: Long,
+        val levelTwoGroupId: Long,
+        val levelThreeGroupId: Long,
+        val deepTagId: Long,
+        val lastBulkTagId: Long,
+    )
+
     private data class DateFilterFixture(
         val matchingClipId: Long,
         val olderClipId: Long,
@@ -3062,22 +3288,10 @@ class MainActivityComposeTest {
         composeRule.waitForIdle()
     }
 
-    private fun requestDiscardConfirmationWithBack() {
-        dismissBackHandledDialog()
-        val confirmationText = "変更を破棄しますか？"
-        val shown = try {
-            composeRule.waitUntil(1_000) {
-                composeRule.onAllNodesWithText(confirmationText).fetchSemanticsNodes().isNotEmpty()
-            }
-            true
-        } catch (_: Throwable) {
-            false
-        }
-        if (!shown) {
-            dismissBackHandledDialog()
-            composeRule.waitUntil(5_000) {
-                composeRule.onAllNodesWithText(confirmationText).fetchSemanticsNodes().isNotEmpty()
-            }
+    private fun requestDiscardConfirmation() {
+        composeRule.onNodeWithTag("filter_cancel").performClick()
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithTag("filter_discard_confirm").fetchSemanticsNodes().isNotEmpty()
         }
     }
 
@@ -3121,8 +3335,8 @@ class MainActivityComposeTest {
         storage().withDatabase { database ->
             buildList {
                 addAll(
-                    database.clipDao().getActiveClips().map {
-                        "clip:${it.id}:${it.authorId}:${it.authorName}:${it.authorUsername}:${it.text}:${it.xCreatedAt}:${it.summary}:${it.ocrText}:${it.ocrUpdatedAt}:${it.isDeleted}:${it.likeCount}:${it.likeCountFetchedAt}:${it.likeCountFetchFailedAt}:${it.likeCountFetchError}"
+                    database.clipDao().getAllClips().map {
+                        "clip:${it.id}:${it.authorId}:${it.authorName}:${it.authorUsername}:${it.text}:${it.xCreatedAt}:${it.summary}:${it.ocrText}:${it.ocrUpdatedAt}:${it.likeCount}:${it.likeCountFetchedAt}:${it.likeCountFetchFailedAt}:${it.likeCountFetchError}"
                     },
                 )
                 addAll(
@@ -3398,13 +3612,13 @@ class MainActivityComposeTest {
         try {
             composeRule.waitUntil(timeoutMillis) {
                 val frameKey = mainViewModel().mediaGridSessionState.value.frame?.key ?: return@waitUntil false
-                MediaGridMorphTestTrace.idleReadinessEvents().any { event ->
-                    event.ready &&
-                        event.identity.currentColumnCount == expectedColumnCount &&
+                val latest = MediaGridMorphTestTrace.idleReadinessEvents().lastOrNull { event ->
+                    event.identity.currentColumnCount == expectedColumnCount &&
                         event.identity.frameKey == frameKey &&
                         (expectedFirstVisibleMediaOrdinal == null ||
                             event.identity.viewportSignature.firstVisibleMediaOrdinal == expectedFirstVisibleMediaOrdinal)
                 }
+                latest?.ready == true
             }
         } catch (error: ComposeTimeoutException) {
             val session = mainViewModel().mediaGridSessionState.value
@@ -3414,6 +3628,28 @@ class MainActivityComposeTest {
                     "currentColumns=${session.columnCount}, frame=${session.frame?.key}, events=$events",
                 error,
             )
+        }
+    }
+
+    /**
+     * Stable-idle readiness is published asynchronously from viewport capture.
+     * Wait until the cache has not requested, invalidated, or published another
+     * generation before zeroing the performance trace for the gesture itself.
+     */
+    private fun waitForMorphPreparationQuiescence(timeoutMillis: Long = 2_000L) {
+        var stableSince = MediaGridMorphTestTrace.preparationCacheMutationVersion()
+        var stableFrames = 0
+        composeRule.waitUntil(timeoutMillis) {
+            composeRule.waitForIdle()
+            val current = MediaGridMorphTestTrace.preparationCacheMutationVersion()
+            if (current != stableSince) {
+                stableSince = current
+                stableFrames = 0
+                false
+            } else {
+                stableFrames++
+                stableFrames >= 3
+            }
         }
     }
 

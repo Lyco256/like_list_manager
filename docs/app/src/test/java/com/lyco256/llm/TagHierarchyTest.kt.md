@@ -8,6 +8,17 @@
 
 ## 主要な定義、設定、処理
 
+- `filterStateColorsUseOneGreenRedGrayMappingWithNoSelectionForNone`
+  - 共通の絞り込み状態色が含む=緑、必須=赤、排除=灰色、なし=transparentで、選択時content色がdark themeでも読める白であることを確認します。
+- `selectedFilterConditionsCycleWithoutNoneAndUseBreadcrumbs`
+  - 選択済み一覧専用のタグ巡回にNONEがなく、グループ巡回にREQUIRED/NONEがないことと、同名タグを親階層付きbreadcrumbで区別できることを確認します。
+- `filterTreeFlatteningKeepsDepthOrderAndDuplicateNamesDistinct`
+  - 深さ3以上の展開行が親子順とdepthを維持し、同名tag/groupも型とIDで区別されることを確認します。
+- `filterTagAndGroupStateCyclesIncludeNoneInTheSpecifiedOrder`
+  - tagとgroupがそれぞれの指定順でNONEを含めて巡回することを確認します。
+
+- `trailingMediaUrlsAreRemovedOnlyAtAValidBoundaryForClipsWithAssets`
+  - assetがある投稿ではURL-only本文を含む末尾のmedia用t.coだけを表示から除去し、assetなし、本文途中、token境界のない文字列は保持することを確認します。
 - `descendantTagsAndGroupCountsIncludeNestedTagsWithoutDuplicateClips`
   - 入れ子グループの子孫タグ取得と、同一投稿に複数タグが付いてもグループ件数が重複しないことを確認します。
 - `filtersApplyRequiredAndTogetherAndIncludedAsOr`

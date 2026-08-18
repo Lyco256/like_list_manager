@@ -5,6 +5,7 @@
 - Production claimがcached selected pairを使い、複数pair builderを呼ばないことを固定する。
 - Template selectionから`filter/groupBy/indexOfFirst/toMap/associate/mapNotNull`を排除し、draw loopからRect/blend helperを排除したことを静的に検査する。
 - frame全header title収集の再導入を拒否する。
+- classified filter toolbarはactive filterで無効化せず、`highlighted = filters.hasActiveFilters` で適用状態だけを表す静的契約を固定する。
 
 ## 2026-08-09 Phase 1 scroll contract
 

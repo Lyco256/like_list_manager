@@ -11,6 +11,10 @@
 - Stable-idleで公開済みのidentity一致pairをproduction claimが直接使用する。cache不一致時だけ`buildMediaGridMorphRowPreparedPairForClaim`がrequested direction一件を再構築する。
 - 複数direction builderはidle preparationと互換テスト用に残し、productionの通常claimでは呼ばない。
 
+## 2026-08-16 preparation quiescence signal
+
+- TEST_HARNESSではstable-idle preparation cacheのrequest／invalidate／publishを単調バージョンで追跡し、実機性能テストがreadyイベント直後の別世代を取り違えないようにする。productionのcache動作や通常描画には影響しない。
+
 ## 2026-08-09 Phase 1 preparation identity
 
 - Morph geometry preparation is keyed by source/frame/columns/detailed viewport identity, not resident `drawIndexVersion`; draw-index publication only drives readiness re-evaluation.

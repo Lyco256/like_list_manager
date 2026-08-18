@@ -1,0 +1,3 @@
+# `DurableClipDeleteUndoStoreTest.kt`
+
+永続削除stagingのfilesystem単体テストです。現在の画像保存先への復元、同名の無関係ファイル非上書き、管理画像外pathの拒否、malformed相対pathによる境界外削除の防止、別slot stagingの分離cleanupを検証します。

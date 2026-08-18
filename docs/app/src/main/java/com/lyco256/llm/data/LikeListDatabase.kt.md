@@ -6,7 +6,7 @@
 
 ## 役割
 
-Room DatabaseにEntityを登録し、`ClipDao` と `TagDao` を公開します。現在のschema versionは7で、1→2から6→7までの非破壊migrationを登録しています。
+Room DatabaseにEntityを登録し、`ClipDao`、`TagDao`、`UndoDao` を公開します。現在のschema versionは9で、1→2から8→9までの非破壊migrationを登録しています。
 
 ## Migration
 
@@ -14,10 +14,12 @@ Room DatabaseにEntityを登録し、`ClipDao` と `TagDao` を公開します�
 - version 1のタグID、名称、色、並び順、投稿タグ割り当てを一時テーブル経由で保持し、既存タグはルート直下へ配置する
 - `clip_tags` は最終テーブル名 `tags` を参照する外部キーで再作成する
 - `MIGRATION_4_5`: `api_usage_months` を追加し、`sync_state` の当月使用量を履歴へ1行バックフィルする
+- `MIGRATION_7_8`: `clips.isDeleted` を廃止するため `clips` を再作成し、clip、asset、clip-tag relationとindex/Foreign Keyを保持する
+- `MIGRATION_8_9`: ID=1の単一永続Undo slotを保持する `undo_slot` tableを追加する
 
 ## 関連ファイル
 
-- `Entities.kt.md`: 登録される6つのEntityです。
+- `Entities.kt.md`: 登録されるEntityと合成モデルです。
 - `Daos.kt.md`: 公開するDAOです。
 - `AppContainer.kt.md`: `Room.databaseBuilder` で実体を生成します。
 - `ClipRepository.kt.md`: DAOを利用します。
@@ -50,3 +52,8 @@ Entity追加・列変更時はversionを更新し、既存実機データを保�
 ## 2026-07 OCR update
 
 - Bumped the database to version 7 and added migration `6 -> 7` for the OCR columns on `clips`.
+
+## Migration 7→8→9（2026-08）
+
+- 7→8では既存の全clipを現行データとして保持し、`isDeleted` 列だけを除去します。assetとclip-tag relationは一時tableを介して戻します。
+- 8→9では既存tableを変更せず `undo_slot` を追加します。

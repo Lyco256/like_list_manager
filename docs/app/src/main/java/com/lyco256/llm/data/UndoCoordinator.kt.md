@@ -1,0 +1,9 @@
+# `UndoCoordinator.kt`
+
+単一の永続Undo slotを直列化し、旧slotの確定、DB編集と新slotのtransaction保存、Undoを担当します。
+
+`UndoActionHandler.afterUndo` と `afterFinalize` は、DB transactionでslot消去が確定した後にだけ実行する外部resource cleanup hookです。clip削除stagingのようなDB外resourceをtransaction中に先に破棄してslotだけ残す事故を避けます。hook側はpayloadが所有するresourceだけをidempotentかつbest effortで処理します。
+
+UIのtimeout、Swipe、キャンセルは、表示開始時の `UndoEntity` をidentityとして渡すoverloadを使います。mutex取得後の現slotが一致しない場合は `SlotChanged` を返して何も変更せず、旧通知の遅延処理が置換後の新slotを消したりUndoしたりすることを防ぎます。引数なしAPIはユーザー編集開始時のinvalidateなど、常に現在slotを対象にする既存処理向けです。
+
+slot identityには永続行全体を用います。同一内容の操作が時計の同じ値で連続してもidentityが衝突しないよう、同一clock値にはnanosecond sequenceを付けた `createdAt` を発行します。

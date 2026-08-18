@@ -6,7 +6,7 @@
 
 ## 役割
 
-version 1相当のタグDB、version 2相当の投稿DB、version 3相当の同期状態DBを作成し、`MIGRATION_1_2`、`MIGRATION_2_3`、`MIGRATION_3_4` が既存データを保持することをAndroidテスト環境で検証します。後続のテストで`MIGRATION_4_5`、`MIGRATION_5_6`、`MIGRATION_6_7`も個別に検証します。
+version 1〜8相当のDB fixtureを作成し、`MIGRATION_1_2` から `MIGRATION_8_9` までが対象データを保持することをAndroidテスト環境で検証します。
 
 ## 実行
 
@@ -26,3 +26,8 @@ version 3→4では既存使用量の保持、継続token列のNULL初期値、m
 ## 2026-07 OCR update
 
 - Added migration coverage for version `6 -> 7`, including the default OCR columns on `clips`.
+
+## DB version 9
+
+- 7→8→9で `isDeleted` 列を除去してもclip/asset/tag/relationとindexが保持され、`undo_slot` を独立tableとして追加できることを検証します。
+- 8→9の単独移行でも既存rowを保持し、Undo slotの挿入・取得ができることを検証します。

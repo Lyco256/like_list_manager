@@ -445,6 +445,7 @@ internal class MediaGridMorphPreparationCache {
         )
         lastRequestedIdentity = identity
         latestToken.set(token)
+        if (BuildConfig.TEST_HARNESS) MediaGridMorphTestTrace.recordPreparationCacheMutation()
         return token
     }
 
@@ -476,6 +477,7 @@ internal class MediaGridMorphPreparationCache {
         val generation = nextGeneration.incrementAndGet()
         _publishedVersion.value = generation
         _invalidationVersion.value = generation
+        if (BuildConfig.TEST_HARNESS) MediaGridMorphTestTrace.recordPreparationCacheMutation()
     }
 
     @Synchronized
@@ -499,6 +501,7 @@ internal class MediaGridMorphPreparationCache {
         published.set(snapshot)
         lastPublishedIdentity = token.identity
         _publishedVersion.value = token.generation
+        if (BuildConfig.TEST_HARNESS) MediaGridMorphTestTrace.recordPreparationCacheMutation()
         return true
     }
 

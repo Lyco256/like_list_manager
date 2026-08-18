@@ -54,7 +54,7 @@ data class PostStorageConfig(
 class PostStorageManager(
     private val context: Context,
     private val config: PostStorageConfig = PostStorageConfig(),
-) {
+) : UndoDatabaseProvider {
     private data class StoragePaths(
         val id: String,
         val type: PostStorageType,
@@ -73,7 +73,7 @@ class PostStorageManager(
     private var pendingEstimateTargetId: String? = null
     private var pendingEstimateBytes: Long? = null
 
-    val database: StateFlow<LikeListDatabase?> = _database.asStateFlow()
+    override val database: StateFlow<LikeListDatabase?> = _database.asStateFlow()
     val state: StateFlow<PostStorageState> = _state.asStateFlow()
 
     init {
@@ -82,7 +82,7 @@ class PostStorageManager(
         finishSwitchedMigration()
     }
 
-    suspend fun <T> withDatabase(block: suspend (LikeListDatabase) -> T): T = mutex.withLock {
+    override suspend fun <T> withDatabase(block: suspend (LikeListDatabase) -> T): T = mutex.withLock {
         check(!_state.value.isMigrating) { "保存先を移動中です" }
         val database = _database.value
             ?: error("選択した保存先を利用できません。SDカードを再装着するか保存先を変更してください")
@@ -255,6 +255,8 @@ class PostStorageManager(
             LikeListDatabase.MIGRATION_4_5,
             LikeListDatabase.MIGRATION_5_6,
             LikeListDatabase.MIGRATION_6_7,
+            LikeListDatabase.MIGRATION_7_8,
+            LikeListDatabase.MIGRATION_8_9,
         ).build()
 
     private fun selectedPaths(): StoragePaths {

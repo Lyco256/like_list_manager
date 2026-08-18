@@ -1,9 +1,31 @@
 # `app/src/main/java/com/lyco256/llm/MainActivity.kt`
 
+## 2026-08-12 タグdraftの保存結果通知
+
+未分類・分類済み通常カード・MediaGrid previewへ、`MainViewModel.setClipTags` の完了callback付き経路を渡します。各UIはchip操作ではこの経路を呼ばず、「適用」時だけ呼び、成功または失敗の結果をdraft状態へ反映します。
+
+## 2026-08-12 投稿者の全保存件数
+
+`MainUiState.authorOptions` が全保存クリップから集計した件数を `authorSavedCountByAuthor` として一度だけマップ化し、未分類・分類済み・MediaGridダイアログへ渡します。現在の検索・タグfilter結果では再集計しないため、同じauthor identityには常に同じ全保存件数が表示されます。
+
+## 2026-08 重いローカル処理のTopAppBar表示
+
+`MainViewModel.heavyLocalWorkActive` はRepositoryの重いローカル処理trackerをUIへ公開します。main `TopAppBar` は、このtrackerがactiveで、かつ初回未分類読込・保存先移行・いいね数更新Dialog・MediaGrid初期Progress・tweet読込Dialogなどの専用Progressが表示されていない場合だけ、設定ボタン左に小さい灰色のindeterminate `CircularProgressIndicator` を1つ表示します。MediaGrid処理やnetwork待機だけではtrackerがactiveにならないため、この表示は出ません。
+
+## 2026-08 未分類画面の初回読込状態
+
+`MainViewModel` は投稿一覧Flowの購読開始と初回emissionを区別し、`MainUiState.hasReceivedInitialClipEmission` に保持します。初回emission前の未分類画面では件数と空状態を出さず、中央Progressを表示します。初回emissionが空の場合は通常の0件表示へ移り、その後のDB更新で空になってもloadingへ戻りません。保存先移動中・利用不可は既存の専用画面を優先し、`isInitialClipLoading` はfalseになります。
+
+## 2026-08 共通Undo通知
+
+`MainViewModel` はRepositoryの永続Undo slotを `pendingUndo` として公開し、slot identity付きのUndo・finalize操作をUIへ渡します。`LikeListManagerUi` の最上位 `Box` に `UndoNotificationHost` を置くため、タブや設定画面の切替では通知が失われません。通知自体の表示、5秒timer、Swipe、失敗表示は `UndoNotificationUi.kt` に分離しています。
+
 ## 2026-07-10 media-grid selection state
 
 `ClassifiedMediaGridState` exposes tag IDs by clip for the filtered lightweight grid source. `MainViewModel.applyClipTagChanges` sends add/remove pending sets only on Apply; drafts are not sent before Apply. The completion callback closes the editor only on success; failures leave selection and pending state visible.
-Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `ローカル削除`, `タグを付ける`.
+Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `ローカル削除`, `適用`.
+
+`MainViewModel.setClipTags` accepts a completion callback that reports `null` on success or a user-facing error message on failure. This lets tag draft callers mark a draft as applied only after the repository transaction succeeds.
 
 Activity、ViewModel、UI state、Compose画面の接続入口です。未分類、分類済み、タグ管理、本体の設定アイコンから開く全画面の `SettingsScreen` へ状態とイベントを流します。画面本体のタグ階層UIは `TagHierarchyUiV2.kt` に分離されています。
 
@@ -36,7 +58,7 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 
 タグ/グループ移動Dialogの移動先には `move_node_target_root` と `move_node_target_group_<groupId>`、キャンセルには `move_node_cancel` のtest tagを付け、E2Eから表示テキストだけに依存せず移動先選択と閉じる操作を検証できます。
 
-`AddAllTagsDialog` は一括追加先タグに `add_all_target_tag_<tagId>`、閉じる操作に `add_all_cancel` のtest tagを付け、E2Eで「別タグへ一括追加」の対象選択とキャンセルを安定して操作できます。
+`AddAllTagsDialog` は `TagHierarchy` を受け取り、source tagを除外した階層Treeを縦スクロール表示します。groupは追加先にせず展開/折りたたみにだけ使い、rootまたは深い階層のtagを1件押すと既存の一括追加callbackへ渡します。Treeには `add_all_tree_list`、groupには `add_all_group_<groupId>` / `add_all_expand_group_<groupId>`、追加先タグには `add_all_target_tag_<tagId>`、閉じる操作には `add_all_cancel` のtest tagを付けています。
 
 `CreateNodeDialog` は入力欄、追加、閉じる操作に `create_node_*` のtest tagを付け、作成とキャンセルをE2Eで安定して検証できます。
 

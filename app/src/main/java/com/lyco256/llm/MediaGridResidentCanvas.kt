@@ -16,6 +16,7 @@ import java.util.LinkedHashMap
 import kotlin.math.roundToInt
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 internal enum class MediaGridResidentCanvasMode {
     Disabled,
@@ -147,6 +148,8 @@ internal object MediaGridMorphTestTrace {
     private val claimFastPathHits = AtomicInteger()
     private val claimLiveCaptureFallbacks = AtomicInteger()
     private val claimTimeFullCaptures = AtomicInteger()
+    /** Monotonic test-only signal for stable-idle preparation cache activity. */
+    private val preparationCacheMutations = AtomicLong()
     @Volatile private var fallbackCount = 0
     private var nextFrameNumber = 0L
 
@@ -183,6 +186,12 @@ internal object MediaGridMorphTestTrace {
         fallbackCount = 0
         nextFrameNumber = 0L
     }
+
+    fun recordPreparationCacheMutation() {
+        if (BuildConfig.TEST_HARNESS) preparationCacheMutations.incrementAndGet()
+    }
+
+    fun preparationCacheMutationVersion(): Long = preparationCacheMutations.get()
 
     fun recordDraw(event: MediaGridMorphDrawObservation) {
         if (BuildConfig.TEST_HARNESS) {

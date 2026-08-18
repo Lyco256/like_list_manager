@@ -14,15 +14,121 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ClipTagEntity::class,
         SyncStateEntity::class,
         ApiUsageMonthEntity::class,
+        UndoEntity::class,
     ],
-    version = 7,
+    version = 9,
     exportSchema = false,
 )
 abstract class LikeListDatabase : RoomDatabase() {
     abstract fun clipDao(): ClipDao
     abstract fun tagDao(): TagDao
+    abstract fun undoDao(): UndoDao
 
     companion object {
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `undo_slot` (
+                        `id` INTEGER NOT NULL,
+                        `actionType` TEXT NOT NULL,
+                        `payloadJson` TEXT NOT NULL,
+                        `message` TEXT NOT NULL,
+                        `createdAt` TEXT NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent(),
+                )
+            }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("CREATE TEMP TABLE `assets_backup` AS SELECT * FROM `assets`")
+                database.execSQL("CREATE TEMP TABLE `clip_tags_backup_v8` AS SELECT * FROM `clip_tags`")
+                database.execSQL("DROP TABLE `assets`")
+                database.execSQL("DROP TABLE `clip_tags`")
+                database.execSQL(
+                    """
+                    CREATE TABLE `clips_new` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `xPostId` TEXT NOT NULL,
+                        `authorId` TEXT,
+                        `authorName` TEXT NOT NULL,
+                        `authorUsername` TEXT NOT NULL,
+                        `text` TEXT NOT NULL,
+                        `postUrl` TEXT NOT NULL,
+                        `xCreatedAt` TEXT NOT NULL,
+                        `savedAt` TEXT NOT NULL,
+                        `syncedAt` TEXT NOT NULL,
+                        `summary` TEXT NOT NULL,
+                        `ocrText` TEXT NOT NULL,
+                        `ocrUpdatedAt` TEXT,
+                        `likeCount` INTEGER,
+                        `likeCountFetchedAt` TEXT,
+                        `likeCountFetchFailedAt` TEXT,
+                        `likeCountFetchError` TEXT
+                    )
+                    """.trimIndent(),
+                )
+                database.execSQL(
+                    """
+                    INSERT INTO `clips_new` (
+                        `id`, `xPostId`, `authorId`, `authorName`, `authorUsername`, `text`, `postUrl`,
+                        `xCreatedAt`, `savedAt`, `syncedAt`, `summary`, `ocrText`, `ocrUpdatedAt`,
+                        `likeCount`, `likeCountFetchedAt`, `likeCountFetchFailedAt`, `likeCountFetchError`
+                    )
+                    SELECT
+                        `id`, `xPostId`, `authorId`, `authorName`, `authorUsername`, `text`, `postUrl`,
+                        `xCreatedAt`, `savedAt`, `syncedAt`, `summary`, `ocrText`, `ocrUpdatedAt`,
+                        `likeCount`, `likeCountFetchedAt`, `likeCountFetchFailedAt`, `likeCountFetchError`
+                    FROM `clips`
+                    """.trimIndent(),
+                )
+                database.execSQL("DROP TABLE `clips`")
+                database.execSQL("ALTER TABLE `clips_new` RENAME TO `clips`")
+                database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_clips_xPostId` ON `clips` (`xPostId`)")
+                database.execSQL(
+                    """
+                    CREATE TABLE `assets` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `clipId` INTEGER NOT NULL,
+                        `mediaKey` TEXT NOT NULL,
+                        `type` TEXT NOT NULL,
+                        `remoteUrl` TEXT,
+                        `previewUrl` TEXT,
+                        `localPath` TEXT,
+                        `width` INTEGER,
+                        `height` INTEGER,
+                        `sizeBytes` INTEGER,
+                        `downloadState` TEXT NOT NULL,
+                        `createdAt` TEXT NOT NULL,
+                        FOREIGN KEY(`clipId`) REFERENCES `clips`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                database.execSQL("INSERT INTO `assets` SELECT * FROM `assets_backup`")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_assets_clipId` ON `assets` (`clipId`)")
+                database.execSQL(
+                    """
+                    CREATE TABLE `clip_tags` (
+                        `clipId` INTEGER NOT NULL,
+                        `tagId` INTEGER NOT NULL,
+                        `createdAt` TEXT NOT NULL,
+                        PRIMARY KEY(`clipId`, `tagId`),
+                        FOREIGN KEY(`clipId`) REFERENCES `clips`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(`tagId`) REFERENCES `tags`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                database.execSQL("INSERT INTO `clip_tags` SELECT * FROM `clip_tags_backup_v8`")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_clip_tags_clipId` ON `clip_tags` (`clipId`)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_clip_tags_tagId` ON `clip_tags` (`tagId`)")
+                database.execSQL("DROP TABLE `assets_backup`")
+                database.execSQL("DROP TABLE `clip_tags_backup_v8`")
+            }
+        }
+
         val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE `clips` ADD COLUMN `ocrText` TEXT NOT NULL DEFAULT ''")

@@ -106,7 +106,7 @@ class SearchFilterDatabaseIntegrationTest {
                     ocrText = "OCR Needle from local text",
                 ),
             )
-            database.clipDao().getActiveClips().single { it.xPostId == "ocr-search-match" }
+            database.clipDao().getAllClips().single { it.xPostId == "ocr-search-match" }
         }
 
         val clips = repository.clipsWithDetails.first { it.any { item -> item.clip.id == clip.id } }
@@ -176,10 +176,10 @@ class SearchFilterDatabaseIntegrationTest {
 
     private suspend fun databaseFingerprint(): SearchDbFingerprint = storage.withDatabase { database ->
         SearchDbFingerprint(
-            clips = database.clipDao().getActiveClips().map { clip ->
-                "${clip.id}:${clip.xPostId}:${clip.summary}:${clip.isDeleted}"
+            clips = database.clipDao().getAllClips().map { clip ->
+                "${clip.id}:${clip.xPostId}:${clip.summary}"
             }.sorted(),
-            clipTags = database.clipDao().clipTagsForClipIds(database.clipDao().getActiveClips().map { it.id }).map {
+            clipTags = database.clipDao().clipTagsForClipIds(database.clipDao().getAllClips().map { it.id }).map {
                 "${it.clipId}:${it.tagId}"
             }.sorted(),
             groups = database.tagDao().getGroups().map { "${it.id}:${it.name}:${it.parentGroupId}" }.sorted(),

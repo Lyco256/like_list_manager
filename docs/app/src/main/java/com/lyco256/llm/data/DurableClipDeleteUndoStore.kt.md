@@ -1,0 +1,7 @@
+# `DurableClipDeleteUndoStore.kt`
+
+clip削除Undo専用の永続ファイルstagingです。通常画像ディレクトリやcacheとは分離した `filesDir/clip_delete_undo_staging` に置きます。
+
+削除前は管理画像ディレクトリのstrict childである実在ファイルだけを一時名へコピーし、sizeとSHA-256を照合してからstaging名へ確定します。1ファイルでも失敗すればその準備directoryを消して削除処理を中止します。
+
+復元時はpayload内の相対pathをcanonical化し、staging root外への脱出を拒否します。現在の画像保存先へcopyし、同名で内容の異なるファイルがあればasset ID付き別名を選びます。cleanupはpayloadが列挙するstaging fileと空になった専用directoryだけをbest effortで削除し、path不正や削除失敗では安全なorphanを残します。

@@ -9,6 +9,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -139,6 +140,34 @@ class PostStorageManagerRecoveryTest {
         }
     }
 
+    @Test
+    fun moveToCopiesPendingUndoSlotWithDatabase() = runBlocking {
+        val manager = PostStorageManager(context, storageConfig)
+        val external = manager.state.value.locations.firstOrNull {
+            it.type == PostStorageType.EXTERNAL && it.isAvailable
+        }
+        if (external == null) {
+            manager.database.value?.close()
+            assumeTrue("removable external storage is not available", false)
+            return@runBlocking
+        }
+        try {
+            val expected = UndoEntity(
+                actionType = "delete_clip",
+                payloadJson = "{\"version\":1,\"clipId\":42}",
+                message = "投稿を削除しました",
+                createdAt = "2026-08-12T10:02:00Z",
+            )
+            manager.withDatabase { it.undoDao().replaceSlot(expected) }
+
+            assertTrue(manager.moveTo(external.id).isSuccess)
+
+            assertEquals(expected, manager.withDatabase { it.undoDao().getSlot() })
+        } finally {
+            manager.database.value?.close()
+        }
+    }
+
     private fun cleanup() {
         context.deleteDatabase(storageConfig.databaseName)
         File(context.getDatabasePath(storageConfig.databaseName).path + ".moving").delete()
@@ -148,6 +177,9 @@ class PostStorageManagerRecoveryTest {
         File(context.filesDir, "${storageConfig.imagesDirectory}.moving").deleteRecursively()
         File(context.filesDir, storageConfig.dataDirectory).deleteRecursively()
         File(context.filesDir, "missing_after_switch").deleteRecursively()
+        context.getExternalFilesDirs(null).filterNotNull().forEach { directory ->
+            File(directory, storageConfig.dataDirectory).deleteRecursively()
+        }
         context.getSharedPreferences(storageConfig.preferencesName, Context.MODE_PRIVATE).edit().clear().commit()
         context.getSharedPreferences("post_storage_user_data_preferences", Context.MODE_PRIVATE).edit().clear().commit()
     }

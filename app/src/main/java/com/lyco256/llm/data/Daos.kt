@@ -1,6 +1,7 @@
 package com.lyco256.llm.data
 
 import androidx.room.Dao
+import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
@@ -13,17 +14,17 @@ interface ClipDao {
     @Query("SELECT COUNT(*) FROM clips")
     suspend fun countClips(): Int
 
-    @Query("SELECT COUNT(*) FROM clips WHERE isDeleted = 0")
-    suspend fun countActiveClips(): Int
+    @Query("SELECT * FROM clips ORDER BY savedAt DESC")
+    fun observeAllClips(): Flow<List<ClipEntity>>
 
-    @Query("SELECT * FROM clips WHERE isDeleted = 0 ORDER BY savedAt DESC")
-    fun observeActiveClips(): Flow<List<ClipEntity>>
+    @Query("SELECT * FROM clips ORDER BY savedAt DESC")
+    suspend fun getAllClips(): List<ClipEntity>
 
-    @Query("SELECT * FROM clips WHERE isDeleted = 0 ORDER BY savedAt DESC")
-    suspend fun getActiveClips(): List<ClipEntity>
+    @Query("SELECT * FROM clips WHERE id = :clipId LIMIT 1")
+    fun observeClip(clipId: Long): Flow<ClipEntity?>
 
-    @Query("SELECT * FROM clips WHERE id = :clipId AND isDeleted = 0 LIMIT 1")
-    fun observeActiveClip(clipId: Long): Flow<ClipEntity?>
+    @Query("SELECT * FROM clips WHERE id = :clipId LIMIT 1")
+    suspend fun getClip(clipId: Long): ClipEntity?
 
     @Query(
         """
@@ -40,12 +41,11 @@ interface ClipDao {
             assets.downloadState AS downloadState
         FROM clips
         INNER JOIN assets ON assets.clipId = clips.id
-        WHERE clips.isDeleted = 0
-          AND assets.type IN ('photo', 'video_thumbnail')
+        WHERE assets.type IN ('photo', 'video_thumbnail')
         ORDER BY assets.clipId DESC, assets.id ASC
         """,
     )
-    fun observeActiveMediaGridAssetRows(): Flow<List<MediaGridAssetRow>>
+    fun observeMediaGridAssetRows(): Flow<List<MediaGridAssetRow>>
 
     @Query("SELECT * FROM assets WHERE clipId IN (:clipIds) ORDER BY id")
     suspend fun assetsForClipIds(clipIds: List<Long>): List<AssetEntity>
@@ -68,14 +68,17 @@ interface ClipDao {
     @Query("SELECT * FROM clip_tags WHERE clipId IN (:clipIds)")
     suspend fun clipTagsForClipIds(clipIds: List<Long>): List<ClipTagEntity>
 
+    @Query("SELECT * FROM clip_tags WHERE clipId IN (:clipIds) AND tagId IN (:tagIds)")
+    suspend fun clipTagsForClipIdsAndTagIds(clipIds: List<Long>, tagIds: List<Long>): List<ClipTagEntity>
+
+    @Query("SELECT * FROM clip_tags WHERE tagId = :tagId ORDER BY clipId")
+    suspend fun clipTagsForTag(tagId: Long): List<ClipTagEntity>
+
     @Query("SELECT * FROM clip_tags")
     fun observeClipTags(): Flow<List<ClipTagEntity>>
 
     @Query("SELECT * FROM clip_tags WHERE clipId = :clipId")
     fun observeClipTagsForClip(clipId: Long): Flow<List<ClipTagEntity>>
-
-    @Query("SELECT clip_tags.* FROM clip_tags INNER JOIN clips ON clips.id = clip_tags.clipId WHERE clips.isDeleted = 0")
-    fun observeActiveClipTags(): Flow<List<ClipTagEntity>>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertClip(clip: ClipEntity): Long
@@ -86,14 +89,23 @@ interface ClipDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertClipTag(clipTag: ClipTagEntity)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertClipTags(clipTags: List<ClipTagEntity>)
+
     @Query("DELETE FROM clip_tags WHERE clipId = :clipId AND tagId = :tagId")
     suspend fun deleteClipTag(clipId: Long, tagId: Long)
+
+    @Delete
+    suspend fun deleteClipTags(clipTags: List<ClipTagEntity>)
 
     @Update
     suspend fun updateClip(clip: ClipEntity)
 
+    @Query("UPDATE clips SET summary = :summary WHERE id = :clipId")
+    suspend fun updateSummary(clipId: Long, summary: String): Int
+
     @Query("UPDATE clips SET ocrText = :ocrText, ocrUpdatedAt = :ocrUpdatedAt WHERE id = :clipId")
-    suspend fun updateOcrText(clipId: Long, ocrText: String, ocrUpdatedAt: String?)
+    suspend fun updateOcrText(clipId: Long, ocrText: String, ocrUpdatedAt: String?): Int
 
     @Query("DELETE FROM clips WHERE id = :clipId")
     suspend fun deleteClip(clipId: Long)
@@ -145,15 +157,34 @@ interface ClipDao {
         pendingAddTagIds: Set<Long>,
         pendingRemoveTagIds: Set<Long>,
         now: String,
-    ) {
+    ): ClipTagRelationChanges {
         require(pendingAddTagIds.intersect(pendingRemoveTagIds).isEmpty()) {
             "追加と削除に同じタグを指定できません"
         }
-        clipIds.forEach { clipId ->
-            pendingRemoveTagIds.forEach { tagId -> deleteClipTag(clipId, tagId) }
-            pendingAddTagIds.forEach { tagId -> insertClipTag(ClipTagEntity(clipId, tagId, now)) }
+        val targetTagIds = pendingAddTagIds + pendingRemoveTagIds
+        if (clipIds.isEmpty() || targetTagIds.isEmpty()) return ClipTagRelationChanges()
+
+        val currentRelations = clipTagsForClipIdsAndTagIds(clipIds.toList(), targetTagIds.toList())
+        val currentKeys = currentRelations.mapTo(hashSetOf()) { it.clipId to it.tagId }
+        val removedRelations = currentRelations.filter { it.tagId in pendingRemoveTagIds }
+        val addedRelations = buildList {
+            clipIds.forEach { clipId ->
+                pendingAddTagIds.forEach { tagId ->
+                    if ((clipId to tagId) !in currentKeys) add(ClipTagEntity(clipId, tagId, now))
+                }
+            }
         }
+        if (removedRelations.isNotEmpty()) deleteClipTags(removedRelations)
+        if (addedRelations.isNotEmpty()) insertClipTags(addedRelations)
+        return ClipTagRelationChanges(addedRelations, removedRelations)
     }
+}
+
+data class ClipTagRelationChanges(
+    val addedRelations: List<ClipTagEntity> = emptyList(),
+    val removedRelations: List<ClipTagEntity> = emptyList(),
+) {
+    val isEmpty: Boolean get() = addedRelations.isEmpty() && removedRelations.isEmpty()
 }
 
 @Dao
@@ -163,6 +194,9 @@ interface TagDao {
 
     @Query("SELECT * FROM tags ORDER BY parentGroupId, sortOrder, name")
     suspend fun getTags(): List<TagEntity>
+
+    @Query("SELECT * FROM tags WHERE id = :tagId LIMIT 1")
+    suspend fun getTag(tagId: Long): TagEntity?
 
     @Query(
         "SELECT tags.* FROM tags INNER JOIN clip_tags ON clip_tags.tagId = tags.id WHERE clip_tags.clipId = :clipId ORDER BY tags.parentGroupId, tags.sortOrder, tags.name",
@@ -175,7 +209,10 @@ interface TagDao {
     @Query("SELECT * FROM tag_groups ORDER BY parentGroupId, sortOrder, name")
     suspend fun getGroups(): List<TagGroupEntity>
 
-    @Query("SELECT clip_tags.tagId, COUNT(*) AS count FROM clip_tags INNER JOIN clips ON clips.id = clip_tags.clipId WHERE clips.isDeleted = 0 GROUP BY clip_tags.tagId")
+    @Query("SELECT * FROM tag_groups WHERE id = :groupId LIMIT 1")
+    suspend fun getGroup(groupId: Long): TagGroupEntity?
+
+    @Query("SELECT tagId, COUNT(*) AS count FROM clip_tags GROUP BY tagId")
     fun observeTagCounts(): Flow<List<TagCountRow>>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -190,11 +227,23 @@ interface TagDao {
     @Update
     suspend fun updateGroup(group: TagGroupEntity)
 
+    @Query("UPDATE tags SET name = :name, updatedAt = :updatedAt WHERE id = :tagId")
+    suspend fun updateTagName(tagId: Long, name: String, updatedAt: String): Int
+
+    @Query("UPDATE tags SET colorId = :colorId, updatedAt = :updatedAt WHERE id = :tagId")
+    suspend fun updateTagColor(tagId: Long, colorId: String, updatedAt: String): Int
+
+    @Query("UPDATE tag_groups SET name = :name, updatedAt = :updatedAt WHERE id = :groupId")
+    suspend fun updateGroupName(groupId: Long, name: String, updatedAt: String): Int
+
+    @Query("UPDATE tag_groups SET colorId = :colorId, updatedAt = :updatedAt WHERE id = :groupId")
+    suspend fun updateGroupColor(groupId: Long, colorId: String, updatedAt: String): Int
+
     @Query("DELETE FROM tags WHERE id = :tagId")
-    suspend fun deleteTag(tagId: Long)
+    suspend fun deleteTag(tagId: Long): Int
 
     @Query("DELETE FROM tag_groups WHERE id = :groupId")
-    suspend fun deleteGroup(groupId: Long)
+    suspend fun deleteGroup(groupId: Long): Int
 
     @Query("SELECT COUNT(*) FROM tags WHERE parentGroupId = :groupId")
     suspend fun countChildTags(groupId: Long): Int
@@ -202,11 +251,38 @@ interface TagDao {
     @Query("SELECT COUNT(*) FROM tag_groups WHERE parentGroupId = :groupId")
     suspend fun countChildGroups(groupId: Long): Int
 
-    @Query("SELECT clips.* FROM clips INNER JOIN clip_tags ON clips.id = clip_tags.clipId WHERE clip_tags.tagId = :tagId AND clips.isDeleted = 0 ORDER BY clips.savedAt DESC")
+    @Query("SELECT clips.* FROM clips INNER JOIN clip_tags ON clips.id = clip_tags.clipId WHERE clip_tags.tagId = :tagId ORDER BY clips.savedAt DESC")
     suspend fun clipsForTag(tagId: Long): List<ClipEntity>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertClipTag(clipTag: ClipTagEntity)
+}
+
+@Dao
+interface UndoDao {
+    @Query("SELECT * FROM undo_slot WHERE id = 1 LIMIT 1")
+    fun observeSlot(): Flow<UndoEntity?>
+
+    @Query("SELECT * FROM undo_slot WHERE id = 1 LIMIT 1")
+    suspend fun getSlot(): UndoEntity?
+
+    @Query(
+        "INSERT OR REPLACE INTO undo_slot (id, actionType, payloadJson, message, createdAt) " +
+            "VALUES (1, :actionType, :payloadJson, :message, :createdAt)",
+    )
+    suspend fun replaceSlot(
+        actionType: String,
+        payloadJson: String,
+        message: String,
+        createdAt: String,
+    )
+
+    suspend fun replaceSlot(slot: UndoEntity) {
+        replaceSlot(slot.actionType, slot.payloadJson, slot.message, slot.createdAt)
+    }
+
+    @Query("DELETE FROM undo_slot WHERE id = 1")
+    suspend fun deleteSlot()
 }
 
 data class TagCountRow(
