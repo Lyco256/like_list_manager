@@ -738,6 +738,9 @@ internal fun EnhancedClassifiedScreen(
                     showProgress = mediaGridSessionState.showInitialProgress,
                     onMediaGridAnchorCheckpoint = onMediaGridAnchorCheckpoint,
                     onMorphCheckpointSuppressed = { morphCheckpointSuppressed = it },
+                    suppressPositionPill = sessionRestoreCheckpointSuppressed ||
+                        legacyPinchCheckpointSuppressed ||
+                        mediaGridSessionState.sessionKey != previousMediaGridSessionKey,
                     onMediaGridColumnCountChange = onMediaGridColumnCountChange,
                     onPinchFinished = { anchor, nextColumnCount ->
                         val changed = nextColumnCount != mediaGridColumnCount
@@ -4284,6 +4287,7 @@ private fun ClassifiedMediaGridContent(
     showProgress: Boolean,
     onMediaGridAnchorCheckpoint: (MediaGridSessionKey, ClassifiedMediaGridScrollAnchor) -> Unit,
     onMorphCheckpointSuppressed: (Boolean) -> Unit,
+    suppressPositionPill: Boolean,
     onMediaGridColumnCountChange: (Int) -> Unit,
     onPinchFinished: (ClassifiedMediaGridScrollAnchor?, Int) -> Unit,
     selectionMode: Boolean,
@@ -4424,6 +4428,78 @@ private fun ClassifiedMediaGridContent(
     val morphRowRenderModel = morphSnapshot?.activeRenderModel
     val morphVisualActive = morphController?.drawMode?.value == MediaGridMorphDrawMode.Morph && morphRowRenderModel != null
     val morphProgress = morphController?.progress ?: remember { mutableStateOf(0f) }
+    val morphPointerActive by morphPointerInProgress.collectAsState()
+    val positionPillMorphing = morphInteractionLocked || morphPointerActive
+    var positionPillState by remember(state) { mutableStateOf(MediaGridPositionPillState()) }
+    val latestPositionPillFrame by rememberUpdatedState(frame)
+    val latestPositionPillSort by rememberUpdatedState(sort)
+    val latestPositionPillColumnCount by rememberUpdatedState(columnCount)
+    val latestPositionPillMorphing by rememberUpdatedState(positionPillMorphing)
+    val dispatchPositionPillEvent: (MediaGridPositionPillEvent) -> Unit = { event ->
+        positionPillState = reduceMediaGridPositionPillState(positionPillState, event)
+    }
+    LaunchedEffect(frame.key, sort.baseOrder) {
+        dispatchPositionPillEvent(
+            MediaGridPositionPillEvent.FrameChanged(
+                frameKey = frame.key,
+                hasBuckets = sort.baseOrder != ClassifiedSortBase.Default,
+                morphing = latestPositionPillMorphing,
+            ),
+        )
+    }
+    LaunchedEffect(state, viewportAnchorFlow, suppressPositionPill) {
+        val morphActivityFlow = combine(
+            morphPointerInProgress,
+            snapshotFlow { morphController?.interactionLocked?.value == true }
+                .distinctUntilChanged(),
+        ) { pointerActive, interactionLocked -> pointerActive || interactionLocked }
+            .distinctUntilChanged()
+        val suppressionFlow = snapshotFlow { suppressPositionPill }.distinctUntilChanged()
+        var previousScrolling = false
+        var previousMorphing = latestPositionPillMorphing
+        combine(
+            viewportAnchorFlow,
+            snapshotFlow { state.isScrollInProgress }.distinctUntilChanged(),
+            morphActivityFlow,
+            suppressionFlow,
+        ) { anchor, scrolling, morphing, suppressed ->
+            MediaGridPositionPillObservation(anchor, scrolling, morphing, suppressed)
+        }.collect { observation ->
+            val currentFrame = latestPositionPillFrame
+            val position = currentMediaGridPosition(
+                frame = currentFrame,
+                anchor = observation.anchor,
+                sort = latestPositionPillSort,
+                columnCount = latestPositionPillColumnCount,
+            )
+            if (observation.suppressed || latestPositionPillSort.baseOrder == ClassifiedSortBase.Default) {
+                if (observation.suppressed) dispatchPositionPillEvent(MediaGridPositionPillEvent.Suppressed)
+            } else {
+                if (observation.morphing && !previousMorphing) {
+                    dispatchPositionPillEvent(MediaGridPositionPillEvent.MorphStarted)
+                } else if (!observation.morphing && previousMorphing) {
+                    dispatchPositionPillEvent(
+                        MediaGridPositionPillEvent.MorphFinished(currentFrame.key, position),
+                    )
+                }
+                if (!observation.morphing) {
+                    when {
+                        observation.scrolling &&
+                            (!previousScrolling || positionPillState.phase == MediaGridPositionPillPhase.Hidden) ->
+                            dispatchPositionPillEvent(MediaGridPositionPillEvent.ScrollStarted(position))
+                        observation.scrolling ->
+                            dispatchPositionPillEvent(MediaGridPositionPillEvent.PositionChanged(position))
+                        !observation.scrolling && previousScrolling ->
+                            dispatchPositionPillEvent(MediaGridPositionPillEvent.ScrollStopped)
+                        else ->
+                            dispatchPositionPillEvent(MediaGridPositionPillEvent.PositionChanged(position))
+                    }
+                }
+            }
+            previousScrolling = observation.scrolling
+            previousMorphing = observation.morphing
+        }
+    }
     val morphDrawObserver = if (BuildConfig.TEST_HARNESS) {
         { event: MediaGridMorphDrawObservation -> MediaGridMorphTestTrace.recordDraw(event) }
     } else {
@@ -4821,6 +4897,16 @@ private fun ClassifiedMediaGridContent(
                 }
             }
             }
+        }
+        val positionPillVisibleForFrame = positionPillState.phase != MediaGridPositionPillPhase.Hidden &&
+            positionPillState.label != null &&
+            (positionPillState.frameKey == frame.key || positionPillMorphing || positionPillState.morphActive)
+        if (positionPillVisibleForFrame) {
+            MediaGridPositionPill(
+                state = positionPillState,
+                onEvent = dispatchPositionPillEvent,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
         }
         if (showProgress) {
             Box(

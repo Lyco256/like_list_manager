@@ -28,6 +28,7 @@ MainActivity / Compose UI
 - 分類済みリスト: 一致件数と文章形式の条件サブバー、適用中だけ背景highlightするfilter/sortボタン、背景highlightを持たない表示切替、適用/キャンセル付き全画面絞り込みDialog、タグのみトグル付きの全ツイート検索、投稿日・本文・概要・投稿者・ユーザー・タグ／グループの「含む」「必須」「排除」複合絞り込み、タグ再割り当て
 - タグリスト: 無制限階層の縦guide付きcompact rowで、グループ／タグ追加、名称変更、移動、長押し並び替え、削除、Tree popupから別タグへの一括追加
 - X風の投稿本文、クリック可能な投稿者、保存済み投稿数、いいね数（詳細popup付き）、カード幅・画像比率に応じた高さ上限、画像previewを表示
+- メディアグリッドのスクロール中は既存見出しと同じ現在位置ラベルを上端の一時ピルで表示し、停止後3秒保持して上方向へ消す。列数Morph中は旧ラベルを固定し、handoff後に新粒度で再評価する
 - 投稿カード内の保存済みPhotoをタップすると、黒背景の全画面画像ビューアで表示し、複数Photoは左右スワイプで切り替え
 - 投稿カード上では投稿URLを文字列として表示せず、メディア付き投稿の本文末尾t.coもUI上だけ省略する。本文中URLと「Xで開く」機能は維持
 - 未分類、分類済み、タグ管理でスクロールバー、スクロール位置維持、一番上へ移動ボタンを表示
@@ -69,6 +70,7 @@ MainActivity / Compose UI
 | 変更したいこと | 最初に読む文書 | 次に確認する文書 |
 | --- | --- | --- |
 | 画面、操作、検索、タグUI | `docs/app/src/main/java/com/lyco256/llm/MainActivity.kt.md` | `docs/app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt.md`, `ClipRepository.kt.md`, `Entities.kt.md` |
+| メディアグリッド現在位置ピル、表示区間ラベル | `docs/app/src/main/java/com/lyco256/llm/MediaGridScrollPosition.kt.md` | `TagHierarchyUiV2.kt.md`, `MediaGridMorph.kt.md`, `MediaGridScrollPositionTest.kt.md` |
 | 共通Undo通知、5秒timeout、Swipe dismiss | `docs/app/src/main/java/com/lyco256/llm/UndoNotificationUi.kt.md` | `MainActivity.kt.md`, `data/UndoCoordinator.kt.md` |
 | Undo payloadの種類、schema version、厳密decode | `docs/app/src/main/java/com/lyco256/llm/data/UndoPayloadCodec.kt.md` | `UndoCoordinator.kt.md`, `Entities.kt.md` |
 | 同期ロジック、月間制限、画像保存 | `docs/app/src/main/java/com/lyco256/llm/data/ClipRepository.kt.md` | `XApiClient.kt.md`, `Daos.kt.md`, `Entities.kt.md` |
@@ -119,7 +121,9 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/MediaGridMorphCanvas.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/MediaGridMorphHandoff.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/MediaGridMorphLazyGridHandoffTestHost.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/MediaGridScrollPosition.kt.md`
 - Classified tab card/grid switching is handled in `MainActivity.kt` and `TagHierarchyUiV2.kt`; the grid path is built from `ClassifiedMediaGridState` over the lightweight repository source, while the card path continues to use `uiState.classified`.
+- `MediaGridScrollPosition.kt` derives the current-position label from the existing viewport ordinal and `mediaGridMorphBucketSpec`; its generation-scoped pill state handles scroll start, 3-second idle retention, upward exit, stale-timer cancellation, frame changes, and Morph handoff reevaluation without touching image or repository work.
 
 ### Data・API
 
@@ -177,6 +181,8 @@ MainActivity / Compose UI
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/UndoDaoIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/UndoCoordinatorIntegrationTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/MediaGridSessionCoordinatorTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/MediaGridScrollPositionTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/MediaGridPositionPillUiTest.kt.md`
 
 ### Macrobenchmark
 

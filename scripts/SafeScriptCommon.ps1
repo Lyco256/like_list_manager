@@ -79,9 +79,27 @@ function Get-SafeCachedFileHash {
 
     $cacheKey = "$($File.FullName)|$($File.Length)|$($File.LastWriteTimeUtc.Ticks)"
     if (-not $script:SafeFileHashCache.ContainsKey($cacheKey)) {
-        $script:SafeFileHashCache[$cacheKey] = (Get-FileHash -LiteralPath $File.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        $script:SafeFileHashCache[$cacheKey] = Get-SafeFileHash -LiteralPath $File.FullName
     }
     return $script:SafeFileHashCache[$cacheKey]
+}
+
+function Get-SafeFileHash {
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+
+    $getFileHash = Get-Command Get-FileHash -ErrorAction SilentlyContinue
+    if ($null -ne $getFileHash) {
+        return ((Get-FileHash -LiteralPath $LiteralPath -Algorithm SHA256).Hash.ToLowerInvariant())
+    }
+
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead($LiteralPath)
+    try {
+        return ([BitConverter]::ToString($sha256.ComputeHash($stream))).Replace("-", "").ToLowerInvariant()
+    } finally {
+        $stream.Dispose()
+        $sha256.Dispose()
+    }
 }
 
 function Get-SafeValidationFingerprint {
@@ -155,7 +173,7 @@ function Test-SafeValidationCache {
             if (-not (Test-Path -LiteralPath $outputPath -PathType Leaf)) {
                 return $false
             }
-            $hash = (Get-FileHash -LiteralPath $outputPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            $hash = Get-SafeFileHash -LiteralPath $outputPath
             if ($hash -ne $output.sha256) {
                 return $false
             }
@@ -183,7 +201,7 @@ function Set-SafeValidationCache {
         }
         [pscustomobject]@{
             path = $outputPath.Replace('\', '/')
-            sha256 = (Get-FileHash -LiteralPath $fullPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            sha256 = Get-SafeFileHash -LiteralPath $fullPath
         }
     }
     $stateDirectory = Join-Path $RepoRoot "build\safe-script-state"

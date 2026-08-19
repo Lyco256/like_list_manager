@@ -438,6 +438,13 @@ The toolbar is a full-width opaque background container with the unchanged Row b
 - The viewport `snapshotFlow` and all controller/scheduler/resident Canvas/pointer-input behavior remain unchanged.
 # TagHierarchyUiV2.kt
 
+## 2026-08-19 メディアグリッド現在位置ピル
+
+- `ClassifiedMediaGridContent` は既存の軽量 `MediaGridViewportAnchorSignature` を共有し、`MediaGridScrollPosition.kt` のordinal逆引きから画面上端側で最初の表示メディアセルが属する見出しラベルを求めます。見出しの分類規則は既存 `mediaGridMorphBucketSpec` と同じで、保存順ではラベルを作りません。
+- 実スクロール開始時だけピルを表示し、スクロール停止後3秒は保持してから上方向へスライドアウトします。表示中の再スクロールは世代番号で古いtimeout／exitを無効化します。
+- 通常frame変更では旧ラベルを即時に表示対象から外し、Morph中の列数変更では表示開始時点のラベルを維持します。列数変更handoff後に新frameのbucketへ更新します。保存位置復元・legacy pinch復元中は表示開始を抑止します。
+- ピルはグリッドBox内の上端中央へ重ねるだけで、LazyGridの配置、高さ、セル描画、画像preload、selection、inline header、scroll checkpointには新しいI/Oや全frame走査を追加しません。
+
 `ClassifiedMediaGridContent`は通常の非選択メディアグリッドでだけproduction Morph hostと共通gesture modifierを明示的に有効化する。underlying LazyVerticalGridは一枚のままcompose/layout/drawし、Grid→progress→active Morph Canvasの順に配置する。
 
 Morph中は`userScrollEnabled`、cell tap/long press、selection/Dialog導線を抑止する。checkpoint抑止はsession restore、legacy fallback pinch、Morphを独立理由として保持し、いずれか一つの終了で他を解除しない。source/filter/sort/session/display/lifecycle変更ではgeneration identityを再検証し、stale Canvasを除去する。

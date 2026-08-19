@@ -28,6 +28,19 @@ class MediaGridRenderingContractTest {
     }
 
     @Test
+    fun currentPositionUsesTheExistingOrdinalWithoutFrameOrIoWork() {
+        val source = locateSource("src/main/java/com/lyco256/llm/MediaGridScrollPosition.kt").readText()
+        assertTrue(source.contains("anchor.firstVisibleMediaOrdinal"))
+        assertTrue(source.contains("itemIndexByMediaOrdinal.getOrNull(mediaOrdinal)"))
+        assertTrue(source.contains("mediaGridMorphBucketSpec("))
+        assertTrue(!source.contains("frame.items.forEach"))
+        assertTrue(!source.contains("frame.items.filter"))
+        assertTrue(!source.contains("repository."))
+        assertTrue(!source.contains("File("))
+        assertTrue(!source.contains("AsyncImage"))
+    }
+
+    @Test
     fun schedulerAndPublicationContractsRemainUntouched() {
         val source = locateSource("src/main/java/com/lyco256/llm/MediaGridSteadyLoadController.kt").readText()
         assertTrue(source.contains("MEDIA_GRID_METADATA_MAX_CONCURRENCY = 4"))
