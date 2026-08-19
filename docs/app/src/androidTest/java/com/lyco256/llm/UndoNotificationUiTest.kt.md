@@ -1,0 +1,7 @@
+# `UndoNotificationUiTest.kt`
+
+`app/src/androidTest/java/com/lyco256/llm/UndoNotificationUiTest.kt`
+
+Undo通知のタイマーと二重tapのテストではCompose clockを手動で進め、effect起動・slot置換・timeout再開の各フレームを明示的に同期します。これにより、Undoは二重tapでも1回だけ実行され、旧slotのタイマーは置換後slotを確定せず、新slotのtimeoutは表示中slotだけを確定することを実機速度に依存せず固定します。
+
+共通Undo overlayについて、message/キャンセル表示、二重tapの1回実行、5秒timeoutが表示中slotだけを確定すること、横/下Swipeと上Swipeの境界、左右/下方向のdismissアニメーション、slot置換時のtimer再開、Undo失敗後の再試行、Host再作成後の永続slot再表示をComposeで検証します。

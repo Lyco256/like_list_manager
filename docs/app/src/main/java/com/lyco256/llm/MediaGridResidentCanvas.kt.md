@@ -5,6 +5,7 @@
 - stable-idle snapshot build、focal entry build、resource membership recheck、claim fast-path hit、live-capture fallback、claim-time full captureを追加記録する。
 - stable idle後の通常claimはfast-path 1、live/full capture 0、claim時pair/plan/RequiredRenderSet/text measure 0、selected direction render model 1を要求する。
 - 同一identityのprepared image Ready公開はresource membership recheckだけを増やし、snapshot/focal/pair/plan/RequiredRenderSet/full captureを増やさない。
+- stable-idle cacheのrequest／invalidate／publishは性能テスト用の単調quiescence signalにも記録するが、通常のresident drawやproduction状態には持ち込まない。
 
 ## 2026-08-10 Phase 2 TEST_HARNESS counters
 

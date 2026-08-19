@@ -12,7 +12,7 @@ WorkManager `2.10.1`をpersistent JPEG preview workerの実行とテストへ追
 
 ## 現状の主要依存
 
-Compose、Room、Coil、AndroidX Security Crypto、AppAuth、material icons extended、JUnit 4、AndroidX Testを管理しています。AppAuthはOAuth 2.0 + PKCE、テスト依存は階層ロジックとDB migrationの検証に使います。
+Compose、Room、Coil、AndroidX Security Crypto、AppAuth、material icons extended、JUnit 4、org.json、AndroidX Testを管理しています。AppAuthはOAuth 2.0 + PKCE、テスト依存は階層ロジック、Undo payload codec、DB migrationの検証に使います。
 
 ## 関連ファイル
 

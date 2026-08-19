@@ -1,5 +1,83 @@
 # `TagHierarchyUiV2.kt`
 
+## 2026-08-13 タグ管理Treeの連続縦guide
+
+- `VisibleTagRow` は、各祖先depthの縦guideが上と下の隣接行へ接続するかを `TagTreeGuideSegment` として保持します。expand/collapseでvisible row列が変わるたびに再計算します。
+- 行の左側にはdepthごとの縦線だけを描き、横branch線は描きません。隣接行で同じguideが続く場合は8dpの行間spacingの半分ずつへsegmentを延長し、1本につながって見えるようにします。subtree末尾ではそのdepthの下側接続を止めます。
+- drag中は、掴んだsubtreeを除きplaceholderを挿入した最終表示列に対して同じguide計算を再実行します。placeholderも行と同じ縦segmentを描き、drag中に階層が途切れたりずれたりしないようにします。
+
+## 2026-08-13 タグ管理行の薄型表示
+
+- タグ管理のタグ／グループ行は、種類を説明する2行目を廃止し、種別icon、名前、件数、操作buttonを1行にまとめます。
+- 名前は1行のellipsis表示と可変幅にし、件数と操作buttonの領域を右側へ確保します。行の最小高は40dp、上下paddingは4dpで、既存の操作targetは32dpのまま維持します。
+- drag開始時に取得したcompact行の実測幅・高さをplaceholderとpreviewへ渡す既存経路を維持し、preview内のpaddingとiconも行本体へ揃えます。
+
+## 2026-08-13 絞り込み状態の丸点凡例
+
+- 絞り込みDialogのタグ条件には、色名を文章で説明する旧凡例の代わりに、`含む`、`必須`、`排除` の実色の丸点と状態名を表示します。
+- 丸点はTreeと選択済み条件が使う共通の `tagFilterColors` mappingを直接参照し、凡例独自の色定数を持ちません。
+- 凡例は狭い表示幅で行を折り返し、3状態のlabelがclipされない配置です。
+
+## 2026-08-13 絞り込み条件の状態色
+
+- タグ／グループ条件はTreeポップアップと選択済み横一覧の両方で、共通の `tagFilterColors` mappingを参照します。
+- 状態色は `含む=緑`、`必須=赤`、`排除=灰色`、`なし=選択containerなし` です。
+- 選択状態は濃色containerと白いlabel/iconを組み合わせ、dark themeでも状態の意味と可読性を維持します。
+
+## 2026-08-12 絞り込み画面の選択済みタグ条件
+
+- Treeポップアップで選んだタグとグループは、絞り込み画面本体の一段の `LazyRow` にbreadcrumb、現在状態、削除ボタン付きで表示します。
+- 条件本体のタップは、タグでは `含む→必須→排除→含む`、グループでは `含む→排除→含む` と巡回し、NONEには戻りません。条件の削除は独立した `×` ボタンだけが行います。Tree側は従来のNONEを含む巡回を維持します。
+- 一覧とTreeは `SearchFilterDialog` 内の同じdraft mapを更新するため双方向に同期し、Dialogの適用とキャンセルの仕様は従来どおりです。
+
+## 2026-08-12 絞り込みタグTreeポップアップ
+
+- `SearchFilterDialog` のタグ条件は、画面内で親階層を入れ替える方式ではなく、独立したスクロール可能なTreeポップアップから選択します。
+- グループの展開／折りたたみと条件変更は別のtap targetです。タグは `なし→含む→必須→排除→なし`、グループは `なし→含む→排除→なし` で巡回し、NONEへ戻るとdraft mapから条件を除きます。
+- `SelectableTagTree` はrootからのflattening、インデント、展開行、縦スクロールをまとめ、グループを選択可能にするかとtag/group click処理を呼び出し側から指定できます。
+- popupを閉じる操作は絞り込みDialogのdraftを保持し、絞り込みDialog自体のキャンセル時だけ未適用の変更を破棄します。
+
+## 2026-08-17 popup legend and compact condition labels
+
+- タグ条件Treeポップアップにも本体と同じ実色丸点凡例を表示し、Tree項目名から`含:`／`必:`／`除:`の接頭辞を外して色と凡例で状態を示す。
+- タグ管理Treeの縦guideは2dp strokeで描画し、入れ子の連続線を少し太くする。
+
+## 2026-08-12 MediaGrid preview overlay
+
+- MediaGridから開くツイートpreviewはカード内headerと「ツイート」titleを持たないoverlayです。
+- 48dpの閉じるボタンはカード外の右上に独立して配置し、ボタン、scrim、Android BackでLoading / NotFound / Loadedの全状態を閉じられます。
+- カード自体は外側tapを消費するため、カード内操作、タグchip、画像viewerの操作がpreviewのdismissへ誤伝播しません。
+
+## 2026-08-12 ツイートカード単一画像の縦幅上限
+
+- 未分類・分類済み通常カード・MediaGridのツイートpreviewが共有する `EnhancedMediaGrid` は、単一画像だけ幅:高さ `3:4` を表示枠の下限にします。
+- 元画像が `3:4` より縦長の場合は枠を `3:4` にして中央crop表示し、`3:4` 以上なら従来の比率とFit表示を維持します。width/heightが欠損・不正な場合も従来の `16:10` fallbackを維持します。
+- 2〜4枚の正方形grid、MediaGrid本体のthumbnail、保存画像・DB寸法、全画面viewerのFit表示にはこの上限を適用しません。
+
+## 2026-08-12 カードのタグ操作行
+
+- 未分類・分類済み・MediaGrid preview が共有するツイートカードでは、タグ／グループの `LazyRow` だけを横スクロール領域にしています。
+- `適用` ボタンは同じ行の右端でスクロール領域外に固定され、タグ数が増えても画面外へ押し出されません。
+- タグがない場合も空状態の案内とdisabledの `適用` ボタンを同じ配置で表示します。
+
+## 2026-08-12 全カードのタグdraft／適用
+
+未分類・分類済み通常カード・MediaGridツイートpreviewは、`ClipTagDraftState` でRoom由来のtag ID集合とUI編集中の集合を分離します。chip操作はdraftだけを変更し、元の集合と異なる場合にだけカード右下の「適用」を有効化します。空集合への変更も適用でき、一度変更して元へ戻した場合は再び無効になります。
+
+適用中は重複操作を止め、Repositoryの成功callback後だけdirty状態を解消します。失敗時はdraftとエラー表示を保持して再試行できます。dirtyでないdraftはRoom更新へ追従し、dirty draftはlikeCountなどタグ以外の再composeでは失われません。一覧のstate mapは現在表示されるclip IDだけへreconcileされ、一覧から消えたclipのdraftを保持し続けません。MediaGrid previewのdraftはdialogのclip IDに紐づき、filter結果から外れてもdialogを閉じるまでは維持されます。未適用のまま閉じたdraftは保存しません。
+
+## 2026-08-12 ツイート自身のいいね数表示
+
+通常カードとMediaGridのツイートpreviewは、投稿者の全保存件数の右隣に、取得済みのツイートいいね数を `♡1,100` / `♡1万` 形式で表示します。値がない場合はheartもplaceholderも表示しません。表示領域から開く詳細popup、取得日時、取得エラー、一時値warningは従来どおりです。
+
+## 2026-08-12 投稿者の全保存件数表示
+
+通常カードとMediaGridのツイートpreviewは、投稿者display nameの直右に上位から渡された全保存件数を日本語の桁区切り付き `N件` 形式で表示します。カード内では全クリップを再集計しません。
+
+## 2026-08-12 未分類の初回読込表示
+
+`EnhancedClipListScreen` は `isInitialLoading` を受け取り、初回投稿一覧emission前は空状態の代わりに画面中央のProgressを表示します。初回読込後の空リストは従来どおり空状態を表示します。
+
 ## 2026-08-10 Stable-idle Ready Snapshot integration
 
 - idle capture後にdirection pair、visible focal-row entry、RequiredRenderSet、required Asset/title unionを一つのSnapshotとしてbackground構築し、現在viewport一件だけをpublishする。
@@ -98,7 +176,7 @@
 - `MainScreen` owns the saveable media-grid `LazyGridState`; `MediaGridSessionCoordinator` owns frame/controller/load-state/anchor lifetime. `EnhancedClassifiedScreen` receives these objects and does not dispose the controller when the screen leaves composition.
 - Selection indicators use 28/24/18/14dp at 2–3/4–6/7–9/10–12 columns; video icons use 24/20/14/10dp. The card-dialog button uses 28dp at 2–3 columns and 24dp at 4–6 columns, with testTag `media_grid_selection_open_<assetId>`.
 - A failed bulk apply keeps the editor, selected clips, and pending draft open and displays `media_grid_bulk_tag_error`; only a successful completion closes the editor.
-Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いいね数`, `取得日時`, `取得エラー`, `タグを付ける`.
+Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いいね数`, `取得日時`, `取得エラー`, `適用`.
 
 投稿一覧のLazyColumnには、未構築項目へ実機UIテストから安全にスクロールできる `clip_list` test tagがあります。
 
@@ -118,9 +196,9 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 - `EnhancedClassifiedScreen`: 一致件数と条件文、右側固定の絞り込み/クリア操作、全画面Dialogの検索/絞り込みパネル、並び替えDialog、投稿の再割り当てを扱います。タグのみOFFでは未分類投稿も表示対象に含めます。
 - `EnhancedTagListScreen`: タグ/グループの追加、名称変更、移動、削除、別タグへの一括追加、ドラッグ&ドロップ移動を扱います。
 - `EnhancedTweetCard`: 投稿本文、画像、概要の読み取り表示、タグ選択、投稿オプションメニューをまとめます。
-- `SearchFilterDialog`: タグのみ、文字列検索、期間、ユーザー、タグ条件を区分し、確定条件と分離した下書きとリアルタイム一致件数を扱います。期間DatePickerは未指定時に今日を初期選択し、日付クリア操作は開始・終了指定の次行へ固定します。画面下部には適用/キャンセル、変更破棄・全条件クリアの確認Dialogを持ちます。
+- `SearchFilterDialog`: タグのみ、文字列検索、期間、ユーザー、タグ条件を区分し、確定条件と分離した下書きとリアルタイム一致件数を扱います。タグ条件はスクロール可能な展開式Tree popupでタグとグループを複数選択します。期間DatePickerは未指定時に今日を初期選択し、日付クリア操作は開始・終了指定の次行へ固定します。画面下部には適用/キャンセル、変更破棄・全条件クリアの確認Dialogを持ちます。
 - `AuthorFilterDialog`: 保存済み投稿者から生成したユーザー一覧を検索し、複数ユーザーOR条件を選択して「決定」で閉じます。選択数は入口ボタンの外に表示し、入口の文言は常に「ユーザーを選択」です。
-- `withoutTrailingMediaUrl`: UI表示時だけ、メディア付き投稿の本文末尾に付く `https://t.co/...` を取り除きます。DB保存値、検索対象、本文途中のURLは変更しません。
+- `withoutTrailingMediaUrl`: UI表示時だけ、メディア付き投稿の本文末尾に付く `https://t.co/...` を取り除きます。本文がなく表示文字列全体がmedia URLの場合や、末尾に複数並ぶ場合も対象です。DB保存値、検索対象、本文途中やtoken境界のないURL風文字列は変更しません。
 - `PreserveScrollAnchor` / `LazyListScrollbar` / `ScrollToTopButton`: 未分類、分類済み、タグ管理のスクロール位置維持、常に薄い表示専用スクロールバー、白丸黒矢印の一番上へ移動ボタンを扱います。
 - 各画面内ではTopAppBarと重複する画面名見出しを表示しません。
 - `TagHierarchySelector` / `TagSelectionDialog`: 投稿カード内のタグ選択を、コンパクトな最上位チップと半画面Dialogの単一階層ナビゲーションで扱います。
@@ -163,8 +241,12 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 ## UI自動テスト
 
 投稿カード、投稿者クリック領域、いいね数表示、分類確定、タグchip、タグ管理row、操作menu、名称変更menu、移動menu、削除menu、一括追加menu、group展開、root追加button、タグ/グループ削除DialogにはIDを含む安定した `testTag` を付けています。Compose E2Eは表示テキストだけに依存せず、操作後のRoom状態もassertします。タグ管理では、operation menuからのタグ名称変更、グループ名称変更、名称変更Dialogキャンセル、タグの別グループ移動、タグ/グループ移動Dialogキャンセル、別タグへの一括追加Dialogキャンセル、タグ/グループ削除DialogのキャンセルをRoom状態で確認します。
-検索/絞り込みDialogには、日付条件、投稿者条件、タグ条件、キャンセル、変更破棄、Dialog内全クリア確認を実機E2Eから安定して操作するため、`filter_options_list`、`filter_start_date`、`filter_end_date`、`filter_date_clear`、`filter_date_picker_apply`、`filter_date_picker_clear`、`filter_author_open`、`filter_author_option_<authorId>_<username>`、`filter_author_confirm`、`filter_author_clear`、`filter_tag_condition_<type>_<id>`、`filter_tag_clear`、`filter_cancel`、`filter_discard_*`、`filter_clear_all_*` を付けています。
+`SelectableTagTree` は絞り込みと一括追加で共用するスクロール可能なTreeです。callerがgroupを選択対象にするか、tag clickの処理、各semantics test tagを指定できます。一括追加ではgroup本体または矢印tapを展開/折りたたみとして扱い、tagだけを追加先にします。
+検索/絞り込みDialogには、日付条件、投稿者条件、タグ条件、キャンセル、変更破棄、Dialog内全クリア確認を実機E2Eから安定して操作するため、`filter_options_list`、`filter_start_date`、`filter_end_date`、`filter_date_clear`、`filter_date_picker_apply`、`filter_date_picker_clear`、`filter_author_open`、`filter_author_option_<authorId>_<username>`、`filter_author_confirm`、`filter_author_clear`、`filter_tag_popup_open`、`filter_tag_tree_list`、`filter_tag_expand_group_<id>`、`filter_tag_condition_<type>_<id>`、`filter_tag_popup_done`、`filter_tag_clear`、`filter_cancel`、`filter_discard_*`、`filter_clear_all_*` を付けています。
+タグ条件の凡例は選択済み条件の横スクロールRowより上に表示し、絞り込み内容の末尾には設定画面と同じ下余白を設けています。タグ選択Popupは説明文と条件遷移の凡例を表示せず、右上の×ボタンも置かず、下部の`決定`で閉じます。
 並び替えDialogには、`sort_open`、`sort_dialog`、`sort_options_list`、`sort_clear_all_open`、`sort_tag_toggle`、`sort_user_toggle`、`sort_base_like`、`sort_base_date`、`sort_apply`、`sort_cancel` などを付け、分類済み画面の表示順をUIテストから安定して切り替えられるようにしています。
+
+分類済みtoolbarのfilter/sort/displayは同寸法・同形状のアイコンButtonです。filterは`filters.hasActiveFilters`、sortは`ClassifiedSortState()`との差分がある場合だけ背景を付けます。表示切替はCard/MediaGridのどちらでも背景を付けません。toolbarには全条件クリアを置かず、条件の全クリアと確認は検索/絞り込みDialog内に残しています。
 メディアグリッドと全画面画像viewerには、保存済みPhotoのタップと閉じる操作をスクリーンショットなしで検証するため、`media_asset_<assetId>`、`image_viewer`、`image_viewer_close`、`image_viewer_position`、`image_viewer_photo_<index>` を付けています。
 
 投稿カードのローカル削除導線には `clip_local_delete_open_<clipId>`、確認Dialogには `clip_local_delete_dialog_<clipId>`、実行/キャンセルには `clip_local_delete_confirm_<clipId>` / `clip_local_delete_cancel_<clipId>` を付け、E2Eで文言ではなく対象clip IDに紐づけて操作できます。

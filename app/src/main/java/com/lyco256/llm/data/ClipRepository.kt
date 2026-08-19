@@ -13,6 +13,7 @@ import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -62,8 +63,167 @@ class ClipRepository internal constructor(
         NoOpMediaGridRgb565RepairEnqueuer,
     private val mediaGridRgb565PackStore: MediaGridRgb565Publisher =
         MediaGridRgb565PackStore(context.filesDir),
+    private val clipDeleteUndoStore: DurableClipDeleteUndoStore = DurableClipDeleteUndoStore(context.filesDir),
+    private val heavyLocalWorkTracker: HeavyLocalWorkTracker = HeavyLocalWorkTracker(),
 ) {
     private val mediaGridPreviewStore = MediaGridPersistentPreviewStore(context.filesDir)
+    private val undoCoordinator = UndoCoordinator(
+        databaseProvider = postStorageManager,
+        handlers = listOf(
+            UndoActionHandler(UndoActionType.CLIP_TAG_CHANGE, undo = { database, rawPayload ->
+                val payload = rawPayload as ClipTagChangeUndoPayload
+                heavyLocalWorkTracker.trackIf(
+                    payload.addedRelations.size + payload.removedRelations.size > 1,
+                ) {
+                    val clipDao = database.clipDao()
+                    if (payload.addedRelations.isNotEmpty()) clipDao.deleteClipTags(payload.addedRelations)
+                    if (payload.removedRelations.isNotEmpty()) clipDao.insertClipTags(payload.removedRelations)
+                }
+            }),
+            UndoActionHandler(UndoActionType.TAG_CREATED, undo = { database, rawPayload ->
+                database.tagDao().deleteTag((rawPayload as TagCreatedUndoPayload).tagId)
+            }),
+            UndoActionHandler(UndoActionType.GROUP_CREATED, undo = { database, rawPayload ->
+                database.tagDao().deleteGroup((rawPayload as GroupCreatedUndoPayload).groupId)
+            }),
+            UndoActionHandler(UndoActionType.TAG_EDITED, undo = { database, rawPayload ->
+                val payload = rawPayload as TagEditedUndoPayload
+                val tagDao = database.tagDao()
+                val now = Instant.now().toString()
+                payload.previousName?.let { previousName ->
+                    check(tagDao.updateTagName(payload.tagId, previousName, now) == 1) {
+                        "タグが見つかりません"
+                    }
+                }
+                payload.previousColorId?.let { previousColorId ->
+                    check(tagDao.updateTagColor(payload.tagId, previousColorId, now) == 1) {
+                        "タグが見つかりません"
+                    }
+                }
+            }),
+            UndoActionHandler(UndoActionType.GROUP_EDITED, undo = { database, rawPayload ->
+                val payload = rawPayload as GroupEditedUndoPayload
+                val tagDao = database.tagDao()
+                val now = Instant.now().toString()
+                payload.previousName?.let { previousName ->
+                    check(tagDao.updateGroupName(payload.groupId, previousName, now) == 1) {
+                        "グループが見つかりません"
+                    }
+                }
+                payload.previousColorId?.let { previousColorId ->
+                    check(tagDao.updateGroupColor(payload.groupId, previousColorId, now) == 1) {
+                        "グループが見つかりません"
+                    }
+                }
+            }),
+            UndoActionHandler(UndoActionType.TAG_DELETED, undo = { database, rawPayload ->
+                val payload = rawPayload as TagDeletedUndoPayload
+                heavyLocalWorkTracker.trackIf(payload.relations.size > 1) {
+                    val tagDao = database.tagDao()
+                    val clipDao = database.clipDao()
+                    check(tagDao.getTag(payload.tag.id) == null) {
+                        "同じIDのタグが既に存在します"
+                    }
+                    check(payload.relations.all { it.tagId == payload.tag.id }) {
+                        "タグ削除のUndoデータが不正です"
+                    }
+                    check(tagDao.insertTag(payload.tag) == payload.tag.id) {
+                        "タグを復元できませんでした"
+                    }
+                    if (payload.relations.isNotEmpty()) clipDao.insertClipTags(payload.relations)
+                    check(clipDao.clipTagsForTag(payload.tag.id) == payload.relations.sortedBy(ClipTagEntity::clipId)) {
+                        "タグと投稿の関連を完全に復元できませんでした"
+                    }
+                }
+            }),
+            UndoActionHandler(UndoActionType.GROUP_DELETED, undo = { database, rawPayload ->
+                val group = (rawPayload as GroupDeletedUndoPayload).group
+                val tagDao = database.tagDao()
+                check(tagDao.getGroup(group.id) == null) {
+                    "同じIDのグループが既に存在します"
+                }
+                group.parentGroupId?.let { parentGroupId ->
+                    check(tagDao.getGroup(parentGroupId) != null) {
+                        "復元先の親グループが見つかりません"
+                    }
+                }
+                check(tagDao.insertGroup(group) == group.id) {
+                    "グループを復元できませんでした"
+                }
+                check(tagDao.getGroup(group.id) == group) {
+                    "グループを完全に復元できませんでした"
+                }
+            }),
+            UndoActionHandler(UndoActionType.SUMMARY_EDITED, undo = { database, rawPayload ->
+                val payload = rawPayload as SummaryEditedUndoPayload
+                check(database.clipDao().updateSummary(payload.clipId, payload.previousSummary) == 1) {
+                    "投稿が見つかりません"
+                }
+            }),
+            UndoActionHandler(UndoActionType.OCR_EDITED, undo = { database, rawPayload ->
+                val payload = rawPayload as OcrEditedUndoPayload
+                check(
+                    database.clipDao().updateOcrText(
+                        payload.clipId,
+                        payload.previousOcrText,
+                        payload.previousOcrUpdatedAt,
+                    ) == 1,
+                ) {
+                    "投稿が見つかりません"
+                }
+            }),
+            UndoActionHandler(
+                UndoActionType.CLIP_DELETED,
+                undo = { database, rawPayload ->
+                    val payload = rawPayload as ClipDeletedUndoPayload
+                    val isHeavyRestore = payload.files.isNotEmpty() || payload.assets.size + payload.relations.size > 1
+                    heavyLocalWorkTracker.trackIf(isHeavyRestore) {
+                        val clipDao = database.clipDao()
+                        check(clipDao.getClip(payload.clip.id) == null) { "同じIDの投稿が既に存在します" }
+                        check(payload.assets.all { it.clipId == payload.clip.id }) { "投稿画像のUndoデータが不正です" }
+                        check(payload.relations.all { it.clipId == payload.clip.id }) { "投稿タグのUndoデータが不正です" }
+                        check(payload.files.map(UndoFileMetadata::assetId).toSet().size == payload.files.size) {
+                            "投稿画像のUndoデータが重複しています"
+                        }
+                        val restoredPaths = clipDeleteUndoStore.restore(payload, postStorageManager.imageDirectory())
+                        check(clipDao.insertClip(payload.clip) == payload.clip.id) { "投稿を復元できませんでした" }
+                        val restoredAssets = payload.assets.map { asset ->
+                            if (asset.id in restoredPaths) asset.copy(localPath = restoredPaths.getValue(asset.id))
+                            else if (asset.localPath != null) asset.copy(localPath = null)
+                            else asset
+                        }
+                        if (restoredAssets.isNotEmpty()) {
+                            check(clipDao.insertAssets(restoredAssets).all { it > 0L }) { "投稿画像を復元できませんでした" }
+                        }
+                        if (payload.relations.isNotEmpty()) clipDao.insertClipTags(payload.relations)
+                        check(clipDao.getClip(payload.clip.id) == payload.clip) { "投稿を完全に復元できませんでした" }
+                        check(clipDao.assetsForClipIds(listOf(payload.clip.id)) == restoredAssets.sortedBy(AssetEntity::id)) {
+                            "投稿画像を完全に復元できませんでした"
+                        }
+                        check(
+                            clipDao.clipTagsForClipIds(listOf(payload.clip.id)).sortedWith(
+                                compareBy(ClipTagEntity::tagId, ClipTagEntity::createdAt),
+                            ) == payload.relations.sortedWith(compareBy(ClipTagEntity::tagId, ClipTagEntity::createdAt)),
+                        ) { "投稿タグを完全に復元できませんでした" }
+                    }
+                },
+                afterUndo = { rawPayload ->
+                    val payload = rawPayload as ClipDeletedUndoPayload
+                    heavyLocalWorkTracker.trackIf(payload.files.isNotEmpty()) { clipDeleteUndoStore.cleanup(payload) }
+                    runCatching { mediaGridPreviewEnqueuer.enqueue(payload.files.map(UndoFileMetadata::assetId)) }
+                },
+                afterFinalize = { rawPayload ->
+                    val payload = rawPayload as ClipDeletedUndoPayload
+                    heavyLocalWorkTracker.trackIf(payload.files.isNotEmpty()) {
+                        clipDeleteUndoStore.cleanup(payload)
+                    }
+                },
+            ),
+        ),
+    )
+
+    val pendingUndo: Flow<UndoEntity?> = undoCoordinator.pendingUndo
+    val heavyLocalWorkActive: StateFlow<Boolean> = heavyLocalWorkTracker.isActive
 
     val apiSettings: ApiSettings
         get() = apiSettingsStore.load()
@@ -90,7 +250,7 @@ class ClipRepository internal constructor(
             rateLimitLimit = syncState.rateLimitLimit,
             rateLimitResetEpochSeconds = syncState.rateLimitResetEpochSeconds,
             lastSyncAt = syncState.lastSyncAt,
-            saveCount = clipDao.countActiveClips(),
+            saveCount = clipDao.countClips(),
             imageCount = try {
                 postStorageManager.countManagedImages()
             } catch (_: Exception) {
@@ -140,7 +300,7 @@ class ClipRepository internal constructor(
             tagDao.observeGroups(),
             tagDao.observeTags(),
             tagDao.observeTagCounts(),
-            database.clipDao().observeActiveClipTags(),
+            database.clipDao().observeClipTags(),
         ) { groups, tags, counts, clipTags ->
             val countMap = counts.associate { it.tagId to it.count }
             TagHierarchy(
@@ -165,7 +325,7 @@ class ClipRepository internal constructor(
         val clipDao = database.clipDao()
         val tagDao = database.tagDao()
         combine(
-            clipDao.observeActiveClips(),
+            clipDao.observeAllClips(),
             tagDao.observeTags(),
             clipDao.observeAssets(),
             clipDao.observeClipTags(),
@@ -189,7 +349,7 @@ class ClipRepository internal constructor(
     fun observeClipWithDetails(clipId: Long): Flow<ClipWithDetails?> = postStorageManager.database.flatMapLatest { database ->
         if (database == null) return@flatMapLatest flowOf(null)
         combine(
-            database.clipDao().observeActiveClip(clipId),
+            database.clipDao().observeClip(clipId),
             database.clipDao().observeAssetsForClip(clipId),
             database.tagDao().observeTagsForClip(clipId),
         ) { clip, assets, tags ->
@@ -202,12 +362,12 @@ class ClipRepository internal constructor(
         if (database == null) return@flatMapLatest flowOf(MediaGridSourceSnapshot(++mediaGridRevision, emptyList()))
         val clipDao = database.clipDao()
         combine(
-            clipDao.observeActiveClips(),
-            clipDao.observeActiveMediaGridAssetRows(),
-            clipDao.observeActiveClipTags(),
-        ) { clips, assets, activeClipTags ->
+            clipDao.observeAllClips(),
+            clipDao.observeMediaGridAssetRows(),
+            clipDao.observeClipTags(),
+        ) { clips, assets, clipTags ->
             val activeTagsByClip = HashMap<Long, ArrayList<Long>>()
-            activeClipTags.forEach { row ->
+            clipTags.forEach { row ->
                 activeTagsByClip.getOrPut(row.clipId) { ArrayList() }.add(row.tagId)
             }
             val assetsByClip = HashMap<Long, ArrayList<MediaGridAssetRow>>()
@@ -350,7 +510,7 @@ class ClipRepository internal constructor(
         var fetched = 0
         var inserted = 0
         var lastResult: XApiResult? = null
-        val existingPostIds = clipDao.getActiveClips().mapTo(mutableSetOf()) { it.xPostId }
+        val existingPostIds = clipDao.getAllClips().mapTo(mutableSetOf()) { it.xPostId }
         var newestReturnedPostId: String? = null
         var firstPageFromTop = !resumingContinuation
         var reachedExistingBoundary = false
@@ -411,40 +571,49 @@ class ClipRepository internal constructor(
             reachedExistingBoundary = reachedExistingBoundary || pageReachedBoundary
 
             postsToInsert.forEach { post ->
-                val clipId = clipDao.insertClip(
-                    ClipEntity(
-                        xPostId = post.id,
-                        authorId = post.authorId,
-                        authorName = post.authorName.ifBlank { "unknown" },
-                        authorUsername = post.authorUsername.ifBlank { "unknown" },
-                        text = post.text,
-                        postUrl = "https://x.com/${post.authorUsername}/status/${post.id}",
-                        xCreatedAt = post.createdAt,
-                        savedAt = now,
-                        syncedAt = now,
-                        likeCount = post.likeCount,
-                        likeCountFetchedAt = post.likeCount?.let { now },
-                    ),
-                )
-                if (clipId > 0) {
-                    inserted += 1
-                    existingPostIds += post.id
-                    post.media.forEach { media ->
-                        val prepared = createAssetForMedia(
-                            clipId = clipId,
-                            postId = post.id,
-                            media = media,
-                            now = now,
-                        ) ?: return@forEach
-                        val assetId = clipDao.insertAssets(listOf(prepared.asset)).singleOrNull() ?: -1L
-                        if (assetId <= 0L || prepared.asset.localPath == null) return@forEach
-                        val rawPublished = prepared.rawPayload?.let { pending ->
-                            publishMediaGridRgb565(assetId, pending)
-                        } ?: false
-                        if (!rawPublished) {
-                            mediaGridRgb565RepairEnqueuer.enqueue(listOf(assetId))
+                // HTTP response waiting is deliberately outside the local-work interval.
+                val downloadedMedia = post.media.map { media ->
+                    media to runCatching { fetchMediaBytes(media) }.getOrNull()
+                }
+                val isHeavyPersist = postsToInsert.size > 1 ||
+                    downloadedMedia.size > 1 || downloadedMedia.any { (_, bytes) -> bytes != null }
+                heavyLocalWorkTracker.trackIf(isHeavyPersist) {
+                    val clipId = clipDao.insertClip(
+                        ClipEntity(
+                            xPostId = post.id,
+                            authorId = post.authorId,
+                            authorName = post.authorName.ifBlank { "unknown" },
+                            authorUsername = post.authorUsername.ifBlank { "unknown" },
+                            text = post.text,
+                            postUrl = "https://x.com/${post.authorUsername}/status/${post.id}",
+                            xCreatedAt = post.createdAt,
+                            savedAt = now,
+                            syncedAt = now,
+                            likeCount = post.likeCount,
+                            likeCountFetchedAt = post.likeCount?.let { now },
+                        ),
+                    )
+                    if (clipId > 0) {
+                        inserted += 1
+                        existingPostIds += post.id
+                        downloadedMedia.forEach { (media, sourceBytes) ->
+                            val prepared = createAssetForMedia(
+                                clipId = clipId,
+                                postId = post.id,
+                                media = media,
+                                sourceBytes = sourceBytes,
+                                now = now,
+                            ) ?: return@forEach
+                            val assetId = clipDao.insertAssets(listOf(prepared.asset)).singleOrNull() ?: -1L
+                            if (assetId <= 0L || prepared.asset.localPath == null) return@forEach
+                            val rawPublished = prepared.rawPayload?.let { pending ->
+                                publishMediaGridRgb565(assetId, pending)
+                            } ?: false
+                            if (!rawPublished) {
+                                mediaGridRgb565RepairEnqueuer.enqueue(listOf(assetId))
+                            }
+                            mediaGridPreviewEnqueuer.enqueue(listOf(assetId))
                         }
-                        mediaGridPreviewEnqueuer.enqueue(listOf(assetId))
                     }
                 }
             }
@@ -496,7 +665,7 @@ class ClipRepository internal constructor(
         postStorageManager.withDatabase { database ->
             val dao = database.clipDao()
             val state = currentMonthState(dao.getSyncState() ?: SyncStateEntity())
-            val targets = likeCountRefreshTargets(dao.getActiveClips(), Instant.now())
+            val targets = likeCountRefreshTargets(dao.getAllClips(), Instant.now())
             val remaining = (state.monthlyBudgetLimit - state.monthlyFetchedCount).coerceAtLeast(0)
             val executable = if (state.monthlyFetchedCount >= state.monthlyStopLimit) 0 else minOf(targets.size, remaining)
             LikeCountRefreshEstimate(targets.size, executable, executable * 0.001)
@@ -509,7 +678,7 @@ class ClipRepository internal constructor(
             val dao = database.clipDao()
             var state = currentMonthState(dao.getSyncState() ?: SyncStateEntity())
             val remaining = (state.monthlyBudgetLimit - state.monthlyFetchedCount).coerceAtLeast(0)
-            val allTargets = likeCountRefreshTargets(dao.getActiveClips(), Instant.now())
+            val allTargets = likeCountRefreshTargets(dao.getAllClips(), Instant.now())
             val targets = if (state.monthlyFetchedCount >= state.monthlyStopLimit) emptyList() else allTargets.take(remaining)
             if (targets.isEmpty()) {
                 return@withDatabase if (allTargets.isEmpty()) "再取得対象はありません。" else "月間取得上限に達しているため再取得できません。"
@@ -531,24 +700,27 @@ class ClipRepository internal constructor(
                     break
                 }
 
-                result.posts.forEach { post ->
-                    byPostId[post.id]?.let { dao.updateLikeCount(it.id, post.likeCount, now) }
-                    success += 1
-                }
-                result.errors.filter { it.isPermanentPostFailure() }.forEach { error ->
-                    byPostId[error.postId]?.let {
-                        dao.recordLikeCountFailure(it.id, now, error.userMessage())
-                        permanentFailures += 1
+                val localUpdateCount = result.posts.size + result.errors.count { it.isPermanentPostFailure() }
+                heavyLocalWorkTracker.trackIf(localUpdateCount > 1) {
+                    result.posts.forEach { post ->
+                        byPostId[post.id]?.let { dao.updateLikeCount(it.id, post.likeCount, now) }
+                        success += 1
                     }
+                    result.errors.filter { it.isPermanentPostFailure() }.forEach { error ->
+                        byPostId[error.postId]?.let {
+                            dao.recordLikeCountFailure(it.id, now, error.userMessage())
+                            permanentFailures += 1
+                        }
+                    }
+                    state = recordApiUsage(database, state, result.posts.size)
+                    dao.upsertSyncState(
+                        state.copy(
+                            rateLimitLimit = result.rateLimitLimit,
+                            rateLimitRemaining = result.rateLimitRemaining,
+                            rateLimitResetEpochSeconds = result.rateLimitReset,
+                        ),
+                    )
                 }
-                state = recordApiUsage(database, state, result.posts.size)
-                dao.upsertSyncState(
-                    state.copy(
-                        rateLimitLimit = result.rateLimitLimit,
-                        rateLimitRemaining = result.rateLimitRemaining,
-                        rateLimitResetEpochSeconds = result.rateLimitReset,
-                    ),
-                )
             }
 
             buildString {
@@ -582,7 +754,7 @@ class ClipRepository internal constructor(
     }
 
     private fun likeCountRefreshTargets(clips: List<ClipEntity>, now: Instant): List<ClipEntity> = clips.filter { clip ->
-        if (clip.isDeleted || clip.likeCountFetchFailedAt != null || clip.xPostId.any { !it.isDigit() }) return@filter false
+        if (clip.likeCountFetchFailedAt != null || clip.xPostId.any { !it.isDigit() }) return@filter false
         if (clip.likeCount == null) return@filter true
         val created = runCatching { Instant.parse(clip.xCreatedAt) }.getOrNull() ?: return@filter false
         val fetched = clip.likeCountFetchedAt?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: return@filter false
@@ -628,22 +800,19 @@ class ClipRepository internal constructor(
         clipId: Long,
         postId: String,
         media: XMedia,
+        sourceBytes: ByteArray?,
         now: String,
     ): PreparedAsset? {
         val isPhoto = media.type == "photo"
         val isVideoLike = media.type == "video" || media.type == "animated_gif"
-        val remote = when {
-            isPhoto -> media.url
-            isVideoLike -> media.previewImageUrl
-            else -> null
-        } ?: return null
+        val remote = mediaRemoteUrl(media) ?: return null
         val shouldDownload = isPhoto || isVideoLike
-        val downloaded = if (shouldDownload) {
+        val downloaded = if (shouldDownload && sourceBytes != null) {
             runCatching {
                 if (isPhoto) {
-                    downloadPhotoAsWebp(postId, media.mediaKey, remote)
+                    savePhotoAsWebp(postId, media.mediaKey, sourceBytes)
                 } else {
-                    downloadMedia(postId, media.mediaKey, remote)
+                    saveMedia(postId, media.mediaKey, sourceBytes)
                 }
             }.getOrNull()
         } else {
@@ -667,16 +836,26 @@ class ClipRepository internal constructor(
         )
     }
 
-    private fun downloadPhotoAsWebp(postId: String, mediaKey: String, url: String): DownloadedImage =
-        downloadImageAsWebp(postId, mediaKey, url)
+    private fun mediaRemoteUrl(media: XMedia): String? = when (media.type) {
+        "photo" -> media.url
+        "video", "animated_gif" -> media.previewImageUrl
+        else -> null
+    }
 
-    private fun downloadMedia(postId: String, mediaKey: String, url: String): DownloadedImage =
-        downloadImageAsWebp(postId, mediaKey, url)
+    /** Reads the network response only; decode, compression and publication happen in the tracked local interval. */
+    private fun fetchMediaBytes(media: XMedia): ByteArray? = mediaRemoteUrl(media)?.let { url ->
+        openConnection(url).inputStream.use { input -> input.readBytes() }
+    }
 
-    private fun downloadImageAsWebp(postId: String, mediaKey: String, url: String): DownloadedImage {
+    private fun savePhotoAsWebp(postId: String, mediaKey: String, sourceBytes: ByteArray): DownloadedImage =
+        saveImageAsWebp(postId, mediaKey, sourceBytes)
+
+    private fun saveMedia(postId: String, mediaKey: String, sourceBytes: ByteArray): DownloadedImage =
+        saveImageAsWebp(postId, mediaKey, sourceBytes)
+
+    private fun saveImageAsWebp(postId: String, mediaKey: String, sourceBytes: ByteArray): DownloadedImage {
         val imageDir = postStorageManager.imageDirectory()
         val target = File(imageDir, "${postId}_${mediaKey}.webp")
-        val sourceBytes = openConnection(url).inputStream.use { input -> input.readBytes() }
         val decoded = BitmapFactory.decodeByteArray(sourceBytes, 0, sourceBytes.size)
             ?: error("画像を読み込めませんでした")
         val bitmap = decoded.withBlackBackgroundIfTransparent()
@@ -753,70 +932,153 @@ class ClipRepository internal constructor(
             Bitmap.CompressFormat.WEBP
         }
 
-    suspend fun createTag(name: String, parentGroupId: Long? = null, colorId: String = TagColorId.STANDARD.id) = withContext(Dispatchers.IO) {
-        postStorageManager.withDatabase { database ->
+    suspend fun createTag(
+        name: String,
+        parentGroupId: Long? = null,
+        colorId: String = TagColorId.STANDARD.id,
+    ): TagEntity = withContext(Dispatchers.IO) {
+        undoCoordinator.commitComputedDatabaseEdit(message = "タグを作成しました") { database ->
             val clean = cleanNodeName(name)
             val tagDao = database.tagDao()
             validateParent(tagDao, parentGroupId)
             ensureUniqueSiblingName(tagDao, parentGroupId, clean)
             val now = Instant.now().toString()
             val order = siblingNodes(tagDao, parentGroupId).size
-            check(tagDao.insertTag(TagEntity(name = clean, parentGroupId = parentGroupId, sortOrder = order, createdAt = now, updatedAt = now, colorId = colorId)) > 0) {
+            val pending = TagEntity(
+                name = clean,
+                parentGroupId = parentGroupId,
+                sortOrder = order,
+                createdAt = now,
+                updatedAt = now,
+                colorId = colorId,
+            )
+            val tagId = tagDao.insertTag(pending)
+            check(tagId > 0) {
                 "タグを追加できませんでした"
             }
+            val created = pending.copy(id = tagId)
+            UndoDatabaseEdit(
+                result = created,
+                payload = TagCreatedUndoPayload(tagId),
+            )
         }
     }
 
     suspend fun renameTag(tag: TagEntity, name: String) = withContext(Dispatchers.IO) {
-        postStorageManager.withDatabase { database ->
+        undoCoordinator.commitComputedDatabaseEdit(message = "タグを変更しました") { database ->
             val clean = cleanNodeName(name)
             val tagDao = database.tagDao()
-            ensureUniqueSiblingName(tagDao, tag.parentGroupId, clean, TagNodeRef(TagNodeType.TAG, tag.id))
-            tagDao.updateTag(tag.copy(name = clean, updatedAt = Instant.now().toString()))
-        }
-    }
-
-    suspend fun createGroup(name: String, parentGroupId: Long? = null, colorId: String = TagColorId.STANDARD.id) = withContext(Dispatchers.IO) {
-        postStorageManager.withDatabase { database ->
-            val clean = cleanNodeName(name)
-            val tagDao = database.tagDao()
-            validateParent(tagDao, parentGroupId)
-            ensureUniqueSiblingName(tagDao, parentGroupId, clean)
+            val current = requireNotNull(tagDao.getTag(tag.id)) { "タグが見つかりません" }
+            val previousName = current.name.takeIf { it != clean }
+            val previousColorId = current.colorId.takeIf { it != tag.colorId }
+            if (previousName != null) {
+                ensureUniqueSiblingName(tagDao, current.parentGroupId, clean, TagNodeRef(TagNodeType.TAG, current.id))
+            }
             val now = Instant.now().toString()
-            val order = siblingNodes(tagDao, parentGroupId).size
-            tagDao.insertGroup(
-                TagGroupEntity(
-                    name = clean,
-                    parentGroupId = parentGroupId,
-                    sortOrder = order,
-                    createdAt = now,
-                    updatedAt = now,
-                    colorId = colorId,
+            previousName?.let {
+                check(tagDao.updateTagName(current.id, clean, now) == 1) { "タグが見つかりません" }
+            }
+            previousColorId?.let {
+                check(tagDao.updateTagColor(current.id, tag.colorId, now) == 1) { "タグが見つかりません" }
+            }
+            UndoDatabaseEdit(
+                result = Unit,
+                payload = if (previousName == null && previousColorId == null) null else TagEditedUndoPayload(
+                    tagId = current.id,
+                    previousName = previousName,
+                    previousColorId = previousColorId,
                 ),
             )
         }
     }
 
-    suspend fun renameGroup(group: TagGroupEntity, name: String) = withContext(Dispatchers.IO) {
-        postStorageManager.withDatabase { database ->
+    suspend fun createGroup(
+        name: String,
+        parentGroupId: Long? = null,
+        colorId: String = TagColorId.STANDARD.id,
+    ): TagGroupEntity = withContext(Dispatchers.IO) {
+        undoCoordinator.commitComputedDatabaseEdit(message = "グループを作成しました") { database ->
             val clean = cleanNodeName(name)
             val tagDao = database.tagDao()
-            ensureUniqueSiblingName(tagDao, group.parentGroupId, clean, TagNodeRef(TagNodeType.GROUP, group.id))
-            tagDao.updateGroup(group.copy(name = clean, updatedAt = Instant.now().toString()))
+            validateParent(tagDao, parentGroupId)
+            ensureUniqueSiblingName(tagDao, parentGroupId, clean)
+            val now = Instant.now().toString()
+            val order = siblingNodes(tagDao, parentGroupId).size
+            val pending = TagGroupEntity(
+                name = clean,
+                parentGroupId = parentGroupId,
+                sortOrder = order,
+                createdAt = now,
+                updatedAt = now,
+                colorId = colorId,
+            )
+            val groupId = tagDao.insertGroup(pending)
+            check(groupId > 0) {
+                "グループを追加できませんでした"
+            }
+            val created = pending.copy(id = groupId)
+            UndoDatabaseEdit(
+                result = created,
+                payload = GroupCreatedUndoPayload(groupId),
+            )
+        }
+    }
+
+    suspend fun renameGroup(group: TagGroupEntity, name: String) = withContext(Dispatchers.IO) {
+        undoCoordinator.commitComputedDatabaseEdit(message = "グループを変更しました") { database ->
+            val clean = cleanNodeName(name)
+            val tagDao = database.tagDao()
+            val current = requireNotNull(tagDao.getGroup(group.id)) { "グループが見つかりません" }
+            val previousName = current.name.takeIf { it != clean }
+            val previousColorId = current.colorId.takeIf { it != group.colorId }
+            if (previousName != null) {
+                ensureUniqueSiblingName(tagDao, current.parentGroupId, clean, TagNodeRef(TagNodeType.GROUP, current.id))
+            }
+            val now = Instant.now().toString()
+            previousName?.let {
+                check(tagDao.updateGroupName(current.id, clean, now) == 1) { "グループが見つかりません" }
+            }
+            previousColorId?.let {
+                check(tagDao.updateGroupColor(current.id, group.colorId, now) == 1) { "グループが見つかりません" }
+            }
+            UndoDatabaseEdit(
+                result = Unit,
+                payload = if (previousName == null && previousColorId == null) null else GroupEditedUndoPayload(
+                    groupId = current.id,
+                    previousName = previousName,
+                    previousColorId = previousColorId,
+                ),
+            )
         }
     }
 
     suspend fun deleteTag(tagId: Long) = withContext(Dispatchers.IO) {
-        postStorageManager.withDatabase { it.tagDao().deleteTag(tagId) }
+        undoCoordinator.commitComputedDatabaseEdit(message = "タグを削除しました") { database ->
+            val tagDao = database.tagDao()
+            val tag = requireNotNull(tagDao.getTag(tagId)) { "タグが見つかりません" }
+            val relations = database.clipDao().clipTagsForTag(tagId)
+            heavyLocalWorkTracker.trackIf(relations.size > 1) {
+                check(tagDao.deleteTag(tagId) == 1) { "タグを削除できませんでした" }
+            }
+            UndoDatabaseEdit(
+                result = Unit,
+                payload = TagDeletedUndoPayload(tag, relations),
+            )
+        }
     }
 
     suspend fun deleteGroup(groupId: Long) = withContext(Dispatchers.IO) {
-        postStorageManager.withDatabase { database ->
+        undoCoordinator.commitComputedDatabaseEdit(message = "グループを削除しました") { database ->
             val tagDao = database.tagDao()
+            val group = requireNotNull(tagDao.getGroup(groupId)) { "グループが見つかりません" }
             require(tagDao.countChildGroups(groupId) == 0 && tagDao.countChildTags(groupId) == 0) {
                 "子要素があるグループは削除できません"
             }
-            tagDao.deleteGroup(groupId)
+            check(tagDao.deleteGroup(groupId) == 1) { "グループを削除できませんでした" }
+            UndoDatabaseEdit(
+                result = Unit,
+                payload = GroupDeletedUndoPayload(group),
+            )
         }
     }
 
@@ -827,6 +1089,7 @@ class ClipRepository internal constructor(
         parentGroupId: Long?,
         indexInDestinationWithoutDragged: Int,
     ) = withContext(Dispatchers.IO) {
+        invalidateUndoBeforeNodeMoveOrReorder()
         postStorageManager.withDatabase { database ->
             val tagDao = database.tagDao()
             validateParent(tagDao, parentGroupId)
@@ -868,6 +1131,7 @@ class ClipRepository internal constructor(
     }
 
     suspend fun moveNodeToParentAt(node: TagNodeRef, parentGroupId: Long?, index: Int) = withContext(Dispatchers.IO) {
+        invalidateUndoBeforeNodeMoveOrReorder()
         postStorageManager.withDatabase { database ->
             val tagDao = database.tagDao()
             validateParent(tagDao, parentGroupId)
@@ -909,6 +1173,7 @@ class ClipRepository internal constructor(
     }
 
     suspend fun reorderSiblings(parentGroupId: Long?, orderedNodes: List<TagNodeRef>) = withContext(Dispatchers.IO) {
+        invalidateUndoBeforeNodeMoveOrReorder()
         postStorageManager.withDatabase { database ->
             val tagDao = database.tagDao()
             val current = siblingNodes(tagDao, parentGroupId)
@@ -920,17 +1185,64 @@ class ClipRepository internal constructor(
     }
 
     suspend fun addAllFromTagToTag(sourceTagId: Long, targetTagId: Long) = withContext(Dispatchers.IO) {
-        postStorageManager.withDatabase { database ->
-        val tagDao = database.tagDao()
-        val now = Instant.now().toString()
-        tagDao.clipsForTag(sourceTagId).forEach { clip ->
-            tagDao.insertClipTag(ClipTagEntity(clip.id, targetTagId, now))
-        }
+        undoCoordinator.commitComputedDatabaseEdit(message = "タグを一括追加しました") { database ->
+            val clipDao = database.clipDao()
+            val sourceClipIds = clipDao.clipTagsForTag(sourceTagId).mapTo(linkedSetOf()) { it.clipId }
+            val changes = heavyLocalWorkTracker.trackIf(sourceClipIds.size > 1) {
+                clipDao.applyClipTagChanges(
+                    clipIds = sourceClipIds,
+                    pendingAddTagIds = setOf(targetTagId),
+                    pendingRemoveTagIds = emptySet(),
+                    now = Instant.now().toString(),
+                )
+            }
+            UndoDatabaseEdit(
+                result = Unit,
+                payload = if (changes.isEmpty) null else ClipTagChangeUndoPayload(
+                    addedRelations = changes.addedRelations,
+                    removedRelations = emptyList(),
+                ),
+            )
         }
     }
 
     suspend fun setClipTags(clipId: Long, tagIds: Set<Long>) = withContext(Dispatchers.IO) {
-        postStorageManager.withDatabase { it.clipDao().replaceClipTags(clipId, tagIds, Instant.now().toString()) }
+        val now = Instant.now().toString()
+        undoCoordinator.commitComputedDatabaseEdit(message = "タグを適用しました") { database ->
+            val clipDao = database.clipDao()
+            val currentRelations = clipDao.clipTagsForClipIds(listOf(clipId))
+            val currentByTagId = currentRelations.associateBy(ClipTagEntity::tagId)
+            val currentTagIds = currentByTagId.keys
+            val removedRelations = currentTagIds.minus(tagIds).map { currentByTagId.getValue(it) }
+            val addedRelations = tagIds.minus(currentTagIds).map { tagId ->
+                ClipTagEntity(clipId = clipId, tagId = tagId, createdAt = now)
+            }
+            removedRelations.forEach { relation -> clipDao.deleteClipTag(relation.clipId, relation.tagId) }
+            addedRelations.forEach { relation -> clipDao.insertClipTag(relation) }
+            UndoDatabaseEdit(
+                result = Unit,
+                payload = ClipTagChangeUndoPayload(
+                    addedRelations = addedRelations,
+                    removedRelations = removedRelations,
+                ),
+            )
+        }
+    }
+
+    suspend fun undoPendingEdit(): UndoCoordinatorResult = withContext(Dispatchers.IO) {
+        undoCoordinator.undo()
+    }
+
+    suspend fun undoPendingEdit(expectedSlot: UndoEntity): UndoCoordinatorResult = withContext(Dispatchers.IO) {
+        undoCoordinator.undo(expectedSlot)
+    }
+
+    suspend fun finalizePendingUndo(): UndoCoordinatorResult = withContext(Dispatchers.IO) {
+        undoCoordinator.finalizePending()
+    }
+
+    suspend fun finalizePendingUndo(expectedSlot: UndoEntity): UndoCoordinatorResult = withContext(Dispatchers.IO) {
+        undoCoordinator.finalizePending(expectedSlot)
     }
 
     suspend fun applyClipTagChanges(
@@ -939,22 +1251,64 @@ class ClipRepository internal constructor(
         pendingRemoveTagIds: Set<Long>,
     ) = withContext(Dispatchers.IO) {
         if (clipIds.isEmpty()) return@withContext
-        postStorageManager.withDatabase {
-            it.clipDao().applyClipTagChanges(
-                clipIds = clipIds,
-                pendingAddTagIds = pendingAddTagIds,
-                pendingRemoveTagIds = pendingRemoveTagIds,
-                now = Instant.now().toString(),
+        undoCoordinator.commitComputedDatabaseEdit(message = "一括タグを変更しました") { database ->
+            val changes = heavyLocalWorkTracker.trackIf(clipIds.size > 1) {
+                database.clipDao().applyClipTagChanges(
+                    clipIds = clipIds,
+                    pendingAddTagIds = pendingAddTagIds,
+                    pendingRemoveTagIds = pendingRemoveTagIds,
+                    now = Instant.now().toString(),
+                )
+            }
+            UndoDatabaseEdit(
+                result = Unit,
+                payload = if (changes.isEmpty) null else ClipTagChangeUndoPayload(
+                    addedRelations = changes.addedRelations,
+                    removedRelations = changes.removedRelations,
+                ),
             )
         }
     }
 
     suspend fun updateSummary(clip: ClipEntity, summary: String) = withContext(Dispatchers.IO) {
-        postStorageManager.withDatabase { it.clipDao().updateClip(clip.copy(summary = summary)) }
+        undoCoordinator.commitComputedDatabaseEdit(message = "概要を保存しました") { database ->
+            val clipDao = database.clipDao()
+            val current = checkNotNull(clipDao.getClip(clip.id)) { "投稿が見つかりません" }
+            if (current.summary == summary) {
+                UndoDatabaseEdit(result = Unit, payload = null)
+            } else {
+                check(clipDao.updateSummary(clip.id, summary) == 1) { "投稿が見つかりません" }
+                UndoDatabaseEdit(
+                    result = Unit,
+                    payload = SummaryEditedUndoPayload(
+                        clipId = clip.id,
+                        previousSummary = current.summary,
+                    ),
+                )
+            }
+        }
     }
 
     suspend fun updateOcrText(clip: ClipEntity, ocrText: String) = withContext(Dispatchers.IO) {
-        postStorageManager.withDatabase { it.clipDao().updateOcrText(clip.id, ocrText, Instant.now().toString()) }
+        undoCoordinator.commitComputedDatabaseEdit(message = "OCRを保存しました") { database ->
+            val clipDao = database.clipDao()
+            val current = checkNotNull(clipDao.getClip(clip.id)) { "投稿が見つかりません" }
+            if (current.ocrText == ocrText) {
+                UndoDatabaseEdit(result = Unit, payload = null)
+            } else {
+                check(clipDao.updateOcrText(clip.id, ocrText, Instant.now().toString()) == 1) {
+                    "投稿が見つかりません"
+                }
+                UndoDatabaseEdit(
+                    result = Unit,
+                    payload = OcrEditedUndoPayload(
+                        clipId = clip.id,
+                        previousOcrText = current.ocrText,
+                        previousOcrUpdatedAt = current.ocrUpdatedAt,
+                    ),
+                )
+            }
+        }
     }
 
     suspend fun detectOcrText(clip: ClipWithDetails): String = withContext(Dispatchers.IO) {
@@ -973,31 +1327,61 @@ class ClipRepository internal constructor(
         }.joinToString("\n\n")
     }
 
+    private suspend fun invalidateUndoBeforeNodeMoveOrReorder() {
+        val result = undoCoordinator.invalidateForUserEdit()
+        check(result == UndoCoordinatorResult.Success || result == UndoCoordinatorResult.NoPendingUndo) {
+            "以前のUndoを確定できませんでした"
+        }
+    }
+
     suspend fun moveClipToTrash(clip: ClipEntity) = withContext(Dispatchers.IO) {
         mediaGridPreviewStore.withPublishLock {
-            postStorageManager.withDatabase { database ->
+            val invalidated = undoCoordinator.invalidateForUserEdit()
+            check(invalidated == UndoCoordinatorResult.Success || invalidated == UndoCoordinatorResult.NoPendingUndo) {
+                "以前のUndoを確定できませんでした"
+            }
+            val snapshot = postStorageManager.withDatabase { database ->
                 val clipDao = database.clipDao()
-                val assets = clipDao.assetsForClipIds(listOf(clip.id))
-                val imageDir = runCatching { postStorageManager.imageDirectory().canonicalFile }.getOrNull()
-                    ?: error("保存先が利用できません")
-                val filesToDelete = assets.mapNotNull { asset ->
-                    val localPath = asset.localPath ?: return@mapNotNull null
-                    val file = File(localPath)
-                    if (!file.exists()) return@mapNotNull null
-                    val canonical = runCatching { file.canonicalFile }.getOrNull()
-                        ?: error("ファイルのパスを解決できません")
-                    require(canonical.path.startsWith(imageDir.path + File.separator) || canonical == imageDir) {
-                        "管理画像ディレクトリ外のファイルは削除できません"
+                val currentClip = checkNotNull(clipDao.getClip(clip.id)) { "投稿が見つかりません" }
+                ClipDeletedUndoPayload(
+                    clip = currentClip,
+                    assets = clipDao.assetsForClipIds(listOf(clip.id)),
+                    relations = clipDao.clipTagsForClipIds(listOf(clip.id)),
+                    files = emptyList(),
+                )
+            }
+            val hasImageStaging = snapshot.assets.any { asset ->
+                asset.localPath?.let(::File)?.isFile == true
+            }
+            val isHeavyDelete = hasImageStaging || snapshot.assets.size + snapshot.relations.size > 1
+            heavyLocalWorkTracker.trackIf(isHeavyDelete) {
+                val prepared = clipDeleteUndoStore.prepare(
+                    clipId = snapshot.clip.id,
+                    assets = snapshot.assets,
+                    imageDirectory = postStorageManager.imageDirectory(),
+                )
+                val payload = snapshot.copy(files = prepared.metadata)
+                try {
+                    undoCoordinator.commitDatabaseEdit(payload, "投稿を削除しました") { database ->
+                        val clipDao = database.clipDao()
+                        check(clipDao.getClip(payload.clip.id) == payload.clip) { "削除前に投稿が変更されました" }
+                        check(clipDao.assetsForClipIds(listOf(payload.clip.id)) == payload.assets) {
+                            "削除前に投稿画像が変更されました"
+                        }
+                        check(
+                            clipDao.clipTagsForClipIds(listOf(payload.clip.id)).sortedWith(
+                                compareBy(ClipTagEntity::tagId, ClipTagEntity::createdAt),
+                            ) == payload.relations.sortedWith(compareBy(ClipTagEntity::tagId, ClipTagEntity::createdAt)),
+                        ) { "削除前に投稿タグが変更されました" }
+                        clipDao.deleteClip(payload.clip.id)
+                        check(clipDao.getClip(payload.clip.id) == null) { "投稿を削除できませんでした" }
                     }
-                    canonical
+                } catch (error: Throwable) {
+                    clipDeleteUndoStore.discardPrepared(prepared.metadata)
+                    throw error
                 }
-                filesToDelete.forEach { file ->
-                    require(file.delete() || !file.exists()) { "ローカル画像の削除に失敗しました" }
-                }
-                database.withTransaction {
-                    clipDao.deleteClip(clip.id)
-                }
-                assets.forEach { asset -> runCatching { mediaGridPreviewStore.deletePreviewUnsafe(asset.id) } }
+                clipDeleteUndoStore.discardOriginals(prepared)
+                payload.assets.forEach { asset -> runCatching { mediaGridPreviewStore.deletePreviewUnsafe(asset.id) } }
             }
         }
     }

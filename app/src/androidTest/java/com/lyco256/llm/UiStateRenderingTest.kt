@@ -1,5 +1,6 @@
 package com.lyco256.llm
 
+import android.view.KeyEvent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.requiredWidth
@@ -14,10 +15,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -31,24 +38,464 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.unit.dp
+import androidx.test.platform.app.InstrumentationRegistry
 import com.lyco256.llm.data.AssetEntity
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.PostStorageEstimate
 import com.lyco256.llm.data.PostStorageLocation
+import com.lyco256.llm.data.PostStorageState
 import com.lyco256.llm.data.PostStorageType
 import com.lyco256.llm.data.TagEntity
+import com.lyco256.llm.data.TagFilterState
+import com.lyco256.llm.data.TagGroupEntity
 import com.lyco256.llm.data.TagHierarchy
+import com.lyco256.llm.data.TagNodeRef
+import com.lyco256.llm.data.TagNodeType
 import com.lyco256.llm.data.TagWithCount
 import java.io.File
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 
 class UiStateRenderingTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun addAllTreeExcludesSourceAndClosesAfterOneRootTagSelection() {
+        val now = "2026-08-13T00:00:00Z"
+        val source = TagEntity(1, "Source", sortOrder = 0, createdAt = now, updatedAt = now)
+        val target = TagEntity(2, "Root target", sortOrder = 1, createdAt = now, updatedAt = now)
+        val hierarchy = TagHierarchy(tags = listOf(source, target).map { TagWithCount(it, 0) })
+        var open by mutableStateOf(true)
+        val selected = mutableListOf<Long>()
+
+        composeRule.setContent {
+            MaterialTheme {
+                if (open) {
+                    AddAllTagsDialog(
+                        source = source,
+                        hierarchy = hierarchy,
+                        onDismiss = { open = false },
+                        onAddAll = {
+                            selected += it.id
+                            open = false
+                        },
+                    )
+                }
+            }
+        }
+
+        composeRule.onAllNodesWithTag("add_all_target_tag_${source.id}").assertCountEquals(0)
+        composeRule.onNodeWithTag("add_all_target_tag_${target.id}").assertIsDisplayed().performClick()
+
+        composeRule.runOnIdle { assertEquals(listOf(target.id), selected) }
+        composeRule.onAllNodesWithTag("add_all_dialog").assertCountEquals(0)
+    }
+
+    @Test
+    fun addAllTreeGroupClickOnlyExpandsAndDeepTagCanBeSelected() {
+        val now = "2026-08-13T00:00:00Z"
+        val rootGroup = TagGroupEntity(10, "Root group", sortOrder = 0, createdAt = now, updatedAt = now)
+        val deepGroup = TagGroupEntity(11, "Deep group", parentGroupId = rootGroup.id, sortOrder = 0, createdAt = now, updatedAt = now)
+        val source = TagEntity(1, "Source", sortOrder = 1, createdAt = now, updatedAt = now)
+        val deepTarget = TagEntity(2, "Same name", parentGroupId = deepGroup.id, createdAt = now, updatedAt = now)
+        val selected = mutableListOf<Long>()
+
+        composeRule.setContent {
+            MaterialTheme {
+                AddAllTagsDialog(
+                    source = source,
+                    hierarchy = TagHierarchy(
+                        groups = listOf(rootGroup, deepGroup),
+                        tags = listOf(source, deepTarget).map { TagWithCount(it, 0) },
+                    ),
+                    onDismiss = {},
+                    onAddAll = { selected += it.id },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("add_all_group_${rootGroup.id}").performClick()
+        composeRule.runOnIdle { assertTrue(selected.isEmpty()) }
+        composeRule.onNodeWithTag("add_all_group_${deepGroup.id}").assertIsDisplayed().performClick()
+        composeRule.runOnIdle { assertTrue(selected.isEmpty()) }
+        composeRule.onNodeWithTag("add_all_target_tag_${deepTarget.id}").assertIsDisplayed().performClick()
+        composeRule.runOnIdle { assertEquals(listOf(deepTarget.id), selected) }
+    }
+
+    @Test
+    fun addAllTreeScrollsToAndSelectsLastTag() {
+        val now = "2026-08-13T00:00:00Z"
+        val source = TagEntity(1, "Source", sortOrder = 0, createdAt = now, updatedAt = now)
+        val targets = (1..60).map { index ->
+            TagEntity(
+                id = 100L + index,
+                name = "Target ${index.toString().padStart(2, '0')}",
+                sortOrder = index,
+                createdAt = now,
+                updatedAt = now,
+            )
+        }
+        val selected = mutableListOf<Long>()
+        var open by mutableStateOf(true)
+
+        composeRule.setContent {
+            MaterialTheme {
+                if (open) {
+                    AddAllTagsDialog(
+                        source = source,
+                        hierarchy = TagHierarchy(tags = (listOf(source) + targets).map { TagWithCount(it, 0) }),
+                        onDismiss = { open = false },
+                        onAddAll = {
+                            selected += it.id
+                            open = false
+                        },
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("add_all_tree_list").performScrollToIndex(targets.lastIndex)
+        composeRule.onNodeWithTag("add_all_target_tag_${targets.last().id}").assertIsDisplayed().performClick()
+
+        composeRule.runOnIdle { assertEquals(listOf(targets.last().id), selected) }
+        composeRule.onAllNodesWithTag("add_all_dialog").assertCountEquals(0)
+    }
+
+    @Test
+    fun addAllTreeCancelDoesNotSelectAnything() {
+        val now = "2026-08-13T00:00:00Z"
+        val source = TagEntity(1, "Source", createdAt = now, updatedAt = now)
+        val target = TagEntity(2, "Target", createdAt = now, updatedAt = now)
+        val selected = mutableListOf<Long>()
+        var open by mutableStateOf(true)
+
+        composeRule.setContent {
+            MaterialTheme {
+                if (open) {
+                    AddAllTagsDialog(
+                        source = source,
+                        hierarchy = TagHierarchy(tags = listOf(source, target).map { TagWithCount(it, 0) }),
+                        onDismiss = { open = false },
+                        onAddAll = { selected += it.id },
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("add_all_cancel").performClick()
+        composeRule.runOnIdle { assertTrue(selected.isEmpty()) }
+        composeRule.onAllNodesWithTag("add_all_dialog").assertCountEquals(0)
+    }
+
+    @Test
+    fun filterStateLegendUsesMappedDotsAndWrapsWithoutLosingLabels() {
+        composeRule.setContent {
+            MaterialTheme {
+                Box(Modifier.requiredWidth(84.dp)) {
+                    FilterTagStateLegend()
+                }
+            }
+        }
+
+        val states = listOf(
+            TagFilterState.INCLUDED to "含む",
+            TagFilterState.REQUIRED to "必須",
+            TagFilterState.EXCLUDED to "排除",
+        )
+        val legendBounds = composeRule.onNodeWithTag("filter_tag_state_legend")
+            .assertIsDisplayed()
+            .fetchSemanticsNode().boundsInRoot
+        states.forEach { (state, label) ->
+            val suffix = state.name.lowercase()
+            val labelBounds = composeRule.onNodeWithTag("filter_tag_state_label_$suffix")
+                .assertIsDisplayed()
+                .fetchSemanticsNode().boundsInRoot
+            assertTrue(labelBounds.left >= legendBounds.left)
+            assertTrue(labelBounds.right <= legendBounds.right)
+            assertTrue(labelBounds.top >= legendBounds.top)
+            assertTrue(labelBounds.bottom <= legendBounds.bottom)
+            composeRule.onNodeWithText(label).assertIsDisplayed()
+
+            val pixels = composeRule.onNodeWithTag("filter_tag_state_dot_$suffix")
+                .assertIsDisplayed()
+                .captureToImage()
+                .toPixelMap()
+            val actual = pixels[pixels.width / 2, pixels.height / 2]
+            val expected = tagFilterColors(state).container
+            assertTrue(kotlin.math.abs(expected.red - actual.red) < 0.02f)
+            assertTrue(kotlin.math.abs(expected.green - actual.green) < 0.02f)
+            assertTrue(kotlin.math.abs(expected.blue - actual.blue) < 0.02f)
+        }
+
+        val firstLabelTop = composeRule.onNodeWithTag("filter_tag_state_label_included")
+            .fetchSemanticsNode().boundsInRoot.top
+        val lastLabelTop = composeRule.onNodeWithTag("filter_tag_state_label_excluded")
+            .fetchSemanticsNode().boundsInRoot.top
+        assertTrue(lastLabelTop > firstLabelTop)
+        composeRule.onAllNodesWithText("含: 緑 / 必: 青 / 除: オレンジ。グループは含む・排除のみです。")
+            .assertCountEquals(0)
+    }
+
+    @Test
+    fun classifiedToolbarHighlightsOnlyAppliedFilterAndSortStates() {
+        var uiState by mutableStateOf(MainUiState())
+        var displayMode by mutableStateOf(ClassifiedDisplayMode.Card)
+        composeRule.setContent {
+            MaterialTheme {
+                TagFilterSummaryRow(
+                    uiState = uiState,
+                    hierarchy = TagHierarchy(),
+                    displayMode = displayMode,
+                    matchingClipCount = 0,
+                    onOpen = {},
+                    onOpenSort = {},
+                    onToggleDisplayMode = {
+                        displayMode = when (displayMode) {
+                            ClassifiedDisplayMode.Card -> ClassifiedDisplayMode.MediaGrid
+                            ClassifiedDisplayMode.MediaGrid -> ClassifiedDisplayMode.Card
+                        }
+                    },
+                    interactionEnabled = true,
+                )
+            }
+        }
+
+        fun stateDescription(tag: String): String = composeRule.onNodeWithTag(tag)
+            .fetchSemanticsNode().config[SemanticsProperties.StateDescription]
+        fun containerSample(tag: String): Color {
+            val pixels = composeRule.onNodeWithTag(tag).captureToImage().toPixelMap()
+            return pixels[pixels.width / 2, (pixels.height - 5).coerceAtLeast(0)]
+        }
+        fun colorDistance(first: Color, second: Color): Float =
+            kotlin.math.abs(first.red - second.red) +
+                kotlin.math.abs(first.green - second.green) +
+                kotlin.math.abs(first.blue - second.blue)
+
+        val defaultFilterColor = containerSample("filter_open")
+        val defaultSortColor = containerSample("sort_open")
+        val defaultDisplayColor = containerSample("classified_display_toggle")
+        assertEquals("未適用", stateDescription("filter_open"))
+        assertEquals("未適用", stateDescription("sort_open"))
+        assertTrue(colorDistance(defaultFilterColor, defaultSortColor) < 0.03f)
+        assertTrue(colorDistance(defaultFilterColor, defaultDisplayColor) < 0.03f)
+        composeRule.onAllNodesWithTag("filter_clear").assertCountEquals(0)
+
+        composeRule.runOnIdle {
+            uiState = uiState.copy(filters = TweetFilterState(query = "active"))
+        }
+        assertEquals("適用中", stateDescription("filter_open"))
+        assertEquals("未適用", stateDescription("sort_open"))
+        assertTrue(colorDistance(defaultFilterColor, containerSample("filter_open")) > 0.1f)
+        assertTrue(colorDistance(defaultSortColor, containerSample("sort_open")) < 0.03f)
+
+        composeRule.runOnIdle {
+            uiState = uiState.copy(
+                filters = TweetFilterState(),
+                sort = ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime),
+            )
+        }
+        assertEquals("未適用", stateDescription("filter_open"))
+        assertEquals("適用中", stateDescription("sort_open"))
+        assertTrue(colorDistance(defaultFilterColor, containerSample("filter_open")) < 0.03f)
+        assertTrue(colorDistance(defaultSortColor, containerSample("sort_open")) > 0.1f)
+
+        composeRule.runOnIdle { uiState = uiState.copy(sort = ClassifiedSortState()) }
+        assertEquals("未適用", stateDescription("sort_open"))
+        assertTrue(colorDistance(defaultSortColor, containerSample("sort_open")) < 0.03f)
+        composeRule.onNodeWithTag("classified_display_toggle").performClick()
+        composeRule.runOnIdle { assertEquals(ClassifiedDisplayMode.MediaGrid, displayMode) }
+        assertTrue(colorDistance(defaultDisplayColor, containerSample("classified_display_toggle")) < 0.03f)
+    }
+
+    @Test
+    fun selectedFilterConditionsStayHorizontalCycleWithoutNoneAndRemoveSeparately() {
+        val now = "2026-08-12T00:00:00Z"
+        val firstGroup = TagGroupEntity(1, "Root A", createdAt = now, updatedAt = now)
+        val secondGroup = TagGroupEntity(2, "Root B", createdAt = now, updatedAt = now)
+        val tags = buildList {
+            add(TagEntity(10, "Same", parentGroupId = firstGroup.id, createdAt = now, updatedAt = now))
+            add(TagEntity(11, "Same", parentGroupId = secondGroup.id, createdAt = now, updatedAt = now))
+            repeat(12) { index ->
+                add(TagEntity(20L + index, "Condition $index", createdAt = now, updatedAt = now))
+            }
+        }
+        val tagRefs = tags.map { TagNodeRef(TagNodeType.TAG, it.id) }
+        val groupRef = TagNodeRef(TagNodeType.GROUP, firstGroup.id)
+        var filters by mutableStateOf(
+            buildMap {
+                tagRefs.forEach { put(it, TagFilterState.INCLUDED) }
+                put(groupRef, TagFilterState.INCLUDED)
+            },
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                Box(Modifier.requiredWidth(320.dp)) {
+                    SelectedTagConditionsRow(
+                        hierarchy = TagHierarchy(
+                            groups = listOf(firstGroup, secondGroup),
+                            tags = tags.map { TagWithCount(it, 0) },
+                        ),
+                        filters = filters,
+                        onCycle = { ref ->
+                            filters = filters + (ref to nextSelectedFilterTagState(ref, filters.getValue(ref)))
+                        },
+                        onRemove = { ref -> filters = filters - ref },
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Root A / Same").assertIsDisplayed()
+        composeRule.onNodeWithTag("filter_selected_tag_conditions").performScrollToIndex(1)
+        composeRule.onNodeWithText("Root B / Same").assertIsDisplayed()
+        composeRule.onNodeWithTag("filter_selected_tag_conditions").performScrollToIndex(0)
+        composeRule.onNodeWithTag("filter_selected_condition_tag_10").performClick()
+        composeRule.onNodeWithText("必須").assertIsDisplayed()
+        composeRule.onNodeWithTag("filter_selected_condition_tag_10").performClick()
+        composeRule.onNodeWithText("排除").assertIsDisplayed()
+        composeRule.onNodeWithTag("filter_selected_condition_tag_10").performClick()
+        composeRule.onAllNodesWithTag("filter_selected_condition_tag_10").assertCountEquals(1)
+
+        composeRule.onNodeWithTag("filter_selected_tag_conditions").performScrollToIndex(tagRefs.size)
+        composeRule.onNodeWithTag("filter_selected_condition_group_1").performClick()
+        composeRule.onAllNodesWithTag("filter_selected_condition_group_1").assertCountEquals(1)
+        composeRule.onNodeWithTag("filter_selected_condition_group_1").performClick()
+        composeRule.onAllNodesWithTag("filter_selected_condition_group_1").assertCountEquals(1)
+
+        composeRule.onNodeWithTag("filter_selected_tag_conditions").performScrollToIndex(tagRefs.lastIndex)
+        composeRule.onNodeWithTag("filter_selected_condition_tag_${tags.last().id}").assertIsDisplayed()
+        composeRule.onNodeWithTag("filter_selected_tag_conditions").performScrollToIndex(0)
+        composeRule.onNodeWithTag("filter_selected_remove_tag_10").performClick()
+        composeRule.onAllNodesWithTag("filter_selected_condition_tag_10").assertCountEquals(0)
+    }
+
+    @Test
+    fun heavyWorkTopBarIndicatorIsSingleAndTracksVisibility() {
+        var visible by mutableStateOf(true)
+
+        composeRule.setContent {
+            MaterialTheme(colorScheme = darkColorScheme()) {
+                Row {
+                    HeavyWorkTopBarIndicator(visible = visible)
+                }
+            }
+        }
+
+        composeRule.onAllNodesWithTag("top_heavy_work_indicator").assertCountEquals(1)
+
+        composeRule.runOnIdle { visible = false }
+        composeRule.onAllNodesWithTag("top_heavy_work_indicator").assertCountEquals(0)
+    }
+
+    @Test
+    fun heavyWorkIndicatorRequiresTrackedWorkAndYieldsToDedicatedProgress() {
+        assertFalse(
+            shouldShowHeavyWorkIndicator(
+                heavyLocalWorkActive = false,
+                dedicatedProgressVisible = false,
+            ),
+        )
+        assertTrue(
+            shouldShowHeavyWorkIndicator(
+                heavyLocalWorkActive = true,
+                dedicatedProgressVisible = false,
+            ),
+        )
+        assertFalse(
+            shouldShowHeavyWorkIndicator(
+                heavyLocalWorkActive = true,
+                dedicatedProgressVisible = true,
+            ),
+        )
+    }
+
+    @Test
+    fun unclassifiedInitialLoadingIsDistinctFromLoadedEmptyAndLaterEmpty() {
+        val now = "2026-08-12T00:00:00Z"
+        val clip = ClipWithDetails(
+            clip = ClipEntity(
+                id = 1,
+                xPostId = "initial-load",
+                authorName = "Initial",
+                authorUsername = "initial",
+                text = "Loaded post",
+                postUrl = "https://x.com/initial/status/1",
+                xCreatedAt = now,
+                savedAt = now,
+                syncedAt = now,
+            ),
+            assets = emptyList(),
+            tags = emptyList(),
+        )
+        var state by mutableStateOf(MainUiState())
+
+        composeRule.setContent {
+            MaterialTheme {
+                androidx.compose.foundation.layout.Column {
+                    UnclassifiedTopBarTitle(state)
+                    EnhancedClipListScreen(
+                        title = "未分類",
+                        clips = state.unclassified,
+                        hierarchy = state.tagHierarchy,
+                        emptyText = "タグなしのツイートはありません",
+                        listState = rememberLazyListState(),
+                        isInitialLoading = state.isInitialClipLoading,
+                        onTagsChange = { _, _ -> },
+                        onSummaryChange = { _, _ -> },
+                        onOcrSave = { _, _ -> },
+                        onOcrDetect = { _, _, _ -> },
+                        onDelete = {},
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("未分類").assertIsDisplayed()
+        composeRule.onAllNodesWithText("未分類 0件").assertCountEquals(0)
+        composeRule.onNodeWithTag("unclassified_initial_loading").assertIsDisplayed()
+        composeRule.onAllNodesWithText("タグなしのツイートはありません").assertCountEquals(0)
+
+        composeRule.runOnIdle {
+            state = MainUiState(hasReceivedInitialClipEmission = true)
+        }
+        composeRule.onNodeWithText("未分類 0件").assertIsDisplayed()
+        composeRule.onAllNodesWithTag("unclassified_initial_loading").assertCountEquals(0)
+        composeRule.onNodeWithText("タグなしのツイートはありません").assertIsDisplayed()
+
+        composeRule.runOnIdle {
+            state = MainUiState(
+                clips = listOf(clip),
+                hasReceivedInitialClipEmission = true,
+            )
+        }
+        composeRule.onNodeWithText("未分類 1件").assertIsDisplayed()
+        composeRule.onAllNodesWithTag("unclassified_initial_loading").assertCountEquals(0)
+
+        composeRule.runOnIdle {
+            state = MainUiState(hasReceivedInitialClipEmission = true)
+        }
+        composeRule.onNodeWithText("未分類 0件").assertIsDisplayed()
+        composeRule.onAllNodesWithTag("unclassified_initial_loading").assertCountEquals(0)
+    }
+
+    @Test
+    fun explicitStorageStatesSuppressInitialClipLoading() {
+        val unavailableState = MainUiState(
+            storageState = PostStorageState(isAvailable = false),
+        )
+        val migratingState = MainUiState(
+            storageState = PostStorageState(isMigrating = true),
+        )
+
+        assertTrue(!unavailableState.isInitialClipLoading)
+        assertTrue(!migratingState.isInitialClipLoading)
+    }
 
     @Test
     fun loadingStateHasDeterministicTitleAndMessage() {
@@ -374,7 +821,6 @@ class UiStateRenderingTest {
                         onToggleDisplayMode = {},
                         onApplyFilters = {},
                         onApplySort = {},
-                        onClearAllFilters = {},
                         onTagsChange = { _, _ -> },
                         onSummaryChange = { _, _ -> },
                         onOcrSave = { _, _ -> },
@@ -542,7 +988,6 @@ class UiStateRenderingTest {
                         onToggleDisplayMode = {},
                         onApplyFilters = {},
                         onApplySort = {},
-                        onClearAllFilters = {},
                         onTagsChange = { _, _ -> },
                         onSummaryChange = { _, _ -> },
                         onOcrSave = { _, _ -> },
@@ -644,7 +1089,6 @@ class UiStateRenderingTest {
                         onToggleDisplayMode = {},
                         onApplyFilters = {},
                         onApplySort = {},
-                        onClearAllFilters = {},
                         onTagsChange = { _, _ -> },
                         onSummaryChange = { _, _ -> },
                         onOcrSave = { _, _ -> },
@@ -711,7 +1155,6 @@ class UiStateRenderingTest {
                     onToggleDisplayMode = {},
                     onApplyFilters = {},
                     onApplySort = {},
-                    onClearAllFilters = {},
                     onTagsChange = { _, _ -> },
                     onSummaryChange = { _, _ -> },
                     onOcrSave = { _, _ -> },
@@ -726,7 +1169,8 @@ class UiStateRenderingTest {
     }
 
     @Test
-    fun mediaGridTweetDialogShowsLoadingAndNotFoundStatesAndCanClose() {
+    fun mediaGridTweetDialogUsesAnOutsideCloseLayerForEveryState() {
+        val details = tagDraftClip(id = 199, tags = emptyList())
         var state by mutableStateOf<MediaGridTweetDialogState>(MediaGridTweetDialogState.Loading)
         composeRule.setContent {
             MaterialTheme {
@@ -744,10 +1188,50 @@ class UiStateRenderingTest {
             }
         }
 
-        composeRule.onNodeWithTag("media_grid_tweet_dialog_loading").assertIsDisplayed()
+        composeRule.runOnIdle { assertTrue(state is MediaGridTweetDialogState.Loading) }
+        composeRule.onAllNodesWithText("ツイート").assertCountEquals(0)
+        composeRule.onAllNodesWithTag("media_grid_tweet_dialog_scrim").assertCountEquals(1)
+        composeRule.onAllNodesWithTag("media_grid_tweet_dialog_close").assertCountEquals(1)
+        val cardBounds = composeRule.onNodeWithTag("media_grid_tweet_dialog").fetchSemanticsNode().boundsInRoot
+        val closeBounds = composeRule.onNodeWithTag("media_grid_tweet_dialog_close").fetchSemanticsNode().boundsInRoot
+        assertTrue(closeBounds.bottom <= cardBounds.top)
+        assertTrue(closeBounds.right >= cardBounds.right - 1f)
+
+        composeRule.onNodeWithTag("media_grid_tweet_dialog").performClick()
+        composeRule.runOnIdle { assertTrue(state is MediaGridTweetDialogState.Loading) }
+        composeRule.onAllNodesWithTag("media_grid_tweet_dialog").assertCountEquals(1)
+
         composeRule.runOnIdle { state = MediaGridTweetDialogState.NotFound }
-        composeRule.onNodeWithTag("media_grid_tweet_dialog_error").assertIsDisplayed()
+        composeRule.waitForIdle()
+        composeRule.runOnIdle { assertTrue(state is MediaGridTweetDialogState.NotFound) }
+        composeRule.onAllNodesWithTag("media_grid_tweet_dialog").assertCountEquals(1)
+        composeRule.onAllNodesWithTag("media_grid_tweet_dialog_scrim").assertCountEquals(1)
+        composeRule.onAllNodesWithTag("media_grid_tweet_dialog_close").assertCountEquals(1)
+
+        composeRule.runOnIdle { state = MediaGridTweetDialogState.Loaded(details) }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            assertEquals(details.clip.id, (state as MediaGridTweetDialogState.Loaded).clip.clip.id)
+        }
+        composeRule.onAllNodesWithTag("media_grid_tweet_dialog").assertCountEquals(1)
+        composeRule.onAllNodesWithTag("media_grid_tweet_dialog_scrim").assertCountEquals(1)
+        composeRule.onAllNodesWithTag("media_grid_tweet_dialog_close").assertCountEquals(1)
+        composeRule.onNodeWithTag("media_grid_tweet_dialog_scrim").performTouchInput {
+            click(Offset(2f, center.y))
+        }
+        composeRule.onAllNodesWithTag("media_grid_tweet_dialog").assertCountEquals(0)
+
+        composeRule.runOnIdle { state = MediaGridTweetDialogState.Loading }
+        composeRule.waitForIdle()
         composeRule.onNodeWithTag("media_grid_tweet_dialog_close").performClick()
+        composeRule.onAllNodesWithTag("media_grid_tweet_dialog").assertCountEquals(0)
+
+        composeRule.runOnIdle { state = MediaGridTweetDialogState.NotFound }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle { assertTrue(state is MediaGridTweetDialogState.NotFound) }
+        composeRule.onAllNodesWithTag("media_grid_tweet_dialog").assertCountEquals(1)
+        InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        composeRule.waitForIdle()
         composeRule.onAllNodesWithTag("media_grid_tweet_dialog").assertCountEquals(0)
     }
 
@@ -792,7 +1276,6 @@ class UiStateRenderingTest {
                         onToggleDisplayMode = {},
                         onApplyFilters = {},
                         onApplySort = {},
-                        onClearAllFilters = {},
                         onTagsChange = { _, _ -> },
                         onSummaryChange = { _, _ -> },
                         onOcrSave = { _, _ -> },
@@ -867,12 +1350,13 @@ class UiStateRenderingTest {
         var savedOcr: String? = null
         var deletedClipId: Long? = null
         var clickedAuthor = false
+        var dialogState by mutableStateOf<MediaGridTweetDialogState>(MediaGridTweetDialogState.Loaded(details))
         composeRule.setContent {
             MaterialTheme {
                 MediaGridTweetDialog(
-                    state = MediaGridTweetDialogState.Loaded(details),
+                    state = dialogState,
                     hierarchy = TagHierarchy(tags = listOf(TagWithCount(tag, 0))),
-                    onDismiss = {},
+                    onDismiss = { dialogState = MediaGridTweetDialogState.Closed },
                     onTagsChange = { _, ids -> selectedTagIds = ids },
                     onSummaryChange = { _, summary -> savedSummary = summary },
                     onOcrSave = { _, text -> savedOcr = text },
@@ -886,9 +1370,16 @@ class UiStateRenderingTest {
         composeRule.onNodeWithTag("media_asset_${asset.id}").performClick()
         composeRule.onNodeWithTag("image_viewer").assertIsDisplayed()
         composeRule.onNodeWithTag("image_viewer_close").performClick()
+        composeRule.onNodeWithTag("media_grid_tweet_dialog").assertIsDisplayed()
 
+        composeRule.onNodeWithTag("classify_${clip.id}").assertIsNotEnabled()
         composeRule.onNodeWithTag("tag_chip_${tag.id}").performClick()
+        composeRule.onNodeWithTag("media_grid_tweet_dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("classify_${clip.id}").assertIsEnabled()
+        composeRule.runOnIdle { assertEquals(emptySet<Long>(), selectedTagIds) }
+        composeRule.onNodeWithTag("classify_${clip.id}").performClick()
         composeRule.runOnIdle { assertEquals(setOf(tag.id), selectedTagIds) }
+        composeRule.onNodeWithTag("media_grid_tweet_dialog").assertIsDisplayed()
 
         composeRule.onNodeWithTag("tweet_options_button_${clip.id}").performClick()
         composeRule.onNodeWithTag("tweet_options_summary").performClick()
@@ -911,6 +1402,251 @@ class UiStateRenderingTest {
         composeRule.onNodeWithTag("clip_local_delete_confirm_${clip.id}").performClick()
         composeRule.runOnIdle { assertEquals(clip.id, deletedClipId) }
         localFile.delete()
+    }
+
+    @Test
+    fun closingMediaGridPreviewDiscardsAnUnappliedTagDraft() {
+        val tag = TagEntity(70, "Preview Draft", createdAt = "2026-01-01T00:00:00Z", updatedAt = "2026-01-01T00:00:00Z")
+        val details = tagDraftClip(id = 70, tags = emptyList())
+        var state by mutableStateOf<MediaGridTweetDialogState>(MediaGridTweetDialogState.Loaded(details))
+        var appliedTagIds: Set<Long>? = null
+        composeRule.setContent {
+            MaterialTheme {
+                MediaGridTweetDialog(
+                    state = state,
+                    hierarchy = TagHierarchy(tags = listOf(TagWithCount(tag, 0))),
+                    onDismiss = { state = MediaGridTweetDialogState.Closed },
+                    onTagsChange = { _, ids -> appliedTagIds = ids },
+                    onSummaryChange = { _, _ -> },
+                    onOcrSave = { _, _ -> },
+                    onOcrDetect = { _, _, _ -> },
+                    onDelete = {},
+                    onAuthorClick = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("tag_chip_${tag.id}").performClick()
+        composeRule.onNodeWithTag("media_grid_tweet_dialog_close").performClick()
+        composeRule.onAllNodesWithTag("media_grid_tweet_dialog").assertCountEquals(0)
+        composeRule.runOnIdle { assertEquals(null, appliedTagIds) }
+    }
+
+    @Test
+    fun unclassifiedCardEnablesApplyOnlyForAChangedTagDraft() {
+        val tag = TagEntity(71, "Draft Tag", createdAt = "2026-01-01T00:00:00Z", updatedAt = "2026-01-01T00:00:00Z")
+        val details = tagDraftClip(id = 71, tags = emptyList())
+        var appliedTagIds: Set<Long>? = null
+        composeRule.setContent {
+            MaterialTheme {
+                EnhancedClipListScreen(
+                    title = "draft-test",
+                    clips = listOf(details),
+                    hierarchy = TagHierarchy(tags = listOf(TagWithCount(tag, 0))),
+                    emptyText = "empty",
+                    listState = rememberLazyListState(),
+                    requireTagConfirmation = true,
+                    onTagsChange = { _, ids -> appliedTagIds = ids },
+                    onSummaryChange = { _, _ -> },
+                    onOcrSave = { _, _ -> },
+                    onOcrDetect = { _, _, _ -> },
+                    onDelete = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("classify_${details.clip.id}").assertIsNotEnabled()
+        composeRule.onNodeWithTag("tag_chip_${tag.id}").performClick()
+        composeRule.onNodeWithTag("classify_${details.clip.id}").assertIsEnabled()
+        composeRule.onNodeWithTag("tag_chip_${tag.id}").performClick()
+        composeRule.onNodeWithTag("classify_${details.clip.id}").assertIsNotEnabled()
+        composeRule.runOnIdle { assertEquals(null, appliedTagIds) }
+        composeRule.onNodeWithTag("tag_chip_${tag.id}").performClick()
+        composeRule.onNodeWithTag("classify_${details.clip.id}").performClick()
+        composeRule.runOnIdle { assertEquals(setOf(tag.id), appliedTagIds) }
+    }
+
+    @Test
+    fun classifiedCardDoesNotPersistTagChipChangesUntilApply() {
+        val first = TagEntity(81, "First", createdAt = "2026-01-01T00:00:00Z", updatedAt = "2026-01-01T00:00:00Z")
+        val second = TagEntity(82, "Second", createdAt = "2026-01-01T00:00:00Z", updatedAt = "2026-01-01T00:00:00Z")
+        val details = tagDraftClip(id = 81, tags = listOf(first))
+        var appliedTagIds: Set<Long>? = null
+        var failApply = true
+        composeRule.setContent {
+            MaterialTheme {
+                EnhancedClassifiedScreen(
+                    uiState = MainUiState(
+                        clips = listOf(details),
+                        tagHierarchy = TagHierarchy(tags = listOf(TagWithCount(first, 1), TagWithCount(second, 0))),
+                    ),
+                    mediaGridState = ClassifiedMediaGridState(),
+                    listState = rememberLazyListState(),
+                    displayMode = ClassifiedDisplayMode.Card,
+                    mediaGridColumnCount = ClassifiedMediaGridDefaultColumnCount,
+                    onMediaGridColumnCountChange = {},
+                    onToggleDisplayMode = {},
+                    onApplyFilters = {},
+                    onApplySort = {},
+                    onTagsChange = { _, _ -> },
+                    onTagsApply = { _, ids, complete ->
+                        appliedTagIds = ids
+                        complete(if (failApply) "failure" else null)
+                    },
+                    onSummaryChange = { _, _ -> },
+                    onOcrSave = { _, _ -> },
+                    onOcrDetect = { _, _, _ -> },
+                    onDelete = {},
+                    onAuthorClick = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("classify_${details.clip.id}").assertIsNotEnabled()
+        composeRule.onNodeWithTag("tag_chip_${second.id}").performClick()
+        composeRule.runOnIdle { assertEquals(null, appliedTagIds) }
+        composeRule.onNodeWithTag("classify_${details.clip.id}").assertIsEnabled().performClick()
+        composeRule.runOnIdle { assertEquals(setOf(first.id, second.id), appliedTagIds) }
+        composeRule.onNodeWithTag("tag_apply_error_${details.clip.id}").assertIsDisplayed()
+        composeRule.onNodeWithTag("classify_${details.clip.id}").assertIsEnabled()
+        composeRule.runOnIdle {
+            failApply = false
+            appliedTagIds = null
+        }
+        composeRule.onNodeWithTag("classify_${details.clip.id}").performClick()
+        composeRule.runOnIdle { assertEquals(setOf(first.id, second.id), appliedTagIds) }
+        composeRule.onNodeWithTag("classify_${details.clip.id}").assertIsNotEnabled()
+    }
+
+    @Test
+    fun unclassifiedTweetCardKeepsApplyFixedWhileOnlyTagsScrollHorizontally() {
+        val tags = horizontalScrollTags()
+        val details = tagDraftClip(id = 200, tags = emptyList())
+        val hierarchy = TagHierarchy(tags = tags.map { TagWithCount(it, 0) })
+        var appliedTagIds: Set<Long>? = null
+        composeRule.setContent {
+            MaterialTheme {
+                EnhancedClipListScreen(
+                    title = "unclassified-card",
+                    clips = listOf(details),
+                    hierarchy = hierarchy,
+                    emptyText = "empty",
+                    listState = rememberLazyListState(),
+                    onTagsChange = { _, _ -> },
+                    onTagsApply = { _, ids, complete -> appliedTagIds = ids; complete(null) },
+                    onSummaryChange = { _, _ -> },
+                    onOcrSave = { _, _ -> },
+                    onOcrDetect = { _, _, _ -> },
+                    onDelete = {},
+                )
+            }
+        }
+        assertTagSelectorScrollKeepsApplyFixed(
+            details = details,
+            hierarchy = hierarchy,
+            toggleTag = tags.first(),
+            expectedAppliedTagIds = setOf(tags.first().id),
+            appliedTagIds = { appliedTagIds },
+        )
+    }
+
+    @Test
+    fun classifiedTweetCardKeepsApplyFixedWhileOnlyTagsScrollHorizontally() {
+        val tags = horizontalScrollTags()
+        val details = tagDraftClip(id = 200, tags = listOf(tags.last()))
+        val hierarchy = TagHierarchy(tags = tags.map { TagWithCount(it, 0) })
+        var appliedTagIds: Set<Long>? = null
+        composeRule.setContent {
+            MaterialTheme {
+                EnhancedClassifiedScreen(
+                    uiState = MainUiState(clips = listOf(details), tagHierarchy = hierarchy),
+                    mediaGridState = ClassifiedMediaGridState(),
+                    listState = rememberLazyListState(),
+                    displayMode = ClassifiedDisplayMode.Card,
+                    mediaGridColumnCount = ClassifiedMediaGridDefaultColumnCount,
+                    onMediaGridColumnCountChange = {},
+                    onToggleDisplayMode = {},
+                    onApplyFilters = {},
+                    onApplySort = {},
+                    onTagsChange = { _, _ -> },
+                    onTagsApply = { _, ids, complete -> appliedTagIds = ids; complete(null) },
+                    onSummaryChange = { _, _ -> },
+                    onOcrSave = { _, _ -> },
+                    onOcrDetect = { _, _, _ -> },
+                    onDelete = {},
+                    onAuthorClick = {},
+                )
+            }
+        }
+        assertTagSelectorScrollKeepsApplyFixed(
+            details = details,
+            hierarchy = hierarchy,
+            toggleTag = tags.first(),
+            expectedAppliedTagIds = setOf(tags.last().id, tags.first().id),
+            appliedTagIds = { appliedTagIds },
+        )
+    }
+
+    private fun horizontalScrollTags() = (1L..16L).map { index ->
+        TagEntity(
+            id = 200L + index,
+            name = "Long tag name $index",
+            createdAt = "2026-01-01T00:00:00Z",
+            updatedAt = "2026-01-01T00:00:00Z",
+        )
+    }
+
+    private fun assertTagSelectorScrollKeepsApplyFixed(
+        details: ClipWithDetails,
+        hierarchy: TagHierarchy,
+        toggleTag: TagEntity,
+        expectedAppliedTagIds: Set<Long>,
+        appliedTagIds: () -> Set<Long>?,
+    ) {
+        val applyTag = "classify_${details.clip.id}"
+        val selectorTag = "tag_selector_${details.clip.id}"
+        val orderedRootTagIds = hierarchy.children(null).map { it.id }
+        val tailTagId = orderedRootTagIds.last()
+        composeRule.onNodeWithTag(applyTag, useUnmergedTree = true).assertIsNotEnabled()
+        val selector = composeRule.onNodeWithTag(selectorTag, useUnmergedTree = true)
+        val selectorConfig = selector.fetchSemanticsNode().config
+        assertTrue(selectorConfig.contains(SemanticsProperties.HorizontalScrollAxisRange))
+        assertFalse(selectorConfig.contains(SemanticsProperties.VerticalScrollAxisRange))
+        composeRule.onNodeWithTag("tag_chip_${toggleTag.id}", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag(applyTag, useUnmergedTree = true).assertIsEnabled()
+        val applyBeforeScroll = composeRule.onNodeWithTag(applyTag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        selector.performScrollToIndex(orderedRootTagIds.lastIndex)
+        composeRule.onAllNodesWithTag("tag_chip_$tailTagId", useUnmergedTree = true).assertCountEquals(1)
+        val applyAfterScroll = composeRule.onNodeWithTag(applyTag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertEquals(applyBeforeScroll.left, applyAfterScroll.left, 0.5f)
+        assertEquals(applyBeforeScroll.top, applyAfterScroll.top, 0.5f)
+        composeRule.runOnIdle { assertEquals(null, appliedTagIds()) }
+        composeRule.onNodeWithTag(applyTag, useUnmergedTree = true).performClick()
+        composeRule.runOnIdle { assertEquals(expectedAppliedTagIds, appliedTagIds()) }
+    }
+
+    @Test
+    fun cardWithoutTagsStillShowsAnEmptySelectorAndDisabledApply() {
+        val details = tagDraftClip(id = 201, tags = emptyList())
+        composeRule.setContent {
+            MaterialTheme {
+                EnhancedClipListScreen(
+                    title = "no-tags",
+                    clips = listOf(details),
+                    hierarchy = TagHierarchy(),
+                    emptyText = "empty",
+                    listState = rememberLazyListState(),
+                    onTagsChange = { _, _ -> },
+                    onSummaryChange = { _, _ -> },
+                    onOcrSave = { _, _ -> },
+                    onOcrDetect = { _, _, _ -> },
+                    onDelete = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("tag_selector_${details.clip.id}").assertIsDisplayed()
+        composeRule.onNodeWithTag("classify_${details.clip.id}").assertIsDisplayed().assertIsNotEnabled()
     }
 
     @Test
@@ -954,6 +1690,22 @@ class UiStateRenderingTest {
         composeRule.onNodeWithTag("clip_list").performScrollToIndex(0)
         composeRule.onNodeWithTag("clip_card_1").assertIsDisplayed()
     }
+
+    private fun tagDraftClip(id: Long, tags: List<TagEntity>): ClipWithDetails = ClipWithDetails(
+        clip = ClipEntity(
+            id = id,
+            xPostId = "tag-draft-$id",
+            authorName = "Draft Author",
+            authorUsername = "draft_author",
+            text = "Tag draft test",
+            postUrl = "https://x.com/draft_author/status/$id",
+            xCreatedAt = "2026-01-01T00:00:00Z",
+            savedAt = "2026-01-01T00:00:00Z",
+            syncedAt = "2026-01-01T00:00:00Z",
+        ),
+        assets = emptyList(),
+        tags = tags,
+    )
 
     private fun asset(id: Long, mediaKey: String): AssetEntity = AssetEntity(
         id = id,
@@ -1011,15 +1763,15 @@ class UiStateRenderingTest {
                 }
             }
         }
-        composeRule.onNodeWithTag(tagAt(0)).assertExists()
+        composeRule.onAllNodesWithTag(tagAt(0)).assertCountEquals(1)
         val single = node(tagAt(0))
         assertWithin("single cell should have positive left padding", single.left > 0f)
         assertWithin("single cell should stay inside the container", single.right > single.left)
 
         composeRule.runOnIdle { visibleCount.value = 2 }
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag(tagAt(0)).assertExists()
-        composeRule.onNodeWithTag(tagAt(1)).assertExists()
+        composeRule.onAllNodesWithTag(tagAt(0)).assertCountEquals(1)
+        composeRule.onAllNodesWithTag(tagAt(1)).assertCountEquals(1)
         val firstPair = node(tagAt(0))
         val secondPair = node(tagAt(1))
         assertWithin("two-cell grid should keep the first row aligned", firstPair.top == secondPair.top)
@@ -1028,19 +1780,19 @@ class UiStateRenderingTest {
 
         composeRule.runOnIdle { visibleCount.value = 3 }
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag(tagAt(0)).assertExists()
-        composeRule.onNodeWithTag(tagAt(1)).assertExists()
-        composeRule.onNodeWithTag(tagAt(2)).assertExists()
+        composeRule.onAllNodesWithTag(tagAt(0)).assertCountEquals(1)
+        composeRule.onAllNodesWithTag(tagAt(1)).assertCountEquals(1)
+        composeRule.onAllNodesWithTag(tagAt(2)).assertCountEquals(1)
         val third = node(tagAt(2))
         assertWithin("three-cell grid should wrap to a new row", third.top > firstPair.top)
         assertWithin("three-cell grid should still start inside the container", third.left > 0f)
 
         composeRule.runOnIdle { visibleCount.value = 4 }
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag(tagAt(0)).assertExists()
-        composeRule.onNodeWithTag(tagAt(1)).assertExists()
-        composeRule.onNodeWithTag(tagAt(2)).assertExists()
-        composeRule.onNodeWithTag(tagAt(3)).assertExists()
+        composeRule.onAllNodesWithTag(tagAt(0)).assertCountEquals(1)
+        composeRule.onAllNodesWithTag(tagAt(1)).assertCountEquals(1)
+        composeRule.onAllNodesWithTag(tagAt(2)).assertCountEquals(1)
+        composeRule.onAllNodesWithTag(tagAt(3)).assertCountEquals(1)
         val fourth = node(tagAt(3))
         assertWithin("four-cell grid should keep the bottom row aligned", third.top == fourth.top)
         assertWithin("four-cell grid should place the last cell to the right of the third", fourth.left > third.left)

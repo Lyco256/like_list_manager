@@ -1,0 +1,7 @@
+# `UndoNotificationUi.kt`
+
+永続Undo slotをアプリ全体の画面下部overlayとして表示します。messageと `キャンセル` を提示し、キャンセルは表示中slotのidentityを付けて逆操作を1回だけ要求します。実行中はボタンとSwipeを無効化し、失敗時はslotを保持したままエラーを表示し、新しい5秒の再試行機会を開始します。
+
+表示時間はforegroundで実際に表示された累積5秒です。Lifecycleが `STARTED` 未満の間は残り時間を減らさず、Activity再作成で永続slotが再収集された場合は新しい5秒を開始します。timeoutと横方向または下方向の48dp以上のSwipeは表示開始時のslotだけをfinalizeします。横Swipeは左右、下Swipeは下方向へfade＋slideし、timeoutは下方向へfade＋slideします。上方向Swipeはdismissしません。slot置換時は `LaunchedEffect` が旧timerをcancelして新しい5秒を開始し、Repository側のidentity照合も競合を防ぎます。
+
+安定したCompose test tagとして `undo_notification`、`undo_notification_message`、`undo_notification_cancel` を公開します。

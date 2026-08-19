@@ -1,0 +1,5 @@
+# `TagManagementCompactRowContractTest.kt`
+
+タグ管理行が種類説明の2行構成へ戻らず、名前・件数・操作領域を1行に配置することをsource contractとして確認します。長い名前の1行ellipsis、40dpの薄型行、4dpの上下paddingも対象です。
+
+dragについては、開始時の実測row boundsが `DragState` の幅・高さへ入り、同じ高さがplaceholderとpreviewへ使われること、およびpreviewの内容もcompactな1行であることを確認します。既存の並び替え・グループ内dropの状態遷移テストと組み合わせて回帰を防ぎます。

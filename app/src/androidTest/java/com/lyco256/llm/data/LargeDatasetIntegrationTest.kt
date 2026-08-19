@@ -54,7 +54,7 @@ class LargeDatasetIntegrationTest {
             }
         }
 
-        val clips = dao.getActiveClips()
+        val clips = dao.getAllClips()
         assertEquals(10_000, dao.countClips())
         assertEquals(10_000, clips.size)
         assertEquals("large-09999", clips.first().xPostId)
@@ -91,7 +91,6 @@ class LargeDatasetIntegrationTest {
                         savedAt = index.toString().padStart(2, '0'),
                         syncedAt = now,
                         summary = if (index % 2 == 0) "manual-summary-$index" else "",
-                        isDeleted = index == 49,
                     ),
                 )
                 clipIds += clipId
@@ -116,11 +115,11 @@ class LargeDatasetIntegrationTest {
             }
         }
 
-        val all = clipDao.getActiveClips()
+        val all = clipDao.getAllClips()
         val assets = clipDao.getAllAssets()
         val relations = clipDao.clipTagsForClipIds(clipIds)
         assertEquals(50, clipDao.countClips())
-        assertEquals(49, all.size)
+        assertEquals(50, all.size)
         assertEquals(5, all.count { it.text.isEmpty() })
         assertTrue(all.any { it.summary.startsWith("manual-summary-") })
         assertTrue(all.any { it.authorId == null && it.authorName.isEmpty() })
@@ -133,7 +132,7 @@ class LargeDatasetIntegrationTest {
     }
 
     @Test
-    fun mediaGridDaoQueriesReturnOnlyActiveSupportedRowsAndDistinctTags() = runBlocking {
+    fun mediaGridDaoQueriesReturnAllSupportedRowsAndDistinctTags() = runBlocking {
         val clipDao = database.clipDao()
         val tagDao = database.tagDao()
         val deletedAt = "2026-06-15T08:00:00Z"
@@ -166,21 +165,20 @@ class LargeDatasetIntegrationTest {
                 ),
             )
 
-            val deletedClip = clipDao.insertClip(
+            val additionalClip = clipDao.insertClip(
                 ClipEntity(
-                    xPostId = "deleted-media",
-                    authorName = "Deleted",
-                    authorUsername = "deleted",
-                    text = "deleted media clip",
-                    postUrl = "https://x.com/deleted/status/deleted-media",
+                    xPostId = "additional-media",
+                    authorName = "Additional",
+                    authorUsername = "additional",
+                    text = "additional media clip",
+                    postUrl = "https://x.com/additional/status/additional-media",
                     xCreatedAt = deletedAt,
                     savedAt = deletedAt,
                     syncedAt = deletedAt,
-                    isDeleted = true,
                 ),
             )
-            clipDao.insertClipTag(ClipTagEntity(deletedClip, tagC, deletedAt))
-            clipDao.insertAssets(listOf(asset(deletedClip, 21, "deleted-photo", "photo", deletedAt)))
+            clipDao.insertClipTag(ClipTagEntity(additionalClip, tagC, deletedAt))
+            clipDao.insertAssets(listOf(asset(additionalClip, 21, "additional-photo", "photo", deletedAt)))
 
             val mediaSecond = clipDao.insertClip(
                 ClipEntity(
@@ -217,15 +215,14 @@ class LargeDatasetIntegrationTest {
             clipDao.insertClipTag(ClipTagEntity(noMedia, tagA, deletedAt))
         }
 
-        val rows = clipDao.observeActiveMediaGridAssetRows().first()
-        val tags = clipDao.observeActiveClipTags().first()
+        val rows = clipDao.observeMediaGridAssetRows().first()
+        val tags = clipDao.observeClipTags().first()
 
-        assertEquals(listOf(31L, 32L, 11L, 12L), rows.map { it.assetId })
-        assertEquals(listOf("photo", "video_thumbnail", "photo", "video_thumbnail"), rows.map { it.assetType })
+        assertEquals(listOf(31L, 32L, 21L, 11L, 12L), rows.map { it.assetId })
+        assertEquals(listOf("photo", "video_thumbnail", "photo", "photo", "video_thumbnail"), rows.map { it.assetType })
         assertTrue(rows.none { it.assetType == "animated_gif" })
-        assertTrue(rows.none { it.assetId == 21L })
-        assertEquals(setOf(31L, 32L, 11L, 12L), rows.map { it.assetId }.toSet())
-        assertEquals(4, tags.size)
+        assertEquals(setOf(31L, 32L, 21L, 11L, 12L), rows.map { it.assetId }.toSet())
+        assertEquals(5, tags.size)
         assertEquals(3, tags.map { it.tagId }.toSet().size)
     }
 
@@ -259,14 +256,14 @@ class LargeDatasetIntegrationTest {
             }
         }
 
-        val rows = clipDao.observeActiveMediaGridAssetRows().first()
+        val rows = clipDao.observeMediaGridAssetRows().first()
         assertEquals(2_000, rows.size)
         assertEquals(2L, rows.take(2).map { it.assetId }.distinct().size.toLong())
         assertEquals(listOf("photo", "video_thumbnail"), rows.take(2).map { it.assetType })
         assertTrue(rows.none { it.assetType == "animated_gif" })
 
         val selectedClipId = rows.first().clipId
-        assertEquals(selectedClipId, clipDao.observeActiveClip(selectedClipId).first()?.id)
+        assertEquals(selectedClipId, clipDao.observeClip(selectedClipId).first()?.id)
         assertEquals(3, clipDao.observeAssetsForClip(selectedClipId).first().size)
     }
 

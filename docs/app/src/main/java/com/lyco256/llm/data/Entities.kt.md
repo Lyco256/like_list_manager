@@ -10,13 +10,14 @@ Roomのテーブル構造と、Repository/UI向けの合成モデルを定義し
 
 ## 主要モデル
 
-- `ClipEntity`: X投稿、投稿者、本文、概要、保存・同期時刻、ローカル削除状態
+- `ClipEntity`: X投稿、投稿者、本文、概要、OCR、いいね数、保存・同期時刻。削除は行のhard DELETEであり、`isDeleted` 列は持ちません
 - `AssetEntity`: 画像/動画サムネイルのURL、ローカルパス、サイズ、取得状態
 - `TagGroupEntity`: 親グループ、名称、兄弟内の並び順
 - `TagEntity`: タグ名、色、親グループ、兄弟内の並び順
 - `ClipTagEntity`: 投稿とタグの多対多関連
 - `SyncStateEntity`: 月間取得数、予算・警告・停止ライン、15分rate limit、最終同期、liked posts同期の継続用next token
 - `ApiUsageMonthEntity`: 月別のAPI使用量履歴と累計集計元
+- `UndoEntity`: `undo_slot` のID=1に、現在の1操作分のaction type、version付きpayload JSON、通知message、slot identityとなる`createdAt`を永続保存
 - `SettingsSnapshot`: 設定画面へ渡す月間/API使用量、保存件数、画像枚数、容量の集約値
 - `ClipWithDetails`, `TagWithCount`: UI表示用の合成モデル
 - `TagHierarchy`, `TagTreeNode`: グループとタグの混在階層、子孫タグ、重複を除いたグループ件数
@@ -32,6 +33,11 @@ Roomのテーブル構造と、Repository/UI向けの合成モデルを定義し
 ## 変更時の確認
 
 Entityの列変更はDB schema変更です。`LikeListDatabase` のversionとmigration、DAO query、Repository変換、既存端末データの移行を必ず一緒に設計します。
+
+## Undoと削除
+
+- `undo_slot` は履歴tableではなく、次のユーザー編集で置換または確定される単一slotです。
+- 投稿削除Undoに必要な `ClipEntity` / `AssetEntity` / `ClipTagEntity` のsnapshotはpayloadに保存し、画像bytesはDB外の永続stagingで管理します。
 
 ## いいね数と件数（2026-06-20）
 

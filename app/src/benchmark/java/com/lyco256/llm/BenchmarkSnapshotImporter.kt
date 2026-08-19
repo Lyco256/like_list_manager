@@ -15,8 +15,8 @@ internal object BenchmarkSnapshotImporter {
     private const val VALIDATION_DIRECTORY = "media-grid-validation"
 
     private data class SnapshotValidation(
-        val activeClips: Long,
-        val activeMediaAssets: Long,
+        val clips: Long,
+        val mediaAssets: Long,
         val taggedMediaClips: Long,
         val localMediaAssets: Long,
         val persistentPreviews: Int = 0,
@@ -164,8 +164,8 @@ internal object BenchmarkSnapshotImporter {
         directory.mkdirs()
         File(directory, "runtime.json").writeText(
             "{\"ready\":true,\"databasePath\":\"${database.absolutePath}\"," +
-                "\"activeClips\":${validation.activeClips}," +
-                "\"activeMediaAssets\":${validation.activeMediaAssets}," +
+                "\"clips\":${validation.clips}," +
+                "\"mediaAssets\":${validation.mediaAssets}," +
                 "\"taggedMediaClips\":${validation.taggedMediaClips}," +
                 "\"localMediaAssets\":${validation.localMediaAssets}}",
             Charsets.UTF_8,
@@ -247,8 +247,8 @@ internal object BenchmarkSnapshotImporter {
         directory.mkdirs()
         File(directory, "snapshot.json").writeText(
             "{\"ready\":true,\"databasePath\":\"${database.absolutePath}\"," +
-                "\"activeClips\":${validation.activeClips}," +
-                "\"activeMediaAssets\":${validation.activeMediaAssets}," +
+                "\"clips\":${validation.clips}," +
+                "\"mediaAssets\":${validation.mediaAssets}," +
                 "\"taggedMediaClips\":${validation.taggedMediaClips}," +
                 "\"localMediaAssets\":${validation.localMediaAssets}," +
                 "\"persistentPreviews\":${validation.persistentPreviews}," +
@@ -264,29 +264,29 @@ internal object BenchmarkSnapshotImporter {
                 require(cursor.moveToFirst()) { "Benchmark validation query returned no row" }
                 cursor.getLong(0)
             }
-            val activeClips = count("SELECT COUNT(*) FROM clips WHERE isDeleted = 0")
-            val activeMediaAssets = count(
+            val clips = count("SELECT COUNT(*) FROM clips")
+            val mediaAssets = count(
                 "SELECT COUNT(*) FROM clips INNER JOIN assets ON assets.clipId = clips.id " +
-                    "WHERE clips.isDeleted = 0 AND assets.type IN ('photo', 'video_thumbnail')",
+                    "WHERE assets.type IN ('photo', 'video_thumbnail')",
             )
             val taggedMediaClips = count(
                 "SELECT COUNT(DISTINCT clips.id) FROM clips " +
                     "INNER JOIN clip_tags ON clip_tags.clipId = clips.id " +
                     "INNER JOIN assets ON assets.clipId = clips.id " +
-                    "WHERE clips.isDeleted = 0 AND assets.type IN ('photo', 'video_thumbnail')",
+                    "WHERE assets.type IN ('photo', 'video_thumbnail')",
             )
             val localMediaAssets = count(
                 "SELECT COUNT(*) FROM clips INNER JOIN assets ON assets.clipId = clips.id " +
-                    "WHERE clips.isDeleted = 0 AND assets.type IN ('photo', 'video_thumbnail') " +
+                    "WHERE assets.type IN ('photo', 'video_thumbnail') " +
                     "AND assets.localPath IS NOT NULL",
             )
-            require(activeClips > 0 && activeMediaAssets > 0 && taggedMediaClips > 0 && localMediaAssets > 0) {
+            require(clips > 0 && mediaAssets > 0 && taggedMediaClips > 0 && localMediaAssets > 0) {
                 "Benchmark snapshot has no usable classified media-grid input " +
-                    "(activeClips=$activeClips, activeMediaAssets=$activeMediaAssets, " +
+                    "(clips=$clips, mediaAssets=$mediaAssets, " +
                     "taggedMediaClips=$taggedMediaClips, localMediaAssets=$localMediaAssets)"
             }
             require(images.isDirectory) { "Benchmark original-image directory is missing" }
-            return SnapshotValidation(activeClips, activeMediaAssets, taggedMediaClips, localMediaAssets)
+            return SnapshotValidation(clips, mediaAssets, taggedMediaClips, localMediaAssets)
         } finally {
             db.close()
         }

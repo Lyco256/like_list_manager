@@ -1,10 +1,19 @@
 # `app/src/androidTest/java/com/lyco256/llm/MainActivityComposeTest.kt`
 
+## 2026-08-12 選択済みタグ条件とTreeの双方向同期
+
+- Treeで選択したタグが絞り込み画面本体の選択済み一覧へ現れること、一覧側の状態変更がTree再表示時に反映されることを検証します。
+- 一覧の削除ボタンで条件をNONE相当に戻した後のTree表示と、Dialog全体をキャンセルした際に確定済みfilterへ影響しないことも続けて検証します。
+
 ## 2026-08-10 production Stable-idle fast path counters
 
 - stable-idle後の代表4→5 claimはfast-path hit 1、live fallback／claim-time full capture 0、claim時pair／plan／RequiredRenderSet／text measure 0、selected direction render model 1を確認する。
 - missing required imageを同じidentityでReady公開した区間はresource membership recheckだけが増え、stable snapshot、focal entry、pair、plan、RequiredRenderSet、full captureが増えないことを確認する。
 - 既存の先頭one-finger overscroll→同一gesture二本指pinch回帰は実offsetが変わらないpointer状態だけではSnapshotを無効化せず、fast-path 1、live/full capture 0でMorphを継続することを確認する。実offset 1px差のstale拒否は`MediaGridMorphTest`で固定する。
+
+## 2026-08-16 stable-idle readiness synchronization
+
+- 代表Morphテストは対象viewportの最新readyイベントだけを採用し、cache世代のrequest／invalidate／publishが静止してからperformance traceをクリアする。これにより、古いready通知や直後の非同期再準備でclaimがfallbackへ落ちる競合を検出可能な期待値のまま防ぐ。
 
 ## 2026-08-10 production Morph claim/draw counters（Phase 2履歴）
 
@@ -68,14 +77,14 @@ The Phase 1 production test now asserts the legacy one-step pinch path and the a
 
 - 主要タブ、設定画面、設定画面表示中のタブ非表示、Android戻るでの元タブ復帰、使用量セクション、データ管理セクション、隔離環境でのXログイン無効化、X API設定の保存/trim/消去UI
 - 設定画面の開閉操作とDB fingerprint不変
-- 検索/絞り込みの適用、日付条件、DatePicker内解除、投稿者条件とタグ条件の複合E2E、投稿者Dialogクリア、タグ条件のみクリア、投稿者クリックによる分類済み投稿者フィルター遷移、キャンセル、BackHandler破棄、Dialog内全クリア確認キャンセル、全クリアとDB fingerprint不変
+- 検索/絞り込みの適用、日付条件、DatePicker内解除、投稿者条件とタグ条件の複合E2E、深さ3以上・大量タグのTree popup、タグ／グループ巡回、popup Back後のdraft保持、投稿者Dialogクリア、タグ条件のみクリア、投稿者クリックによる分類済み投稿者フィルター遷移、キャンセル、Dialog内全クリア確認キャンセル、全クリアとDB fingerprint不変
 - 投稿カードのいいね数ポップアップが詳細と暫定警告を表示し、開閉でDB fingerprintを変えないこと
 - 未分類から分類済みへの移動、分類解除、Roomの `clip_tags` 更新
 - 別グループに同名の子タグがある場合の複数タグ同時付与
-- 投稿カードのローカル削除Dialogで、キャンセル時は保持、確定時は一覧から消えつつDB上はsoft deleteとして残ること
+- 投稿カードのローカル削除Dialogで、キャンセル時は保持、確定時は一覧とDBからhard DELETEされること
 - 投稿カードの概要編集がDBへ保存され、Activity再作成後も入力内容が残ること
 - 保存済みPhotoの画像viewerが戻る操作で閉じること、複数画像をswipeで移動できること、開閉やページ移動でDB fingerprintを変えないこと
-- タグ/グループ作成、タグ/グループ作成Dialogキャンセル、同名子タグ、タグ名称変更、グループ名称変更、名称変更Dialogキャンセル、タグの別グループ移動、タグ/グループ移動Dialogキャンセル、別タグへの一括追加、別タグへの一括追加Dialogキャンセル、削除、タグ/グループ削除Dialogキャンセル
+- タグ/グループ作成、タグ/グループ作成Dialogキャンセル、同名子タグ、タグ名称変更、グループ名称変更、名称変更Dialogキャンセル、タグの別グループ移動、タグ/グループ移動Dialogキャンセル、Treeをscrollして選ぶ別タグへの一括追加、別タグへの一括追加Dialogキャンセル、削除、タグ/グループ削除Dialogキャンセル
 - popup外tapがカードへ伝播せず、タグ関係も変化しないこと
 - 空状態、同期エラー表示、Activity再作成後のタブ復元と分類済みフィルター復元
 
@@ -87,9 +96,13 @@ The Phase 1 production test now asserts the legacy one-step pinch path and the a
 
 いいね数更新の確認Dialogは、隔離DBに数値post IDの対象clipを追加して `settings_like_refresh` から開き、`settings_like_refresh_cancel` で閉じた前後のDB fingerprintが変わらないことを確認します。
 
-投稿カードのローカル削除Dialogは `clip_local_delete_*_<clipId>` のtest tagで開閉/実行し、キャンセル時は保持、確定時は一覧から消えつつDB上はsoft deleteとして残ることを確認します。
+投稿カードのローカル削除Dialogは `clip_local_delete_*_<clipId>` のtest tagで開閉/実行し、キャンセル時は保持、確定時は一覧とDBからhard DELETEされることを確認します。永続画像stagingからの復元はRepository integration testの責務です。
 
 分類済み検索では、フィルタ適用後に一覧をスクロールして `scroll_to_top` で戻っても検索条件summaryと対象clipが残りDB fingerprintが変わらないことを確認します。未分類一覧では、タグchip選択後に一覧をスクロールし、対象clipへ戻ってから分類確定できることを確認し、スクロールで未確定選択状態が失われないことを固定します。
+
+カード内のタグ選択を操作する統合テストは、対象clipの永続タグ状態から未分類/分類済み画面を確定し、ViewModelの対象一覧への反映、縦一覧の対象カード、カード配下の横タグselectorの順に待ってから対象chipへスクロールします。これにより実機viewportやテスト実行順に依存せず、同じtest tagを持つ別カードを誤操作しません。
+
+分類済み一覧の絞り込み保持テストは、横スクロール可能なtoolbar summaryの文字列が狭い実機viewportと交差することを前提にせず、一覧スクロールと先頭復帰の前後で同じ適用済み条件semanticsが1件保持されることを確認します。対象カードの表示とDB fingerprint不変の検証は維持します。
 
 ## 2026-07-02 追記: 設定画面UI調整
 
@@ -161,8 +174,25 @@ The Phase 1 production test now asserts the legacy one-step pinch path and the a
 - The large-media flow keeps the normal paced drag, fast fling, immediate retouch, final visible-range selection, and post-filter cell action as the integration regression coverage for operation-state suppression and latest-viewport following.
 - Placeholder tags, existing image success/error behavior, column changes, selection, dialogs, and Macrobenchmark behavior remain covered by their existing tests and are not changed by this implementation.
 
+## 2026-08-13 classified filter clear path
+
+- 分類済みtoolbarからclearを除いたため、filterのDB非変更E2Eは検索/絞り込みDialog内の全クリア確認を実行してから適用する経路を使用します。
+
 ## 2026-08-01 Phase 1 row reflow coverage
 
 - The integration build uses `TEST_HARNESS=true`; `testHarnessMediaGridUsesSameSurfaceRendererWithoutLegacyMorphCanvas` drives the TEST_HARNESS pinch and explicitly rejects the historical Morph canvas, while the rendering contract test verifies the same-surface modifier statically.
 - The classified display-toggle flow exercises the real LazyVerticalGrid pinch handoff after the claim-time capture, including column changes through the actual target frame.
 - Before pinch assertions, the flow waits for `showInitialProgress == false`; a visible media item alone does not prove that the TEST_HARNESS Morph controller is enabled.
+
+## 2026-08-13 tag integration viewport stabilization
+
+- Card tag integration flows scroll the vertical `clip_list` to the target card and then the card-local horizontal `tag_selector_<clipId>` to the requested tag or group chip before interaction. Classified-card removal explicitly applies its draft before waiting for Room, and the flows stay independent of the device viewport width.
+- The card helper waits for the selected screen, list, and target card as Compose nodes directly. The ViewModel clip collection is used only to wait for Room observation; derived classified/unclassified membership is not coupled to the screen-transition wait.
+- Root tag/group fixture helpers identify the newly inserted row from the before/after ID difference, so duplicate names are valid fixtures, and finalize the fixture-only creation Undo before navigating away so the bottom notification cannot intercept a tab tap.
+- E2E cases that apply tag relations only as setup also finalize that setup slot before changing bottom tabs. The pending-selection case instead waits for the expanded clip collection to reach the ViewModel and verifies the still-dirty Apply control before committing.
+- Fixture finalization waits for the asynchronous pending-slot Flow emission before reading and finalizing the slot; it cannot silently miss a newly committed edit.
+- Tag-management actions scroll back to their exact row after returning from a card tab, and classified-result assertions scroll the target card into view.
+- The long-list pending-draft case scrolls the card's Apply descendant itself into the viewport before clicking, rather than treating partial card visibility as proof that its bottom action is tappable.
+- Its unique assertion is that the dirty Apply state survives list replacement and round-trip scrolling; the final database classification uses the same ViewModel entry point, while exact draft IDs through the Apply callback remain covered by the focused card tests.
+- Add-all integration flows scroll `tag_list` back to the source tag row after creating later tags, so source-row actions do not depend on the tag-management viewport left by fixture setup.
+- Child-tag fixtures wait until the Activity's observed hierarchy contains the inserted ID before opening a group popup, avoiding a race between direct Room fixture insertion and Compose collection.

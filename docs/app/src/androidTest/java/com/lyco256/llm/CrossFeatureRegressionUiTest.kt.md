@@ -1,0 +1,3 @@
+# `CrossFeatureRegressionUiTest.kt`
+
+tag filter適用中の分類済みカードでtag Applyした結果、filter対象外になったカードが一覧から消えることを検証します。同じtag変更をMediaGrid previewでApplyした場合は、preview dialogを自動で閉じず、更新後のカードを表示し続けることも検証します。

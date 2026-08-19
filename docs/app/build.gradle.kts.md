@@ -18,6 +18,7 @@ AndroidアプリモジュールのapplicationId、SDK、Java/Kotlin 21、Compose
 - Security Crypto: Client IDとOAuthセッションの暗号化保存
 - AppAuth: OAuth 2.0 Authorization Code + PKCE
 - JUnit 4: 階層・絞り込みロジックのローカル単体テスト
+- org.json: Android非依存のJVM unit testで `UndoPayloadCodec` のJSON round trip/不正payload拒否を検証
 - unit test classpath補強: 日本語を含む作業パスでJUnitがテスト/本体クラスを読み込めない環境差を避けるため、`Test` タスク実行前に `debug` と `debugUnitTest` のKotlin/Java出力を一時ASCIIパスへコピーし、そのパスをclasspath先頭へ追加する
 - AndroidX Test: SQLite migrationの実機テスト
 - `AndroidJUnitRunner`: `connectedDebugAndroidTest` で実機テストを検出・実行

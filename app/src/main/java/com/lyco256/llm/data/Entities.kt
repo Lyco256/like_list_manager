@@ -23,7 +23,6 @@ data class ClipEntity(
     val summary: String = "",
     val ocrText: String = "",
     val ocrUpdatedAt: String? = null,
-    val isDeleted: Boolean = false,
     val likeCount: Long? = null,
     val likeCountFetchedAt: String? = null,
     val likeCountFetchFailedAt: String? = null,
@@ -150,6 +149,19 @@ data class ApiUsageMonthEntity(
     val createdAt: String,
     val updatedAt: String,
 )
+
+@Entity(tableName = "undo_slot")
+data class UndoEntity(
+    @PrimaryKey val id: Int = SLOT_ID,
+    val actionType: String,
+    val payloadJson: String,
+    val message: String,
+    val createdAt: String,
+) {
+    companion object {
+        const val SLOT_ID = 1
+    }
+}
 
 data class SettingsSnapshot(
     val monthlyApiUsage: Long? = null,

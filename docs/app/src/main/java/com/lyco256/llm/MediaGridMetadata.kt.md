@@ -1,6 +1,6 @@
 # MediaGridMetadata.kt
 
-メディアグリッド専用のメタデータ処理を担当する。Repositoryから受け取った軽量Asset行・active Clip・active ClipTagのスナップショットを、`Dispatchers.Default`でlatest-wins処理する。
+メディアグリッド専用のメタデータ処理を担当する。Repositoryから受け取った軽量Asset行・現存Clip・ClipTagのスナップショットを、`Dispatchers.Default`でlatest-wins処理する。
 
 完成結果は最大3件のLRUキャッシュへ保持し、Bitmapやファイル内容は保持しない。キャッシュヒット時は`Calculating`を挟まずReady結果を即時発行し、ミス時だけ`Calculating`からReadyへ遷移する。枠は静的グラデーションを先に描画し、次フレーム以降に既存URLの画像要求を開始する。メタデータ処理中にFile I/Oや画像デコードは行わない。
 

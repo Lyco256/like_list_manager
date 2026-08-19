@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -36,6 +37,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -78,6 +80,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -106,6 +110,8 @@ import com.lyco256.llm.data.TagNodeRef
 import com.lyco256.llm.data.TagNodeType
 import com.lyco256.llm.data.TagTreeNode
 import com.lyco256.llm.data.TagWithCount
+import com.lyco256.llm.data.UndoCoordinatorResult
+import com.lyco256.llm.data.UndoEntity
 import com.lyco256.llm.data.tagColor
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -251,6 +257,7 @@ data class TweetFilterState(
 
 data class MainUiState(
     val clips: List<ClipWithDetails> = emptyList(),
+    val hasReceivedInitialClipEmission: Boolean = false,
     val tags: List<TagWithCount> = emptyList(),
     val tagHierarchy: TagHierarchy = TagHierarchy(),
     val syncState: SyncStateEntity? = null,
@@ -261,8 +268,15 @@ data class MainUiState(
     val filters: TweetFilterState = TweetFilterState(),
     val sort: ClassifiedSortState = ClassifiedSortState(),
 ) {
+    val isInitialClipLoading: Boolean
+        get() = !hasReceivedInitialClipEmission &&
+            storageState.isAvailable &&
+            !storageState.isMigrating
     val unclassified: List<ClipWithDetails> by lazy { clips.filter { it.tags.isEmpty() } }
     val authorOptions: List<TweetAuthorOption> by lazy { buildAuthorOptions(clips) }
+    val authorSavedCountByAuthor: Map<TweetAuthorKey, Int> by lazy {
+        authorOptions.associate { it.key to it.count }
+    }
     val classified: List<ClipWithDetails> by lazy { sortClipsForDisplay(
         clips = filterClipsForSearch(clips, tagHierarchy, filters),
         hierarchy = tagHierarchy,
@@ -306,11 +320,20 @@ sealed interface MediaGridTweetDialogState {
 
 private data class RepositoryUiState(
     val clips: List<ClipWithDetails>,
+    val hasReceivedInitialClipEmission: Boolean,
     val tags: List<TagWithCount>,
     val tagHierarchy: TagHierarchy,
     val syncState: SyncStateEntity?,
     val storageState: PostStorageState,
 )
+
+internal data class InitialClipListState(
+    val clips: List<ClipWithDetails> = emptyList(),
+    val hasReceivedInitialEmission: Boolean = false,
+) {
+    fun afterEmission(value: List<ClipWithDetails>): InitialClipListState =
+        InitialClipListState(clips = value, hasReceivedInitialEmission = true)
+}
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val appContainer = (application as LikeListManagerApp).container
@@ -329,15 +352,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         imageLoader = appContainer.mediaGridImageLoader,
     ) { assetId, candidate -> repository.recoverMediaGridCandidate(assetId, candidate) }
     internal val mediaGridSessionState: StateFlow<MediaGridSessionUiState> = mediaGridSessionCoordinator.state
+    val pendingUndo: StateFlow<UndoEntity?> = repository.pendingUndo
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val heavyLocalWorkActive: StateFlow<Boolean> = repository.heavyLocalWorkActive
+
+    private val initialClipListState = repository.clipsWithDetails
+        .map { clips -> InitialClipListState().afterEmission(clips) }
+        .onStart { emit(InitialClipListState()) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, InitialClipListState())
 
     private val repositoryState = combine(
-        repository.clipsWithDetails,
+        initialClipListState,
         repository.tagsWithCount,
         repository.tagHierarchy,
         repository.syncState,
         repository.storageState,
-    ) { clips, tags, hierarchy, syncState, storageState ->
-        RepositoryUiState(clips, tags, hierarchy, syncState, storageState)
+    ) { clipState, tags, hierarchy, syncState, storageState ->
+        RepositoryUiState(
+            clips = clipState.clips,
+            hasReceivedInitialClipEmission = clipState.hasReceivedInitialEmission,
+            tags = tags,
+            tagHierarchy = hierarchy,
+            syncState = syncState,
+            storageState = storageState,
+        )
     }
 
     private val uiStateBase = combine(
@@ -349,6 +387,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ) { repositoryState, settings, session, filterValue, sortValue ->
         MainUiState(
             clips = repositoryState.clips,
+            hasReceivedInitialClipEmission = repositoryState.hasReceivedInitialClipEmission,
             tags = repositoryState.tags,
             tagHierarchy = repositoryState.tagHierarchy,
             syncState = repositoryState.syncState,
@@ -467,7 +506,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearTagFilters() { filters.value = filters.value.copy(tagFilters = emptyMap()) }
 
-    fun clearAllFilters() { filters.value = TweetFilterState() }
 
     fun openMediaGridTweetDialog(clipId: Long) {
         selectedMediaGridClipId.value = clipId
@@ -499,8 +537,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun addAllFromTagToTag(source: TagEntity, target: TagEntity) = viewModelScope.launch {
         repository.addAllFromTagToTag(source.id, target.id)
     }
-    fun setClipTags(clip: ClipEntity, tagIds: Set<Long>) = viewModelScope.launch {
-        repository.setClipTags(clip.id, tagIds)
+    fun setClipTags(
+        clip: ClipEntity,
+        tagIds: Set<Long>,
+        onResult: (String?) -> Unit = {},
+    ) = viewModelScope.launch {
+        runCatching { repository.setClipTags(clip.id, tagIds) }
+            .onSuccess { onResult(null) }
+            .onFailure { onResult(it.message ?: "タグの適用に失敗しました") }
     }
     fun applyClipTagChanges(
         clipIds: Set<Long>,
@@ -533,6 +577,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun moveClipToTrash(clip: ClipEntity) = viewModelScope.launch {
         repository.moveClipToTrash(clip)
     }
+
+    suspend fun undoPendingEdit(expectedSlot: UndoEntity): UndoCoordinatorResult =
+        repository.undoPendingEdit(expectedSlot)
+
+    suspend fun finalizePendingUndo(expectedSlot: UndoEntity): UndoCoordinatorResult =
+        repository.finalizePendingUndo(expectedSlot)
     fun saveApiSettings(settings: ApiSettings, onSaved: (() -> Unit)? = null) = viewModelScope.launch {
         repository.saveApiSettings(settings)
         apiSettings.value = repository.loadApiSettings()
@@ -659,6 +709,7 @@ fun LikeListManagerUi(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val mediaGridTweetDialogState by viewModel.mediaGridTweetDialogState.collectAsState()
+    val pendingUndo by viewModel.pendingUndo.collectAsState()
     MaterialTheme(
         colorScheme = darkColorScheme(
             primary = Color(0xFF7DB7FF),
@@ -669,28 +720,38 @@ fun LikeListManagerUi(
         ),
     ) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            MainScreen(
-                uiState = uiState,
-                viewModel = viewModel,
-                onLogin = onLogin,
-                initialTab = initialTab,
-                initialClassifiedDisplayMode = initialClassifiedDisplayMode,
-                persistScreenState = persistScreenState,
-            )
-            MediaGridTweetDialog(
-                state = mediaGridTweetDialogState,
-                hierarchy = uiState.tagHierarchy,
-                onDismiss = viewModel::closeMediaGridTweetDialog,
-                onTagsChange = viewModel::setClipTags,
-                onSummaryChange = viewModel::updateSummary,
-                onOcrSave = viewModel::updateOcrText,
-                onOcrDetect = viewModel::detectOcrText,
-                onDelete = viewModel::moveClipToTrash,
-                onAuthorClick = { clip ->
-                    viewModel.closeMediaGridTweetDialog()
-                    viewModel.filterByAuthorFromClip(clip)
-                },
-            )
+            Box(Modifier.fillMaxSize()) {
+                MainScreen(
+                    uiState = uiState,
+                    viewModel = viewModel,
+                    onLogin = onLogin,
+                    initialTab = initialTab,
+                    initialClassifiedDisplayMode = initialClassifiedDisplayMode,
+                    persistScreenState = persistScreenState,
+                )
+                MediaGridTweetDialog(
+                    state = mediaGridTweetDialogState,
+                    hierarchy = uiState.tagHierarchy,
+                    authorSavedCountByAuthor = uiState.authorSavedCountByAuthor,
+                    onDismiss = viewModel::closeMediaGridTweetDialog,
+                    onTagsChange = { clip, tagIds -> viewModel.setClipTags(clip, tagIds) },
+                    onTagsApply = { clip, tagIds, complete -> viewModel.setClipTags(clip, tagIds, complete) },
+                    onSummaryChange = viewModel::updateSummary,
+                    onOcrSave = viewModel::updateOcrText,
+                    onOcrDetect = viewModel::detectOcrText,
+                    onDelete = viewModel::moveClipToTrash,
+                    onAuthorClick = { clip ->
+                        viewModel.closeMediaGridTweetDialog()
+                        viewModel.filterByAuthorFromClip(clip)
+                    },
+                )
+                UndoNotificationHost(
+                    pendingUndo = pendingUndo,
+                    onUndo = viewModel::undoPendingEdit,
+                    onFinalize = viewModel::finalizePendingUndo,
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
+            }
         }
     }
 }
@@ -724,6 +785,8 @@ fun MainScreen(
     var syncMessage by remember { mutableStateOf<String?>(null) }
     var likeRefreshEstimating by remember { mutableStateOf(false) }
     var likeRefreshRunning by remember { mutableStateOf(false) }
+    val heavyLocalWorkActive by viewModel.heavyLocalWorkActive.collectAsState()
+    val mediaGridTweetDialogState by viewModel.mediaGridTweetDialogState.collectAsState()
     val unclassifiedListState = rememberLazyListState()
     val tagListState = rememberLazyListState()
     val classifiedListStates = remember { mutableMapOf<String, LazyListState>() }
@@ -764,33 +827,35 @@ fun MainScreen(
         tab = tab,
         uiState = uiState,
     )
+    val dedicatedProgressVisible = uiState.storageState.isMigrating ||
+        (tab == AppTab.Unclassified && uiState.isInitialClipLoading) ||
+        likeRefreshEstimating ||
+        likeRefreshRunning ||
+        mediaGridTweetDialogState is MediaGridTweetDialogState.Loading ||
+        (tab == AppTab.Classified &&
+            classifiedDisplayMode == ClassifiedDisplayMode.MediaGrid &&
+            (mediaGridState.status == MediaGridLoadStatus.Calculating || mediaGridSessionState.showInitialProgress))
+    val showHeavyWorkIndicator = shouldShowHeavyWorkIndicator(
+        heavyLocalWorkActive = heavyLocalWorkActive,
+        dedicatedProgressVisible = dedicatedProgressVisible,
+    )
 
     Scaffold(
         modifier = Modifier.testTag("main_screen"),
         topBar = {
             TopAppBar(
                 title = {
-                    if (tab == AppTab.Unclassified) {
-                        Text(
-                            buildAnnotatedString {
-                                append("未分類 ")
-                                withStyle(
-                                    SpanStyle(
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontWeight = FontWeight.Normal,
-                                    ),
-                                ) {
-                                    append("${uiState.unclassified.size}件")
-                                }
-                            },
-                            fontWeight = FontWeight.SemiBold,
-                        )
+                    if (tab == AppTab.Unclassified &&
+                        uiState.storageState.isAvailable &&
+                        !uiState.storageState.isMigrating
+                    ) {
+                        UnclassifiedTopBarTitle(uiState)
                     } else {
                         Text(topBarTitle, fontWeight = FontWeight.SemiBold)
                     }
                 },
                 actions = {
+                    HeavyWorkTopBarIndicator(visible = showHeavyWorkIndicator)
                     IconButton(
                         onClick = {
                             settingsOpen = true
@@ -851,11 +916,14 @@ fun MainScreen(
                 title = "未分類",
                 clips = uiState.unclassified,
                 hierarchy = uiState.tagHierarchy,
+                authorSavedCountByAuthor = uiState.authorSavedCountByAuthor,
                 emptyText = "タグなしのツイートはありません",
                 listState = unclassifiedListState,
                 modifier = Modifier.padding(padding).testTag("unclassified_screen"),
+                isInitialLoading = uiState.isInitialClipLoading,
                 requireTagConfirmation = true,
-                onTagsChange = viewModel::setClipTags,
+                onTagsChange = { clip, tagIds -> viewModel.setClipTags(clip, tagIds) },
+                onTagsApply = { clip, tagIds, complete -> viewModel.setClipTags(clip, tagIds, complete) },
                 onSummaryChange = viewModel::updateSummary,
                 onOcrSave = viewModel::updateOcrText,
                 onOcrDetect = viewModel::detectOcrText,
@@ -888,8 +956,8 @@ fun MainScreen(
                 modifier = Modifier.padding(padding).testTag("classified_screen"),
                 onApplyFilters = viewModel::applyFilters,
                 onApplySort = viewModel::applySort,
-                onClearAllFilters = viewModel::clearAllFilters,
-                onTagsChange = viewModel::setClipTags,
+                onTagsChange = { clip, tagIds -> viewModel.setClipTags(clip, tagIds) },
+                onTagsApply = { clip, tagIds, complete -> viewModel.setClipTags(clip, tagIds, complete) },
                 onSummaryChange = viewModel::updateSummary,
                 onOcrSave = viewModel::updateOcrText,
                 onOcrDetect = viewModel::detectOcrText,
@@ -922,6 +990,46 @@ fun MainScreen(
     syncMessage?.let { message ->
         SyncResultDialog(message = message, onDismiss = { syncMessage = null })
     }
+}
+
+internal fun shouldShowHeavyWorkIndicator(
+    heavyLocalWorkActive: Boolean,
+    dedicatedProgressVisible: Boolean,
+): Boolean = heavyLocalWorkActive && !dedicatedProgressVisible
+
+@Composable
+internal fun HeavyWorkTopBarIndicator(visible: Boolean) {
+    if (!visible) return
+    CircularProgressIndicator(
+        modifier = Modifier
+            .size(18.dp)
+            .testTag("top_heavy_work_indicator"),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        strokeWidth = 2.dp,
+    )
+}
+
+@Composable
+internal fun UnclassifiedTopBarTitle(uiState: MainUiState) {
+    Text(
+        buildAnnotatedString {
+            append("未分類")
+            if (!uiState.isInitialClipLoading) {
+                append(" ")
+                withStyle(
+                    SpanStyle(
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Normal,
+                    ),
+                ) {
+                    append("${uiState.unclassified.size}件")
+                }
+            }
+        },
+        modifier = Modifier.testTag("unclassified_top_bar_title"),
+        fontWeight = FontWeight.SemiBold,
+    )
 }
 
 @Composable
@@ -1206,7 +1314,7 @@ internal fun classifiedConditionSummary(
     sortConditionSummary(sort),
 ).joinToString(" / ")
 
-private fun ClipEntity.authorKey(): TweetAuthorKey =
+internal fun ClipEntity.authorKey(): TweetAuthorKey =
     TweetAuthorKey(authorId = authorId?.takeIf { it.isNotBlank() }, username = authorUsername.lowercase())
 
 private fun ClipEntity.postedLocalDate(): LocalDate? =
@@ -1315,6 +1423,7 @@ fun ClipListScreen(
     title: String,
     clips: List<ClipWithDetails>,
     hierarchy: TagHierarchy,
+    authorSavedCountByAuthor: Map<TweetAuthorKey, Int> = emptyMap(),
     emptyText: String,
     modifier: Modifier = Modifier,
     requireTagConfirmation: Boolean = false,
@@ -1339,6 +1448,7 @@ fun ClipListScreen(
                     }
                     TweetCard(
                         clip = clip,
+                        authorSavedCount = authorSavedCountByAuthor[clip.clip.authorKey()] ?: 0,
                         hierarchy = hierarchy,
                         expandedGroups = expandedGroups,
                         selectedTagIds = selectedTagIds,
@@ -1397,6 +1507,7 @@ fun ClassifiedScreen(
                 items(uiState.classified, key = { it.clip.id }) { clip ->
                     TweetCard(
                         clip = clip,
+                        authorSavedCount = uiState.authorSavedCountByAuthor[clip.clip.authorKey()] ?: 0,
                         hierarchy = uiState.tagHierarchy,
                         expandedGroups = expandedGroups,
                         selectedTagIds = clip.tags.map { it.id }.toSet(),
@@ -1415,6 +1526,7 @@ fun ClassifiedScreen(
 @Composable
 fun TweetCard(
     clip: ClipWithDetails,
+    authorSavedCount: Int = 0,
     hierarchy: TagHierarchy,
     expandedGroups: MutableMap<Long, Boolean>,
     selectedTagIds: Set<Long>,
@@ -1449,7 +1561,15 @@ fun TweetCard(
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(clip.clip.authorName, fontWeight = FontWeight.SemiBold)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(clip.clip.authorName, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            formatAuthorSavedCount(authorSavedCount),
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.testTag("clip_author_saved_count_${clip.clip.id}"),
+                        )
+                    }
                     Text(
                         "@${clip.clip.authorUsername}",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1738,7 +1858,7 @@ private fun TagFilterChildren(
                 FilterChip(
                     selected = state != TagFilterState.NONE,
                     onClick = { onCycle(ref) },
-                    label = { Text("${state.shortLabel()}${node.name} (${node.count})") },
+                    label = { Text("${node.name} (${node.count})") },
                 )
             }
             if (node is TagGroupNode && expandedGroups[node.id] == true) {
@@ -1908,7 +2028,7 @@ private fun TagManagementChildren(
             )
             if (addAllOpen && node is TagLeafNode) AddAllTagsDialog(
                 source = node.tag,
-                targets = hierarchy.tags.map { it.tag }.filter { it.id != node.id },
+                hierarchy = hierarchy,
                 onDismiss = { addAllOpen = false },
                 onAddAll = { onAddAll(node.tag, it); addAllOpen = false },
             )
@@ -2019,25 +2139,68 @@ fun TagFilterState.shortLabel(): String = when (this) {
 }
 
 @Composable
-fun AddAllTagsDialog(source: TagEntity, targets: List<TagEntity>, onDismiss: () -> Unit, onAddAll: (TagEntity) -> Unit) {
-    AlertDialog(
+fun AddAllTagsDialog(source: TagEntity, hierarchy: TagHierarchy, onDismiss: () -> Unit, onAddAll: (TagEntity) -> Unit) {
+    val expandedGroups = remember { mutableStateMapOf<Long, Boolean>() }
+    val selectableHierarchy = remember(hierarchy.structuralRevision, source.id) {
+        hierarchy.copy(tags = hierarchy.tags.filter { it.tag.id != source.id })
+    }
+    val tagsById = remember(selectableHierarchy.structuralRevision) {
+        selectableHierarchy.tags.associateBy { it.tag.id }
+    }
+    Dialog(
         onDismissRequest = onDismiss,
-        title = { Text("タグ内容を別タグへ追加") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("「${source.name}」の全ツイートに追加するタグを選びます。元のタグは残ります。")
-                targets.forEach { target ->
-                    AssistChip(
-                        onClick = { onAddAll(target) },
-                        modifier = Modifier.testTag("add_all_target_tag_${target.id}"),
-                        label = { Text(target.name) },
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .fillMaxHeight(0.82f)
+                .testTag("add_all_dialog"),
+            shape = RoundedCornerShape(20.dp),
+            tonalElevation = 6.dp,
+        ) {
+            Column(Modifier.fillMaxSize().padding(16.dp)) {
+                Text("タグ内容を別タグへ追加", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "「${source.name}」の全ツイートに追加するタグを選びます。元のタグは残ります。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 8.dp),
+                )
+                Divider()
+                if (selectableHierarchy.tags.isEmpty()) {
+                    Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                        Text(
+                            "追加先にできるタグがありません",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    SelectableTagTree(
+                        hierarchy = selectableHierarchy,
+                        expandedGroups = expandedGroups,
+                        groupSelectable = false,
+                        isSelected = { false },
+                        stateLabel = { "" },
+                        selectedColors = { tagFilterColors(TagFilterState.NONE) },
+                        onTagClick = { ref -> tagsById[ref.id]?.tag?.let(onAddAll) },
+                        onGroupClick = {},
+                        modifier = Modifier.weight(1f),
+                        treeTestTag = "add_all_tree_list",
+                        rowTestTag = { ref -> "add_all_tree_row_${ref.type.name.lowercase()}_${ref.id}" },
+                        groupExpandTestTag = { id -> "add_all_expand_group_$id" },
+                        conditionTestTag = { ref ->
+                            if (ref.type == TagNodeType.TAG) "add_all_target_tag_${ref.id}" else "add_all_group_${ref.id}"
+                        },
                     )
                 }
+                Divider()
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss, modifier = Modifier.testTag("add_all_cancel")) { Text("閉じる") }
+                }
             }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("add_all_cancel")) { Text("閉じる") } },
-    )
+        }
+    }
 }
 
 @Composable

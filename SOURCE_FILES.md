@@ -7,6 +7,9 @@ MainActivity / Compose UI
   -> MainViewModel
     -> ClipRepository
       -> Room DAO -> SQLite
+      -> UndoCoordinator -> single durable undo_slot
+      -> DurableClipDeleteUndoStore -> staged image bytes
+      -> HeavyLocalWorkTracker -> shared local-work progress
       -> XOAuthManager -> AppAuth / X OAuth 2.0
       -> XApiClient -> X API v2
       -> ApiSettingsStore -> EncryptedSharedPreferences
@@ -21,14 +24,16 @@ MainActivity / Compose UI
 ### UI
 
 - ダークテーマ
-- 未分類リスト: グループを展開し、配下のタグを保留選択して分類済みにする
-- 分類済みリスト: 一致件数と文章形式の条件サブバー、適用/キャンセル付き全画面絞り込みDialog、タグのみトグル付きの全ツイート検索、投稿日・本文・概要・投稿者・ユーザー・タグ／グループの「含む」「必須」「排除」複合絞り込み、タグ再割り当て
-- タグリスト: 無制限階層のグループ／タグ追加、名称変更、移動、長押し並び替え、削除、別タグへの一括追加
-- X風の投稿本文、投稿者、画像表示
+- 未分類リスト: 初回DB emissionまでProgressを表示し、グループを展開して配下タグをカード内draftとして選択し、`適用`で一括確定する
+- 分類済みリスト: 一致件数と文章形式の条件サブバー、適用中だけ背景highlightするfilter/sortボタン、背景highlightを持たない表示切替、適用/キャンセル付き全画面絞り込みDialog、タグのみトグル付きの全ツイート検索、投稿日・本文・概要・投稿者・ユーザー・タグ／グループの「含む」「必須」「排除」複合絞り込み、タグ再割り当て
+- タグリスト: 無制限階層の縦guide付きcompact rowで、グループ／タグ追加、名称変更、移動、長押し並び替え、削除、Tree popupから別タグへの一括追加
+- X風の投稿本文、クリック可能な投稿者、保存済み投稿数、いいね数（詳細popup付き）、カード幅・画像比率に応じた高さ上限、画像previewを表示
 - 投稿カード内の保存済みPhotoをタップすると、黒背景の全画面画像ビューアで表示し、複数Photoは左右スワイプで切り替え
 - 投稿カード上では投稿URLを文字列として表示せず、メディア付き投稿の本文末尾t.coもUI上だけ省略する。本文中URLと「Xで開く」機能は維持
 - 未分類、分類済み、タグ管理でスクロールバー、スクロール位置維持、一番上へ移動ボタンを表示
-- Xで開く、ローカル削除
+- Xで開く、hard DELETEと画像stagingによる永続Undo対応のローカル削除
+- 編集後は画面下部に共通Undo通知を表示し、5秒timeout、横/下Swipe確定、キャンセルによる逆操作を扱う
+- 同期と重いローカルDB/ファイル処理のどちらかがactiveな間はTop barに共通Progressを表示
 - 右上設定アイコンから全画面の設定画面を開き、同期、いいね数更新、API使用量、X API設定、投稿データ保存先をまとめて表示
 
 ### X連携
@@ -47,7 +52,7 @@ MainActivity / Compose UI
 ### 保存と同期
 
 - Roomで投稿、画像情報、タググループ、タグ、投稿タグ関連、同期状態を保存
-- DB version 7でタグ階層、いいね数、同期継続token、月別API使用量履歴、OCR文字列を保持し、version 1→2、2→3、3→4、4→5、5→6、6→7を非破壊移行
+- DB version 9でタグ階層、いいね数、同期継続token、月別API使用量履歴、OCR文字列、単一永続Undo slotを保持する。version 7→8で `isDeleted` を廃止し、8→9で `undo_slot` を追加するほか、1→2から6→7までの非破壊移行も維持
 - Client IDとOAuth tokenは暗号化SharedPreferencesへ保存
 - Room DBと画像は内部ストレージまたはSDカードのアプリ専用領域へまとめて保存
 - 保存先変更時はコピー、容量・件数・DB整合性検証、切り替え、旧データ削除を行う
@@ -64,7 +69,11 @@ MainActivity / Compose UI
 | 変更したいこと | 最初に読む文書 | 次に確認する文書 |
 | --- | --- | --- |
 | 画面、操作、検索、タグUI | `docs/app/src/main/java/com/lyco256/llm/MainActivity.kt.md` | `docs/app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt.md`, `ClipRepository.kt.md`, `Entities.kt.md` |
+| 共通Undo通知、5秒timeout、Swipe dismiss | `docs/app/src/main/java/com/lyco256/llm/UndoNotificationUi.kt.md` | `MainActivity.kt.md`, `data/UndoCoordinator.kt.md` |
+| Undo payloadの種類、schema version、厳密decode | `docs/app/src/main/java/com/lyco256/llm/data/UndoPayloadCodec.kt.md` | `UndoCoordinator.kt.md`, `Entities.kt.md` |
 | 同期ロジック、月間制限、画像保存 | `docs/app/src/main/java/com/lyco256/llm/data/ClipRepository.kt.md` | `XApiClient.kt.md`, `Daos.kt.md`, `Entities.kt.md` |
+| 重いローカルDB・ファイル処理のactive追跡 | `docs/app/src/main/java/com/lyco256/llm/data/HeavyLocalWorkTracker.kt.md` | `ClipRepository.kt.md` |
+| 投稿削除の永続Undo、画像staging・復元・cleanup | `docs/app/src/main/java/com/lyco256/llm/data/DurableClipDeleteUndoStore.kt.md` | `ClipRepository.kt.md`, `UndoCoordinator.kt.md`, `Daos.kt.md` |
 | 新規local assetの永続JPEG preview生成 | `docs/app/src/main/java/com/lyco256/llm/data/MediaGridPersistentPreviewStore.kt.md` | `MediaGridPreviewWork.kt.md`, `MediaGridPreviewWorker.kt.md`, `ClipRepository.kt.md` |
 | 投稿DB・画像の保存先、SDカード移動 | `docs/app/src/main/java/com/lyco256/llm/data/PostStorageManager.kt.md` | `AppContainer.kt.md`, `ClipRepository.kt.md`, `MainActivity.kt.md` |
 | X APIのendpointやresponse | `docs/app/src/main/java/com/lyco256/llm/data/XApiClient.kt.md` | `ClipRepository.kt.md`, `Entities.kt.md` |
@@ -100,6 +109,7 @@ MainActivity / Compose UI
 
 - `docs/app/src/main/java/com/lyco256/llm/LikeListManagerApp.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/MainActivity.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/UndoNotificationUi.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/SettingsScreen.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/OcrUi.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt.md`
@@ -122,6 +132,10 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/data/XOAuthManager.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/XApiClient.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/ClipRepository.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/UndoCoordinator.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/UndoPayloadCodec.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/DurableClipDeleteUndoStore.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/HeavyLocalWorkTracker.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/MediaGridPersistentPreviewStore.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/MediaGridPreviewWork.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/MediaGridPreviewWorker.kt.md`
@@ -130,7 +144,19 @@ MainActivity / Compose UI
 
 ### Tests
 
+- `docs/app/src/test/java/com/lyco256/llm/AuthorSavedCountTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/ClipTagDraftStateTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/InitialClipListStateTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/SingleCardMediaPresentationTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/AuthorSavedCountUiTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/CrossFeatureRegressionUiTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/TweetLikeDisplayUiTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/UndoNotificationUiTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/TagHierarchyTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/TagManagementCompactRowContractTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/TagTreeGuideTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/TagTreeGuideContractTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/TagManagementCompactRowUiTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/MediaGridMorphTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/MediaGridMorphHandoffTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/MediaGridRenderingContractTest.kt.md`
@@ -146,6 +172,10 @@ MainActivity / Compose UI
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/PostStorageManagerRecoveryTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/OcrTextRecognizerTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/MediaGridPersistentPreviewStoreTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/data/HeavyLocalWorkTrackerTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/data/UndoPayloadCodecTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/UndoDaoIntegrationTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/UndoCoordinatorIntegrationTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/MediaGridSessionCoordinatorTest.kt.md`
 
 ### Macrobenchmark
@@ -177,8 +207,8 @@ MainActivity / Compose UI
 - 任意フォルダへの保存とアンインストール後の投稿データ保持は未実装
 - タグ色変更は12色パレットで実装済み
 - 動画/GIF本体は保存しない
-- DBはversion 7で、version 1→2・2→3・3→4・4→5・5→6・6→7のmigrationを実装済み
-- 階層・複合絞り込み・制約・件数表示の単体テストと、version 1→2・2→3・3→4・4→5・5→6・6→7のmigration testを実装済み
+- DBはversion 9で、version 1→2から8→9までのmigrationを実装済み
+- 階層・複合絞り込み・制約・件数表示の単体テストと、version 1→2から8→9までのmigration testを実装済み
 - 実際のXログインとliked posts同期はユーザーのClient IDとXアカウントで実機確認が必要
 
 ## 関連文書
@@ -191,5 +221,5 @@ MainActivity / Compose UI
 
 # メディアグリッド高速化の入口
 
-`MediaGridMetadata.kt`が軽量スナップショットの絞り込み・正規化済みcache key・実効sortだけの準備・標準安定ソート・Asset展開・最大3件LRUキャッシュを担当する。Repositoryのsourceはactive Clip/Asset/ClipTagの3 Flowだけで、タグIDの`LongArray`と前計算済み投稿者キーを保持する。保存順ではsortを省略し、cache hitでは`Calculating`を表示しない。
+`MediaGridMetadata.kt`が軽量スナップショットの絞り込み・正規化済みcache key・実効sortだけの準備・標準安定ソート・Asset展開・最大3件LRUキャッシュを担当する。Repositoryのsourceは現存Clip/Asset/ClipTagの3 Flowだけで、タグIDの`LongArray`と前計算済み投稿者キーを保持する。保存順ではsortを省略し、cache hitでは`Calculating`を表示しない。
 - `docs/app/src/test/java/com/lyco256/llm/data/TagColorPaletteTest.kt.md`

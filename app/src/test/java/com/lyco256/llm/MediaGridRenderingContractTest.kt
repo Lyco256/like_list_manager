@@ -42,7 +42,7 @@ class MediaGridRenderingContractTest {
         val source = locateSource("src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt").readText()
         assertEquals(1, Regex("LocalOverscrollConfiguration\\s+provides\\s+null").findAll(source).count())
         assertEquals(3, Regex("zIndex\\(ClassifiedMediaGridToolbarZIndex\\)").findAll(source).count())
-        val filterToolbar = source.substringAfter("private fun TagFilterSummaryRow").substringBefore("internal fun filterConditionSummary")
+        val filterToolbar = source.substringAfter("internal fun TagFilterSummaryRow").substringBefore("internal fun filterConditionSummary")
         val selectionToolbar = source.substringAfter("private fun MediaGridSelectionToolbar").substringBefore("internal enum class BulkTagAggregate")
         assertTrue(filterToolbar.contains("Row("))
         assertTrue(selectionToolbar.contains("Row("))
@@ -237,7 +237,7 @@ class MediaGridRenderingContractTest {
         assertTrue(uiSource.contains("mediaGridSingleSurface"))
         assertTrue(uiSource.contains("interactionEnabled = !morphCheckpointSuppressed"))
         assertTrue(uiSource.contains("metadataOverlaysVisible = !morphInteractionLocked"))
-        assertTrue(uiSource.contains("enabled = interactionEnabled && filters.hasActiveFilters"))
+        assertTrue(uiSource.contains("highlighted = filters.hasActiveFilters"))
         assertTrue(!uiSource.contains("mediaGridLegacyPinchToResize"))
         assertTrue(!uiSource.contains("mediaGridMorphRowReflowCanvas"))
     }

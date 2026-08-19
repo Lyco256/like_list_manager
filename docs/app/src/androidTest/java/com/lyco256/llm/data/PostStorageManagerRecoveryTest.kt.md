@@ -10,5 +10,6 @@
 - `switched` フェーズ後に切替先を開けない状態を再現し、元の内部保存先へ戻してmigration状態を消去すること
 - 起動直後の使用容量は未計算として `usedBytes = null` になり、refresh後にDBと画像だけを管理対象容量へ含めること
 - 内部SharedPreferencesなどのユーザーデータを追加しても、投稿データ保存先の使用容量が増えないこと
+- 保存先移動時にversion 9 DBの永続Undo slotがDB本体と一緒にコピーされること
 
 変更時は `scripts/run-safe-integration-check.cmd` で、同じ実機上の本番package metadataが前後不変であることも合わせて確認します。

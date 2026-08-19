@@ -1,5 +1,29 @@
 # `ClipRepository.kt`
 
+## 2026-08 heavy local work tracker
+
+`heavyLocalWorkActive` は共通 `HeavyLocalWorkTracker` の参照カウントを `StateFlow<Boolean>` で公開します。同期取得後のclip/asset DB保存、画像decode・WebP圧縮・raw publish、like count取得後のまとまったDB保存、複数clipの一括タグ更新、大量relationを持つタグ削除/Undo、投稿削除の画像stagingとUndo復元だけがtracker対象です。
+
+同期mediaはHTTP responseをbytesへ読む区間をtracker外に分離し、decode/圧縮/保存とDB更新だけをactiveにします。X API待機、MediaGridのpreload・preview・morphなど表示用background処理、単一clipの軽量tag更新、専用Progressを使う保存先移動はtracker対象外です。
+
+## 2026-08 tag/group move and reorder Undo invalidation
+
+`moveNode` / `moveNodeToParentAt` / `moveNodeToParentAtSlot` / `reorderSiblings` は、ユーザーの移動・並べ替えをDBで検証する前に直前の共通Undo slotをinvalidateします。移動や並べ替えが失敗しても旧slotは復活せず、成功時もこれらの操作用の新しいUndo slotは作りません。このinvalidateは移動・並べ替えAPIだけに限定し、X同期、likeCount、API使用量などの内部更新には適用しません。
+
+## 2026-08 clip deletion durable Undo
+
+`moveClipToTrash` は旧Undoを先に確定し、削除対象の最新 `ClipEntity`、全 `AssetEntity`、全 `ClipTagEntity` をsnapshotします。実在する管理画像を永続stagingへコピーしてsizeとSHA-256を検証できた場合だけ、snapshot payloadの保存とclipのhard DELETEを同じRoom transactionで確定します。CASCADEによりasset/relationは一覧Flowから即時に消えます。コピーまたはtransactionが失敗した場合はDBと元画像を残します。
+
+削除確定後の元画像は、staging済みのcanonical path・size・digestと現在も一致する場合だけ破棄します。Undoは現在選択中の画像保存先へ検証済みbytesを復元し、同名の無関係ファイルを上書きせず、実際の復元pathを `AssetEntity.localPath` に設定します。同じIDでclip/assetsと元の`createdAt`を持つrelationsを1 transactionで復元し、成功後だけslotとstagingを消してpersistent previewの通常生成を再予約します。失敗時はDB transactionをrollbackし、slotとstagingを再試行用に保持します。slotのdismiss/overwriteでは記録されたstagingだけをbest effort cleanupします。
+
+## 2026-08 OCR Undo
+
+`updateOcrText` は操作開始時に以前の共通Undoを確定し、DB上の最新 `ocrText` と要求値を比較します。文字列が変わる場合だけ、新しい更新時刻とOCR文字列の保存、および変更前の `ocrText` / `ocrUpdatedAt` を持つ `OcrEditedUndoPayload` の保存を同じRoom transactionで確定します。同一文字列ではtimestampを更新せず、新しいUndo slotも作りません。Undo handlerはOCRの2列だけを元へ戻すため、保存前後に更新された `likeCount`、summary、本文、Asset、タグrelationは巻き戻しません。OCR認識処理はDBを変更せず、Undo slotも作りません。
+
+## 2026-08 summary Undo
+
+`updateSummary` は操作開始時に以前の共通Undoを確定し、DB上の最新summaryと新しい値を比較します。値が変わる場合だけ、変更前summaryを持つ `SummaryEditedUndoPayload` の保存とsummary専用UPDATEを同じRoom transactionで確定します。同値の場合や更新失敗時には新しいUndo slotを作りません。Undo handlerもsummary列だけを変更前へ戻すため、保存前後に更新された `likeCount`、OCR、本文、Asset、タグrelationは巻き戻しません。
+
 ## 第14実装
 
 新規画像を1件ずつ処理し、source Bitmapからraw payloadを作ってからWebP品質85を保存し、単一Asset insertでIDを確定してraw slotのpublish・CRC再読込確認まで待ちます。asset ID未確定のpayloadは常に最大1枚分です。
@@ -14,7 +38,29 @@ clip削除ではDB削除成功後に、共有公開ロック下でasset ID由来
 
 ## 2026-07-10 bulk tag transaction
 
-`applyClipTagChanges` applies `pendingAddTagIds` and `pendingRemoveTagIds` to all selected clip IDs through a single Room transaction. It is called only when the media-grid bulk editor is applied.
+`applyClipTagChanges` applies `pendingAddTagIds` and `pendingRemoveTagIds` to all selected clip IDs through a single Room transaction. It is called only when the media-grid bulk editor is applied. 実際に追加・削除されたrelationだけを一括操作全体で1つの共通Undo slotへ保存し、Undoでは追加分だけを削除して削除分を元の`createdAt`で復元します。既存relationや選択外clipには触れず、実差分が0件ならslotを作りません。
+
+`addAllFromTagToTag` はsource tagのrelationを一括取得し、target tagが未付与のclipだけへrelationを追加します。新規relationとその`createdAt`だけを共通Undo slotへ保存するため、Undo後もsource relationと操作前から存在したtarget relationは元の`createdAt`のまま残ります。実差分が0件なら新しいslotは作りません。
+
+## 2026-08 single-clip tag Undo
+
+`setClipTags` invalidates the previous common Undo slot, reads the clip's current relations, applies only the added/removed relation diff, and stores that same diff in the new slot within one Room transaction. Undo deletes only relations added by that edit and restores removed relations with their original `createdAt`; unrelated clip fields and other clips are not restored from snapshots.
+
+## 2026-08 tag/group creation Undo
+
+`createTag` / `createGroup` は旧共通Undo slotを先に破棄し、node挿入と確定IDを持つ作成Undo payloadの保存を1つのRoom transactionで行います。戻り値はDBへ保存された確定ID入りEntityです。Undoはpayloadに記録したタグまたはグループのIDだけを削除し、親group、兄弟順、同名nodeを含む既存nodeは変更しません。作成失敗時は新しいslotを残しません。
+
+## 2026-08 tag/group edit Undo
+
+`renameTag` / `renameGroup` はDB上の最新nodeと要求値を比較し、実際に変わる `name` / `colorId` の変更前値だけを共通Undo payloadへ保存します。名前だけ、色だけ、同時変更はいずれも1操作・1slotです。Undoはpayloadに含まれるfieldだけをDAOのfield更新queryで戻すため、その後に変わった `parentGroupId`、`sortOrder`、payload対象外fieldを上書きしません。無変更または更新失敗では新しいslotを残しません。
+
+## 2026-08 tag deletion Undo
+
+`deleteTag` は旧共通Undo slotを先に破棄し、削除前の `TagEntity` 全fieldとそのタグの全 `ClipTagEntity` を取得して、payload保存とタグDELETEを同じRoom transactionで確定します。Undoは同じタグIDを新規挿入してrelationを元の `createdAt` のまま復元します。同じIDの別タグが存在する場合や、削除済みclipなどにより全relationを復元できない場合はtransaction全体をrollbackし、Undo slotを保持します。他タグ、他relation、clip本体は変更しません。
+
+## 2026-08 empty group deletion Undo
+
+`deleteGroup` は旧共通Undo slotを先に破棄し、子groupとtagを持たないことを確認した上で、削除前の `TagGroupEntity` 全fieldをpayloadへ保存し、group DELETEとslot保存を同じRoom transactionで確定します。Undoは同じID、親、`sortOrder`、名称、色、timestampsでgroupだけを再挿入し、親やsiblingを更新しません。同じIDのgroupが既に存在する場合や親groupが消失した場合は復元せず、Undo slotを保持します。
 
 ## 対応ソース
 
@@ -98,17 +144,17 @@ clip削除ではDB削除成功後に、共有公開ロック下でasset ID由来
 ## 2026-07 media grid lightweight flow
 
 - `mediaGridSource` is a repository Flow that does not depend on `clipsWithDetails` or `observeTags()`.
-- It combines only active clips, lightweight asset rows, and lightweight clip-tag rows. The source stores tag IDs and one precomputed `TweetAuthorKey`; it never stores or copies `TagEntity` lists.
+- It combines current clips, lightweight asset rows, and lightweight clip-tag rows. The source stores tag IDs and one precomputed `TweetAuthorKey`; it never stores or copies `TagEntity` lists.
 - Clips with matching filters but no media are still preserved in the source so the UI can show the existing media-free empty state.
 - The lightweight flow keeps the card path separate, and card rendering still uses `clipsWithDetails`.
 
 ## 2026-07 media-grid tweet dialog
 
-- `observeClipWithDetails(clipId)` combines only the selected active clip, its assets, and its tags.
+- `observeClipWithDetails(clipId)` combines only the selected current clip, its assets, and its tags.
 - The Flow emits `null` for a missing or deleted clip and stops when the ViewModel clears the selected clip ID.
 - Updates to the selected clip, its assets, or its tag relations re-emit the `ClipWithDetails` used by the open dialog.
 # メディアグリッド高速化追補
 
-Repositoryはactive Clip、対象Asset、active ClipTagから軽量スナップショットを構築する。ClipごとのタグIDは`LongArray`で保持し、タグEntityの複製とメディア専用タグ経路の二重購読を行わない。
+Repositoryは現存Clip、対象Asset、ClipTagから軽量スナップショットを構築する。ClipごとのタグIDは`LongArray`で保持し、タグEntityの複製とメディア専用タグ経路の二重購読を行わない。
 
 ClipTag行はClipごとの可変バッファへ集約してから一度だけ`LongArray`へ変換する。投稿者キー、投稿日、local day、メディア件数もsource生成時に前計算するため、タグ名・色だけの変更ではsource revisionを進めず、ClipTag変更では更新する。

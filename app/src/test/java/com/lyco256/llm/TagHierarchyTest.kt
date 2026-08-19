@@ -38,6 +38,76 @@ class TagHierarchyTest {
     private val parent = TagGroupEntity(1, "開発", null, 0, now, now)
     private val child = TagGroupEntity(2, "Android", 1, 0, now, now)
     private val kotlin = TagEntity(10, "Kotlin", parentGroupId = 2, createdAt = now, updatedAt = now)
+
+    @Test
+    fun filterStateColorsUseOneGreenRedGrayMappingWithNoSelectionForNone() {
+        assertEquals(TagFilterColors(Color.Transparent, Color.Unspecified), tagFilterColors(TagFilterState.NONE))
+        assertEquals(TagFilterColors(Color(0xFF2E7D32), Color.White), tagFilterColors(TagFilterState.INCLUDED))
+        assertEquals(TagFilterColors(Color(0xFFC62828), Color.White), tagFilterColors(TagFilterState.REQUIRED))
+        assertEquals(TagFilterColors(Color(0xFF616161), Color.White), tagFilterColors(TagFilterState.EXCLUDED))
+    }
+
+    @Test
+    fun filterTreeFlatteningKeepsDepthOrderAndDuplicateNamesDistinct() {
+        val third = TagGroupEntity(3, "同名", 2, 0, now, now)
+        val deepTag = TagEntity(11, "同名", parentGroupId = 3, createdAt = now, updatedAt = now)
+        val rootTag = TagEntity(12, "同名", parentGroupId = null, sortOrder = 1, createdAt = now, updatedAt = now)
+        val hierarchy = TagHierarchy(
+            groups = listOf(parent, child, third),
+            tags = listOf(TagWithCount(deepTag, 2), TagWithCount(rootTag, 4)),
+        )
+
+        val collapsed = hierarchy.visibleRows(emptySet())
+        assertEquals(listOf(parent.id, rootTag.id), collapsed.map { it.node.id })
+        assertEquals(listOf(0, 0), collapsed.map { it.depth })
+
+        val expanded = hierarchy.visibleRows(setOf(parent.id, child.id, third.id))
+        assertEquals(listOf(parent.id, child.id, third.id, deepTag.id, rootTag.id), expanded.map { it.node.id })
+        assertEquals(listOf(0, 1, 2, 3, 0), expanded.map { it.depth })
+        assertEquals(
+            listOf(
+                TagNodeRef(TagNodeType.GROUP, third.id),
+                TagNodeRef(TagNodeType.TAG, deepTag.id),
+                TagNodeRef(TagNodeType.TAG, rootTag.id),
+            ),
+            expanded.takeLast(3).map { it.node.ref() },
+        )
+    }
+
+    @Test
+    fun filterTagAndGroupStateCyclesIncludeNoneInTheSpecifiedOrder() {
+        val tag = TagNodeRef(TagNodeType.TAG, 10)
+        val group = TagNodeRef(TagNodeType.GROUP, 1)
+
+        assertEquals(TagFilterState.INCLUDED, nextFilterTagState(tag, TagFilterState.NONE))
+        assertEquals(TagFilterState.REQUIRED, nextFilterTagState(tag, TagFilterState.INCLUDED))
+        assertEquals(TagFilterState.EXCLUDED, nextFilterTagState(tag, TagFilterState.REQUIRED))
+        assertEquals(TagFilterState.NONE, nextFilterTagState(tag, TagFilterState.EXCLUDED))
+
+        assertEquals(TagFilterState.INCLUDED, nextFilterTagState(group, TagFilterState.NONE))
+        assertEquals(TagFilterState.EXCLUDED, nextFilterTagState(group, TagFilterState.INCLUDED))
+        assertEquals(TagFilterState.NONE, nextFilterTagState(group, TagFilterState.EXCLUDED))
+    }
+
+    @Test
+    fun selectedFilterConditionsCycleWithoutNoneAndUseBreadcrumbs() {
+        val tag = TagNodeRef(TagNodeType.TAG, kotlin.id)
+        val group = TagNodeRef(TagNodeType.GROUP, child.id)
+
+        assertEquals(TagFilterState.REQUIRED, nextSelectedFilterTagState(tag, TagFilterState.INCLUDED))
+        assertEquals(TagFilterState.EXCLUDED, nextSelectedFilterTagState(tag, TagFilterState.REQUIRED))
+        assertEquals(TagFilterState.INCLUDED, nextSelectedFilterTagState(tag, TagFilterState.EXCLUDED))
+        assertEquals(TagFilterState.EXCLUDED, nextSelectedFilterTagState(group, TagFilterState.INCLUDED))
+        assertEquals(TagFilterState.INCLUDED, nextSelectedFilterTagState(group, TagFilterState.EXCLUDED))
+
+        val duplicate = TagEntity(11, "Kotlin", parentGroupId = null, createdAt = now, updatedAt = now)
+        val hierarchy = TagHierarchy(
+            groups = listOf(parent, child),
+            tags = listOf(TagWithCount(kotlin, 0), TagWithCount(duplicate, 0)),
+        )
+        assertEquals("開発 / Android / Kotlin", hierarchy.filterConditionPath(tag))
+        assertEquals("Kotlin", hierarchy.filterConditionPath(TagNodeRef(TagNodeType.TAG, duplicate.id)))
+    }
     private val compose = TagEntity(11, "Compose", parentGroupId = 2, createdAt = now, updatedAt = now)
     private val design = TagEntity(12, "Design", createdAt = now, updatedAt = now)
 
@@ -62,6 +132,33 @@ class TagHierarchyTest {
         assertEquals("3,643", formatLikeCount(3_643))
         assertEquals("1.9万", formatLikeCount(19_999))
         assertEquals("10万", formatLikeCount(100_000))
+    }
+
+    @Test
+    fun trailingMediaUrlsAreRemovedOnlyAtAValidBoundaryForClipsWithAssets() {
+        assertEquals("", "https://t.co/abc".withoutTrailingMediaUrl(hasAssets = true))
+        assertEquals("本文", "本文 https://t.co/abc".withoutTrailingMediaUrl(hasAssets = true))
+        assertEquals(
+            "本文",
+            "本文 https://t.co/a https://t.co/b".withoutTrailingMediaUrl(hasAssets = true),
+        )
+
+        assertEquals(
+            "https://t.co/abc",
+            "https://t.co/abc".withoutTrailingMediaUrl(hasAssets = false),
+        )
+        assertEquals(
+            "https://t.co/abc 本文",
+            "https://t.co/abc 本文".withoutTrailingMediaUrl(hasAssets = true),
+        )
+        assertEquals(
+            "本文 https://example.com/path 続き",
+            "本文 https://example.com/path 続き".withoutTrailingMediaUrl(hasAssets = true),
+        )
+        assertEquals(
+            "本文https://t.co/abc",
+            "本文https://t.co/abc".withoutTrailingMediaUrl(hasAssets = true),
+        )
     }
 
     @Test

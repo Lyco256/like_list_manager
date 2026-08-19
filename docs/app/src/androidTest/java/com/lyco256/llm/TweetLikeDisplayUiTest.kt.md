@@ -1,0 +1,3 @@
+# `TweetLikeDisplayUiTest.kt`
+
+未分類カード、分類済みカード、MediaGridツイートpreviewで、ツイート自身のいいね数が投稿者保存件数の右隣にheart付きで表示されることを検証します。既存の万単位format、null時の完全な非表示、詳細popupと一時値warningの継続も対象です。
