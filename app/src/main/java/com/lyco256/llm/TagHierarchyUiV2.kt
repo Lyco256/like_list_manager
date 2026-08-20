@@ -537,13 +537,15 @@ internal fun EnhancedClassifiedScreen(
     var pendingPinchAnchor by remember { mutableStateOf<ClassifiedMediaGridScrollAnchor?>(null) }
     var pinchCompletionGeneration by remember { mutableStateOf(0) }
     var morphCheckpointSuppressed by remember(mediaGridSessionState.sessionKey) { mutableStateOf(false) }
+    var mediaGridScrollbarDragging by remember(mediaGridSessionState.sessionKey) { mutableStateOf(false) }
     val latestSessionKey by rememberUpdatedState(mediaGridSessionState.sessionKey)
     val latestFrame by rememberUpdatedState(mediaGridSessionState.frame)
     val latestCheckpoint by rememberUpdatedState(onMediaGridAnchorCheckpoint)
     var sessionRestoreCheckpointSuppressed by remember(mediaGridSessionState.sessionKey) { mutableStateOf(false) }
     var legacyPinchCheckpointSuppressed by remember(mediaGridSessionState.sessionKey) { mutableStateOf(false) }
     val suppressScrollCheckpoint =
-        sessionRestoreCheckpointSuppressed || legacyPinchCheckpointSuppressed || morphCheckpointSuppressed
+        sessionRestoreCheckpointSuppressed || legacyPinchCheckpointSuppressed || morphCheckpointSuppressed ||
+            mediaGridScrollbarDragging
     val latestSuppressScrollCheckpoint by rememberUpdatedState(suppressScrollCheckpoint)
     val lifecycleOwner = LocalContext.current as? LifecycleOwner
     if (displayMode == ClassifiedDisplayMode.MediaGrid && lifecycleOwner != null) {
@@ -738,6 +740,10 @@ internal fun EnhancedClassifiedScreen(
                     showProgress = mediaGridSessionState.showInitialProgress,
                     onMediaGridAnchorCheckpoint = onMediaGridAnchorCheckpoint,
                     onMorphCheckpointSuppressed = { morphCheckpointSuppressed = it },
+                    sessionKey = mediaGridSessionState.sessionKey,
+                    onMediaGridScrollbarDragStateChanged = { snapshot ->
+                        mediaGridScrollbarDragging = snapshot.isDragging
+                    },
                     suppressPositionPill = sessionRestoreCheckpointSuppressed ||
                         legacyPinchCheckpointSuppressed ||
                         mediaGridSessionState.sessionKey != previousMediaGridSessionKey,
@@ -4287,6 +4293,8 @@ private fun ClassifiedMediaGridContent(
     showProgress: Boolean,
     onMediaGridAnchorCheckpoint: (MediaGridSessionKey, ClassifiedMediaGridScrollAnchor) -> Unit,
     onMorphCheckpointSuppressed: (Boolean) -> Unit,
+    sessionKey: MediaGridSessionKey?,
+    onMediaGridScrollbarDragStateChanged: (MediaGridScrollbarDragSnapshot) -> Unit,
     suppressPositionPill: Boolean,
     onMediaGridColumnCountChange: (Int) -> Unit,
     onPinchFinished: (ClassifiedMediaGridScrollAnchor?, Int) -> Unit,
@@ -4331,6 +4339,24 @@ private fun ClassifiedMediaGridContent(
     } else null
     val viewportAnchorFlow = remember(state, frame.key, columnCount) {
         MutableStateFlow<MediaGridViewportAnchorSignature?>(null)
+    }
+    val viewportAnchor by viewportAnchorFlow.collectAsState(initial = null)
+    val scrollbarState = rememberMediaGridScrollbarState()
+    val scrollbarDragInProgress = remember(state) { MutableStateFlow(false) }
+    LaunchedEffect(scrollbarState, sessionKey, frame.key) {
+        var previousDragFrameKey: MediaGridRenderKey? = null
+        snapshotFlow { scrollbarState.dragSnapshot }
+            .distinctUntilChanged()
+            .collect { snapshot ->
+                onMediaGridScrollbarDragStateChanged(snapshot)
+                scrollbarDragInProgress.value = snapshot.isDragging
+                if (!snapshot.isDragging && previousDragFrameKey == frame.key && sessionKey != null) {
+                    withFrameNanos { }
+                    captureClassifiedMediaGridScrollAnchor(state, frame.assetIdByItemKey)
+                        ?.let { onMediaGridAnchorCheckpoint(sessionKey, it) }
+                }
+                if (snapshot.isDragging) previousDragFrameKey = snapshot.frameKey
+            }
     }
     DisposableEffect(previewPreloader) {
         onDispose { previewPreloader?.cancelAll() }
@@ -4454,7 +4480,9 @@ private fun ClassifiedMediaGridContent(
                 .distinctUntilChanged(),
         ) { pointerActive, interactionLocked -> pointerActive || interactionLocked }
             .distinctUntilChanged()
-        val suppressionFlow = snapshotFlow { suppressPositionPill }.distinctUntilChanged()
+        val suppressionFlow = snapshotFlow {
+            suppressPositionPill || scrollbarState.dragSnapshot.isDragging
+        }.distinctUntilChanged()
         var previousScrolling = false
         var previousMorphing = latestPositionPillMorphing
         combine(
@@ -4559,14 +4587,16 @@ private fun ClassifiedMediaGridContent(
         columnCount,
         morphPreparationCache,
         morphPointerInProgress,
+        scrollbarDragInProgress,
         morphEnabled,
     ) {
         combine(
             viewportAnchorFlow,
             snapshotFlow { state.isScrollInProgress }.distinctUntilChanged(),
             morphPointerInProgress,
+            scrollbarDragInProgress,
             morphPreparationCache.invalidationVersion,
-        ) { signature, isScrollInProgress, pointerInProgress, invalidationVersion ->
+        ) { signature, isScrollInProgress, pointerInProgress, isScrollbarDragging, invalidationVersion ->
             signature
                 ?.takeIf {
                     it.firstVisibleMediaOrdinal >= 0 &&
@@ -4574,14 +4604,14 @@ private fun ClassifiedMediaGridContent(
                         it.viewportWidthPx > 0 &&
                         it.viewportHeightPx > 0
                 }
-                ?.takeUnless { isScrollInProgress || pointerInProgress || !morphEnabled }
+                ?.takeUnless { isScrollInProgress || pointerInProgress || isScrollbarDragging || !morphEnabled }
                 ?.let { it to invalidationVersion }
         }.distinctUntilChanged().collectLatest { trigger ->
             val signature = trigger?.first ?: return@collectLatest
             // Require a short quiet window before doing stable-idle work. A
             // pointer-down can precede LazyGrid's scroll flag by a frame.
             kotlinx.coroutines.delay(32L)
-            if (state.isScrollInProgress || morphPointerInProgress.value) return@collectLatest
+            if (state.isScrollInProgress || morphPointerInProgress.value || scrollbarDragInProgress.value) return@collectLatest
             val preparedIndexAtCapture = residentPreparedIndex ?: return@collectLatest
             val capture = captureMediaGridMorphInput(
                 frame = frame,
@@ -4630,7 +4660,8 @@ private fun ClassifiedMediaGridContent(
             if (
                 !morphPreparationCache.isCurrent(token) ||
                 state.isScrollInProgress ||
-                morphPointerInProgress.value
+                morphPointerInProgress.value ||
+                scrollbarDragInProgress.value
             ) {
                 return@collectLatest
             }
@@ -4908,6 +4939,18 @@ private fun ClassifiedMediaGridContent(
                 modifier = Modifier.align(Alignment.TopCenter),
             )
         }
+        MediaGridScrollbar(
+            frame = frame,
+            anchor = viewportAnchor,
+            state = state,
+            scrollbarState = scrollbarState,
+            enabled = !showProgress && !morphInteractionLocked && !morphPointerActive && !morphVisualActive,
+            onDragStateChanged = { snapshot ->
+                onMediaGridScrollbarDragStateChanged(snapshot)
+                scrollbarDragInProgress.value = snapshot.isDragging
+            },
+            modifier = Modifier.align(Alignment.CenterEnd),
+        )
         if (showProgress) {
             Box(
                 Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).testTag("classified_media_grid_progress"),

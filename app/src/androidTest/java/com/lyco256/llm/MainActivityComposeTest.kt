@@ -2965,6 +2965,104 @@ class MainActivityComposeTest {
         composeRule.onNodeWithText("タグなしのツイートはありません").assertIsDisplayed()
     }
 
+    @Test
+    fun mediaGridScrollbarJumpsToTheEndAndBackWithoutTakingTheWholeRightEdge() {
+        val mediaAssetIds = insertMediaGridClips(180, "scrollbar-ui")
+        mainViewModel().applyFilters(TweetFilterState(taggedOnly = false))
+        composeRule.onNodeWithTag("tab_classified").performClick()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("classified_display_toggle").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("classified_display_toggle").performClick()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("media_grid_scrollbar").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("media_grid_scrollbar").assertIsDisplayed()
+        composeRule.onNodeWithTag("media_grid_scrollbar_thumb").assertIsDisplayed()
+
+        val scrollbarBounds = composeRule.onNodeWithTag("media_grid_scrollbar")
+            .fetchSemanticsNode().boundsInRoot
+        val thumbBounds = composeRule.onNodeWithTag("media_grid_scrollbar_thumb")
+            .fetchSemanticsNode().boundsInRoot
+        composeRule.onNodeWithTag("media_grid_scrollbar").performTouchInput {
+            val localX = scrollbarBounds.width / 2f
+            val startY = thumbBounds.center.y - scrollbarBounds.top
+            down(androidx.compose.ui.geometry.Offset(localX, startY))
+            moveTo(androidx.compose.ui.geometry.Offset(localX, scrollbarBounds.height - 4f), 800)
+            up()
+        }
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("media_grid_item_${mediaAssetIds.first()}")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("media_grid_item_${mediaAssetIds.first()}").assertIsDisplayed()
+
+        val latestThumbBounds = composeRule.onNodeWithTag("media_grid_scrollbar_thumb")
+            .fetchSemanticsNode().boundsInRoot
+        composeRule.onNodeWithTag("media_grid_scrollbar").performTouchInput {
+            val localX = scrollbarBounds.width / 2f
+            val startY = latestThumbBounds.center.y - scrollbarBounds.top
+            down(androidx.compose.ui.geometry.Offset(localX, startY))
+            moveTo(androidx.compose.ui.geometry.Offset(localX, 4f), 800)
+            up()
+        }
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithTag("media_grid_item_${mediaAssetIds.last()}")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("media_grid_item_${mediaAssetIds.last()}").assertIsDisplayed()
+
+        mainViewModel().applySort(ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime))
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("media_grid_scrollbar").fetchSemanticsNodes().isNotEmpty()
+        }
+        mainViewModel().applySort(ClassifiedSortState(baseOrder = ClassifiedSortBase.LikeCount))
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("media_grid_scrollbar").fetchSemanticsNodes().isNotEmpty()
+        }
+        mainViewModel().applySort(ClassifiedSortState())
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("media_grid_scrollbar").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    private fun insertMediaGridClips(count: Int, prefix: String): List<Long> = runBlocking {
+        storage().withDatabase { database ->
+            val base = Instant.now()
+            val assetIds = ArrayList<Long>(count)
+            repeat(count) { index ->
+                val now = base.plusSeconds(index.toLong()).toString()
+                val clipId = database.clipDao().insertClip(
+                    ClipEntity(
+                        xPostId = "$prefix-post-$index",
+                        authorName = "$prefix author",
+                        authorUsername = "${prefix}_$index",
+                        text = "$prefix item $index",
+                        postUrl = "https://x.com/$prefix/$index",
+                        xCreatedAt = now,
+                        savedAt = now,
+                        syncedAt = now,
+                        likeCount = index.toLong(),
+                    ),
+                )
+                assetIds += database.clipDao().insertAssets(
+                    listOf(
+                        AssetEntity(
+                            clipId = clipId,
+                            mediaKey = "media-$prefix-$index",
+                            type = "photo",
+                            remoteUrl = null,
+                            previewUrl = null,
+                            downloadState = "failed",
+                            createdAt = now,
+                        ),
+                    ),
+                ).single()
+            }
+            assetIds
+        }
+    }
+
     private fun createRootTag(name: String): Long {
         val existingIds = runBlocking { storage().withDatabase { it.tagDao().getTags().map { tag -> tag.id }.toSet() } }
         composeRule.onNodeWithTag("create_root_tag").performClick()

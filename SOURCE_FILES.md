@@ -71,6 +71,7 @@ MainActivity / Compose UI
 | --- | --- | --- |
 | 画面、操作、検索、タグUI | `docs/app/src/main/java/com/lyco256/llm/MainActivity.kt.md` | `docs/app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt.md`, `ClipRepository.kt.md`, `Entities.kt.md` |
 | メディアグリッド現在位置ピル、表示区間ラベル | `docs/app/src/main/java/com/lyco256/llm/MediaGridScrollPosition.kt.md` | `TagHierarchyUiV2.kt.md`, `MediaGridMorph.kt.md`, `MediaGridScrollPositionTest.kt.md` |
+| メディアグリッド高速スクロールバー、thumb drag | `docs/app/src/main/java/com/lyco256/llm/MediaGridScrollbar.kt.md` | `TagHierarchyUiV2.kt.md`, `MediaGridScrollPosition.kt.md`, `MediaGridScrollbarTest.kt.md` |
 | 共通Undo通知、5秒timeout、Swipe dismiss | `docs/app/src/main/java/com/lyco256/llm/UndoNotificationUi.kt.md` | `MainActivity.kt.md`, `data/UndoCoordinator.kt.md` |
 | Undo payloadの種類、schema version、厳密decode | `docs/app/src/main/java/com/lyco256/llm/data/UndoPayloadCodec.kt.md` | `UndoCoordinator.kt.md`, `Entities.kt.md` |
 | 同期ロジック、月間制限、画像保存 | `docs/app/src/main/java/com/lyco256/llm/data/ClipRepository.kt.md` | `XApiClient.kt.md`, `Daos.kt.md`, `Entities.kt.md` |
@@ -122,6 +123,7 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/MediaGridMorphHandoff.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/MediaGridMorphLazyGridHandoffTestHost.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/MediaGridScrollPosition.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/MediaGridScrollbar.kt.md`
 - Classified tab card/grid switching is handled in `MainActivity.kt` and `TagHierarchyUiV2.kt`; the grid path is built from `ClassifiedMediaGridState` over the lightweight repository source, while the card path continues to use `uiState.classified`.
 - `MediaGridScrollPosition.kt` derives the current-position label from the existing viewport ordinal and `mediaGridMorphBucketSpec`; its generation-scoped pill state handles scroll start, 3-second idle retention, upward exit, stale-timer cancellation, frame changes, and Morph handoff reevaluation without touching image or repository work.
 
@@ -182,6 +184,7 @@ MainActivity / Compose UI
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/UndoCoordinatorIntegrationTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/MediaGridSessionCoordinatorTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/MediaGridScrollPositionTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/MediaGridScrollbarTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/MediaGridPositionPillUiTest.kt.md`
 
 ### Macrobenchmark
