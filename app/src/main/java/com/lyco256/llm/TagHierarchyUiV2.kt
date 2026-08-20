@@ -3784,6 +3784,7 @@ internal data class MediaGridOrdinalIndex(
 
 internal data class MediaGridHeaderBoundary(
     val bucketKey: String,
+    val label: String,
     val startMediaOrdinal: Int,
 )
 
@@ -4000,16 +4001,20 @@ internal fun buildMediaGridFrameData(
     val mediaOrdinalByAssetId = HashMap<Long, Int>(entries.size)
     val itemIndexByAssetId = HashMap<Long, Int>(entries.size)
     val headerBoundaries = ArrayList<MediaGridHeaderBoundary>()
-    var pendingHeaderKey: String? = null
+    var pendingHeader: MediaGridHeaderItem? = null
     var mediaCount = 0
     items.forEachIndexed { index, item ->
         itemByKey[item.key] = item
         when (item) {
-            is MediaGridHeaderItem -> pendingHeaderKey = item.safeKey
+            is MediaGridHeaderItem -> pendingHeader = item
             is MediaGridCellItem -> {
-                pendingHeaderKey?.let { bucketKey ->
-                    headerBoundaries += MediaGridHeaderBoundary(bucketKey, mediaCount)
-                    pendingHeaderKey = null
+                pendingHeader?.let { header ->
+                    headerBoundaries += MediaGridHeaderBoundary(
+                        bucketKey = header.safeKey,
+                        label = header.label,
+                        startMediaOrdinal = mediaCount,
+                    )
+                    pendingHeader = null
                 }
                 mediaIndices[mediaCount] = index
                 assetIds[mediaCount] = item.entry.assetId

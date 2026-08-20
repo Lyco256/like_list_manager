@@ -11,11 +11,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertCountEquals
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -95,9 +93,9 @@ class MediaGridScrollbarUiTest {
             .fetchSemanticsNode().boundsInRoot
         assertEquals(trackBounds.right, draggingThumbBounds.right, 0.5f)
         assertEquals(trackBounds.left, draggingThumbBounds.left, 0.5f)
-        val labelBounds = composeRule.onNodeWithTag("media_grid_scrollbar_position_label")
-            .fetchSemanticsNode().boundsInRoot
-        assertTrue(labelBounds.right < trackBounds.left)
+        val headerPills = composeRule.onAllNodesWithTag("media_grid_scrollbar_header_pill")
+            .assertCountEquals(frame.headerBoundaryIndex.boundaries.size)
+        assertTrue(headerPills.fetchSemanticsNodes().first().boundsInRoot.right < trackBounds.left)
 
         composeRule.runOnIdle {
             scrollbarState.finishDrag()
@@ -108,72 +106,11 @@ class MediaGridScrollbarUiTest {
             .fetchSemanticsNode().boundsInRoot
         assertEquals(trackBounds.right, finalThumbBounds.right, 0.5f)
         assertEquals(trackBounds.left, finalThumbBounds.left, 0.5f)
+        composeRule.onAllNodesWithTag("media_grid_scrollbar_header_pill").assertCountEquals(0)
     }
 
     @Test
-    fun targetLabelFollowsOrdinalImmediatelyAndCancelRemovesIt() {
-        val frame = testFrame()
-        val scrollbarState = MediaGridScrollbarState()
-
-        composeRule.setContent {
-            MaterialTheme {
-                val gridState = rememberLazyGridState()
-                Box(Modifier.fillMaxSize()) {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(4),
-                        state = gridState,
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        items((0 until 100).toList()) {
-                            Box(Modifier.height(100.dp))
-                        }
-                    }
-                    MediaGridScrollbar(
-                        frame = frame,
-                        anchor = anchor(frame),
-                        state = gridState,
-                        scrollbarState = scrollbarState,
-                        enabled = true,
-                    )
-                }
-            }
-        }
-        composeRule.waitForIdle()
-        composeRule.runOnIdle {
-            val geometry = calculateMediaGridScrollbarGeometry(
-                totalMediaCount = 100,
-                firstVisibleMediaOrdinal = 0,
-                lastVisibleMediaOrdinal = 9,
-                trackHeightPx = 600f,
-                minThumbHeightPx = 32f,
-            )
-            assertTrue(scrollbarState.beginDrag(frame, geometry, geometry.thumbTopPx))
-        }
-        composeRule.waitForIdle()
-        val labelBounds = composeRule.onNodeWithTag("media_grid_scrollbar_position_label")
-            .assertIsDisplayed()
-            .fetchSemanticsNode().boundsInRoot
-        val rootBounds = composeRule.onRoot().fetchSemanticsNode().boundsInRoot
-        assertTrue(labelBounds.top >= rootBounds.top)
-        assertTrue(labelBounds.bottom <= rootBounds.bottom)
-        assertTrue(composeRule.onAllNodesWithText("2026/08/01").fetchSemanticsNodes().isNotEmpty())
-
-        composeRule.runOnIdle { scrollbarState.updateDrag(580f) }
-        composeRule.waitForIdle()
-        assertTrue(composeRule.onAllNodesWithText("2026/10/30").fetchSemanticsNodes().isNotEmpty())
-        val updatedLabelBounds = composeRule.onNodeWithTag("media_grid_scrollbar_position_label")
-            .fetchSemanticsNode().boundsInRoot
-        assertTrue(updatedLabelBounds.top >= rootBounds.top)
-        assertTrue(updatedLabelBounds.bottom <= rootBounds.bottom)
-        composeRule.onAllNodesWithTag("media_grid_position_pill").assertCountEquals(0)
-
-        composeRule.runOnIdle { scrollbarState.cancelDrag() }
-        composeRule.waitForIdle()
-        composeRule.onAllNodesWithTag("media_grid_scrollbar_position_label").assertCountEquals(0)
-    }
-
-    @Test
-    fun realPointerDragKeepsBucketPillWithinBucketMovesAtBoundaryAndHidesOnUp() {
+    fun realPointerDragShowsEveryHeaderAtFixedPositionsAndHidesOnUp() {
         val frame = bucketFrame()
         val scrollbarState = MediaGridScrollbarState()
 
@@ -201,6 +138,7 @@ class MediaGridScrollbarUiTest {
             }
         }
         composeRule.waitForIdle()
+        composeRule.waitForIdle()
 
         val scrollbar = composeRule.onNodeWithTag("media_grid_scrollbar")
         val scrollbarBounds = scrollbar.fetchSemanticsNode().boundsInRoot
@@ -210,40 +148,123 @@ class MediaGridScrollbarUiTest {
             .fetchSemanticsNode().boundsInRoot
         val grabOffset = thumbBounds.center.y - thumbBounds.top
         val maxThumbTop = trackBounds.height - thumbBounds.height
-        fun localYForOrdinal(ordinal: Int): Float =
-            maxThumbTop * ordinal.toFloat() / 90f + grabOffset
+        val expectedPositions = mediaGridScrollbarHeaderPillPositions(
+            frame = frame,
+            totalMediaCount = 100,
+            visibleMediaCount = 10,
+            maxThumbTopPx = maxThumbTop,
+        )
 
         scrollbar.performTouchInput {
             down(androidx.compose.ui.geometry.Offset(scrollbarBounds.width / 2f, grabOffset))
-            moveTo(androidx.compose.ui.geometry.Offset(scrollbarBounds.width / 2f, localYForOrdinal(20)), 400)
+            moveTo(androidx.compose.ui.geometry.Offset(scrollbarBounds.width / 2f, maxThumbTop / 2f + grabOffset), 400)
         }
         composeRule.waitForIdle()
-        val firstBucketPill = composeRule.onNodeWithTag("media_grid_scrollbar_bucket_pill")
-            .assertIsDisplayed()
-            .fetchSemanticsNode().boundsInRoot
-        assertEquals(trackBounds.right, firstBucketPill.right, 0.5f)
-        assertEquals(12f * composeRule.density.density, firstBucketPill.width, 1f)
-        assertEquals(4f * composeRule.density.density, firstBucketPill.height, 1f)
+        composeRule.onAllNodesWithTag("media_grid_scrollbar_header_pill")
+            .assertCountEquals(expectedPositions.size)
+        val firstBounds = composeRule.onAllNodesWithTag("media_grid_scrollbar_header_pill")
+            .fetchSemanticsNodes().map { it.boundsInRoot }
+        assertEquals(
+            frame.headerBoundaryIndex.boundaries.map { it.label },
+            listOf("2026/08/01", "2026/08/02", "2026/08/03"),
+        )
+        frame.headerBoundaryIndex.boundaries.forEach { boundary ->
+            composeRule.onAllNodesWithText(boundary.label).assertCountEquals(1)
+        }
+        assertTrue(firstBounds.zip(expectedPositions).all { (bounds, position) ->
+            kotlin.math.abs(bounds.top - (trackBounds.top + position.topPx)) <= 1.5f
+        })
 
         scrollbar.performTouchInput {
-            moveTo(androidx.compose.ui.geometry.Offset(scrollbarBounds.width / 2f, localYForOrdinal(30)), 300)
+            moveTo(androidx.compose.ui.geometry.Offset(scrollbarBounds.width / 2f, maxThumbTop + grabOffset), 400)
         }
         composeRule.waitForIdle()
-        val sameBucketPill = composeRule.onNodeWithTag("media_grid_scrollbar_bucket_pill")
-            .fetchSemanticsNode().boundsInRoot
-        assertEquals(firstBucketPill.top, sameBucketPill.top, 1f)
-
-        scrollbar.performTouchInput {
-            moveTo(androidx.compose.ui.geometry.Offset(scrollbarBounds.width / 2f, localYForOrdinal(50)), 400)
-        }
-        composeRule.waitForIdle()
-        val nextBucketPill = composeRule.onNodeWithTag("media_grid_scrollbar_bucket_pill")
-            .fetchSemanticsNode().boundsInRoot
-        assertTrue(nextBucketPill.top > sameBucketPill.top + 1f)
+        val movedBounds = composeRule.onAllNodesWithTag("media_grid_scrollbar_header_pill")
+            .fetchSemanticsNodes().map { it.boundsInRoot }
+        assertEquals(firstBounds.map { it.top }, movedBounds.map { it.top })
 
         scrollbar.performTouchInput { up() }
         composeRule.waitForIdle()
-        composeRule.onAllNodesWithTag("media_grid_scrollbar_bucket_pill").assertCountEquals(0)
+        composeRule.onAllNodesWithTag("media_grid_scrollbar_header_pill").assertCountEquals(0)
+    }
+
+    @Test
+    fun likeCountShowsEveryHeader() {
+        val likeEntries = likeCountEntries()
+        val likeFrame = buildMediaGridFrameData(
+            entries = likeEntries,
+            sort = ClassifiedSortState(baseOrder = ClassifiedSortBase.LikeCount),
+            columnCount = 4,
+            dataKey = MediaGridDataKey(3L, 1L, TweetFilterState(), ClassifiedSortState(baseOrder = ClassifiedSortBase.LikeCount)),
+        )
+        val likeState = MediaGridScrollbarState()
+        composeRule.setContent {
+            MaterialTheme {
+                val gridState = rememberLazyGridState()
+                Box(Modifier.fillMaxSize()) {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(4),
+                        state = gridState,
+                        modifier = Modifier.fillMaxSize(),
+                    ) { items(likeEntries.indices.toList()) { Box(Modifier.height(100.dp)) } }
+                    MediaGridScrollbar(likeFrame, anchor(likeFrame), gridState, likeState, true)
+                }
+            }
+        }
+        composeRule.waitForIdle()
+        val thumb = composeRule.onNodeWithTag("media_grid_scrollbar_thumb").fetchSemanticsNode().boundsInRoot
+        val scrollbar = composeRule.onNodeWithTag("media_grid_scrollbar")
+        val scrollbarBounds = scrollbar.fetchSemanticsNode().boundsInRoot
+        val grabOffset = thumb.center.y - thumb.top
+        scrollbar.performTouchInput {
+            down(androidx.compose.ui.geometry.Offset(scrollbarBounds.width / 2f, grabOffset))
+            moveTo(androidx.compose.ui.geometry.Offset(scrollbarBounds.width / 2f, grabOffset + 80f), 400)
+        }
+        composeRule.waitForIdle()
+        composeRule.onAllNodesWithTag("media_grid_scrollbar_header_pill")
+            .assertCountEquals(likeFrame.headerBoundaryIndex.boundaries.size)
+        likeFrame.headerBoundaryIndex.boundaries.forEach { boundary ->
+            composeRule.onAllNodesWithText(boundary.label).assertCountEquals(1)
+        }
+        scrollbar.performTouchInput { up() }
+        composeRule.waitForIdle()
+    }
+
+    @Test
+    fun savedOrderShowsNoHeaderPills() {
+        val likeEntries = likeCountEntries()
+        val savedFrame = buildMediaGridFrameData(
+            entries = likeEntries,
+            sort = ClassifiedSortState(baseOrder = ClassifiedSortBase.Default),
+            columnCount = 4,
+            dataKey = MediaGridDataKey(2L, 1L, TweetFilterState(), ClassifiedSortState()),
+        )
+        val savedState = MediaGridScrollbarState()
+        composeRule.setContent {
+            MaterialTheme {
+                val gridState = rememberLazyGridState()
+                Box(Modifier.fillMaxSize()) {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(4),
+                        state = gridState,
+                        modifier = Modifier.fillMaxSize(),
+                    ) { items(likeEntries.indices.toList()) { Box(Modifier.height(100.dp)) } }
+                    MediaGridScrollbar(savedFrame, anchor(savedFrame), gridState, savedState, true)
+                }
+            }
+        }
+        composeRule.waitForIdle()
+        val savedThumb = composeRule.onNodeWithTag("media_grid_scrollbar_thumb").fetchSemanticsNode().boundsInRoot
+        val savedScrollbar = composeRule.onNodeWithTag("media_grid_scrollbar")
+        val savedScrollbarBounds = savedScrollbar.fetchSemanticsNode().boundsInRoot
+        val savedGrabOffset = savedThumb.center.y - savedThumb.top
+        savedScrollbar.performTouchInput {
+            down(androidx.compose.ui.geometry.Offset(savedScrollbarBounds.width / 2f, savedGrabOffset))
+            moveTo(androidx.compose.ui.geometry.Offset(savedScrollbarBounds.width / 2f, savedGrabOffset + 80f), 400)
+        }
+        composeRule.waitForIdle()
+        composeRule.onAllNodesWithTag("media_grid_scrollbar_header_pill").assertCountEquals(0)
+        savedScrollbar.performTouchInput { up() }
     }
 
     private fun testFrame(): MediaGridFrameData {
@@ -306,6 +327,31 @@ class MediaGridScrollbarUiTest {
             columnCount = 4,
             dataKey = MediaGridDataKey(1L, 1L, TweetFilterState(), sort),
         )
+    }
+
+    private fun likeCountEntries(): List<MediaGridEntry> {
+        val counts = listOf<Long?>(null, 0L, 200L, 500L, 1_000L, 5_000L, 10_000L, 50_000L, 100_000L)
+        return counts.flatMapIndexed { bucketIndex, likeCount ->
+            (0 until 12).map { index ->
+                val id = bucketIndex * 12 + index + 1L
+                MediaGridEntry(
+                    entryId = id,
+                    clipId = id,
+                    assetId = id,
+                    mediaKey = "like-media-$id",
+                    mediaIndex = 0,
+                    type = "photo",
+                    displayUrl = null,
+                    downloadState = "downloaded",
+                    localPath = null,
+                    xCreatedAt = LocalDate.of(2026, 8, 1)
+                        .atStartOfDay()
+                        .toInstant(ZoneOffset.UTC)
+                        .toString(),
+                    likeCount = likeCount,
+                )
+            }
+        }
     }
 
     private fun anchor(frame: MediaGridFrameData): MediaGridViewportAnchorSignature =

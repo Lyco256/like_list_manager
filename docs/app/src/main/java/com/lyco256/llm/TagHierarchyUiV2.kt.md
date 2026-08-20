@@ -1,8 +1,8 @@
 # `TagHierarchyUiV2.kt`
 
-## 2026-08-20 media-grid scrollbar bucket boundary index
+## 2026-08-20 media-grid scrollbar header boundary pills
 
-`buildMediaGridFrameData`は既存のheader/cell items走査中に、投稿日順・いいね数順の各header bucketについて最初のmedia ordinalを`MediaGridHeaderBoundaryIndex`へ記録します。保存順では索引を作りません。drag中の小型スクロールバーピルはframe固有の索引をtarget ordinal以下で二分探索し、見出し開始ordinalをscrollbar fractionへ変換します。
+`buildMediaGridFrameData`は既存のheader/cell items走査中に、投稿日順・いいね数順の各header bucketについてbucket key、インライン見出しと同じlabel、最初のmedia ordinalを`MediaGridHeaderBoundaryIndex`へ記録します。保存順では索引を作りません。drag中はframe固有の全boundaryを見出し開始ordinalからscrollbar座標へ変換した文字入りピルとして、各位置へ固定表示します。位置一覧はframe key、track geometry、total/visible media数の変更時だけ再構築し、pointer MOVEのtarget変更では全件探索を行いません。
 
 ## 2026-08-20 media-grid scrollbar checkpoint deduplication
 

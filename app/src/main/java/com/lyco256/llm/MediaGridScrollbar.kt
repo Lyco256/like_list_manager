@@ -41,8 +41,6 @@ import androidx.compose.ui.layout.Layout
 
 internal const val MediaGridScrollbarMinThumbHeightDp = 32
 internal const val MediaGridScrollbarTouchSlopDp = 8
-internal const val MediaGridScrollbarBucketPillWidthDp = 12
-internal const val MediaGridScrollbarBucketPillHeightDp = 4
 private const val MediaGridScrollbarLabelGapDp = 6
 
 internal data class MediaGridScrollbarGeometry(
@@ -137,6 +135,38 @@ internal fun mediaGridScrollbarTopForOrdinal(
     totalMediaCount = totalMediaCount,
     visibleMediaCount = visibleMediaCount,
 )?.let { fraction -> fraction * maxThumbTopPx.coerceAtLeast(0f) }
+
+internal data class MediaGridScrollbarHeaderPillPosition(
+    val bucketKey: String,
+    val label: String,
+    val startMediaOrdinal: Int,
+    val topPx: Float,
+)
+
+/**
+ * Prepares every inline header's fixed scrollbar position from the current frame.
+ * The caller caches this result; pointer target changes are intentionally not an input.
+ */
+internal fun mediaGridScrollbarHeaderPillPositions(
+    frame: MediaGridFrameData,
+    totalMediaCount: Int,
+    visibleMediaCount: Int,
+    maxThumbTopPx: Float,
+): List<MediaGridScrollbarHeaderPillPosition> = frame.headerBoundaryIndex.boundaries.mapNotNull { boundary ->
+    mediaGridScrollbarTopForOrdinal(
+        mediaOrdinal = boundary.startMediaOrdinal,
+        totalMediaCount = totalMediaCount,
+        visibleMediaCount = visibleMediaCount,
+        maxThumbTopPx = maxThumbTopPx,
+    )?.let { topPx ->
+        MediaGridScrollbarHeaderPillPosition(
+            bucketKey = boundary.bucketKey,
+            label = boundary.label,
+            startMediaOrdinal = boundary.startMediaOrdinal,
+            topPx = topPx,
+        )
+    }
+}
 
 internal fun mediaGridScrollbarTargetItemIndex(
     fraction: Float,
@@ -470,42 +500,30 @@ internal fun MediaGridScrollbar(
 
     if (!enabled || frame.ordinalIndex.assetIdByMediaOrdinal.isEmpty()) return
     val dragSnapshot = scrollbarState.dragSnapshot
-    val dragPosition = dragSnapshot
-        .takeIf { (it.isDragging || it.isFinalTargetPending) && it.frameKey == frame.key }
-        ?.targetMediaOrdinal
-        ?.let { ordinal ->
-            mediaGridPositionForOrdinal(
-                frame = frame,
-                mediaOrdinal = ordinal,
-                sort = frame.key.dataKey.sort,
-                columnCount = frame.key.columnCount,
-            )
-        }
     val thumbTopPx = scrollbarState.thumbTopPx(geometry)
     val thumbHeightPx = dragSnapshot
         .takeIf { it.isDragging || it.isFinalTargetPending }
         ?.thumbHeightPx
         ?: geometry.thumbHeightPx
-    val bucketPillHeightPx = with(density) { MediaGridScrollbarBucketPillHeightDp.dp.toPx() }
-    val bucketPillTopPx = if (dragSnapshot.isDragging && dragSnapshot.frameKey == frame.key) {
-        val targetOrdinal = dragSnapshot.targetMediaOrdinal
-        val boundary = targetOrdinal?.let { ordinal ->
-            mediaGridHeaderBoundaryForOrdinal(frame, ordinal, frame.key.dataKey.sort)
-        }
-        val maxThumbTopPx = dragSnapshot.maxThumbTopPx
-        if (boundary != null && maxThumbTopPx != null) {
-            mediaGridScrollbarTopForOrdinal(
-                mediaOrdinal = boundary.startMediaOrdinal,
-                totalMediaCount = dragSnapshot.totalMediaCount,
-                visibleMediaCount = dragSnapshot.visibleMediaCount,
-                maxThumbTopPx = maxThumbTopPx,
-            )?.coerceIn(0f, (trackHeightPx - bucketPillHeightPx).coerceAtLeast(0f))
+    val headerPillPositions = remember(
+        frame.key,
+        trackHeightPx,
+        geometry.totalMediaCount,
+        geometry.visibleMediaCount,
+        geometry.maxThumbTopPx,
+    ) {
+        if (!geometry.isScrollable) {
+            emptyList()
         } else {
-            null
+            mediaGridScrollbarHeaderPillPositions(
+                frame = frame,
+                totalMediaCount = geometry.totalMediaCount,
+                visibleMediaCount = geometry.visibleMediaCount,
+                maxThumbTopPx = geometry.maxThumbTopPx,
+            )
         }
-    } else {
-        null
     }
+    val showHeaderPills = dragSnapshot.isDragging && dragSnapshot.frameKey == frame.key
     val touchHeightDp = with(density) { (geometry.thumbHeightPx + touchSlopPx * 2f).toDp() }
     val touchOffsetPx = (thumbTopPx - touchSlopPx).coerceAtLeast(0f)
     val labelGapPx = with(density) { MediaGridScrollbarLabelGapDp.dp.toPx() }
@@ -553,19 +571,6 @@ internal fun MediaGridScrollbar(
                             .clip(RoundedCornerShape(2.dp))
                             .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)),
                     )
-                    if (bucketPillTopPx != null) {
-                        Box(
-                            Modifier
-                                .align(Alignment.TopEnd)
-                                .offset { IntOffset(0, bucketPillTopPx.roundToInt()) }
-                                .width(MediaGridScrollbarBucketPillWidthDp.dp)
-                                .height(MediaGridScrollbarBucketPillHeightDp.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(MaterialTheme.colorScheme.primary)
-                                .zIndex(1f)
-                                .testTag("media_grid_scrollbar_bucket_pill"),
-                        )
-                    }
                     Box(
                         Modifier
                             .align(Alignment.TopEnd)
@@ -592,41 +597,48 @@ internal fun MediaGridScrollbar(
                     }
                 }
             }
-            if (dragPosition != null) {
-                Surface(
-                    color = MaterialTheme.colorScheme.inverseSurface,
-                    contentColor = MaterialTheme.colorScheme.inverseOnSurface,
-                    shape = RoundedCornerShape(50),
-                    modifier = Modifier
-                        .zIndex(3f)
-                        .testTag("media_grid_scrollbar_position_label"),
-                ) {
-                    Text(
-                        text = dragPosition.label,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                        maxLines = 1,
-                    )
+            if (showHeaderPills) {
+                headerPillPositions.forEach { position ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.inverseSurface,
+                        contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                        shape = RoundedCornerShape(50),
+                        modifier = Modifier
+                            .zIndex(1f)
+                            .testTag("media_grid_scrollbar_header_pill"),
+                    ) {
+                        Text(
+                            text = position.label,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
         },
         modifier = modifier.fillMaxHeight().width(32.dp),
     ) { measurables, constraints ->
         val track = measurables.first().measure(constraints)
-        val label = measurables.getOrNull(1)?.measure(
-            constraints.copy(minWidth = 0, maxWidth = Constraints.Infinity, minHeight = 0),
-        )
+        val pills = measurables.drop(1).map { measurable ->
+            measurable.measure(
+                constraints.copy(minWidth = 0, maxWidth = Constraints.Infinity, minHeight = 0),
+            )
+        }
         layout(track.width, track.height) {
             track.place(0, 0)
-            if (label != null) {
-                val trackHeight = track.height.toFloat()
-                val labelTop = (
-                    thumbTopPx + thumbHeightPx / 2f - label.height / 2f
-                    ).coerceIn(0f, (trackHeight - label.height).coerceAtLeast(0f))
-                val labelLeft = (
-                    track.width - thumbHalfWidthPx * 2f - labelGapPx - label.width
+            if (showHeaderPills) {
+                pills.forEachIndexed { index, pill ->
+                    val position = headerPillPositions[index]
+                    val pillTop = position.topPx.coerceIn(
+                        0f,
+                        (track.height - pill.height).coerceAtLeast(0).toFloat(),
+                    )
+                    val pillLeft = (
+                        track.width - thumbHalfWidthPx * 2f - labelGapPx - pill.width
                     ).roundToInt()
-                label.place(labelLeft, labelTop.roundToInt())
+                    pill.place(pillLeft, pillTop.roundToInt())
+                }
             }
         }
     }

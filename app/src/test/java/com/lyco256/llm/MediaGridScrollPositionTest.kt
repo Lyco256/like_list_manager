@@ -125,9 +125,9 @@ class MediaGridScrollPositionTest {
 
         assertEquals(
             listOf(
-                MediaGridHeaderBoundary("post_time_day_2026-08-19", 0),
-                MediaGridHeaderBoundary("post_time_day_2026-08-20", 2),
-                MediaGridHeaderBoundary("post_time_day_2026-08-21", 4),
+                MediaGridHeaderBoundary("post_time_day_2026-08-19", "2026/08/19", 0),
+                MediaGridHeaderBoundary("post_time_day_2026-08-20", "2026/08/20", 2),
+                MediaGridHeaderBoundary("post_time_day_2026-08-21", "2026/08/21", 4),
             ),
             frame.headerBoundaryIndex.boundaries,
         )
@@ -175,6 +175,48 @@ class MediaGridScrollPositionTest {
     }
 
     @Test
+    fun headerBoundaryLabelsFollowColumnGranularityForDateAndLikeSorts() {
+        val postTime = ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime)
+        val weekFrame = frame(
+            postTime,
+            listOf(
+                entry(1L, "2026-08-17T00:00:00Z", 1L),
+                entry(2L, "2026-08-23T12:00:00Z", 2L),
+                entry(3L, "2026-08-24T00:00:00Z", 3L),
+            ),
+            5,
+        )
+        assertEquals(
+            listOf("2026/08/17 ~ 2026/08/23", "2026/08/24 ~ 2026/08/30"),
+            weekFrame.headerBoundaryIndex.boundaries.map { it.label },
+        )
+        assertEquals(listOf(0, 2), weekFrame.headerBoundaryIndex.boundaries.map { it.startMediaOrdinal })
+
+        val monthFrame = frame(
+            postTime,
+            listOf(
+                entry(4L, "2026-08-01T00:00:00Z", 1L),
+                entry(5L, "2026-08-31T12:00:00Z", 2L),
+                entry(6L, "2026-09-01T00:00:00Z", 3L),
+            ),
+            9,
+        )
+        assertEquals(listOf("2026/8", "2026/9"), monthFrame.headerBoundaryIndex.boundaries.map { it.label })
+        assertEquals(listOf(0, 2), monthFrame.headerBoundaryIndex.boundaries.map { it.startMediaOrdinal })
+
+        val likeFrame = frame(
+            ClassifiedSortState(baseOrder = ClassifiedSortBase.LikeCount),
+            listOf(
+                entry(7L, date(), null),
+                entry(8L, date(), 100_000L),
+            ),
+            4,
+        )
+        assertEquals(listOf("いいね数不明", "10万以上"), likeFrame.headerBoundaryIndex.boundaries.map { it.label })
+        assertEquals(listOf(0, 1), likeFrame.headerBoundaryIndex.boundaries.map { it.startMediaOrdinal })
+    }
+
+    @Test
     fun defaultSortHasNoHeaderBoundaryIndex() {
         val frame = frame(
             ClassifiedSortState(baseOrder = ClassifiedSortBase.Default),
@@ -183,6 +225,43 @@ class MediaGridScrollPositionTest {
 
         assertTrue(frame.headerBoundaryIndex.boundaries.isEmpty())
         assertNull(frame.headerBoundaryIndex.boundaryAtOrBefore(1))
+    }
+
+    @Test
+    fun scrollbarHeaderPillsUseEveryBoundaryLabelAndStartOrdinalInOrder() {
+        val sort = ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime)
+        val frame = frame(
+            sort,
+            listOf(
+                entry(1L, "2026-08-19T00:00:00Z", 1L),
+                entry(2L, "2026-08-20T00:00:00Z", 2L),
+                entry(3L, "not-a-date", 3L),
+            ),
+            4,
+        )
+
+        val positions = mediaGridScrollbarHeaderPillPositions(
+            frame = frame,
+            totalMediaCount = 3,
+            visibleMediaCount = 1,
+            maxThumbTopPx = 200f,
+        )
+
+        assertEquals(listOf("2026/08/19", "2026/08/20", "日付不明"), positions.map { it.label })
+        assertEquals(listOf(0, 1, 2), positions.map { it.startMediaOrdinal })
+        assertEquals(listOf(0f, 100f, 200f), positions.map { it.topPx })
+    }
+
+    @Test
+    fun defaultSortHasNoScrollbarHeaderPills() {
+        val frame = frame(
+            ClassifiedSortState(baseOrder = ClassifiedSortBase.Default),
+            listOf(entry(1L, date(), 1L), entry(2L, date(), 2L)),
+        )
+
+        assertTrue(
+            mediaGridScrollbarHeaderPillPositions(frame, 2, 1, 200f).isEmpty(),
+        )
     }
 
     @Test
