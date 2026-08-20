@@ -1,0 +1,3 @@
+# `MediaGridScrollPositionTest.kt`
+
+現在位置のbucket逆引き、全見出しboundaryのlabel／開始ordinal／scrollbar位置、現在位置ピル状態遷移を純粋なJUnitテストで固定します。保存順の非表示、投稿日の日／週／月と日付不明、いいね数の200／500／1000単位・10万以上・不明、見出し開始ordinal索引、全boundaryのordinal順、スクロール停止後の3秒予約と上方向終了、古い世代イベントの無効化、frame変更、Morph中固定・handoff後再評価、ピンチ単独非表示を確認します。

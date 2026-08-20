@@ -1106,12 +1106,17 @@ class UiStateRenderingTest {
             }.isSuccess
         }
         composeRule.onNodeWithTag("media_grid_item_10").assertIsDisplayed()
+        composeRule.onAllNodesWithTag("media_grid_position_pill").assertCountEquals(0)
         composeRule.onNodeWithTag("classified_media_grid").performScrollToIndex(targetIndex)
         composeRule.waitUntil(30_000) {
             runCatching {
                 composeRule.onNodeWithTag("media_grid_item_400").assertIsDisplayed()
             }.isSuccess
         }
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("media_grid_position_pill").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("media_grid_position_pill_text").assertIsDisplayed()
         composeRule.runOnIdle {
             columnCount = 2
         }

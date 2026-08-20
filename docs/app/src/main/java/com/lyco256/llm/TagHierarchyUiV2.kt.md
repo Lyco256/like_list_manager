@@ -1,5 +1,15 @@
 # `TagHierarchyUiV2.kt`
 
+## 2026-08-20 media-grid scrollbar header boundary pills
+
+`buildMediaGridFrameData`は既存のheader/cell items走査中に、投稿日順・いいね数順の各header bucketについてbucket key、インライン見出しと同じlabel、最初のmedia ordinalを`MediaGridHeaderBoundaryIndex`へ記録します。保存順では索引を作りません。drag中はframe固有の全boundaryを見出し開始ordinalからscrollbar座標へ変換した文字入りピルとして、各位置へ固定表示します。位置一覧はframe key、track geometry、total/visible media数の変更時だけ再構築し、pointer MOVEのtarget変更では全件探索を行いません。
+
+## 2026-08-20 media-grid scrollbar checkpoint deduplication
+
+- `ClassifiedMediaGridContent`からスクロールバー完了時の直接checkpointを分離し、親のcheckpoint coordinatorへ一本化しました。
+- coordinatorは`MediaGridScrollbarDragSnapshot.completionId`を記録し、完了snapshotと同じ`isScrollInProgress=false`遷移を二重に保存しません。完了後の通常指スクロールは新しいtrue遷移でこの抑制を解除し、従来どおり保存します。
+- ドラッグ抑制状態は親Effect内で`rememberUpdatedState`経由の最新値を参照します。scrollbar、morph、restore、pinchの抑制中はviewport終了checkpointを発行しません。
+
 ## 2026-08-13 タグ管理Treeの連続縦guide
 
 - `VisibleTagRow` は、各祖先depthの縦guideが上と下の隣接行へ接続するかを `TagTreeGuideSegment` として保持します。expand/collapseでvisible row列が変わるたびに再計算します。
@@ -437,6 +447,15 @@ The toolbar is a full-width opaque background container with the unchanged Row b
 - Capture directly scans visible items once and accepts only keys in `MediaGridFrameData.assetIdByItemKey`, preserving header exclusion and center/fallback selection without collection or per-item `Offset` allocations.
 - The viewport `snapshotFlow` and all controller/scheduler/resident Canvas/pointer-input behavior remain unchanged.
 # TagHierarchyUiV2.kt
+
+## 2026-08-19 メディアグリッド現在位置ピル
+
+- `ClassifiedMediaGridContent` は既存の軽量 `MediaGridViewportAnchorSignature` を共有し、`MediaGridScrollPosition.kt` のordinal逆引きから画面上端側で最初の表示メディアセルが属する見出しラベルを求めます。見出しの分類規則は既存 `mediaGridMorphBucketSpec` と同じで、保存順ではラベルを作りません。
+- スクロールバーdrag中は同じordinal逆引きを`MediaGridScrollbarDragSnapshot.targetMediaOrdinal`へ適用し、viewport反映を待たずthumb左側へ現在のbucket labelを表示します。thumb label表示中は上部ピルを抑止し、正常終了時だけ最終targetを上部ピルへ引き継ぎます。
+- 実スクロール開始時だけピルを表示し、スクロール停止後3秒は保持してから上方向へスライドアウトします。表示中の再スクロールは世代番号で古いtimeout／exitを無効化します。
+- 通常frame変更では旧ラベルを即時に表示対象から外し、Morph中の列数変更では表示開始時点のラベルを維持します。列数変更handoff後に新frameのbucketへ更新します。保存位置復元・legacy pinch復元中は表示開始を抑止します。
+- ピルはグリッドBox内の上端中央へ重ねるだけで、LazyGridの配置、高さ、セル描画、画像preload、selection、inline header、scroll checkpointには新しいI/Oや全frame走査を追加しません。
+- scrollbarのdrag snapshot通知は`ClassifiedMediaGridContent`の一経路へ集約し、checkpoint、stable-idle Morph抑制、ピル抑制、正常終了handoffを同じ状態源から処理します。cancel、frame変更、無効化はhandoffを発生させません。
 
 `ClassifiedMediaGridContent`は通常の非選択メディアグリッドでだけproduction Morph hostと共通gesture modifierを明示的に有効化する。underlying LazyVerticalGridは一枚のままcompose/layout/drawし、Grid→progress→active Morph Canvasの順に配置する。
 

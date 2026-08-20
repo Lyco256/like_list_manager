@@ -1,0 +1,3 @@
+# `MediaGridPositionPillUiTest.kt`
+
+ピルComposableをCompose時計で直接検証します。スクロール停止後の3秒表示と180ms上方向終了、終了アニメーション中の再スクロール、世代が古い終了処理から新しい表示を守ることを固定します。

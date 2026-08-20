@@ -537,13 +537,17 @@ internal fun EnhancedClassifiedScreen(
     var pendingPinchAnchor by remember { mutableStateOf<ClassifiedMediaGridScrollAnchor?>(null) }
     var pinchCompletionGeneration by remember { mutableStateOf(0) }
     var morphCheckpointSuppressed by remember(mediaGridSessionState.sessionKey) { mutableStateOf(false) }
+    var mediaGridScrollbarSnapshot by remember(mediaGridSessionState.sessionKey) {
+        mutableStateOf(MediaGridScrollbarDragSnapshot())
+    }
     val latestSessionKey by rememberUpdatedState(mediaGridSessionState.sessionKey)
     val latestFrame by rememberUpdatedState(mediaGridSessionState.frame)
     val latestCheckpoint by rememberUpdatedState(onMediaGridAnchorCheckpoint)
     var sessionRestoreCheckpointSuppressed by remember(mediaGridSessionState.sessionKey) { mutableStateOf(false) }
     var legacyPinchCheckpointSuppressed by remember(mediaGridSessionState.sessionKey) { mutableStateOf(false) }
     val suppressScrollCheckpoint =
-        sessionRestoreCheckpointSuppressed || legacyPinchCheckpointSuppressed || morphCheckpointSuppressed
+        sessionRestoreCheckpointSuppressed || legacyPinchCheckpointSuppressed || morphCheckpointSuppressed ||
+            mediaGridScrollbarSnapshot.isDragging
     val latestSuppressScrollCheckpoint by rememberUpdatedState(suppressScrollCheckpoint)
     val lifecycleOwner = LocalContext.current as? LifecycleOwner
     if (displayMode == ClassifiedDisplayMode.MediaGrid && lifecycleOwner != null) {
@@ -577,20 +581,35 @@ internal fun EnhancedClassifiedScreen(
     }
     LaunchedEffect(mediaGridLazyState, mediaGridSessionState.sessionKey, displayMode) {
         var checkpointState = MediaGridScrollCheckpointState()
-        snapshotFlow { mediaGridLazyState.isScrollInProgress }
-            .distinctUntilChanged()
-            .collect { inProgress ->
-                val transition = mediaGridScrollCheckpointTransition(checkpointState, inProgress)
-                checkpointState = transition.state
-                if (transition.shouldCheckpoint) {
-                    val key = latestSessionKey
-                    val frame = latestFrame
-                    if (!suppressScrollCheckpoint && displayMode == ClassifiedDisplayMode.MediaGrid && key != null && frame != null) {
-                        captureClassifiedMediaGridScrollAnchor(mediaGridLazyState, frame.assetIdByItemKey)
-                            ?.let { latestCheckpoint(key, it) }
-                    }
+        combine(
+            snapshotFlow { mediaGridLazyState.isScrollInProgress }.distinctUntilChanged(),
+            snapshotFlow { mediaGridScrollbarSnapshot }.distinctUntilChanged(),
+        ) { inProgress, scrollbarSnapshot ->
+            inProgress to scrollbarSnapshot
+        }.collect { (inProgress, scrollbarSnapshot) ->
+            val transition = mediaGridScrollCheckpointTransition(
+                state = checkpointState,
+                isScrollInProgress = inProgress,
+                scrollbarSnapshot = scrollbarSnapshot,
+            )
+            checkpointState = transition.state
+            if (transition.shouldCheckpoint) {
+                if (scrollbarSnapshot.endReason == MediaGridScrollbarDragEnd.Completed) {
+                    withFrameNanos { }
+                }
+                val key = latestSessionKey
+                val frame = latestFrame
+                if (
+                    !latestSuppressScrollCheckpoint &&
+                    displayMode == ClassifiedDisplayMode.MediaGrid &&
+                    key != null &&
+                    frame != null
+                ) {
+                    captureClassifiedMediaGridScrollAnchor(mediaGridLazyState, frame.assetIdByItemKey)
+                        ?.let { latestCheckpoint(key, it) }
                 }
             }
+        }
     }
     var previousMediaGridSessionKey by remember { mutableStateOf<MediaGridSessionKey?>(null) }
     LaunchedEffect(mediaGridSessionState.sessionKey) {
@@ -738,6 +757,13 @@ internal fun EnhancedClassifiedScreen(
                     showProgress = mediaGridSessionState.showInitialProgress,
                     onMediaGridAnchorCheckpoint = onMediaGridAnchorCheckpoint,
                     onMorphCheckpointSuppressed = { morphCheckpointSuppressed = it },
+                    sessionKey = mediaGridSessionState.sessionKey,
+                    onMediaGridScrollbarDragStateChanged = { snapshot ->
+                        mediaGridScrollbarSnapshot = snapshot
+                    },
+                    suppressPositionPill = sessionRestoreCheckpointSuppressed ||
+                        legacyPinchCheckpointSuppressed ||
+                        mediaGridSessionState.sessionKey != previousMediaGridSessionKey,
                     onMediaGridColumnCountChange = onMediaGridColumnCountChange,
                     onPinchFinished = { anchor, nextColumnCount ->
                         val changed = nextColumnCount != mediaGridColumnCount
@@ -3756,6 +3782,34 @@ internal data class MediaGridOrdinalIndex(
     val itemIndexByAssetId: Map<Long, Int>,
 )
 
+internal data class MediaGridHeaderBoundary(
+    val bucketKey: String,
+    val label: String,
+    val startMediaOrdinal: Int,
+)
+
+internal data class MediaGridHeaderBoundaryIndex(
+    val boundaries: List<MediaGridHeaderBoundary> = emptyList(),
+) {
+    /** Returns the latest header start at or before [mediaOrdinal] in O(log n). */
+    internal fun boundaryAtOrBefore(mediaOrdinal: Int): MediaGridHeaderBoundary? {
+        if (mediaOrdinal < 0 || boundaries.isEmpty()) return null
+        var low = 0
+        var high = boundaries.lastIndex
+        var best = -1
+        while (low <= high) {
+            val middle = (low + high) ushr 1
+            if (boundaries[middle].startMediaOrdinal <= mediaOrdinal) {
+                best = middle
+                low = middle + 1
+            } else {
+                high = middle - 1
+            }
+        }
+        return boundaries.getOrNull(best)
+    }
+}
+
 internal data class MediaGridFrameData(
     val key: MediaGridRenderKey,
     val items: List<ClassifiedMediaGridItem>,
@@ -3765,6 +3819,7 @@ internal data class MediaGridFrameData(
     val ordinalIndex: MediaGridOrdinalIndex = MediaGridOrdinalIndex(
         LongArray(0), IntArray(0), IntArray(0), emptyMap(), emptyMap(),
     ),
+    val headerBoundaryIndex: MediaGridHeaderBoundaryIndex = MediaGridHeaderBoundaryIndex(),
 )
 
 internal data class MediaGridViewportSignature(
@@ -3945,20 +4000,33 @@ internal fun buildMediaGridFrameData(
     val mediaOrdinalByItemIndex = IntArray(items.size) { -1 }
     val mediaOrdinalByAssetId = HashMap<Long, Int>(entries.size)
     val itemIndexByAssetId = HashMap<Long, Int>(entries.size)
+    val headerBoundaries = ArrayList<MediaGridHeaderBoundary>()
+    var pendingHeader: MediaGridHeaderItem? = null
     var mediaCount = 0
     items.forEachIndexed { index, item ->
         itemByKey[item.key] = item
-        if (item is MediaGridCellItem) {
-            mediaIndices[mediaCount] = index
-            assetIds[mediaCount] = item.entry.assetId
-            itemIndices[mediaCount] = index
-            mediaOrdinalByItemIndex[index] = mediaCount
-            assetIdByItemKey[item.key] = item.entry.assetId
-            if (!mediaOrdinalByAssetId.containsKey(item.entry.assetId)) {
-                mediaOrdinalByAssetId[item.entry.assetId] = mediaCount
-                itemIndexByAssetId[item.entry.assetId] = index
+        when (item) {
+            is MediaGridHeaderItem -> pendingHeader = item
+            is MediaGridCellItem -> {
+                pendingHeader?.let { header ->
+                    headerBoundaries += MediaGridHeaderBoundary(
+                        bucketKey = header.safeKey,
+                        label = header.label,
+                        startMediaOrdinal = mediaCount,
+                    )
+                    pendingHeader = null
+                }
+                mediaIndices[mediaCount] = index
+                assetIds[mediaCount] = item.entry.assetId
+                itemIndices[mediaCount] = index
+                mediaOrdinalByItemIndex[index] = mediaCount
+                assetIdByItemKey[item.key] = item.entry.assetId
+                if (!mediaOrdinalByAssetId.containsKey(item.entry.assetId)) {
+                    mediaOrdinalByAssetId[item.entry.assetId] = mediaCount
+                    itemIndexByAssetId[item.entry.assetId] = index
+                }
+                mediaCount++
             }
-            mediaCount++
         }
     }
     val ordinalIndex = MediaGridOrdinalIndex(
@@ -3975,6 +4043,7 @@ internal fun buildMediaGridFrameData(
         mediaCellIndices = ordinalIndex.itemIndexByMediaOrdinal,
         assetIdByItemKey = Collections.unmodifiableMap(assetIdByItemKey),
         ordinalIndex = ordinalIndex,
+        headerBoundaryIndex = MediaGridHeaderBoundaryIndex(headerBoundaries),
     )
 }
 
@@ -3985,7 +4054,11 @@ internal data class ClassifiedMediaGridScrollAnchor(
     val centerOffset: Float,
 )
 
-internal data class MediaGridScrollCheckpointState(val observedScrollStart: Boolean = false)
+internal data class MediaGridScrollCheckpointState(
+    val observedScrollStart: Boolean = false,
+    val handledScrollbarCompletionId: Long = 0L,
+    val skipNextScrollEndForCompletionId: Long? = null,
+)
 
 internal data class MediaGridScrollCheckpointTransition(
     val state: MediaGridScrollCheckpointState,
@@ -3995,16 +4068,38 @@ internal data class MediaGridScrollCheckpointTransition(
 internal fun mediaGridScrollCheckpointTransition(
     state: MediaGridScrollCheckpointState,
     isScrollInProgress: Boolean,
-): MediaGridScrollCheckpointTransition = when {
-    isScrollInProgress -> MediaGridScrollCheckpointTransition(
-        state = state.copy(observedScrollStart = true),
-        shouldCheckpoint = false,
+    scrollbarSnapshot: MediaGridScrollbarDragSnapshot = MediaGridScrollbarDragSnapshot(),
+): MediaGridScrollCheckpointTransition {
+    val observedScrollEnd = !isScrollInProgress && state.observedScrollStart
+    var nextState = state.copy(
+        observedScrollStart = isScrollInProgress,
+        skipNextScrollEndForCompletionId = if (isScrollInProgress) null else state.skipNextScrollEndForCompletionId,
     )
-    state.observedScrollStart -> MediaGridScrollCheckpointTransition(
-        state = MediaGridScrollCheckpointState(),
-        shouldCheckpoint = true,
-    )
-    else -> MediaGridScrollCheckpointTransition(state, shouldCheckpoint = false)
+    var shouldCheckpoint = false
+
+    if (
+        scrollbarSnapshot.endReason == MediaGridScrollbarDragEnd.Completed &&
+        scrollbarSnapshot.completionId != 0L &&
+        scrollbarSnapshot.completionId != state.handledScrollbarCompletionId
+    ) {
+        shouldCheckpoint = true
+        nextState = nextState.copy(
+            handledScrollbarCompletionId = scrollbarSnapshot.completionId,
+            skipNextScrollEndForCompletionId = scrollbarSnapshot.completionId,
+        )
+    }
+
+    if (observedScrollEnd && !scrollbarSnapshot.isDragging && !scrollbarSnapshot.isFinalTargetPending) {
+        if (nextState.skipNextScrollEndForCompletionId == scrollbarSnapshot.completionId &&
+            scrollbarSnapshot.endReason == MediaGridScrollbarDragEnd.Completed
+        ) {
+            nextState = nextState.copy(skipNextScrollEndForCompletionId = null)
+        } else {
+            shouldCheckpoint = true
+        }
+    }
+
+    return MediaGridScrollCheckpointTransition(nextState, shouldCheckpoint)
 }
 
 internal fun buildClassifiedMediaGridItems(
@@ -4284,6 +4379,9 @@ private fun ClassifiedMediaGridContent(
     showProgress: Boolean,
     onMediaGridAnchorCheckpoint: (MediaGridSessionKey, ClassifiedMediaGridScrollAnchor) -> Unit,
     onMorphCheckpointSuppressed: (Boolean) -> Unit,
+    sessionKey: MediaGridSessionKey?,
+    onMediaGridScrollbarDragStateChanged: (MediaGridScrollbarDragSnapshot) -> Unit,
+    suppressPositionPill: Boolean,
     onMediaGridColumnCountChange: (Int) -> Unit,
     onPinchFinished: (ClassifiedMediaGridScrollAnchor?, Int) -> Unit,
     selectionMode: Boolean,
@@ -4327,6 +4425,17 @@ private fun ClassifiedMediaGridContent(
     } else null
     val viewportAnchorFlow = remember(state, frame.key, columnCount) {
         MutableStateFlow<MediaGridViewportAnchorSignature?>(null)
+    }
+    val viewportAnchor by viewportAnchorFlow.collectAsState(initial = null)
+    val scrollbarState = rememberMediaGridScrollbarState()
+    val scrollbarDragInProgress = remember(state) { MutableStateFlow(false) }
+    LaunchedEffect(scrollbarState, sessionKey, frame.key) {
+        snapshotFlow { scrollbarState.dragSnapshot }
+            .distinctUntilChanged()
+            .collect { snapshot ->
+                onMediaGridScrollbarDragStateChanged(snapshot)
+                scrollbarDragInProgress.value = snapshot.isDragging || snapshot.isFinalTargetPending
+            }
     }
     DisposableEffect(previewPreloader) {
         onDispose { previewPreloader?.cancelAll() }
@@ -4424,6 +4533,103 @@ private fun ClassifiedMediaGridContent(
     val morphRowRenderModel = morphSnapshot?.activeRenderModel
     val morphVisualActive = morphController?.drawMode?.value == MediaGridMorphDrawMode.Morph && morphRowRenderModel != null
     val morphProgress = morphController?.progress ?: remember { mutableStateOf(0f) }
+    val morphPointerActive by morphPointerInProgress.collectAsState()
+    val positionPillMorphing = morphInteractionLocked || morphPointerActive
+    var positionPillState by remember(state) { mutableStateOf(MediaGridPositionPillState()) }
+    val latestPositionPillFrame by rememberUpdatedState(frame)
+    val latestPositionPillSort by rememberUpdatedState(sort)
+    val latestPositionPillColumnCount by rememberUpdatedState(columnCount)
+    val latestPositionPillMorphing by rememberUpdatedState(positionPillMorphing)
+    val dispatchPositionPillEvent: (MediaGridPositionPillEvent) -> Unit = { event ->
+        positionPillState = reduceMediaGridPositionPillState(positionPillState, event)
+    }
+    var lastHandledScrollbarCompletionId by remember(scrollbarState) { mutableStateOf(0L) }
+    LaunchedEffect(frame.key, sort.baseOrder) {
+        dispatchPositionPillEvent(
+            MediaGridPositionPillEvent.FrameChanged(
+                frameKey = frame.key,
+                hasBuckets = sort.baseOrder != ClassifiedSortBase.Default,
+                morphing = latestPositionPillMorphing,
+            ),
+        )
+    }
+    LaunchedEffect(state, viewportAnchorFlow, suppressPositionPill) {
+        val morphActivityFlow = combine(
+            morphPointerInProgress,
+            snapshotFlow { morphController?.interactionLocked?.value == true }
+                .distinctUntilChanged(),
+        ) { pointerActive, interactionLocked -> pointerActive || interactionLocked }
+            .distinctUntilChanged()
+        val scrollbarDragFlow = snapshotFlow { scrollbarState.dragSnapshot }.distinctUntilChanged()
+        var previousScrolling = false
+        var previousMorphing = latestPositionPillMorphing
+        combine(
+            viewportAnchorFlow,
+            snapshotFlow { state.isScrollInProgress }.distinctUntilChanged(),
+            morphActivityFlow,
+            scrollbarDragFlow,
+        ) { anchor, scrolling, morphing, scrollbarDragSnapshot ->
+            MediaGridPositionPillObservation(
+                anchor = anchor,
+                scrolling = scrolling,
+                morphing = morphing,
+                suppressed = suppressPositionPill ||
+                    scrollbarDragSnapshot.isDragging ||
+                    scrollbarDragSnapshot.isFinalTargetPending,
+                scrollbarDragSnapshot = scrollbarDragSnapshot,
+            )
+        }.collect { observation ->
+            val currentFrame = latestPositionPillFrame
+            val position = currentMediaGridPosition(
+                frame = currentFrame,
+                anchor = observation.anchor,
+                sort = latestPositionPillSort,
+                columnCount = latestPositionPillColumnCount,
+            )
+            val completedDrag = observation.scrollbarDragSnapshot
+                .takeIf {
+                    it.endReason == MediaGridScrollbarDragEnd.Completed &&
+                        it.completionId != lastHandledScrollbarCompletionId
+                }
+            if (completedDrag != null) {
+                lastHandledScrollbarCompletionId = completedDrag.completionId
+                val finalPosition = completedDrag.targetMediaOrdinal?.let { ordinal ->
+                    mediaGridPositionForOrdinal(
+                        frame = currentFrame,
+                        mediaOrdinal = ordinal,
+                        sort = latestPositionPillSort,
+                        columnCount = latestPositionPillColumnCount,
+                    )?.takeIf { it.frameKey == completedDrag.frameKey }
+                }
+                dispatchPositionPillEvent(MediaGridPositionPillEvent.ScrollbarDragFinished(finalPosition))
+            } else if (observation.suppressed || latestPositionPillSort.baseOrder == ClassifiedSortBase.Default) {
+                if (observation.suppressed) dispatchPositionPillEvent(MediaGridPositionPillEvent.Suppressed)
+            } else {
+                if (observation.morphing && !previousMorphing) {
+                    dispatchPositionPillEvent(MediaGridPositionPillEvent.MorphStarted)
+                } else if (!observation.morphing && previousMorphing) {
+                    dispatchPositionPillEvent(
+                        MediaGridPositionPillEvent.MorphFinished(currentFrame.key, position),
+                    )
+                }
+                if (!observation.morphing) {
+                    when {
+                        observation.scrolling &&
+                            (!previousScrolling || positionPillState.phase == MediaGridPositionPillPhase.Hidden) ->
+                            dispatchPositionPillEvent(MediaGridPositionPillEvent.ScrollStarted(position))
+                        observation.scrolling ->
+                            dispatchPositionPillEvent(MediaGridPositionPillEvent.PositionChanged(position))
+                        !observation.scrolling && previousScrolling ->
+                            dispatchPositionPillEvent(MediaGridPositionPillEvent.ScrollStopped)
+                        else ->
+                            dispatchPositionPillEvent(MediaGridPositionPillEvent.PositionChanged(position))
+                    }
+                }
+            }
+            previousScrolling = observation.scrolling
+            previousMorphing = observation.morphing
+        }
+    }
     val morphDrawObserver = if (BuildConfig.TEST_HARNESS) {
         { event: MediaGridMorphDrawObservation -> MediaGridMorphTestTrace.recordDraw(event) }
     } else {
@@ -4483,14 +4689,16 @@ private fun ClassifiedMediaGridContent(
         columnCount,
         morphPreparationCache,
         morphPointerInProgress,
+        scrollbarDragInProgress,
         morphEnabled,
     ) {
         combine(
             viewportAnchorFlow,
             snapshotFlow { state.isScrollInProgress }.distinctUntilChanged(),
             morphPointerInProgress,
+            scrollbarDragInProgress,
             morphPreparationCache.invalidationVersion,
-        ) { signature, isScrollInProgress, pointerInProgress, invalidationVersion ->
+        ) { signature, isScrollInProgress, pointerInProgress, isScrollbarDragging, invalidationVersion ->
             signature
                 ?.takeIf {
                     it.firstVisibleMediaOrdinal >= 0 &&
@@ -4498,14 +4706,14 @@ private fun ClassifiedMediaGridContent(
                         it.viewportWidthPx > 0 &&
                         it.viewportHeightPx > 0
                 }
-                ?.takeUnless { isScrollInProgress || pointerInProgress || !morphEnabled }
+                ?.takeUnless { isScrollInProgress || pointerInProgress || isScrollbarDragging || !morphEnabled }
                 ?.let { it to invalidationVersion }
         }.distinctUntilChanged().collectLatest { trigger ->
             val signature = trigger?.first ?: return@collectLatest
             // Require a short quiet window before doing stable-idle work. A
             // pointer-down can precede LazyGrid's scroll flag by a frame.
             kotlinx.coroutines.delay(32L)
-            if (state.isScrollInProgress || morphPointerInProgress.value) return@collectLatest
+            if (state.isScrollInProgress || morphPointerInProgress.value || scrollbarDragInProgress.value) return@collectLatest
             val preparedIndexAtCapture = residentPreparedIndex ?: return@collectLatest
             val capture = captureMediaGridMorphInput(
                 frame = frame,
@@ -4554,7 +4762,8 @@ private fun ClassifiedMediaGridContent(
             if (
                 !morphPreparationCache.isCurrent(token) ||
                 state.isScrollInProgress ||
-                morphPointerInProgress.value
+                morphPointerInProgress.value ||
+                scrollbarDragInProgress.value
             ) {
                 return@collectLatest
             }
@@ -4822,6 +5031,24 @@ private fun ClassifiedMediaGridContent(
             }
             }
         }
+        val positionPillVisibleForFrame = positionPillState.phase != MediaGridPositionPillPhase.Hidden &&
+            positionPillState.label != null &&
+            (positionPillState.frameKey == frame.key || positionPillMorphing || positionPillState.morphActive)
+        if (positionPillVisibleForFrame) {
+            MediaGridPositionPill(
+                state = positionPillState,
+                onEvent = dispatchPositionPillEvent,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
+        }
+        MediaGridScrollbar(
+            frame = frame,
+            anchor = viewportAnchor,
+            state = state,
+            scrollbarState = scrollbarState,
+            enabled = !showProgress && !morphInteractionLocked && !morphPointerActive && !morphVisualActive,
+            modifier = Modifier.align(Alignment.CenterEnd),
+        )
         if (showProgress) {
             Box(
                 Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).testTag("classified_media_grid_progress"),

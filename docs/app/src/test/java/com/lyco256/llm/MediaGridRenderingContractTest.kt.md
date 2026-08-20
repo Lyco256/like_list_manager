@@ -1,5 +1,7 @@
 # `MediaGridRenderingContractTest.kt`
 
+現在位置ピルの契約として、既存の軽量viewport ordinalとbucket生成だけを使い、frame全走査、Repository／File／画像処理を現在位置算出へ追加していないことも静的に確認します。
+
 ## 2026-08-10 Phase 2 claim/draw contract
 
 - Production claimがcached selected pairを使い、複数pair builderを呼ばないことを固定する。

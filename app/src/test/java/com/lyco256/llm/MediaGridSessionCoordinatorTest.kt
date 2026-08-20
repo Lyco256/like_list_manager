@@ -2,6 +2,8 @@ package com.lyco256.llm
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MediaGridSessionCoordinatorTest {
@@ -17,6 +19,57 @@ class MediaGridSessionCoordinatorTest {
         assertEquals(false, transition(false))
         assertEquals(false, transition(true))
         assertEquals(true, transition(false))
+    }
+
+    @Test
+    fun completedScrollbarCheckpointIsNotDuplicatedByScrollEndTransition() {
+        val completed = MediaGridScrollbarDragSnapshot(
+            endReason = MediaGridScrollbarDragEnd.Completed,
+            completionId = 1L,
+        )
+        var state = MediaGridScrollCheckpointState()
+
+        state = mediaGridScrollCheckpointTransition(state, isScrollInProgress = true).state
+        val completion = mediaGridScrollCheckpointTransition(
+            state,
+            isScrollInProgress = false,
+            scrollbarSnapshot = completed,
+        )
+        assertTrue(completion.shouldCheckpoint)
+        state = completion.state
+
+        val duplicate = mediaGridScrollCheckpointTransition(
+            state,
+            isScrollInProgress = false,
+            scrollbarSnapshot = completed,
+        )
+        assertFalse(duplicate.shouldCheckpoint)
+    }
+
+    @Test
+    fun normalScrollAfterScrollbarCompletionStillCheckpoints() {
+        val completed = MediaGridScrollbarDragSnapshot(
+            endReason = MediaGridScrollbarDragEnd.Completed,
+            completionId = 1L,
+        )
+        var state = MediaGridScrollCheckpointState()
+        state = mediaGridScrollCheckpointTransition(
+            state,
+            isScrollInProgress = false,
+            scrollbarSnapshot = completed,
+        ).state
+
+        state = mediaGridScrollCheckpointTransition(
+            state,
+            isScrollInProgress = true,
+            scrollbarSnapshot = completed,
+        ).state
+        val normalScrollEnd = mediaGridScrollCheckpointTransition(
+            state,
+            isScrollInProgress = false,
+            scrollbarSnapshot = completed,
+        )
+        assertTrue(normalScrollEnd.shouldCheckpoint)
     }
 
     @Test

@@ -174,6 +174,11 @@ The Phase 1 production test now asserts the legacy one-step pinch path and the a
 - The large-media flow keeps the normal paced drag, fast fling, immediate retouch, final visible-range selection, and post-filter cell action as the integration regression coverage for operation-state suppression and latest-viewport following.
 - Placeholder tags, existing image success/error behavior, column changes, selection, dialogs, and Macrobenchmark behavior remain covered by their existing tests and are not changed by this implementation.
 
+## 2026-08 media grid scrollbar navigation
+
+- `mediaGridScrollbarJumpsToTheEndAndBackWithoutTakingTheWholeRightEdge` remains the real Activity regression path for scrollbar rendering, endpoint jumps, and sort changes across default, post-time, and like-count modes.
+- `MediaGridScrollbarUiTest` separately exercises the TEST_HARNESS scrollbar composable on the isolated test app, asserting target-ordinal label updates, upper-pill suppression, and cancellation cleanup without touching production data.
+
 ## 2026-08-13 classified filter clear path
 
 - 分類済みtoolbarからclearを除いたため、filterのDB非変更E2Eは検索/絞り込みDialog内の全クリア確認を実行してから適用する経路を使用します。

@@ -92,3 +92,7 @@ MediaGrid previewにカード内titleがないこと、閉じるボタンがカ�
 ## 2026-07 media grid column coverage
 
 - The media-grid compose smoke now checks that changing the column count keeps the anchor media cell visible and that the day/month headers still span the full grid width.
+
+## 2026-08-19 media-grid current-position pill
+
+- The large-dataset header regression verifies that the initial grid has no current-position pill and that a real grid scroll shows `media_grid_position_pill` and its label without changing the existing header/column assertions.
