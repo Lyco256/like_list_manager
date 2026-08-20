@@ -44,6 +44,52 @@ class MediaGridScrollbarTest {
     }
 
     @Test
+    fun bucketStartOrdinalUsesTheSameMediaOrdinalScrollbarFraction() {
+        assertEquals(0f, mediaGridScrollbarFractionForOrdinal(0, 100, 10)!!, 0.001f)
+        assertEquals(40f / 90f, mediaGridScrollbarFractionForOrdinal(40, 100, 10)!!, 0.001f)
+        assertEquals(1f, mediaGridScrollbarFractionForOrdinal(200, 100, 10)!!, 0.001f)
+        assertEquals(400f, mediaGridScrollbarTopForOrdinal(40, 100, 10, 900f)!!, 0.001f)
+        assertEquals(null, mediaGridScrollbarFractionForOrdinal(0, 10, 10))
+    }
+
+    @Test
+    fun dragSnapshotRetainsMetricsOnlyUntilThePointerSessionEnds() {
+        val frame = testFrame(50)
+        val geometry = calculateMediaGridScrollbarGeometry(50, 0, 9, 1000f, 32f)
+        val state = MediaGridScrollbarState()
+
+        assertTrue(state.beginDrag(frame, geometry, geometry.thumbTopPx))
+        assertEquals(geometry.totalMediaCount, state.dragSnapshot.totalMediaCount)
+        assertEquals(geometry.visibleMediaCount, state.dragSnapshot.visibleMediaCount)
+        assertEquals(geometry.maxThumbTopPx, state.dragSnapshot.maxThumbTopPx)
+        state.finishDrag()
+        assertFalse(state.dragSnapshot.isDragging)
+        assertTrue(state.dragSnapshot.isFinalTargetPending)
+        state.cancelDrag()
+        assertEquals(null, state.dragSnapshot.maxThumbTopPx)
+    }
+
+    @Test
+    fun fastRoundTripKeepsTheLatestTargetAtTheReturnedBucket() {
+        val frame = testFrame(100)
+        val geometry = calculateMediaGridScrollbarGeometry(100, 0, 9, 1000f, 32f)
+        val state = MediaGridScrollbarState()
+
+        assertTrue(state.beginDrag(frame, geometry, geometry.thumbTopPx))
+        state.updateDrag(geometry.maxThumbTopPx)
+        state.updateDrag(geometry.maxThumbTopPx * 0.45f)
+        state.updateDrag(geometry.thumbTopPx)
+
+        assertEquals(0, state.dragSnapshot.targetMediaOrdinal)
+        assertEquals(
+            frame.ordinalIndex.itemIndexByMediaOrdinal[0],
+            state.currentTargetItemIndex,
+        )
+        assertEquals(0, frame.headerBoundaryIndex.boundaryAtOrBefore(state.dragSnapshot.targetMediaOrdinal!!)?.startMediaOrdinal)
+        state.cancelDrag()
+    }
+
+    @Test
     fun ordinalTargetMapsOnlyToMediaItemIndexesForEveryColumnCount() {
         val entries = (0 until 40).map { index ->
             MediaGridEntry(

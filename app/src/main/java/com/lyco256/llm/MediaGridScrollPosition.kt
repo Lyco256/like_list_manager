@@ -57,6 +57,15 @@ internal fun mediaGridPositionForOrdinal(
     )
 }
 
+internal fun mediaGridHeaderBoundaryForOrdinal(
+    frame: MediaGridFrameData,
+    mediaOrdinal: Int,
+    sort: ClassifiedSortState,
+): MediaGridHeaderBoundary? {
+    if (sort.baseOrder == ClassifiedSortBase.Default) return null
+    return frame.headerBoundaryIndex.boundaryAtOrBefore(mediaOrdinal)
+}
+
 internal data class MediaGridPositionPillObservation(
     val anchor: MediaGridViewportAnchorSignature?,
     val scrolling: Boolean,

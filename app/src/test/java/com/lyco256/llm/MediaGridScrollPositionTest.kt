@@ -109,6 +109,83 @@ class MediaGridScrollPositionTest {
     }
 
     @Test
+    fun frameBuildIndexesEachHeaderStartAndFindsTheContainingBucket() {
+        val sort = ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime)
+        val frame = frame(
+            sort,
+            listOf(
+                entry(1L, "2026-08-19T00:00:00Z", 1L),
+                entry(2L, "2026-08-19T08:00:00Z", 2L),
+                entry(3L, "2026-08-20T00:00:00Z", 3L),
+                entry(4L, "2026-08-20T08:00:00Z", 4L),
+                entry(5L, "2026-08-21T00:00:00Z", 5L),
+            ),
+            4,
+        )
+
+        assertEquals(
+            listOf(
+                MediaGridHeaderBoundary("post_time_day_2026-08-19", 0),
+                MediaGridHeaderBoundary("post_time_day_2026-08-20", 2),
+                MediaGridHeaderBoundary("post_time_day_2026-08-21", 4),
+            ),
+            frame.headerBoundaryIndex.boundaries,
+        )
+        assertEquals(0, frame.headerBoundaryIndex.boundaryAtOrBefore(1)?.startMediaOrdinal)
+        assertEquals(2, frame.headerBoundaryIndex.boundaryAtOrBefore(3)?.startMediaOrdinal)
+        assertEquals(4, frame.headerBoundaryIndex.boundaryAtOrBefore(4)?.startMediaOrdinal)
+    }
+
+    @Test
+    fun headerBoundaryIndexUsesExistingGranularityAndSpecialBuckets() {
+        val postTime = ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime)
+        val weekFrame = frame(
+            postTime,
+            listOf(
+                entry(1L, "2026-08-17T00:00:00Z", 1L),
+                entry(2L, "2026-08-23T12:00:00Z", 2L),
+                entry(3L, "2026-08-24T00:00:00Z", 3L),
+            ),
+            5,
+        )
+        assertEquals(listOf(0, 2), weekFrame.headerBoundaryIndex.boundaries.map { it.startMediaOrdinal })
+
+        val monthFrame = frame(
+            postTime,
+            listOf(
+                entry(4L, "2026-08-01T00:00:00Z", 1L),
+                entry(5L, "2026-08-31T12:00:00Z", 2L),
+                entry(6L, "2026-09-01T00:00:00Z", 3L),
+            ),
+            9,
+        )
+        assertEquals(listOf(0, 2), monthFrame.headerBoundaryIndex.boundaries.map { it.startMediaOrdinal })
+
+        val likeFrame = frame(
+            ClassifiedSortState(baseOrder = ClassifiedSortBase.LikeCount),
+            listOf(
+                entry(7L, date(), null),
+                entry(8L, date(), null),
+                entry(9L, date(), 100_000L),
+                entry(10L, date(), 100_000L),
+            ),
+            4,
+        )
+        assertEquals(listOf(0, 2), likeFrame.headerBoundaryIndex.boundaries.map { it.startMediaOrdinal })
+    }
+
+    @Test
+    fun defaultSortHasNoHeaderBoundaryIndex() {
+        val frame = frame(
+            ClassifiedSortState(baseOrder = ClassifiedSortBase.Default),
+            listOf(entry(1L, date(), 1L), entry(2L, date(), 2L)),
+        )
+
+        assertTrue(frame.headerBoundaryIndex.boundaries.isEmpty())
+        assertNull(frame.headerBoundaryIndex.boundaryAtOrBefore(1))
+    }
+
+    @Test
     fun nextHeaderDoesNotAdvanceUntilFirstVisibleMediaMoves() {
         val sort = ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime)
         val frame = frame(

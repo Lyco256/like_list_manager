@@ -41,6 +41,8 @@ import androidx.compose.ui.layout.Layout
 
 internal const val MediaGridScrollbarMinThumbHeightDp = 32
 internal const val MediaGridScrollbarTouchSlopDp = 8
+internal const val MediaGridScrollbarBucketPillWidthDp = 12
+internal const val MediaGridScrollbarBucketPillHeightDp = 4
 private const val MediaGridScrollbarLabelGapDp = 6
 
 internal data class MediaGridScrollbarGeometry(
@@ -113,6 +115,29 @@ internal fun mediaGridScrollbarTargetOrdinal(
         .coerceIn(0, maxStartOrdinal)
 }
 
+internal fun mediaGridScrollbarFractionForOrdinal(
+    mediaOrdinal: Int,
+    totalMediaCount: Int,
+    visibleMediaCount: Int,
+): Float? {
+    val total = totalMediaCount.coerceAtLeast(0)
+    val visible = visibleMediaCount.coerceIn(0, total)
+    if (total <= 0 || visible <= 0 || total <= visible) return null
+    val maxStartOrdinal = total - visible
+    return mediaOrdinal.coerceIn(0, maxStartOrdinal).toFloat() / maxStartOrdinal.toFloat()
+}
+
+internal fun mediaGridScrollbarTopForOrdinal(
+    mediaOrdinal: Int,
+    totalMediaCount: Int,
+    visibleMediaCount: Int,
+    maxThumbTopPx: Float,
+): Float? = mediaGridScrollbarFractionForOrdinal(
+    mediaOrdinal = mediaOrdinal,
+    totalMediaCount = totalMediaCount,
+    visibleMediaCount = visibleMediaCount,
+)?.let { fraction -> fraction * maxThumbTopPx.coerceAtLeast(0f) }
+
 internal fun mediaGridScrollbarTargetItemIndex(
     fraction: Float,
     totalMediaCount: Int,
@@ -132,6 +157,9 @@ internal data class MediaGridScrollbarDragSnapshot(
     val isFinalTargetPending: Boolean = false,
     val endReason: MediaGridScrollbarDragEnd? = null,
     val completionId: Long = 0L,
+    val totalMediaCount: Int = 0,
+    val visibleMediaCount: Int = 0,
+    val maxThumbTopPx: Float? = null,
 )
 
 internal enum class MediaGridScrollbarDragEnd {
@@ -251,6 +279,9 @@ internal class MediaGridScrollbarState {
             fraction = geometry.fraction,
             thumbTopPx = thumbTop,
             thumbHeightPx = geometry.thumbHeightPx,
+            totalMediaCount = geometry.totalMediaCount,
+            visibleMediaCount = geometry.visibleMediaCount,
+            maxThumbTopPx = geometry.maxThumbTopPx,
         )
         publishRequest(
             sessionId = sessionId,
@@ -332,6 +363,9 @@ internal class MediaGridScrollbarState {
             completionId = completionId,
             thumbTopPx = null,
             thumbHeightPx = null,
+            totalMediaCount = 0,
+            visibleMediaCount = 0,
+            maxThumbTopPx = null,
         )
         return true
     }
@@ -452,6 +486,26 @@ internal fun MediaGridScrollbar(
         .takeIf { it.isDragging || it.isFinalTargetPending }
         ?.thumbHeightPx
         ?: geometry.thumbHeightPx
+    val bucketPillHeightPx = with(density) { MediaGridScrollbarBucketPillHeightDp.dp.toPx() }
+    val bucketPillTopPx = if (dragSnapshot.isDragging && dragSnapshot.frameKey == frame.key) {
+        val targetOrdinal = dragSnapshot.targetMediaOrdinal
+        val boundary = targetOrdinal?.let { ordinal ->
+            mediaGridHeaderBoundaryForOrdinal(frame, ordinal, frame.key.dataKey.sort)
+        }
+        val maxThumbTopPx = dragSnapshot.maxThumbTopPx
+        if (boundary != null && maxThumbTopPx != null) {
+            mediaGridScrollbarTopForOrdinal(
+                mediaOrdinal = boundary.startMediaOrdinal,
+                totalMediaCount = dragSnapshot.totalMediaCount,
+                visibleMediaCount = dragSnapshot.visibleMediaCount,
+                maxThumbTopPx = maxThumbTopPx,
+            )?.coerceIn(0f, (trackHeightPx - bucketPillHeightPx).coerceAtLeast(0f))
+        } else {
+            null
+        }
+    } else {
+        null
+    }
     val touchHeightDp = with(density) { (geometry.thumbHeightPx + touchSlopPx * 2f).toDp() }
     val touchOffsetPx = (thumbTopPx - touchSlopPx).coerceAtLeast(0f)
     val labelGapPx = with(density) { MediaGridScrollbarLabelGapDp.dp.toPx() }
@@ -499,12 +553,26 @@ internal fun MediaGridScrollbar(
                             .clip(RoundedCornerShape(2.dp))
                             .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)),
                     )
+                    if (bucketPillTopPx != null) {
+                        Box(
+                            Modifier
+                                .align(Alignment.TopEnd)
+                                .offset { IntOffset(0, bucketPillTopPx.roundToInt()) }
+                                .width(MediaGridScrollbarBucketPillWidthDp.dp)
+                                .height(MediaGridScrollbarBucketPillHeightDp.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(MaterialTheme.colorScheme.primary)
+                                .zIndex(1f)
+                                .testTag("media_grid_scrollbar_bucket_pill"),
+                        )
+                    }
                     Box(
                         Modifier
                             .align(Alignment.TopEnd)
                             .offset { IntOffset(0, touchOffsetPx.toInt()) }
                             .width(32.dp)
-                            .height(touchHeightDp),
+                            .height(touchHeightDp)
+                            .zIndex(2f),
                         contentAlignment = Alignment.TopEnd,
                     ) {
                         Box(

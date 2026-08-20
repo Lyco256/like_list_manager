@@ -1,5 +1,9 @@
 # `TagHierarchyUiV2.kt`
 
+## 2026-08-20 media-grid scrollbar bucket boundary index
+
+`buildMediaGridFrameData`は既存のheader/cell items走査中に、投稿日順・いいね数順の各header bucketについて最初のmedia ordinalを`MediaGridHeaderBoundaryIndex`へ記録します。保存順では索引を作りません。drag中の小型スクロールバーピルはframe固有の索引をtarget ordinal以下で二分探索し、見出し開始ordinalをscrollbar fractionへ変換します。
+
 ## 2026-08-20 media-grid scrollbar checkpoint deduplication
 
 - `ClassifiedMediaGridContent`からスクロールバー完了時の直接checkpointを分離し、親のcheckpoint coordinatorへ一本化しました。
