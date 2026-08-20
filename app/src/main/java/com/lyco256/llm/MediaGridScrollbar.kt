@@ -495,6 +495,7 @@ internal fun MediaGridScrollbar(
                             .align(Alignment.TopEnd)
                             .fillMaxHeight()
                             .width(4.dp)
+                            .testTag("media_grid_scrollbar_track")
                             .clip(RoundedCornerShape(2.dp))
                             .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)),
                     )
@@ -504,10 +505,10 @@ internal fun MediaGridScrollbar(
                             .offset { IntOffset(0, touchOffsetPx.toInt()) }
                             .width(32.dp)
                             .height(touchHeightDp),
+                        contentAlignment = Alignment.TopEnd,
                     ) {
                         Box(
                             Modifier
-                                .align(Alignment.Center)
                                 .width(4.dp)
                                 .height(with(density) { thumbHeightPx.toDp() })
                                 .testTag("media_grid_scrollbar_thumb")
@@ -555,7 +556,7 @@ internal fun MediaGridScrollbar(
                     thumbTopPx + thumbHeightPx / 2f - label.height / 2f
                     ).coerceIn(0f, (trackHeight - label.height).coerceAtLeast(0f))
                 val labelLeft = (
-                    track.width / 2f - thumbHalfWidthPx - labelGapPx - label.width
+                    track.width - thumbHalfWidthPx * 2f - labelGapPx - label.width
                     ).roundToInt()
                 label.place(labelLeft, labelTop.roundToInt())
             }

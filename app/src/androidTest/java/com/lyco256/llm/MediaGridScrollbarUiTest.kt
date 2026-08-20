@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -15,8 +16,10 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.junit4.createComposeRule
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -26,6 +29,85 @@ import java.time.ZoneOffset
 class MediaGridScrollbarUiTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun visualScrollbarBoundsStayAtGridRightEdgeAcrossDragStates() {
+        val frame = testFrame()
+        val scrollbarState = MediaGridScrollbarState()
+
+        composeRule.setContent {
+            MaterialTheme {
+                val gridState = rememberLazyGridState()
+                Box(Modifier.fillMaxSize()) {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(4),
+                        state = gridState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag("media_grid_bounds"),
+                    ) {
+                        items((0 until 100).toList()) {
+                            Box(Modifier.height(100.dp))
+                        }
+                    }
+                    MediaGridScrollbar(
+                        frame = frame,
+                        anchor = anchor(frame),
+                        state = gridState,
+                        scrollbarState = scrollbarState,
+                        enabled = true,
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        val gridBounds = composeRule.onNodeWithTag("media_grid_bounds")
+            .fetchSemanticsNode().boundsInRoot
+        val containerBounds = composeRule.onNodeWithTag("media_grid_scrollbar")
+            .fetchSemanticsNode().boundsInRoot
+        val trackBounds = composeRule.onNodeWithTag("media_grid_scrollbar_track")
+            .fetchSemanticsNode().boundsInRoot
+        val normalThumbBounds = composeRule.onNodeWithTag("media_grid_scrollbar_thumb")
+            .fetchSemanticsNode().boundsInRoot
+
+        assertEquals(gridBounds.right, containerBounds.right, 0.5f)
+        assertEquals(gridBounds.right, trackBounds.right, 0.5f)
+        assertEquals(gridBounds.right, normalThumbBounds.right, 0.5f)
+        assertEquals(trackBounds.left, normalThumbBounds.left, 0.5f)
+        assertTrue(containerBounds.left < trackBounds.left)
+        assertTrue(containerBounds.width >= trackBounds.width * 4f)
+
+        val geometry = calculateMediaGridScrollbarGeometry(
+            totalMediaCount = 100,
+            firstVisibleMediaOrdinal = 0,
+            lastVisibleMediaOrdinal = 9,
+            trackHeightPx = trackBounds.height,
+            minThumbHeightPx = 32f,
+        )
+        composeRule.runOnIdle {
+            assertTrue(scrollbarState.beginDrag(frame, geometry, geometry.thumbTopPx))
+        }
+        composeRule.waitForIdle()
+        val draggingThumbBounds = composeRule.onNodeWithTag("media_grid_scrollbar_thumb")
+            .fetchSemanticsNode().boundsInRoot
+        assertEquals(trackBounds.right, draggingThumbBounds.right, 0.5f)
+        assertEquals(trackBounds.left, draggingThumbBounds.left, 0.5f)
+        val labelBounds = composeRule.onNodeWithTag("media_grid_scrollbar_position_label")
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue(labelBounds.right < trackBounds.left)
+
+        composeRule.runOnIdle {
+            scrollbarState.finishDrag()
+            assertTrue(scrollbarState.dragSnapshot.isFinalTargetPending)
+        }
+        composeRule.waitForIdle()
+        val finalThumbBounds = composeRule.onNodeWithTag("media_grid_scrollbar_thumb")
+            .fetchSemanticsNode().boundsInRoot
+        assertEquals(trackBounds.right, finalThumbBounds.right, 0.5f)
+        assertEquals(trackBounds.left, finalThumbBounds.left, 0.5f)
+    }
 
     @Test
     fun targetLabelFollowsOrdinalImmediatelyAndCancelRemovesIt() {
