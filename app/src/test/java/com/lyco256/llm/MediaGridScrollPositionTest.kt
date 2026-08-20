@@ -46,6 +46,51 @@ class MediaGridScrollPositionTest {
     }
 
     @Test
+    fun targetOrdinalUsesTheSameHeaderBucketForEverySupportedSort() {
+        val postTimeEntries = listOf(
+            entry(1L, "2026-08-19T12:00:00Z", 1L),
+            entry(2L, "2026-08-20T12:00:00Z", 2L),
+        )
+        val postTimeFrame = frame(
+            ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime),
+            postTimeEntries,
+            4,
+        )
+        assertEquals(
+            "2026/08/20",
+            mediaGridPositionForOrdinal(
+                postTimeFrame,
+                mediaOrdinal = 1,
+                sort = postTimeFrame.key.dataKey.sort,
+                columnCount = 4,
+            )?.label,
+        )
+
+        val likeFrame = frame(
+            ClassifiedSortState(baseOrder = ClassifiedSortBase.LikeCount),
+            listOf(entry(3L, date(), 100_000L)),
+            9,
+        )
+        assertEquals(
+            "10万以上",
+            mediaGridPositionForOrdinal(
+                likeFrame,
+                mediaOrdinal = 0,
+                sort = likeFrame.key.dataKey.sort,
+                columnCount = 9,
+            )?.label,
+        )
+        assertNull(
+            mediaGridPositionForOrdinal(
+                frame(ClassifiedSortState(), listOf(entry(4L, date(), 1L)), 4),
+                mediaOrdinal = 0,
+                sort = ClassifiedSortState(),
+                columnCount = 4,
+            ),
+        )
+    }
+
+    @Test
     fun nextHeaderDoesNotAdvanceUntilFirstVisibleMediaMoves() {
         val sort = ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime)
         val frame = frame(
@@ -161,6 +206,54 @@ class MediaGridScrollPositionTest {
             MediaGridPositionPillEvent.FrameChanged(default.key, hasBuckets = false, morphing = false),
         )
         assertEquals(MediaGridPositionPillPhase.Hidden, state.phase)
+    }
+
+    @Test
+    fun completedScrollbarDragHandsOffOneFinalPositionWithFreshTimer() {
+        val frame = frame(
+            ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime),
+            listOf(entry(1L, date(), 1L)),
+            4,
+        )
+        var state = reduceMediaGridPositionPillState(
+            MediaGridPositionPillState(),
+            MediaGridPositionPillEvent.ScrollbarDragFinished(position(frame, 4)),
+        )
+        assertEquals(MediaGridPositionPillPhase.Visible, state.phase)
+        assertTrue(state.hideScheduled)
+        val generation = state.generation
+        state = reduceMediaGridPositionPillState(
+            state,
+            MediaGridPositionPillEvent.HideTimeout(generation),
+        )
+        assertEquals(MediaGridPositionPillPhase.Hiding, state.phase)
+    }
+
+    @Test
+    fun staleScrollbarCompletionCannotReplaceANewerGeneration() {
+        val frame = frame(
+            ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime),
+            listOf(entry(1L, date(), 1L)),
+            4,
+        )
+        val first = position(frame, 4)
+        val second = first.copy(label = "newer")
+        var state = reduceMediaGridPositionPillState(
+            MediaGridPositionPillState(),
+            MediaGridPositionPillEvent.ScrollbarDragFinished(first),
+        )
+        val oldGeneration = state.generation
+        state = reduceMediaGridPositionPillState(
+            state,
+            MediaGridPositionPillEvent.ScrollbarDragFinished(second),
+        )
+        assertEquals("newer", state.label)
+        assertEquals(oldGeneration + 1L, state.generation)
+        state = reduceMediaGridPositionPillState(
+            state,
+            MediaGridPositionPillEvent.HideTimeout(oldGeneration),
+        )
+        assertEquals(MediaGridPositionPillPhase.Visible, state.phase)
     }
 
     @Test

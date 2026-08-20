@@ -4350,12 +4350,17 @@ private fun ClassifiedMediaGridContent(
             .collect { snapshot ->
                 onMediaGridScrollbarDragStateChanged(snapshot)
                 scrollbarDragInProgress.value = snapshot.isDragging
-                if (!snapshot.isDragging && previousDragFrameKey == frame.key && sessionKey != null) {
+                if (
+                    snapshot.endReason == MediaGridScrollbarDragEnd.Completed &&
+                    previousDragFrameKey == frame.key &&
+                    sessionKey != null
+                ) {
                     withFrameNanos { }
                     captureClassifiedMediaGridScrollAnchor(state, frame.assetIdByItemKey)
                         ?.let { onMediaGridAnchorCheckpoint(sessionKey, it) }
                 }
                 if (snapshot.isDragging) previousDragFrameKey = snapshot.frameKey
+                else if (snapshot.endReason != null) previousDragFrameKey = null
             }
     }
     DisposableEffect(previewPreloader) {
@@ -4464,6 +4469,7 @@ private fun ClassifiedMediaGridContent(
     val dispatchPositionPillEvent: (MediaGridPositionPillEvent) -> Unit = { event ->
         positionPillState = reduceMediaGridPositionPillState(positionPillState, event)
     }
+    var lastHandledScrollbarCompletionId by remember(scrollbarState) { mutableStateOf(0L) }
     LaunchedEffect(frame.key, sort.baseOrder) {
         dispatchPositionPillEvent(
             MediaGridPositionPillEvent.FrameChanged(
@@ -4480,18 +4486,22 @@ private fun ClassifiedMediaGridContent(
                 .distinctUntilChanged(),
         ) { pointerActive, interactionLocked -> pointerActive || interactionLocked }
             .distinctUntilChanged()
-        val suppressionFlow = snapshotFlow {
-            suppressPositionPill || scrollbarState.dragSnapshot.isDragging
-        }.distinctUntilChanged()
+        val scrollbarDragFlow = snapshotFlow { scrollbarState.dragSnapshot }.distinctUntilChanged()
         var previousScrolling = false
         var previousMorphing = latestPositionPillMorphing
         combine(
             viewportAnchorFlow,
             snapshotFlow { state.isScrollInProgress }.distinctUntilChanged(),
             morphActivityFlow,
-            suppressionFlow,
-        ) { anchor, scrolling, morphing, suppressed ->
-            MediaGridPositionPillObservation(anchor, scrolling, morphing, suppressed)
+            scrollbarDragFlow,
+        ) { anchor, scrolling, morphing, scrollbarDragSnapshot ->
+            MediaGridPositionPillObservation(
+                anchor = anchor,
+                scrolling = scrolling,
+                morphing = morphing,
+                suppressed = suppressPositionPill || scrollbarDragSnapshot.isDragging,
+                scrollbarDragSnapshot = scrollbarDragSnapshot,
+            )
         }.collect { observation ->
             val currentFrame = latestPositionPillFrame
             val position = currentMediaGridPosition(
@@ -4500,7 +4510,23 @@ private fun ClassifiedMediaGridContent(
                 sort = latestPositionPillSort,
                 columnCount = latestPositionPillColumnCount,
             )
-            if (observation.suppressed || latestPositionPillSort.baseOrder == ClassifiedSortBase.Default) {
+            val completedDrag = observation.scrollbarDragSnapshot
+                .takeIf {
+                    it.endReason == MediaGridScrollbarDragEnd.Completed &&
+                        it.completionId != lastHandledScrollbarCompletionId
+                }
+            if (completedDrag != null) {
+                lastHandledScrollbarCompletionId = completedDrag.completionId
+                val finalPosition = completedDrag.targetMediaOrdinal?.let { ordinal ->
+                    mediaGridPositionForOrdinal(
+                        frame = currentFrame,
+                        mediaOrdinal = ordinal,
+                        sort = latestPositionPillSort,
+                        columnCount = latestPositionPillColumnCount,
+                    )?.takeIf { it.frameKey == completedDrag.frameKey }
+                }
+                dispatchPositionPillEvent(MediaGridPositionPillEvent.ScrollbarDragFinished(finalPosition))
+            } else if (observation.suppressed || latestPositionPillSort.baseOrder == ClassifiedSortBase.Default) {
                 if (observation.suppressed) dispatchPositionPillEvent(MediaGridPositionPillEvent.Suppressed)
             } else {
                 if (observation.morphing && !previousMorphing) {
@@ -4945,10 +4971,6 @@ private fun ClassifiedMediaGridContent(
             state = state,
             scrollbarState = scrollbarState,
             enabled = !showProgress && !morphInteractionLocked && !morphPointerActive && !morphVisualActive,
-            onDragStateChanged = { snapshot ->
-                onMediaGridScrollbarDragStateChanged(snapshot)
-                scrollbarDragInProgress.value = snapshot.isDragging
-            },
             modifier = Modifier.align(Alignment.CenterEnd),
         )
         if (showProgress) {

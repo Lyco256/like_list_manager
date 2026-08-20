@@ -9,8 +9,11 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -18,7 +21,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,16 +29,19 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.ui.draw.clip
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.layout.Layout
 
 internal const val MediaGridScrollbarMinThumbHeightDp = 32
 internal const val MediaGridScrollbarTouchSlopDp = 8
+private const val MediaGridScrollbarLabelGapDp = 6
 
 internal data class MediaGridScrollbarGeometry(
     val isScrollable: Boolean,
@@ -122,7 +127,17 @@ internal data class MediaGridScrollbarDragSnapshot(
     val targetMediaOrdinal: Int? = null,
     val targetItemIndex: Int? = null,
     val fraction: Float? = null,
+    val thumbTopPx: Float? = null,
+    val thumbHeightPx: Float? = null,
+    val isFinalTargetPending: Boolean = false,
+    val endReason: MediaGridScrollbarDragEnd? = null,
+    val completionId: Long = 0L,
 )
+
+internal enum class MediaGridScrollbarDragEnd {
+    Completed,
+    Cancelled,
+}
 
 private data class MediaGridScrollbarDragSession(
     val frameKey: MediaGridRenderKey,
@@ -146,6 +161,7 @@ internal class MediaGridScrollbarState {
 
     private var session: MediaGridScrollbarDragSession? = null
     private var pendingFinalTargetItemIndex: Int? = null
+    private var completionId: Long = 0L
 
     internal val isDragging: Boolean
         get() = dragSnapshot.isDragging
@@ -191,6 +207,8 @@ internal class MediaGridScrollbarState {
             targetMediaOrdinal = targetOrdinal,
             targetItemIndex = targetItemIndex,
             fraction = geometry.fraction,
+            thumbTopPx = thumbTop,
+            thumbHeightPx = geometry.thumbHeightPx,
         )
         targetRequests.value = targetItemIndex
         return true
@@ -216,6 +234,8 @@ internal class MediaGridScrollbarState {
             targetMediaOrdinal = targetOrdinal,
             targetItemIndex = targetItemIndex,
             fraction = fraction,
+            thumbTopPx = thumbTop,
+            endReason = null,
         )
         targetRequests.value = targetItemIndex
     }
@@ -223,6 +243,7 @@ internal class MediaGridScrollbarState {
     internal fun finishDrag() {
         pendingFinalTargetItemIndex = dragSnapshot.targetItemIndex
         session = null
+        dragSnapshot = dragSnapshot.copy(isFinalTargetPending = true)
         targetRequests.value = null
         targetRequests.value = pendingFinalTargetItemIndex
     }
@@ -230,7 +251,7 @@ internal class MediaGridScrollbarState {
     internal fun cancelDrag() {
         pendingFinalTargetItemIndex = null
         session = null
-        dragSnapshot = MediaGridScrollbarDragSnapshot()
+        dragSnapshot = MediaGridScrollbarDragSnapshot(endReason = MediaGridScrollbarDragEnd.Cancelled)
         targetRequests.value = null
     }
 
@@ -240,16 +261,23 @@ internal class MediaGridScrollbarState {
     internal fun completeFinalTarget(targetItemIndex: Int) {
         if (pendingFinalTargetItemIndex != targetItemIndex) return
         pendingFinalTargetItemIndex = null
-        dragSnapshot = MediaGridScrollbarDragSnapshot()
+        completionId += 1L
+        dragSnapshot = dragSnapshot.copy(
+            isDragging = false,
+            isFinalTargetPending = false,
+            endReason = MediaGridScrollbarDragEnd.Completed,
+            completionId = completionId,
+        )
         targetRequests.value = null
     }
 
     internal fun cancelIfFrameChanged(frameKey: MediaGridRenderKey) {
-        if (session?.frameKey != null && session?.frameKey != frameKey) cancelDrag()
+        val activeFrameKey = session?.frameKey ?: dragSnapshot.frameKey
+        if (activeFrameKey != null && activeFrameKey != frameKey) cancelDrag()
     }
 
     internal fun thumbTopPx(fallback: MediaGridScrollbarGeometry): Float =
-        session?.thumbTopPx ?: fallback.thumbTopPx
+        session?.thumbTopPx ?: dragSnapshot.thumbTopPx ?: fallback.thumbTopPx
 }
 
 @Composable
@@ -263,7 +291,6 @@ internal fun MediaGridScrollbar(
     state: LazyGridState,
     scrollbarState: MediaGridScrollbarState,
     enabled: Boolean,
-    onDragStateChanged: (MediaGridScrollbarDragSnapshot) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -300,11 +327,6 @@ internal fun MediaGridScrollbar(
             scrollbarState.completeFinalTarget(targetItemIndex)
         }
     }
-    LaunchedEffect(scrollbarState) {
-        snapshotFlow { scrollbarState.dragSnapshot }
-            .distinctUntilChanged()
-            .collect { onDragStateChanged(it) }
-    }
     DisposableEffect(frame.key) {
         onDispose {
             if (scrollbarState.dragSnapshot.frameKey != null) scrollbarState.cancelDrag()
@@ -312,71 +334,126 @@ internal fun MediaGridScrollbar(
     }
 
     if (!enabled || frame.ordinalIndex.assetIdByMediaOrdinal.isEmpty()) return
+    val dragSnapshot = scrollbarState.dragSnapshot
+    val dragPosition = dragSnapshot
+        .takeIf { it.isDragging && it.frameKey == frame.key }
+        ?.targetMediaOrdinal
+        ?.let { ordinal ->
+            mediaGridPositionForOrdinal(
+                frame = frame,
+                mediaOrdinal = ordinal,
+                sort = frame.key.dataKey.sort,
+                columnCount = frame.key.columnCount,
+            )
+        }
     val thumbTopPx = scrollbarState.thumbTopPx(geometry)
-    val thumbHeightDp = with(density) { geometry.thumbHeightPx.toDp() }
+    val thumbHeightPx = dragSnapshot.thumbHeightPx ?: geometry.thumbHeightPx
     val touchHeightDp = with(density) { (geometry.thumbHeightPx + touchSlopPx * 2f).toDp() }
     val touchOffsetPx = (thumbTopPx - touchSlopPx).coerceAtLeast(0f)
-    Box(
-        modifier = modifier
-            .fillMaxHeight()
-            .width(32.dp)
-            .onSizeChanged { trackHeightPx = it.height.toFloat() }
-            .pointerInput(frame.key) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    val currentGeometry = latestGeometry
-                    val hitTop = (currentGeometry.thumbTopPx - touchSlopPx).coerceAtLeast(0f)
-                    val hitBottom = currentGeometry.thumbTopPx + currentGeometry.thumbHeightPx + touchSlopPx
-                    if (!currentGeometry.isScrollable || down.position.y !in hitTop..hitBottom) {
-                        return@awaitEachGesture
-                    }
-                    down.consume()
-                    if (!latestDragState.beginDrag(latestFrame, currentGeometry, down.position.y)) {
-                        return@awaitEachGesture
-                    }
-                        try {
-                            drag(down.id) { change ->
-                                change.consume()
-                                latestDragState.updateDrag(change.position.y)
+    val labelGapPx = with(density) { MediaGridScrollbarLabelGapDp.dp.toPx() }
+    val thumbHalfWidthPx = with(density) { 2.dp.toPx() }
+    Layout(
+        content = {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(32.dp)
+                    .onSizeChanged { trackHeightPx = it.height.toFloat() }
+                    .pointerInput(frame.key) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val currentGeometry = latestGeometry
+                            val hitTop = (currentGeometry.thumbTopPx - touchSlopPx).coerceAtLeast(0f)
+                            val hitBottom = currentGeometry.thumbTopPx + currentGeometry.thumbHeightPx + touchSlopPx
+                            if (!currentGeometry.isScrollable || down.position.y !in hitTop..hitBottom) {
+                                return@awaitEachGesture
                             }
-                            latestDragState.finishDrag()
-                        } finally {
-                            if (latestDragState.hasActivePointer) latestDragState.cancelDrag()
+                            down.consume()
+                            if (!latestDragState.beginDrag(latestFrame, currentGeometry, down.position.y)) {
+                                return@awaitEachGesture
+                            }
+                            try {
+                                drag(down.id) { change ->
+                                    change.consume()
+                                    latestDragState.updateDrag(change.position.y)
+                                }
+                                latestDragState.finishDrag()
+                            } finally {
+                                if (latestDragState.hasActivePointer) latestDragState.cancelDrag()
+                            }
                         }
+                    }
+                    .testTag("media_grid_scrollbar"),
+            ) {
+                if (geometry.isScrollable) {
+                    Box(
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .fillMaxHeight()
+                            .width(4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)),
+                    )
+                    Box(
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .offset { IntOffset(0, touchOffsetPx.toInt()) }
+                            .width(32.dp)
+                            .height(touchHeightDp),
+                    ) {
+                        Box(
+                            Modifier
+                                .align(Alignment.Center)
+                                .width(4.dp)
+                                .height(with(density) { thumbHeightPx.toDp() })
+                                .testTag("media_grid_scrollbar_thumb")
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(
+                                    if (scrollbarState.isDragging) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                                    },
+                                ),
+                        )
+                    }
                 }
             }
-            .testTag("media_grid_scrollbar"),
-        contentAlignment = Alignment.TopEnd,
-    ) {
-        if (geometry.isScrollable) {
-            Box(
-                Modifier
-                    .fillMaxHeight()
-                    .width(4.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)),
-            )
-            Box(
-                Modifier
-                    .offset { IntOffset(0, touchOffsetPx.toInt()) }
-                    .width(32.dp)
-                    .height(touchHeightDp),
-            ) {
-                Box(
-                Modifier
-                    .align(Alignment.Center)
-                    .width(4.dp)
-                    .height(thumbHeightDp)
-                    .testTag("media_grid_scrollbar_thumb")
-                    .clip(RoundedCornerShape(2.dp))
-                        .background(
-                            if (scrollbarState.isDragging) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
-                            },
-                        ),
-                )
+            if (dragPosition != null) {
+                Surface(
+                    color = MaterialTheme.colorScheme.inverseSurface,
+                    contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                    shape = RoundedCornerShape(50),
+                    modifier = Modifier
+                        .zIndex(3f)
+                        .testTag("media_grid_scrollbar_position_label"),
+                ) {
+                    Text(
+                        text = dragPosition.label,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                    )
+                }
+            }
+        },
+        modifier = modifier.fillMaxHeight().width(32.dp),
+    ) { measurables, constraints ->
+        val track = measurables.first().measure(constraints)
+        val label = measurables.getOrNull(1)?.measure(
+            constraints.copy(minWidth = 0, maxWidth = Constraints.Infinity, minHeight = 0),
+        )
+        layout(track.width, track.height) {
+            track.place(0, 0)
+            if (label != null) {
+                val trackHeight = track.height.toFloat()
+                val labelTop = (
+                    thumbTopPx + thumbHeightPx / 2f - label.height / 2f
+                    ).coerceIn(0f, (trackHeight - label.height).coerceAtLeast(0f))
+                val labelLeft = (
+                    track.width / 2f - thumbHalfWidthPx - labelGapPx - label.width
+                    ).roundToInt()
+                label.place(labelLeft, labelTop.roundToInt())
             }
         }
     }

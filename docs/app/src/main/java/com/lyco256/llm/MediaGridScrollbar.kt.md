@@ -5,6 +5,7 @@
 - 表示可否、thumb高、thumb位置、drag fractionからmedia ordinalへの変換は純粋関数で計算します。
 - `MediaGridFrameData.ordinalIndex`のmedia ordinalと`itemIndexByMediaOrdinal`だけを使い、drag中にframe全走査・DB・Repository・再ソートを行いません。
 - drag開始時にframe key、件数、visible件数、thumb geometry、pointer grab offset、ordinal indexを固定します。frame変更、cancel、無効化時はdragを解除します。
-- target item indexは`StateFlow`で最新値だけを保持し、pointerイベントごとの移動命令をキューに積みません。thumb描画はdrag中のpointer由来位置を優先します。
+- target item indexは`StateFlow`で最新値だけを保持し、pointerイベントごとの移動命令をキューに積みません。thumb描画はdrag中のpointer由来位置を優先します。最終target反映中もtarget ordinalとthumb位置を保持します。
 - pointer入力はthumb周辺の広いhit領域だけで取得し、thumb外の右端領域はグリッドへ渡します。
-- `TagHierarchyUiV2.kt`側ではviewport anchor、checkpoint抑制、morphのstable-idle抑制、後続位置ラベル向けdrag snapshotの受け渡しだけを行います。
+- drag中は`targetMediaOrdinal`から既存bucketを直接求めた小型labelをthumb左側へoverlay表示し、縦位置をグリッド領域内へclampします。labelは操作を持たず、レイアウト幅を変更しません。
+- `MediaGridScrollbarDragSnapshot`を唯一のdrag状態源とし、親側の1経路だけがcheckpoint、上部ピル抑制、morph抑制、終了引き継ぎを処理します。正常終了と取消終了は区別され、古いtargetを引き継ぎません。

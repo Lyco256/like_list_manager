@@ -33,7 +33,7 @@
 | 18 | メディアグリッド複数選択 | 主要項目完了 | 0件維持、×／戻る終了、0件時タグ編集無効、2〜6列Dialogボタン、7〜12列非表示、同一clipId選択同期、選択画像本体非変更、単一／複数画像チェック色、開始時のみハプティックを実装・単体／Compose／隔離実機ゲートで確認 |
 | 19 | 共通Undo | 自動テスト実装済み | `UndoPayloadCodecTest`、`UndoDaoIntegrationTest`、`UndoCoordinatorIntegrationTest`、`RepositoryIntegrationTest`、`UndoNotificationUiTest`、`DurableClipDeleteUndoStoreTest` でcodec・DB・transaction・各逆操作・永続画像staging・UI競合をカバー |
 | 20 | 要件20〜35交差回帰 | 自動テスト実装済み | `CrossFeatureRegressionUiTest` と各unit/Compose testでApply draft、author/like、media表示、filter Tree/状態色、compact row/縦guide、toolbar、Undo通知の組み合わせをカバー |
-| 21 | メディアグリッド高速スクロールバー | 自動・隔離実機確認済み | `MediaGridScrollbarTest` でordinal位置、端点、最小thumb、clamp、列数2〜12、drag session固定、frame無効化、cancel、最新targetをカバー。`MainActivityComposeTest.mediaGridScrollbarJumpsToTheEndAndBackWithoutTakingTheWholeRightEdge` と `run-safe-integration-check.cmd` で表示、末尾／先頭ジャンプ、投稿日／いいね／保存順を確認 |
+| 21 | メディアグリッド高速スクロールバー | 自動・隔離実機確認済み | `MediaGridScrollbarTest` でordinal位置、端点、最小thumb、clamp、列数2〜12、drag session固定、frame無効化、cancel、最新target、正常完了/取消終了をカバー。`MediaGridScrollPositionTest` でtarget ordinalの投稿日/いいねbucket、保存順非表示、上部ピル引き継ぎ世代を確認。`MediaGridScrollbarUiTest` でlabel即時表示、target追従、上部ピル非併用、cancel消去を確認。`MainActivityComposeTest.mediaGridScrollbarJumpsToTheEndAndBackWithoutTakingTheWholeRightEdge` と `run-safe-integration-check.cmd` で実機の表示、末尾／先頭ジャンプ、投稿日／いいね／保存順を確認 |
 
 ## 合格ゲート
 

@@ -29,11 +29,40 @@ internal data class MediaGridCurrentPosition(
     val label: String,
 )
 
+/**
+ * Resolves one media ordinal through the same bucket implementation used by
+ * the inline grid headers. This is a direct ordinal lookup and does not
+ * inspect the viewport or access repository state.
+ */
+internal fun mediaGridPositionForOrdinal(
+    frame: MediaGridFrameData,
+    mediaOrdinal: Int,
+    sort: ClassifiedSortState,
+    columnCount: Int,
+): MediaGridCurrentPosition? {
+    if (sort.baseOrder == ClassifiedSortBase.Default || mediaOrdinal < 0) return null
+    val itemIndex = frame.ordinalIndex.itemIndexByMediaOrdinal.getOrNull(mediaOrdinal) ?: return null
+    val cell = frame.items.getOrNull(itemIndex) as? MediaGridCellItem ?: return null
+    val bucket = mediaGridMorphBucketSpec(
+        xCreatedAt = cell.entry.xCreatedAt,
+        likeCount = cell.entry.likeCount,
+        baseOrder = sort.baseOrder,
+        columnCount = columnCount,
+    ) ?: return null
+    return MediaGridCurrentPosition(
+        frameKey = frame.key,
+        mediaOrdinal = mediaOrdinal,
+        bucketKey = bucket.key,
+        label = bucket.label,
+    )
+}
+
 internal data class MediaGridPositionPillObservation(
     val anchor: MediaGridViewportAnchorSignature?,
     val scrolling: Boolean,
     val morphing: Boolean,
     val suppressed: Boolean,
+    val scrollbarDragSnapshot: MediaGridScrollbarDragSnapshot = MediaGridScrollbarDragSnapshot(),
 )
 
 /**
@@ -49,24 +78,9 @@ internal fun currentMediaGridPosition(
     sort: ClassifiedSortState,
     columnCount: Int,
 ): MediaGridCurrentPosition? {
-    if (sort.baseOrder == ClassifiedSortBase.Default) return null
     if (anchor == null || anchor.renderKey != frame.key) return null
     val mediaOrdinal = anchor.firstVisibleMediaOrdinal
-    if (mediaOrdinal < 0) return null
-    val itemIndex = frame.ordinalIndex.itemIndexByMediaOrdinal.getOrNull(mediaOrdinal) ?: return null
-    val cell = frame.items.getOrNull(itemIndex) as? MediaGridCellItem ?: return null
-    val bucket = mediaGridMorphBucketSpec(
-        xCreatedAt = cell.entry.xCreatedAt,
-        likeCount = cell.entry.likeCount,
-        baseOrder = sort.baseOrder,
-        columnCount = columnCount,
-    ) ?: return null
-    return MediaGridCurrentPosition(
-        frameKey = frame.key,
-        mediaOrdinal = mediaOrdinal,
-        bucketKey = bucket.key,
-        label = bucket.label,
-    )
+    return mediaGridPositionForOrdinal(frame, mediaOrdinal, sort, columnCount)
 }
 
 internal enum class MediaGridPositionPillPhase {
@@ -95,6 +109,8 @@ internal sealed interface MediaGridPositionPillEvent {
     data object Suppressed : MediaGridPositionPillEvent
 
     data class ScrollStarted(val position: MediaGridCurrentPosition?) : MediaGridPositionPillEvent
+
+    data class ScrollbarDragFinished(val position: MediaGridCurrentPosition?) : MediaGridPositionPillEvent
 
     data class PositionChanged(val position: MediaGridCurrentPosition?) : MediaGridPositionPillEvent
 
@@ -139,6 +155,22 @@ internal fun reduceMediaGridPositionPillState(
                 label = position.label,
                 generation = state.generation + 1L,
                 hideScheduled = false,
+                hideRequestedDuringMorph = false,
+            )
+        }
+    }
+
+    is MediaGridPositionPillEvent.ScrollbarDragFinished -> {
+        val position = event.position
+        if (state.morphActive || position == null) {
+            if (position == null) hiddenPositionPill(state, state.frameKey, morphActive = false) else state
+        } else {
+            state.copy(
+                phase = MediaGridPositionPillPhase.Visible,
+                frameKey = position.frameKey,
+                label = position.label,
+                generation = state.generation + 1L,
+                hideScheduled = true,
                 hideRequestedDuringMorph = false,
             )
         }

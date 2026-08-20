@@ -108,6 +108,46 @@ class MediaGridScrollbarTest {
         assertEquals(null, state.currentTargetItemIndex)
     }
 
+    @Test
+    fun finishKeepsTargetAndThumbUntilFinalScrollCompletes() {
+        val frame = testFrame(50)
+        val geometry = calculateMediaGridScrollbarGeometry(50, 0, 9, 1000f, 32f)
+        val state = MediaGridScrollbarState()
+
+        assertTrue(state.beginDrag(frame, geometry, geometry.thumbTopPx))
+        state.updateDrag(900f)
+        val target = state.currentTargetItemIndex
+        val ordinal = state.dragSnapshot.targetMediaOrdinal
+        state.finishDrag()
+
+        assertTrue(state.dragSnapshot.isDragging)
+        assertTrue(state.dragSnapshot.isFinalTargetPending)
+        assertEquals(target, state.currentTargetItemIndex)
+        assertEquals(ordinal, state.dragSnapshot.targetMediaOrdinal)
+
+        state.completeFinalTarget(checkNotNull(target))
+        assertFalse(state.dragSnapshot.isDragging)
+        assertEquals(MediaGridScrollbarDragEnd.Completed, state.dragSnapshot.endReason)
+        assertTrue(state.dragSnapshot.completionId > 0L)
+    }
+
+    @Test
+    fun cancelAfterPointerReleaseDoesNotLookLikeCompletionAndClearsTarget() {
+        val frame = testFrame(50)
+        val geometry = calculateMediaGridScrollbarGeometry(50, 0, 9, 1000f, 32f)
+        val state = MediaGridScrollbarState()
+
+        assertTrue(state.beginDrag(frame, geometry, geometry.thumbTopPx))
+        state.updateDrag(900f)
+        state.finishDrag()
+        state.cancelIfFrameChanged(frame.key.copy(columnCount = 8))
+
+        assertFalse(state.dragSnapshot.isDragging)
+        assertEquals(MediaGridScrollbarDragEnd.Cancelled, state.dragSnapshot.endReason)
+        assertEquals(null, state.currentTargetItemIndex)
+        assertEquals(null, state.targetRequests.value)
+    }
+
     private fun testFrame(count: Int): MediaGridFrameData {
         val entries = (0 until count).map { index ->
             MediaGridEntry(
