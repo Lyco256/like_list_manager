@@ -78,6 +78,10 @@ class MediaGridScrollbarUiTest {
         composeRule.runOnIdle { scrollbarState.updateDrag(580f) }
         composeRule.waitForIdle()
         assertTrue(composeRule.onAllNodesWithText("2026/10/30").fetchSemanticsNodes().isNotEmpty())
+        val updatedLabelBounds = composeRule.onNodeWithTag("media_grid_scrollbar_position_label")
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue(updatedLabelBounds.top >= rootBounds.top)
+        assertTrue(updatedLabelBounds.bottom <= rootBounds.bottom)
         composeRule.onAllNodesWithTag("media_grid_position_pill").assertCountEquals(0)
 
         composeRule.runOnIdle { scrollbarState.cancelDrag() }

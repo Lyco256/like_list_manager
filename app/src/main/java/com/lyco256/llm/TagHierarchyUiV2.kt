@@ -537,7 +537,9 @@ internal fun EnhancedClassifiedScreen(
     var pendingPinchAnchor by remember { mutableStateOf<ClassifiedMediaGridScrollAnchor?>(null) }
     var pinchCompletionGeneration by remember { mutableStateOf(0) }
     var morphCheckpointSuppressed by remember(mediaGridSessionState.sessionKey) { mutableStateOf(false) }
-    var mediaGridScrollbarDragging by remember(mediaGridSessionState.sessionKey) { mutableStateOf(false) }
+    var mediaGridScrollbarSnapshot by remember(mediaGridSessionState.sessionKey) {
+        mutableStateOf(MediaGridScrollbarDragSnapshot())
+    }
     val latestSessionKey by rememberUpdatedState(mediaGridSessionState.sessionKey)
     val latestFrame by rememberUpdatedState(mediaGridSessionState.frame)
     val latestCheckpoint by rememberUpdatedState(onMediaGridAnchorCheckpoint)
@@ -545,7 +547,7 @@ internal fun EnhancedClassifiedScreen(
     var legacyPinchCheckpointSuppressed by remember(mediaGridSessionState.sessionKey) { mutableStateOf(false) }
     val suppressScrollCheckpoint =
         sessionRestoreCheckpointSuppressed || legacyPinchCheckpointSuppressed || morphCheckpointSuppressed ||
-            mediaGridScrollbarDragging
+            mediaGridScrollbarSnapshot.isDragging
     val latestSuppressScrollCheckpoint by rememberUpdatedState(suppressScrollCheckpoint)
     val lifecycleOwner = LocalContext.current as? LifecycleOwner
     if (displayMode == ClassifiedDisplayMode.MediaGrid && lifecycleOwner != null) {
@@ -579,20 +581,35 @@ internal fun EnhancedClassifiedScreen(
     }
     LaunchedEffect(mediaGridLazyState, mediaGridSessionState.sessionKey, displayMode) {
         var checkpointState = MediaGridScrollCheckpointState()
-        snapshotFlow { mediaGridLazyState.isScrollInProgress }
-            .distinctUntilChanged()
-            .collect { inProgress ->
-                val transition = mediaGridScrollCheckpointTransition(checkpointState, inProgress)
-                checkpointState = transition.state
-                if (transition.shouldCheckpoint) {
-                    val key = latestSessionKey
-                    val frame = latestFrame
-                    if (!suppressScrollCheckpoint && displayMode == ClassifiedDisplayMode.MediaGrid && key != null && frame != null) {
-                        captureClassifiedMediaGridScrollAnchor(mediaGridLazyState, frame.assetIdByItemKey)
-                            ?.let { latestCheckpoint(key, it) }
-                    }
+        combine(
+            snapshotFlow { mediaGridLazyState.isScrollInProgress }.distinctUntilChanged(),
+            snapshotFlow { mediaGridScrollbarSnapshot }.distinctUntilChanged(),
+        ) { inProgress, scrollbarSnapshot ->
+            inProgress to scrollbarSnapshot
+        }.collect { (inProgress, scrollbarSnapshot) ->
+            val transition = mediaGridScrollCheckpointTransition(
+                state = checkpointState,
+                isScrollInProgress = inProgress,
+                scrollbarSnapshot = scrollbarSnapshot,
+            )
+            checkpointState = transition.state
+            if (transition.shouldCheckpoint) {
+                if (scrollbarSnapshot.endReason == MediaGridScrollbarDragEnd.Completed) {
+                    withFrameNanos { }
+                }
+                val key = latestSessionKey
+                val frame = latestFrame
+                if (
+                    !latestSuppressScrollCheckpoint &&
+                    displayMode == ClassifiedDisplayMode.MediaGrid &&
+                    key != null &&
+                    frame != null
+                ) {
+                    captureClassifiedMediaGridScrollAnchor(mediaGridLazyState, frame.assetIdByItemKey)
+                        ?.let { latestCheckpoint(key, it) }
                 }
             }
+        }
     }
     var previousMediaGridSessionKey by remember { mutableStateOf<MediaGridSessionKey?>(null) }
     LaunchedEffect(mediaGridSessionState.sessionKey) {
@@ -742,7 +759,7 @@ internal fun EnhancedClassifiedScreen(
                     onMorphCheckpointSuppressed = { morphCheckpointSuppressed = it },
                     sessionKey = mediaGridSessionState.sessionKey,
                     onMediaGridScrollbarDragStateChanged = { snapshot ->
-                        mediaGridScrollbarDragging = snapshot.isDragging
+                        mediaGridScrollbarSnapshot = snapshot
                     },
                     suppressPositionPill = sessionRestoreCheckpointSuppressed ||
                         legacyPinchCheckpointSuppressed ||
@@ -3994,7 +4011,11 @@ internal data class ClassifiedMediaGridScrollAnchor(
     val centerOffset: Float,
 )
 
-internal data class MediaGridScrollCheckpointState(val observedScrollStart: Boolean = false)
+internal data class MediaGridScrollCheckpointState(
+    val observedScrollStart: Boolean = false,
+    val handledScrollbarCompletionId: Long = 0L,
+    val skipNextScrollEndForCompletionId: Long? = null,
+)
 
 internal data class MediaGridScrollCheckpointTransition(
     val state: MediaGridScrollCheckpointState,
@@ -4004,16 +4025,38 @@ internal data class MediaGridScrollCheckpointTransition(
 internal fun mediaGridScrollCheckpointTransition(
     state: MediaGridScrollCheckpointState,
     isScrollInProgress: Boolean,
-): MediaGridScrollCheckpointTransition = when {
-    isScrollInProgress -> MediaGridScrollCheckpointTransition(
-        state = state.copy(observedScrollStart = true),
-        shouldCheckpoint = false,
+    scrollbarSnapshot: MediaGridScrollbarDragSnapshot = MediaGridScrollbarDragSnapshot(),
+): MediaGridScrollCheckpointTransition {
+    val observedScrollEnd = !isScrollInProgress && state.observedScrollStart
+    var nextState = state.copy(
+        observedScrollStart = isScrollInProgress,
+        skipNextScrollEndForCompletionId = if (isScrollInProgress) null else state.skipNextScrollEndForCompletionId,
     )
-    state.observedScrollStart -> MediaGridScrollCheckpointTransition(
-        state = MediaGridScrollCheckpointState(),
-        shouldCheckpoint = true,
-    )
-    else -> MediaGridScrollCheckpointTransition(state, shouldCheckpoint = false)
+    var shouldCheckpoint = false
+
+    if (
+        scrollbarSnapshot.endReason == MediaGridScrollbarDragEnd.Completed &&
+        scrollbarSnapshot.completionId != 0L &&
+        scrollbarSnapshot.completionId != state.handledScrollbarCompletionId
+    ) {
+        shouldCheckpoint = true
+        nextState = nextState.copy(
+            handledScrollbarCompletionId = scrollbarSnapshot.completionId,
+            skipNextScrollEndForCompletionId = scrollbarSnapshot.completionId,
+        )
+    }
+
+    if (observedScrollEnd && !scrollbarSnapshot.isDragging) {
+        if (nextState.skipNextScrollEndForCompletionId == scrollbarSnapshot.completionId &&
+            scrollbarSnapshot.endReason == MediaGridScrollbarDragEnd.Completed
+        ) {
+            nextState = nextState.copy(skipNextScrollEndForCompletionId = null)
+        } else {
+            shouldCheckpoint = true
+        }
+    }
+
+    return MediaGridScrollCheckpointTransition(nextState, shouldCheckpoint)
 }
 
 internal fun buildClassifiedMediaGridItems(
@@ -4344,23 +4387,11 @@ private fun ClassifiedMediaGridContent(
     val scrollbarState = rememberMediaGridScrollbarState()
     val scrollbarDragInProgress = remember(state) { MutableStateFlow(false) }
     LaunchedEffect(scrollbarState, sessionKey, frame.key) {
-        var previousDragFrameKey: MediaGridRenderKey? = null
         snapshotFlow { scrollbarState.dragSnapshot }
             .distinctUntilChanged()
             .collect { snapshot ->
                 onMediaGridScrollbarDragStateChanged(snapshot)
                 scrollbarDragInProgress.value = snapshot.isDragging
-                if (
-                    snapshot.endReason == MediaGridScrollbarDragEnd.Completed &&
-                    previousDragFrameKey == frame.key &&
-                    sessionKey != null
-                ) {
-                    withFrameNanos { }
-                    captureClassifiedMediaGridScrollAnchor(state, frame.assetIdByItemKey)
-                        ?.let { onMediaGridAnchorCheckpoint(sessionKey, it) }
-                }
-                if (snapshot.isDragging) previousDragFrameKey = snapshot.frameKey
-                else if (snapshot.endReason != null) previousDragFrameKey = null
             }
     }
     DisposableEffect(previewPreloader) {

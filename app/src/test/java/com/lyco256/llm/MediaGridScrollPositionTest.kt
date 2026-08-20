@@ -91,6 +91,24 @@ class MediaGridScrollPositionTest {
     }
 
     @Test
+    fun targetOrdinalsWithinOneBucketKeepTheSameLabel() {
+        val sort = ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime)
+        val frame = frame(
+            sort,
+            listOf(
+                entry(1L, "2026-08-19T00:00:00Z", 1L),
+                entry(2L, "2026-08-19T08:00:00Z", 2L),
+            ),
+            4,
+        )
+
+        assertEquals(
+            mediaGridPositionForOrdinal(frame, 0, sort, 4)?.label,
+            mediaGridPositionForOrdinal(frame, 1, sort, 4)?.label,
+        )
+    }
+
+    @Test
     fun nextHeaderDoesNotAdvanceUntilFirstVisibleMediaMoves() {
         val sort = ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime)
         val frame = frame(

@@ -1,5 +1,11 @@
 # `TagHierarchyUiV2.kt`
 
+## 2026-08-20 media-grid scrollbar checkpoint deduplication
+
+- `ClassifiedMediaGridContent`からスクロールバー完了時の直接checkpointを分離し、親のcheckpoint coordinatorへ一本化しました。
+- coordinatorは`MediaGridScrollbarDragSnapshot.completionId`を記録し、完了snapshotと同じ`isScrollInProgress=false`遷移を二重に保存しません。完了後の通常指スクロールは新しいtrue遷移でこの抑制を解除し、従来どおり保存します。
+- ドラッグ抑制状態は親Effect内で`rememberUpdatedState`経由の最新値を参照します。scrollbar、morph、restore、pinchの抑制中はviewport終了checkpointを発行しません。
+
 ## 2026-08-13 タグ管理Treeの連続縦guide
 
 - `VisibleTagRow` は、各祖先depthの縦guideが上と下の隣接行へ接続するかを `TagTreeGuideSegment` として保持します。expand/collapseでvisible row列が変わるたびに再計算します。
