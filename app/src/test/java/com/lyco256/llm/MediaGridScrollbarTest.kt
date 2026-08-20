@@ -88,7 +88,7 @@ class MediaGridScrollbarTest {
 
         assertTrue(state.dragSnapshot.isDragging)
         assertEquals(frame.key, state.dragSnapshot.frameKey)
-        assertEquals(state.currentTargetItemIndex, state.targetRequests.value)
+        assertEquals(state.currentTargetItemIndex, state.targetRequests.value?.targetItemIndex)
         assertEquals(90, state.dragSnapshot.targetMediaOrdinal)
         state.cancelIfFrameChanged(frame.key.copy(columnCount = 8))
         assertFalse(state.dragSnapshot.isDragging)
@@ -109,7 +109,7 @@ class MediaGridScrollbarTest {
     }
 
     @Test
-    fun finishKeepsTargetAndThumbUntilFinalScrollCompletes() {
+    fun finishEndsPointerImmediatelyButKeepsFinalTargetPending() {
         val frame = testFrame(50)
         val geometry = calculateMediaGridScrollbarGeometry(50, 0, 9, 1000f, 32f)
         val state = MediaGridScrollbarState()
@@ -118,17 +118,112 @@ class MediaGridScrollbarTest {
         state.updateDrag(900f)
         val target = state.currentTargetItemIndex
         val ordinal = state.dragSnapshot.targetMediaOrdinal
+        val dragRequest = checkNotNull(state.targetRequests.value)
         state.finishDrag()
+        val finalRequest = checkNotNull(state.targetRequests.value)
 
-        assertTrue(state.dragSnapshot.isDragging)
+        assertFalse(state.dragSnapshot.isDragging)
+        assertFalse(state.hasActivePointer)
         assertTrue(state.dragSnapshot.isFinalTargetPending)
         assertEquals(target, state.currentTargetItemIndex)
         assertEquals(ordinal, state.dragSnapshot.targetMediaOrdinal)
+        assertEquals(target, finalRequest.targetItemIndex)
+        assertEquals(MediaGridScrollbarRequestKind.Drag, dragRequest.kind)
+        assertEquals(MediaGridScrollbarRequestKind.Final, finalRequest.kind)
+        assertTrue(finalRequest.requestId > dragRequest.requestId)
+        assertTrue(state.shouldProcessRequest(finalRequest))
 
-        state.completeFinalTarget(checkNotNull(target))
+        assertTrue(state.completeFinalTarget(finalRequest))
         assertFalse(state.dragSnapshot.isDragging)
+        assertFalse(state.dragSnapshot.isFinalTargetPending)
         assertEquals(MediaGridScrollbarDragEnd.Completed, state.dragSnapshot.endReason)
         assertTrue(state.dragSnapshot.completionId > 0L)
+        assertEquals(null, state.targetRequests.value)
+        assertEquals(0f, state.thumbTopPx(geometry), 0.001f)
+    }
+
+    @Test
+    fun finalRequestIsUniqueWhenDragAndReleaseUseTheSameItem() {
+        val frame = testFrame(50)
+        val geometry = calculateMediaGridScrollbarGeometry(50, 0, 9, 1000f, 32f)
+        val state = MediaGridScrollbarState()
+
+        assertTrue(state.beginDrag(frame, geometry, geometry.thumbTopPx))
+        state.updateDrag(900f)
+        val dragRequest = checkNotNull(state.targetRequests.value)
+        state.updateDrag(900f)
+        val repeatedDragRequest = checkNotNull(state.targetRequests.value)
+        state.finishDrag()
+        val finalRequest = checkNotNull(state.targetRequests.value)
+
+        assertEquals(dragRequest.targetItemIndex, repeatedDragRequest.targetItemIndex)
+        assertEquals(repeatedDragRequest.targetItemIndex, finalRequest.targetItemIndex)
+        assertTrue(dragRequest.requestId < repeatedDragRequest.requestId)
+        assertTrue(repeatedDragRequest.requestId < finalRequest.requestId)
+        assertEquals(MediaGridScrollbarRequestKind.Final, finalRequest.kind)
+    }
+
+    @Test
+    fun staleFinalCompletionCannotFinishANewDragSession() {
+        val frame = testFrame(50)
+        val geometry = calculateMediaGridScrollbarGeometry(50, 0, 9, 1000f, 32f)
+        val state = MediaGridScrollbarState()
+
+        assertTrue(state.beginDrag(frame, geometry, geometry.thumbTopPx))
+        state.updateDrag(900f)
+        state.finishDrag()
+        val staleFinalRequest = checkNotNull(state.targetRequests.value)
+
+        assertTrue(state.beginDrag(frame, geometry, geometry.thumbTopPx))
+        state.updateDrag(450f)
+        assertTrue(state.dragSnapshot.isDragging)
+        assertFalse(state.completeFinalTarget(staleFinalRequest))
+        assertTrue(state.dragSnapshot.isDragging)
+        assertFalse(state.dragSnapshot.isFinalTargetPending)
+        assertTrue(checkNotNull(state.targetRequests.value).requestId > staleFinalRequest.requestId)
+    }
+
+    @Test
+    fun finalCompletionAndCancellationReturnThumbToViewportGeometry() {
+        val frame = testFrame(50)
+        val geometry = calculateMediaGridScrollbarGeometry(50, 0, 9, 1000f, 32f)
+        val fallback = geometry.copy(thumbTopPx = 123f)
+        val state = MediaGridScrollbarState()
+
+        assertTrue(state.beginDrag(frame, geometry, geometry.thumbTopPx))
+        state.updateDrag(900f)
+        state.finishDrag()
+        val finalRequest = checkNotNull(state.targetRequests.value)
+        assertEquals(geometry.maxThumbTopPx, state.thumbTopPx(fallback), 0.001f)
+        assertTrue(state.completeFinalTarget(finalRequest))
+        assertEquals(123f, state.thumbTopPx(fallback), 0.001f)
+
+        assertTrue(state.beginDrag(frame, geometry, geometry.thumbTopPx))
+        state.updateDrag(900f)
+        state.cancelDrag()
+        assertFalse(state.isDragging)
+        assertFalse(state.hasPendingFinalTarget)
+        assertEquals(123f, state.thumbTopPx(fallback), 0.001f)
+    }
+
+    @Test
+    fun cancelledRequestConsumerClearsOnlyItsOwnSession() {
+        val frame = testFrame(50)
+        val geometry = calculateMediaGridScrollbarGeometry(50, 0, 9, 1000f, 32f)
+        val state = MediaGridScrollbarState()
+        val oldConsumer = state.beginRequestConsumer()
+
+        assertTrue(state.beginDrag(frame, geometry, geometry.thumbTopPx))
+        state.finishDrag()
+        val newConsumer = state.beginRequestConsumer()
+        assertTrue(state.beginDrag(frame, geometry, geometry.thumbTopPx))
+        state.updateDrag(450f)
+        state.cancelForCoroutine(frame.key, oldConsumer)
+        assertTrue(state.dragSnapshot.isDragging)
+        state.cancelForCoroutine(frame.key, newConsumer)
+        assertFalse(state.dragSnapshot.isDragging)
+        assertFalse(state.hasPendingFinalTarget)
+        assertEquals(null, state.targetRequests.value)
     }
 
     @Test

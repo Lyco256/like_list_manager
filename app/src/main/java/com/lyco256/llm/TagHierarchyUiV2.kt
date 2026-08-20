@@ -4046,7 +4046,7 @@ internal fun mediaGridScrollCheckpointTransition(
         )
     }
 
-    if (observedScrollEnd && !scrollbarSnapshot.isDragging) {
+    if (observedScrollEnd && !scrollbarSnapshot.isDragging && !scrollbarSnapshot.isFinalTargetPending) {
         if (nextState.skipNextScrollEndForCompletionId == scrollbarSnapshot.completionId &&
             scrollbarSnapshot.endReason == MediaGridScrollbarDragEnd.Completed
         ) {
@@ -4391,7 +4391,7 @@ private fun ClassifiedMediaGridContent(
             .distinctUntilChanged()
             .collect { snapshot ->
                 onMediaGridScrollbarDragStateChanged(snapshot)
-                scrollbarDragInProgress.value = snapshot.isDragging
+                scrollbarDragInProgress.value = snapshot.isDragging || snapshot.isFinalTargetPending
             }
     }
     DisposableEffect(previewPreloader) {
@@ -4530,7 +4530,9 @@ private fun ClassifiedMediaGridContent(
                 anchor = anchor,
                 scrolling = scrolling,
                 morphing = morphing,
-                suppressed = suppressPositionPill || scrollbarDragSnapshot.isDragging,
+                suppressed = suppressPositionPill ||
+                    scrollbarDragSnapshot.isDragging ||
+                    scrollbarDragSnapshot.isFinalTargetPending,
                 scrollbarDragSnapshot = scrollbarDragSnapshot,
             )
         }.collect { observation ->

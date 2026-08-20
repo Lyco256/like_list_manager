@@ -139,7 +139,20 @@ internal enum class MediaGridScrollbarDragEnd {
     Cancelled,
 }
 
+internal enum class MediaGridScrollbarRequestKind {
+    Drag,
+    Final,
+}
+
+internal data class MediaGridScrollbarRequest(
+    val requestId: Long,
+    val sessionId: Long,
+    val targetItemIndex: Int,
+    val kind: MediaGridScrollbarRequestKind,
+)
+
 private data class MediaGridScrollbarDragSession(
+    val sessionId: Long,
     val frameKey: MediaGridRenderKey,
     val itemIndexByMediaOrdinal: IntArray,
     val totalMediaCount: Int,
@@ -157,10 +170,14 @@ internal class MediaGridScrollbarState {
     var dragSnapshot by mutableStateOf(MediaGridScrollbarDragSnapshot())
         private set
 
-    internal val targetRequests = MutableStateFlow<Int?>(null)
+    internal val targetRequests = MutableStateFlow<MediaGridScrollbarRequest?>(null)
 
     private var session: MediaGridScrollbarDragSession? = null
-    private var pendingFinalTargetItemIndex: Int? = null
+    private var pendingFinalRequest: MediaGridScrollbarRequest? = null
+    private var nextSessionId: Long = 0L
+    private var nextRequestId: Long = 0L
+    private var requestConsumerToken: Long = 0L
+    private var activeRequestConsumerToken: Long? = null
     private var completionId: Long = 0L
 
     internal val isDragging: Boolean
@@ -169,8 +186,26 @@ internal class MediaGridScrollbarState {
     internal val hasActivePointer: Boolean
         get() = session != null
 
+    internal val hasPendingFinalTarget: Boolean
+        get() = pendingFinalRequest != null
+
     internal val currentTargetItemIndex: Int?
-        get() = dragSnapshot.targetItemIndex
+        get() = targetRequests.value?.targetItemIndex ?: pendingFinalRequest?.targetItemIndex ?: session?.targetItemIndex
+
+    internal fun beginRequestConsumer(): Long {
+        requestConsumerToken += 1L
+        return requestConsumerToken.also { activeRequestConsumerToken = it }
+    }
+
+    internal fun shouldProcessRequest(request: MediaGridScrollbarRequest): Boolean {
+        if (targetRequests.value != request) return false
+        return when (request.kind) {
+            MediaGridScrollbarRequestKind.Drag ->
+                dragSnapshot.isDragging && session?.let { it.sessionId == request.sessionId } == true
+            MediaGridScrollbarRequestKind.Final ->
+                !dragSnapshot.isDragging && pendingFinalRequest == request
+        }
+    }
 
     internal fun beginDrag(
         frame: MediaGridFrameData,
@@ -178,7 +213,13 @@ internal class MediaGridScrollbarState {
         pointerY: Float,
     ): Boolean {
         if (!geometry.isScrollable) return false
-        pendingFinalTargetItemIndex = null
+        // A new pointer always owns the state. An older final request may still
+        // be inside scrollToItem, but it must not be allowed to complete this
+        // new session.
+        pendingFinalRequest = null
+        targetRequests.value = null
+        val sessionId = nextSessionId + 1L
+        nextSessionId = sessionId
         val maxTop = geometry.maxThumbTopPx
         val thumbTop = geometry.thumbTopPx
         val pointerGrabOffset = (pointerY - thumbTop).coerceIn(0f, geometry.thumbHeightPx)
@@ -189,6 +230,7 @@ internal class MediaGridScrollbarState {
         ) ?: return false
         val targetItemIndex = frame.ordinalIndex.itemIndexByMediaOrdinal.getOrNull(targetOrdinal) ?: return false
         session = MediaGridScrollbarDragSession(
+            sessionId = sessionId,
             frameKey = frame.key,
             itemIndexByMediaOrdinal = frame.ordinalIndex.itemIndexByMediaOrdinal,
             totalMediaCount = geometry.totalMediaCount,
@@ -210,7 +252,11 @@ internal class MediaGridScrollbarState {
             thumbTopPx = thumbTop,
             thumbHeightPx = geometry.thumbHeightPx,
         )
-        targetRequests.value = targetItemIndex
+        publishRequest(
+            sessionId = sessionId,
+            targetItemIndex = targetItemIndex,
+            kind = MediaGridScrollbarRequestKind.Drag,
+        )
         return true
     }
 
@@ -237,47 +283,99 @@ internal class MediaGridScrollbarState {
             thumbTopPx = thumbTop,
             endReason = null,
         )
-        targetRequests.value = targetItemIndex
+        publishRequest(
+            sessionId = current.sessionId,
+            targetItemIndex = targetItemIndex,
+            kind = MediaGridScrollbarRequestKind.Drag,
+        )
     }
 
     internal fun finishDrag() {
-        pendingFinalTargetItemIndex = dragSnapshot.targetItemIndex
+        val current = session ?: return
         session = null
-        dragSnapshot = dragSnapshot.copy(isFinalTargetPending = true)
-        targetRequests.value = null
-        targetRequests.value = pendingFinalTargetItemIndex
+        val finalRequest = nextRequest(
+            sessionId = current.sessionId,
+            targetItemIndex = current.targetItemIndex,
+            kind = MediaGridScrollbarRequestKind.Final,
+        )
+        pendingFinalRequest = finalRequest
+        dragSnapshot = dragSnapshot.copy(
+            isDragging = false,
+            isFinalTargetPending = true,
+        )
+        targetRequests.value = finalRequest
     }
 
     internal fun cancelDrag() {
-        pendingFinalTargetItemIndex = null
+        pendingFinalRequest = null
         session = null
         dragSnapshot = MediaGridScrollbarDragSnapshot(endReason = MediaGridScrollbarDragEnd.Cancelled)
         targetRequests.value = null
     }
 
     internal fun isFinalTargetPending(targetItemIndex: Int): Boolean =
-        pendingFinalTargetItemIndex == targetItemIndex
+        pendingFinalRequest?.targetItemIndex == targetItemIndex
 
-    internal fun completeFinalTarget(targetItemIndex: Int) {
-        if (pendingFinalTargetItemIndex != targetItemIndex) return
-        pendingFinalTargetItemIndex = null
+    internal fun completeFinalTarget(request: MediaGridScrollbarRequest): Boolean {
+        if (
+            request.kind != MediaGridScrollbarRequestKind.Final ||
+            pendingFinalRequest != request ||
+            targetRequests.value != request
+        ) return false
+        pendingFinalRequest = null
         completionId += 1L
+        targetRequests.value = null
         dragSnapshot = dragSnapshot.copy(
             isDragging = false,
             isFinalTargetPending = false,
             endReason = MediaGridScrollbarDragEnd.Completed,
             completionId = completionId,
+            thumbTopPx = null,
+            thumbHeightPx = null,
         )
-        targetRequests.value = null
+        return true
     }
 
     internal fun cancelIfFrameChanged(frameKey: MediaGridRenderKey) {
-        val activeFrameKey = session?.frameKey ?: dragSnapshot.frameKey
+        val activeFrameKey = session?.frameKey ?: pendingFinalRequest?.let { dragSnapshot.frameKey }
         if (activeFrameKey != null && activeFrameKey != frameKey) cancelDrag()
     }
 
+    internal fun cancelForDisposedFrame(frameKey: MediaGridRenderKey) {
+        val activeFrameKey = session?.frameKey ?: pendingFinalRequest?.let { dragSnapshot.frameKey }
+        if (activeFrameKey == frameKey) cancelDrag()
+    }
+
+    internal fun cancelForCoroutine(frameKey: MediaGridRenderKey, consumerToken: Long) {
+        if (activeRequestConsumerToken != consumerToken) return
+        activeRequestConsumerToken = null
+        val activeFrameKey = session?.frameKey ?: pendingFinalRequest?.let { dragSnapshot.frameKey }
+        if (activeFrameKey == frameKey && (session != null || pendingFinalRequest != null)) cancelDrag()
+    }
+
     internal fun thumbTopPx(fallback: MediaGridScrollbarGeometry): Float =
-        session?.thumbTopPx ?: dragSnapshot.thumbTopPx ?: fallback.thumbTopPx
+        session?.thumbTopPx
+            ?: dragSnapshot.takeIf { it.isDragging || it.isFinalTargetPending }?.thumbTopPx
+            ?: fallback.thumbTopPx
+
+    private fun publishRequest(
+        sessionId: Long,
+        targetItemIndex: Int,
+        kind: MediaGridScrollbarRequestKind,
+    ) {
+        targetRequests.value = nextRequest(sessionId, targetItemIndex, kind)
+    }
+
+    private fun nextRequest(
+        sessionId: Long,
+        targetItemIndex: Int,
+        kind: MediaGridScrollbarRequestKind,
+    ): MediaGridScrollbarRequest = MediaGridScrollbarRequest(
+        requestId = nextRequestId + 1L,
+        sessionId = sessionId,
+        targetItemIndex = targetItemIndex,
+        kind = kind,
+    ).also { nextRequestId = it.requestId }
 }
 
 @Composable
@@ -315,28 +413,31 @@ internal fun MediaGridScrollbar(
         if (!geometry.isScrollable || !enabled) scrollbarState.cancelDrag()
     }
     LaunchedEffect(scrollbarState, state, frame.key) {
-        scrollbarState.targetRequests.collect { targetItemIndex ->
-            if (targetItemIndex == null) return@collect
-            withFrameNanos { }
-            val latestTarget = scrollbarState.currentTargetItemIndex
-            if (
-                latestTarget != targetItemIndex ||
-                (!scrollbarState.isDragging && !scrollbarState.isFinalTargetPending(targetItemIndex))
-            ) return@collect
-            state.scrollToItem(latestTarget)
-            scrollbarState.completeFinalTarget(targetItemIndex)
+        val consumerToken = scrollbarState.beginRequestConsumer()
+        try {
+            scrollbarState.targetRequests.collect { request ->
+                if (request == null) return@collect
+                withFrameNanos { }
+                if (!scrollbarState.shouldProcessRequest(request)) return@collect
+                state.scrollToItem(request.targetItemIndex)
+                if (request.kind == MediaGridScrollbarRequestKind.Final) {
+                    scrollbarState.completeFinalTarget(request)
+                }
+            }
+        } finally {
+            scrollbarState.cancelForCoroutine(frame.key, consumerToken)
         }
     }
     DisposableEffect(frame.key) {
         onDispose {
-            if (scrollbarState.dragSnapshot.frameKey != null) scrollbarState.cancelDrag()
+            scrollbarState.cancelForDisposedFrame(frame.key)
         }
     }
 
     if (!enabled || frame.ordinalIndex.assetIdByMediaOrdinal.isEmpty()) return
     val dragSnapshot = scrollbarState.dragSnapshot
     val dragPosition = dragSnapshot
-        .takeIf { it.isDragging && it.frameKey == frame.key }
+        .takeIf { (it.isDragging || it.isFinalTargetPending) && it.frameKey == frame.key }
         ?.targetMediaOrdinal
         ?.let { ordinal ->
             mediaGridPositionForOrdinal(
@@ -347,7 +448,10 @@ internal fun MediaGridScrollbar(
             )
         }
     val thumbTopPx = scrollbarState.thumbTopPx(geometry)
-    val thumbHeightPx = dragSnapshot.thumbHeightPx ?: geometry.thumbHeightPx
+    val thumbHeightPx = dragSnapshot
+        .takeIf { it.isDragging || it.isFinalTargetPending }
+        ?.thumbHeightPx
+        ?: geometry.thumbHeightPx
     val touchHeightDp = with(density) { (geometry.thumbHeightPx + touchSlopPx * 2f).toDp() }
     val touchOffsetPx = (thumbTopPx - touchSlopPx).coerceAtLeast(0f)
     val labelGapPx = with(density) { MediaGridScrollbarLabelGapDp.dp.toPx() }
@@ -409,7 +513,7 @@ internal fun MediaGridScrollbar(
                                 .testTag("media_grid_scrollbar_thumb")
                                 .clip(RoundedCornerShape(2.dp))
                                 .background(
-                                    if (scrollbarState.isDragging) {
+                                    if (scrollbarState.isDragging || scrollbarState.hasPendingFinalTarget) {
                                         MaterialTheme.colorScheme.primary
                                     } else {
                                         MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)

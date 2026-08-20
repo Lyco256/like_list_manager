@@ -3026,6 +3026,48 @@ class MainActivityComposeTest {
         }
     }
 
+    @Test
+    fun slowScrollbarReleaseThenNormalGridScrollKeepsThumbFollowingViewport() {
+        insertMediaGridClips(180, "scrollbar-slow-release")
+        mainViewModel().applyFilters(TweetFilterState(taggedOnly = false))
+        composeRule.onNodeWithTag("tab_classified").performClick()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("classified_display_toggle").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("classified_display_toggle").performClick()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithTag("media_grid_scrollbar").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        val scrollbar = composeRule.onNodeWithTag("media_grid_scrollbar")
+        val scrollbarBounds = scrollbar.fetchSemanticsNode().boundsInRoot
+        val thumbBounds = composeRule.onNodeWithTag("media_grid_scrollbar_thumb")
+            .fetchSemanticsNode().boundsInRoot
+        val localX = scrollbarBounds.width / 2f
+        val startY = thumbBounds.center.y - scrollbarBounds.top
+        val targetY = scrollbarBounds.height * 0.45f
+
+        scrollbar.performTouchInput {
+            down(androidx.compose.ui.geometry.Offset(localX, startY))
+            moveTo(androidx.compose.ui.geometry.Offset(localX, targetY), 700)
+            advanceEventTime(1_200)
+            up()
+        }
+        composeRule.waitForIdle()
+
+        val releasedThumbTop = composeRule.onNodeWithTag("media_grid_scrollbar_thumb")
+            .fetchSemanticsNode().boundsInRoot.top
+        assertTrue(releasedThumbTop > thumbBounds.top + 1f)
+
+        composeRule.onNodeWithTag("classified_media_grid").performTouchInput {
+            swipeUp(durationMillis = 700)
+        }
+        composeRule.waitUntil(10_000) {
+            composeRule.onNodeWithTag("media_grid_scrollbar_thumb")
+                .fetchSemanticsNode().boundsInRoot.top > releasedThumbTop + 1f
+        }
+    }
+
     private fun insertMediaGridClips(count: Int, prefix: String): List<Long> = runBlocking {
         storage().withDatabase { database ->
             val base = Instant.now()
