@@ -56,6 +56,10 @@ The repository integration suite verifies that `applyClipTagChanges` applies pen
 
 - Added repository tests for OCR detection, OCR persistence, and hard delete of assets and local files.
 
+## 2026-08 OCR structured post result
+
+The OCR repository test verifies that locally stored `photo` and `video_thumbnail` assets are returned in asset order with their asset IDs, local paths, and image-level structured results. Non-OCR asset types are ignored, while the compatibility `fullText` keeps the existing non-blank image order and `\n\n` separator. Detection still leaves the database and Undo slot unchanged; only the explicit OCR save updates `ocrText` and `ocrUpdatedAt`.
+
 ## 2026-07 media thumbnail coverage
 
 - Added repository tests for `photo` WebP saves, `video` / `animated_gif` preview-image saves on non-Wi-Fi contexts, preview decode failure, and mixed legacy local paths.

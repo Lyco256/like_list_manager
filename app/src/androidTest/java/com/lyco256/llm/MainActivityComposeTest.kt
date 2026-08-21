@@ -3311,8 +3311,10 @@ class MainActivityComposeTest {
         assertTrue(composeRule.onAllNodesWithText("文字起こし中").fetchSemanticsNodes().isEmpty())
         composeRule.onNodeWithText("Saved OCR Text", substring = true).assertIsDisplayed()
         composeRule.onNodeWithTag("ocr_redetect").performClick()
-        composeRule.onNodeWithTag("ocr_redetect_warning_dialog").assertIsDisplayed()
-        composeRule.onNodeWithTag("ocr_redetect_warning_confirm").performClick()
+        assertTrue(composeRule.onAllNodesWithTag("ocr_redetect_warning_dialog").fetchSemanticsNodes().isEmpty())
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithText("文字起こし中").fetchSemanticsNodes().isEmpty()
+        }
         composeRule.onNodeWithTag("ocr_cancel").performClick()
         assertEquals("Saved OCR Text", ocrTextForClip(clipId))
         assertTrue(java.io.File(photoPath).exists())

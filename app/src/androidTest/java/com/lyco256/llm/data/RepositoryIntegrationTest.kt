@@ -2514,6 +2514,16 @@ class RepositoryIntegrationTest {
                         downloadState = "downloaded",
                         createdAt = now,
                     ),
+                    AssetEntity(
+                        clipId = clipId,
+                        mediaKey = "video-body-not-ocr",
+                        type = "video",
+                        remoteUrl = "https://example.test/video",
+                        previewUrl = null,
+                        localPath = null,
+                        downloadState = "remote",
+                        createdAt = now,
+                    ),
                 ),
             )
             clipId
@@ -2527,15 +2537,21 @@ class RepositoryIntegrationTest {
 
         val recognized = repository.detectOcrText(clipWithDetails)
 
-        assertEquals("Landscape OCR\nSecond line\n\nPortrait OCR", recognized)
+        assertEquals("Landscape OCR\nSecond line\n\nPortrait OCR", recognized.fullText)
+        assertEquals(clipId, recognized.clipId)
+        assertEquals(listOf("ocr-photo.jpg", "ocr-thumb.png"), recognized.assets.map { File(it.localPath).name })
+        assertEquals(listOf("photo", "thumb"), recognized.assets.map { asset ->
+            clipWithDetails.assets.single { it.id == asset.assetId }.mediaKey
+        })
+        assertEquals(listOf("Landscape OCR\nSecond line", "Portrait OCR"), recognized.assets.map { it.recognition.fullText })
         assertEquals(null, storage.withDatabase { it.undoDao().getSlot() })
 
         val clip = clipWithDetails.clip
-        repository.updateOcrText(clip, recognized)
+        repository.updateOcrText(clip, recognized.fullText)
 
         storage.withDatabase { database ->
             val updated = database.clipDao().getAllClips().single { it.id == clipId }
-            assertEquals(recognized, updated.ocrText)
+            assertEquals(recognized.fullText, updated.ocrText)
             assertTrue(requireNotNull(updated.ocrUpdatedAt).isNotBlank())
         }
     }

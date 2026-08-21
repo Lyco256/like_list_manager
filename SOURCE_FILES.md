@@ -61,7 +61,7 @@ MainActivity / Compose UI
 - 保存先設定と移動復旧状態は内部SharedPreferencesへ保存
 - PhotoはWebP lossy quality 85で保存
 - 動画/GIF本体は保存せず、previewImageUrlからthumbnailを取得してWebPで保存する。新規同期ではWi-Fi待ち状態を作らない
-- OCR Gatewayは画像寸法、整形済み全文、読み順済みの行領域、元画像座標の4点polygon、confidenceを持つエンジン非依存の`OcrRecognitionResult`を返す。ML Kitのcorner pointsを優先し、bounding boxへフォールバックする。構造化結果は永続化せず、`ClipRepository.detectOcrText()`は従来どおり全文の`String`を返す
+- OCR Gatewayは画像寸法、整形済み全文、読み順済みの行領域、元画像座標の4点polygon、confidenceを持つエンジン非依存の`OcrRecognitionResult`を返す。ML Kitのcorner pointsを優先し、bounding boxへフォールバックする。`ClipRepository.detectOcrText()`はasset ID・local path・画像単位結果を順序付きで保持する`OcrPostRecognitionResult`を返し、`fullText`は従来どおり空でない画像全文を空行で結合する。構造化結果は永続化せず、OCR画面では`OcrSessionController`の未保存セッションだけが保持する
 - 投稿IDのunique制約で重複保存を防止
 - 月間取得数、月別API使用量履歴、警告/停止判定値、15分rate limitを記録
 - 初回サンプルデータはDBが空の場合だけ投入
@@ -116,6 +116,7 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/UndoNotificationUi.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/SettingsScreen.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/OcrUi.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/OcrSession.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/TagColorUi.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/MediaGridPlaceholderRendering.kt.md`
@@ -178,6 +179,7 @@ MainActivity / Compose UI
 - `MainActivityComposeTest.kt`, `UiStateRenderingTest.kt`, `RepositoryIntegrationTest.kt`, and `LargeDatasetIntegrationTest.kt` cover the classified display toggle, lightweight media-grid flow, 2〜12 column resizing, section headers, selection/Dialog boundaries, and large-data rendering.
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/PostStorageManagerRecoveryTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/OcrTextRecognizerTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/OcrSessionTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/MediaGridPersistentPreviewStoreTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/HeavyLocalWorkTrackerTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/UndoPayloadCodecTest.kt.md`

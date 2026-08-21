@@ -136,7 +136,11 @@ clip削除ではDB削除成功後に、共有公開ロック下でasset ID由来
 
 ## 2026-08 structured OCR boundary
 
-`detectOcrText()` now receives `OcrRecognitionResult` from the gateway but continues to return a `String`, using only each image result's `fullText` and the existing `\n\n` separator between eligible images. OCR UI, `ocrText`/`ocrUpdatedAt` persistence, database schema, and source image files are unchanged. Structured regions are not persisted or exposed to the UI in this change.
+`detectOcrText()` now returns an `OcrPostRecognitionResult` containing the clip ID, ordered `OcrAssetRecognitionResult` entries (`assetId`, `localPath`, and the image-level `OcrRecognitionResult`), and the compatibility `fullText`. Eligible assets remain limited to locally available `photo` and `video_thumbnail` entries sorted by asset ID. The full text still joins non-blank image full texts with `\n\n`. Structured results are not persisted; the OCR UI keeps them only in the active unsaved session.
+
+## 2026-08 OCR session flow
+
+OCR detection remains read-only. The existing `updateOcrText()` path is the only persistence path and still preserves field-level `ocrText` / `ocrUpdatedAt` updates, no-op behavior, and OCR edit Undo semantics. ViewModel save callbacks report success or failure so the UI closes only after a successful transaction.
 
 ## 2026-07 media thumbnail update
 

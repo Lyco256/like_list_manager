@@ -49,6 +49,18 @@ data class MediaGridClipSource(
 
 data class MediaGridSourceSnapshot(val revision: Long, val clips: List<MediaGridClipSource>)
 
+data class OcrAssetRecognitionResult(
+    val assetId: Long,
+    val localPath: String,
+    val recognition: OcrRecognitionResult,
+)
+
+data class OcrPostRecognitionResult(
+    val clipId: Long,
+    val assets: List<OcrAssetRecognitionResult>,
+    val fullText: String,
+)
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class ClipRepository internal constructor(
     private val context: Context,
@@ -1311,20 +1323,38 @@ class ClipRepository internal constructor(
         }
     }
 
-    suspend fun detectOcrText(clip: ClipWithDetails): String = withContext(Dispatchers.IO) {
+    suspend fun detectOcrText(clip: ClipWithDetails): OcrPostRecognitionResult = withContext(Dispatchers.IO) {
         val eligibleAssets = clip.assets
             .filter { asset -> asset.localPath != null && asset.type in setOf("photo", "video_thumbnail") }
             .sortedBy { it.id }
-        if (eligibleAssets.isEmpty()) return@withContext ""
-        eligibleAssets.mapNotNull { asset ->
+        if (eligibleAssets.isEmpty()) {
+            return@withContext OcrPostRecognitionResult(
+                clipId = clip.clip.id,
+                assets = emptyList(),
+                fullText = "",
+            )
+        }
+        val assetResults = eligibleAssets.mapNotNull { asset ->
             val path = asset.localPath?.let(::File)?.takeIf(File::isFile) ?: return@mapNotNull null
             val bitmap = runCatching { BitmapFactory.decodeFile(path.absolutePath) }.getOrNull() ?: return@mapNotNull null
             try {
-                ocrTextGateway.recognize(bitmap).fullText.trim().takeIf(String::isNotBlank)
+                OcrAssetRecognitionResult(
+                    assetId = asset.id,
+                    localPath = path.absolutePath,
+                    recognition = ocrTextGateway.recognize(bitmap),
+                )
             } finally {
                 bitmap.recycle()
             }
-        }.joinToString("\n\n")
+        }
+        OcrPostRecognitionResult(
+            clipId = clip.clip.id,
+            assets = assetResults,
+            fullText = assetResults
+                .map { it.recognition.fullText.trim() }
+                .filter(String::isNotBlank)
+                .joinToString("\n\n"),
+        )
     }
 
     private suspend fun invalidateUndoBeforeNodeMoveOrReorder() {

@@ -15,4 +15,4 @@ OCR text gateway and formatting helpers.
 
 `MlKitOcrTextGateway` converts ML Kit types at this boundary. Four corner points are preferred; when unavailable, a bounding box is converted to a four-point polygon. Lines without position data remain as text-only regions, and unavailable confidence remains `null`. Blank lines are omitted as regions without changing the existing full-text formatting.
 
-`FakeOcrTextGateway` accepts a `(Bitmap) -> OcrRecognitionResult` provider, allowing tests to inject arbitrary dimensions, line order, separators, polygons, and confidence values. `ClipRepository.detectOcrText()` still consumes only `fullText` and returns the existing `String` interface; the structured result is not persisted.
+`FakeOcrTextGateway` accepts a `(Bitmap) -> OcrRecognitionResult` provider, allowing tests to inject arbitrary dimensions, line order, separators, polygons, and confidence values. `ClipRepository.detectOcrText()` carries this image-level result into the ordered post-level `OcrPostRecognitionResult`; no structured result is persisted.

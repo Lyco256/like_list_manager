@@ -152,6 +152,7 @@ import com.lyco256.llm.data.MediaGridClipSource
 import com.lyco256.llm.data.MediaGridPreviewNotifier
 import com.lyco256.llm.data.MediaGridPreviewPreloader
 import com.lyco256.llm.data.MediaGridPreviewRecoveryGate
+import com.lyco256.llm.data.OcrPostRecognitionResult
 import com.lyco256.llm.data.buildMediaGridImageRequest
 import com.lyco256.llm.data.TagEntity
 import com.lyco256.llm.data.TagFilterState
@@ -344,6 +345,13 @@ fun EnhancedClipListScreen(
     onSummaryChange: (ClipEntity, String) -> Unit,
     onOcrSave: (ClipEntity, String) -> Unit,
     onOcrDetect: (ClipWithDetails, (String) -> Unit, (String) -> Unit) -> Unit,
+    onOcrSaveResult: OcrSaveResultHandler = { clip, text, complete ->
+        onOcrSave(clip, text)
+        complete(null)
+    },
+    onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
+        onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
+    },
     onDelete: (ClipEntity) -> Unit,
     onAuthorClick: (ClipEntity) -> Unit = {},
 ) {
@@ -410,6 +418,8 @@ fun EnhancedClipListScreen(
                             onSummaryChange = onSummaryChange,
                             onOcrSave = onOcrSave,
                             onOcrDetect = onOcrDetect,
+                            onOcrSaveResult = onOcrSaveResult,
+                            onOcrDetectStructured = onOcrDetectStructured,
                             onDelete = onDelete,
                             onAuthorClick = onAuthorClick,
                         )
@@ -444,6 +454,13 @@ internal fun EnhancedClassifiedScreen(
     onSummaryChange: (ClipEntity, String) -> Unit,
     onOcrSave: (ClipEntity, String) -> Unit,
     onOcrDetect: (ClipWithDetails, (String) -> Unit, (String) -> Unit) -> Unit,
+    onOcrSaveResult: OcrSaveResultHandler = { clip, text, complete ->
+        onOcrSave(clip, text)
+        complete(null)
+    },
+    onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
+        onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
+    },
     onDelete: (ClipEntity) -> Unit,
     onAuthorClick: (ClipEntity) -> Unit,
 ) {
@@ -484,6 +501,8 @@ internal fun EnhancedClassifiedScreen(
         onSummaryChange = onSummaryChange,
         onOcrSave = onOcrSave,
         onOcrDetect = onOcrDetect,
+        onOcrSaveResult = onOcrSaveResult,
+        onOcrDetectStructured = onOcrDetectStructured,
         onDelete = onDelete,
         onAuthorClick = onAuthorClick,
     )
@@ -514,6 +533,13 @@ internal fun EnhancedClassifiedScreen(
     onSummaryChange: (ClipEntity, String) -> Unit,
     onOcrSave: (ClipEntity, String) -> Unit,
     onOcrDetect: (ClipWithDetails, (String) -> Unit, (String) -> Unit) -> Unit,
+    onOcrSaveResult: OcrSaveResultHandler = { clip, text, complete ->
+        onOcrSave(clip, text)
+        complete(null)
+    },
+    onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
+        onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
+    },
     onDelete: (ClipEntity) -> Unit,
     onAuthorClick: (ClipEntity) -> Unit,
 ) {
@@ -832,6 +858,8 @@ internal fun EnhancedClassifiedScreen(
                             onSummaryChange = onSummaryChange,
                             onOcrSave = onOcrSave,
                             onOcrDetect = onOcrDetect,
+                            onOcrSaveResult = onOcrSaveResult,
+                            onOcrDetectStructured = onOcrDetectStructured,
                             onDelete = onDelete,
                             onAuthorClick = onAuthorClick,
                         )
@@ -899,6 +927,13 @@ fun MediaGridTweetDialog(
     onSummaryChange: (ClipEntity, String) -> Unit,
     onOcrSave: (ClipEntity, String) -> Unit,
     onOcrDetect: (ClipWithDetails, (String) -> Unit, (String) -> Unit) -> Unit,
+    onOcrSaveResult: OcrSaveResultHandler = { clip, text, complete ->
+        onOcrSave(clip, text)
+        complete(null)
+    },
+    onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
+        onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
+    },
     onDelete: (ClipEntity) -> Unit,
     onAuthorClick: (ClipEntity) -> Unit,
 ) {
@@ -984,6 +1019,8 @@ fun MediaGridTweetDialog(
                                     onSummaryChange = onSummaryChange,
                                     onOcrSave = onOcrSave,
                                     onOcrDetect = onOcrDetect,
+                                    onOcrSaveResult = onOcrSaveResult,
+                                    onOcrDetectStructured = onOcrDetectStructured,
                                     onDelete = {
                                         onDismiss()
                                         onDelete(it)
@@ -1252,6 +1289,13 @@ private fun EnhancedTweetCard(
     onSummaryChange: (ClipEntity, String) -> Unit,
     onOcrSave: (ClipEntity, String) -> Unit,
     onOcrDetect: (ClipWithDetails, (String) -> Unit, (String) -> Unit) -> Unit,
+    onOcrSaveResult: OcrSaveResultHandler = { clip, text, complete ->
+        onOcrSave(clip, text)
+        complete(null)
+    },
+    onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
+        onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
+    },
     onDelete: (ClipEntity) -> Unit,
     onAuthorClick: (ClipEntity) -> Unit,
     modifier: Modifier = Modifier,
@@ -1260,10 +1304,7 @@ private fun EnhancedTweetCard(
     var summaryDialogOpen by remember { mutableStateOf(false) }
     var summaryDraft by remember(clip.clip.id, clip.clip.summary) { mutableStateOf(clip.clip.summary) }
     var ocrDialogOpen by remember { mutableStateOf(false) }
-    var ocrRedetectWarningOpen by remember { mutableStateOf(false) }
-    var ocrText by remember(clip.clip.id, clip.clip.ocrText) { mutableStateOf(clip.clip.ocrText) }
-    var ocrError by remember { mutableStateOf<String?>(null) }
-    var ocrProcessing by remember { mutableStateOf(false) }
+    var ocrSessionKey by remember { mutableStateOf(0L) }
     var deleteOpen by remember { mutableStateOf(false) }
     val selectionPath = remember { mutableStateListOf<Long>() }
     var selectionOpen by remember { mutableStateOf(false) }
@@ -1354,25 +1395,7 @@ private fun EnhancedTweetCard(
                     hasOcrAction = hasOcrAction,
                     onOcrAction = {
                         ocrDialogOpen = true
-                        ocrText = clip.clip.ocrText
-                        if (clip.clip.ocrText.isBlank()) {
-                            ocrProcessing = true
-                            ocrError = null
-                            onOcrDetect(
-                                clip,
-                                { result ->
-                                    ocrText = result
-                                    ocrProcessing = false
-                                },
-                                { message ->
-                                    ocrError = message
-                                    ocrProcessing = false
-                                },
-                            )
-                        } else {
-                            ocrProcessing = false
-                            ocrError = null
-                        }
+                        ocrSessionKey++
                     },
                     onSummaryAction = {
                         summaryDraft = clip.clip.summary
@@ -1478,46 +1501,16 @@ private fun EnhancedTweetCard(
         )
     }
     if (ocrDialogOpen) {
-        OcrTextDialog(
-            previewPaths = ocrPreviewPaths,
-            text = ocrText,
-            isProcessing = ocrProcessing,
-            errorMessage = ocrError,
-            onTextChange = { ocrText = it },
-            onRedetect = { ocrRedetectWarningOpen = true },
-            onConfirm = {
-                onOcrSave(clip.clip, ocrText)
-                ocrDialogOpen = false
-            },
-            onDismiss = {
-                ocrDialogOpen = false
-                ocrProcessing = false
-            },
-        )
-    }
-    if (ocrRedetectWarningOpen) {
-        OcrRedetectConfirmDialog(
-            onConfirm = {
-                ocrRedetectWarningOpen = false
-                ocrDialogOpen = true
-                ocrProcessing = true
-                ocrError = null
-                onOcrDetect(
-                    clip,
-                    { result ->
-                        ocrText = result
-                        ocrProcessing = false
-                    },
-                    { message ->
-                        ocrError = message
-                        ocrProcessing = false
-                    },
-                )
-            },
-            onDismiss = {
-                ocrRedetectWarningOpen = false
-            },
-        )
+        androidx.compose.runtime.key(clip.clip.id, ocrSessionKey) {
+            OcrSessionDialog(
+                clip = clip,
+                sessionKey = ocrSessionKey,
+                previewPaths = ocrPreviewPaths,
+                onDetect = onOcrDetectStructured,
+                onSave = onOcrSaveResult,
+                onDismiss = { ocrDialogOpen = false },
+            )
+        }
     }
     if (deleteOpen) {
         AlertDialog(

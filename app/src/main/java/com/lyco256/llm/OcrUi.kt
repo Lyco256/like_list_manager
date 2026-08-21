@@ -27,6 +27,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,6 +40,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.lyco256.llm.data.ClipWithDetails
 
 @Composable
 internal fun TweetOptionsMenuButton(
@@ -125,23 +128,41 @@ internal fun SummarySettingsDialog(
 }
 
 @Composable
-internal fun OcrRedetectConfirmDialog(
-    onConfirm: () -> Unit,
+internal fun OcrSessionDialog(
+    clip: ClipWithDetails,
+    sessionKey: Long,
+    previewPaths: List<String>,
+    onDetect: OcrStructuredDetectHandler,
+    onSave: OcrSaveResultHandler,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        modifier = Modifier.testTag("ocr_redetect_warning_dialog"),
-        title = { Text("再検出") },
-        text = { Text("文字起こし結果を上書きして再検出します。よろしいですか。") },
-        dismissButton = {
-            TextButton(onClick = onDismiss, modifier = Modifier.testTag("ocr_redetect_warning_cancel")) {
-                Text("キャンセル")
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm, modifier = Modifier.testTag("ocr_redetect_warning_confirm")) {
-                Text("再検出")
+    var renderedState by remember(clip.clip.id, sessionKey) {
+        mutableStateOf<OcrSessionState?>(null)
+    }
+    val controller = remember(clip.clip.id, sessionKey) {
+        OcrSessionController(clip) { renderedState = it }
+    }
+    val state = renderedState ?: controller.state
+
+    DisposableEffect(controller) {
+        onDispose { controller.invalidate() }
+    }
+    LaunchedEffect(controller) {
+        controller.startAutomaticDetection(onDetect)
+    }
+
+    OcrTextDialog(
+        previewPaths = previewPaths,
+        text = state.draftText,
+        isProcessing = state.isDetecting,
+        isSaving = state.isSaving,
+        errorMessage = state.errorMessage,
+        onTextChange = controller::editDraft,
+        onRedetect = { controller.redetect(onDetect) },
+        onConfirm = { controller.save(onSave, onDismiss) },
+        onDismiss = {
+            if (controller.dismiss()) {
+                onDismiss()
             }
         },
     )
@@ -153,6 +174,7 @@ internal fun OcrTextDialog(
     previewPaths: List<String>,
     text: String,
     isProcessing: Boolean,
+    isSaving: Boolean = false,
     errorMessage: String?,
     onTextChange: (String) -> Unit,
     onRedetect: () -> Unit,
@@ -207,6 +229,16 @@ internal fun OcrTextDialog(
                         Text("文字起こし中")
                     }
                 }
+                if (isSaving) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.testTag("ocr_saving"),
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.size(12.dp))
+                        Text("保存中")
+                    }
+                }
                 if (errorMessage != null) {
                     Text(errorMessage, color = MaterialTheme.colorScheme.error)
                 }
@@ -214,7 +246,7 @@ internal fun OcrTextDialog(
                     value = text,
                     onValueChange = onTextChange,
                     modifier = Modifier.fillMaxWidth().testTag("ocr_result_text"),
-                    enabled = !isProcessing,
+                    enabled = !isProcessing && !isSaving,
                     label = { Text("OCR結果") },
                     minLines = 4,
                     maxLines = 10,
@@ -224,6 +256,7 @@ internal fun OcrTextDialog(
         dismissButton = {
             TextButton(
                 onClick = onDismiss,
+                enabled = !isSaving,
                 modifier = Modifier.testTag("ocr_cancel"),
             ) {
                 Text("キャンセル")
@@ -233,14 +266,14 @@ internal fun OcrTextDialog(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(
                     onClick = onRedetect,
-                    enabled = !isProcessing,
+                    enabled = !isProcessing && !isSaving,
                     modifier = Modifier.testTag("ocr_redetect"),
                 ) {
                     Text("再検出")
                 }
                 TextButton(
                     onClick = onConfirm,
-                    enabled = !isProcessing,
+                    enabled = !isProcessing && !isSaving,
                     modifier = Modifier.testTag("ocr_confirm"),
                 ) {
                     Text("保存")
