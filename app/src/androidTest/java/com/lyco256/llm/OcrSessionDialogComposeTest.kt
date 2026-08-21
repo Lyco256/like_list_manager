@@ -11,16 +11,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.junit4.createComposeRule
 import com.lyco256.llm.data.AssetEntity
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipWithDetails
+import com.lyco256.llm.data.OcrAssetRecognitionResult
+import com.lyco256.llm.data.OcrPoint
+import com.lyco256.llm.data.OcrPolygon
+import com.lyco256.llm.data.OcrPostRecognitionResult
+import com.lyco256.llm.data.OcrRecognitionResult
+import com.lyco256.llm.data.OcrTextRegion
 import com.lyco256.llm.data.TagEntity
 import com.lyco256.llm.data.TagHierarchy
 import com.lyco256.llm.data.TagWithCount
@@ -34,6 +43,92 @@ class OcrSessionDialogComposeTest {
     val composeRule = createComposeRule()
 
     @Test
+    fun fullScreenViewerUsesAssetPagesAndSwitchesAtFitScale() {
+        composeRule.setContent {
+            MaterialTheme {
+                OcrTextDialog(
+                    previewAssets = listOf(
+                        OcrImagePage(11L, "/tmp/ocr-first.webp", 100, 100),
+                        OcrImagePage(22L, "/tmp/ocr-second.webp", 100, 100),
+                    ),
+                    text = "draft",
+                    structuredResult = null,
+                    isProcessing = false,
+                    errorMessage = null,
+                    onTextChange = {},
+                    onRedetect = {},
+                    onConfirm = {},
+                    onDismiss = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("ocr_full_screen").assertIsDisplayed()
+        composeRule.onNodeWithTag("ocr_page_indicator").assertTextContains("1 / 2")
+        composeRule.onNodeWithTag("ocr_image_asset_11").assertIsDisplayed()
+        composeRule.onNodeWithTag("ocr_image_viewer").performTouchInput { swipeLeft() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("ocr_page_indicator").assertTextContains("2 / 2")
+        composeRule.onNodeWithTag("ocr_image_asset_22").assertIsDisplayed()
+    }
+
+    @Test
+    fun structuredHighlightFollowsTheMatchingAssetPageOnly() {
+        val structured = OcrPostRecognitionResult(
+            clipId = 7L,
+            assets = listOf(
+                OcrAssetRecognitionResult(
+                    assetId = 22L,
+                    localPath = "/tmp/ocr-second.webp",
+                    recognition = OcrRecognitionResult(
+                        imageWidth = 100,
+                        imageHeight = 100,
+                        fullText = "second",
+                        regions = listOf(
+                            OcrTextRegion(
+                                text = "second",
+                                polygon = OcrPolygon(
+                                    listOf(
+                                        OcrPoint(10f, 10f),
+                                        OcrPoint(70f, 12f),
+                                        OcrPoint(68f, 30f),
+                                        OcrPoint(8f, 28f),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            fullText = "second",
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                OcrTextDialog(
+                    previewAssets = listOf(
+                        OcrImagePage(11L, "/tmp/ocr-first.webp", 100, 100),
+                        OcrImagePage(22L, "/tmp/ocr-second.webp", 100, 100),
+                    ),
+                    text = "second",
+                    structuredResult = structured,
+                    isProcessing = false,
+                    errorMessage = null,
+                    onTextChange = {},
+                    onRedetect = {},
+                    onConfirm = {},
+                    onDismiss = {},
+                )
+            }
+        }
+
+        composeRule.onAllNodesWithTag("ocr_polygon_overlay").assertCountEquals(0)
+        composeRule.onNodeWithTag("ocr_image_viewer").performTouchInput { swipeLeft() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("ocr_polygon_overlay").assertIsDisplayed()
+    }
+
+    @Test
     fun saveDoesNotDismissBeforeCompletionAndFailureKeepsDraftForRetry() {
         var saveCalls = 0
         lateinit var completeSave: (String?) -> Unit
@@ -44,7 +139,7 @@ class OcrSessionDialogComposeTest {
                 OcrSessionDialog(
                     clip = clip(),
                     sessionKey = 1L,
-                    previewPaths = emptyList(),
+                    previewAssets = emptyList(),
                     onDetect = { _, _, _ -> error("saved OCR must not auto-detect") },
                     onSave = { _, _, complete ->
                         saveCalls++
@@ -59,7 +154,7 @@ class OcrSessionDialogComposeTest {
         composeRule.onNodeWithTag("ocr_confirm").performClick()
         composeRule.waitForIdle()
         assertEquals(1, saveCalls)
-        composeRule.onNodeWithTag("ocr_dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("ocr_full_screen").assertIsDisplayed()
         composeRule.onNodeWithTag("ocr_saving").assertIsDisplayed()
         composeRule.onNodeWithTag("ocr_cancel").assertIsNotEnabled()
         composeRule.onNodeWithTag("ocr_redetect").assertIsNotEnabled()
@@ -67,7 +162,7 @@ class OcrSessionDialogComposeTest {
 
         completeSave("save failed")
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("ocr_dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("ocr_full_screen").assertIsDisplayed()
         composeRule.onNodeWithText("save failed").assertIsDisplayed()
         composeRule.onNodeWithTag("ocr_result_text").assertTextContains("persisted")
 
@@ -76,7 +171,7 @@ class OcrSessionDialogComposeTest {
         assertEquals(2, saveCalls)
         completeSave(null)
         composeRule.waitForIdle()
-        assertTrue(composeRule.onAllNodesWithTag("ocr_dialog").fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithTag("ocr_full_screen").fetchSemanticsNodes().isEmpty())
     }
 
     @Test
@@ -96,7 +191,7 @@ class OcrSessionDialogComposeTest {
                     OcrSessionDialog(
                         clip = clip(),
                         sessionKey = sessionKey,
-                        previewPaths = emptyList(),
+                        previewAssets = emptyList(),
                         onDetect = { _, _, _ -> error("saved OCR must not auto-detect") },
                         onSave = { _, _, _ -> error("cancelled session must not save") },
                         onDismiss = { open = false },
@@ -109,7 +204,7 @@ class OcrSessionDialogComposeTest {
         composeRule.onNodeWithTag("ocr_result_text").performTextReplacement("edited")
         composeRule.onNodeWithTag("ocr_cancel").performClick()
         composeRule.waitForIdle()
-        assertTrue(composeRule.onAllNodesWithTag("ocr_dialog").fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithTag("ocr_full_screen").fetchSemanticsNodes().isEmpty())
 
         composeRule.onNodeWithTag("ocr_open").performClick()
         composeRule.onNodeWithTag("ocr_result_text").assertTextContains("persisted")
@@ -144,12 +239,12 @@ class OcrSessionDialogComposeTest {
         composeRule.onNodeWithTag("media_grid_tweet_dialog").assertIsDisplayed()
         composeRule.onNodeWithTag("tweet_options_button_7").performClick()
         composeRule.onNodeWithTag("tweet_options_ocr").performClick()
-        composeRule.onNodeWithTag("ocr_dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("ocr_full_screen").assertIsDisplayed()
         composeRule.onNodeWithTag("ocr_result_text").assertTextContains("persisted")
         composeRule.onNodeWithTag("ocr_cancel").performClick()
         composeRule.waitForIdle()
         assertEquals(0, saveCalls)
-        assertTrue(composeRule.onAllNodesWithTag("ocr_dialog").fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithTag("ocr_full_screen").fetchSemanticsNodes().isEmpty())
         composeRule.onNodeWithTag("media_grid_tweet_dialog").assertIsDisplayed()
     }
 
@@ -192,11 +287,11 @@ class OcrSessionDialogComposeTest {
 
         composeRule.onNodeWithTag("tweet_options_button_7").performClick()
         composeRule.onNodeWithTag("tweet_options_ocr").performClick()
-        composeRule.onNodeWithTag("ocr_dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("ocr_full_screen").assertIsDisplayed()
         composeRule.onNodeWithTag("ocr_result_text").assertTextContains("persisted")
         composeRule.onNodeWithTag("ocr_cancel").performClick()
         composeRule.waitForIdle()
-        assertTrue(composeRule.onAllNodesWithTag("ocr_dialog").fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithTag("ocr_full_screen").fetchSemanticsNodes().isEmpty())
         composeRule.onNodeWithTag("clip_card_7").assertIsDisplayed()
     }
 

@@ -2,6 +2,7 @@ package com.lyco256.llm
 
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipWithDetails
+import com.lyco256.llm.data.OcrAssetRecognitionResult
 import com.lyco256.llm.data.OcrPostRecognitionResult
 
 internal typealias OcrLegacyDetectHandler = (
@@ -21,6 +22,16 @@ internal typealias OcrSaveResultHandler = (
     String,
     (String?) -> Unit,
 ) -> Unit
+
+internal data class OcrImagePage(
+    val assetId: Long,
+    val localPath: String,
+    val imageWidth: Int? = null,
+    val imageHeight: Int? = null,
+)
+
+internal fun OcrPostRecognitionResult.assetFor(assetId: Long): OcrAssetRecognitionResult? =
+    assets.firstOrNull { it.assetId == assetId }
 
 internal data class OcrSessionState(
     val clipId: Long,

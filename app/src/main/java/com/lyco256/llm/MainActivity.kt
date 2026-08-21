@@ -1589,12 +1589,16 @@ fun TweetCard(
     var ocrDialogOpen by remember { mutableStateOf(false) }
     var ocrSessionKey by remember { mutableStateOf(0L) }
     var deleteOpen by remember { mutableStateOf(false) }
-    val ocrPreviewPaths = remember(clip.assets) {
+    val ocrPreviewAssets = remember(clip.assets) {
         clip.assets
             .filter { it.type == "photo" || it.type == "video_thumbnail" }
-            .mapNotNull { asset -> asset.localPath?.takeIf { File(it).exists() } }
+            .mapNotNull { asset ->
+                asset.localPath?.takeIf { File(it).exists() }?.let { path ->
+                    OcrImagePage(asset.id, path, asset.width, asset.height)
+                }
+            }
     }
-    val hasOcrAction = ocrPreviewPaths.isNotEmpty()
+    val hasOcrAction = ocrPreviewAssets.isNotEmpty()
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -1720,7 +1724,7 @@ fun TweetCard(
             OcrSessionDialog(
                 clip = clip,
                 sessionKey = ocrSessionKey,
-                previewPaths = ocrPreviewPaths,
+                previewAssets = ocrPreviewAssets,
                 onDetect = onOcrDetectStructured,
                 onSave = onOcrSaveResult,
                 onDismiss = { ocrDialogOpen = false },

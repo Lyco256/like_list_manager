@@ -1309,10 +1309,14 @@ private fun EnhancedTweetCard(
     val selectionPath = remember { mutableStateListOf<Long>() }
     var selectionOpen by remember { mutableStateOf(false) }
     var likePopupOpen by remember(clip.clip.id) { mutableStateOf(false) }
-    val ocrPreviewPaths = remember(clip.assets) {
+    val ocrPreviewAssets = remember(clip.assets) {
         clip.assets
             .filter { it.type == "photo" || it.type == "video_thumbnail" }
-            .mapNotNull { it.localPath }
+            .mapNotNull { asset ->
+                asset.localPath?.takeIf { File(it).exists() }?.let { path ->
+                    OcrImagePage(asset.id, path, asset.width, asset.height)
+                }
+            }
     }
     val hasOcrAction = remember(clip.assets) {
         clip.assets.any { (it.type == "photo" || it.type == "video_thumbnail") && it.localPath != null }
@@ -1505,7 +1509,7 @@ private fun EnhancedTweetCard(
             OcrSessionDialog(
                 clip = clip,
                 sessionKey = ocrSessionKey,
-                previewPaths = ocrPreviewPaths,
+                previewAssets = ocrPreviewAssets,
                 onDetect = onOcrDetectStructured,
                 onSave = onOcrSaveResult,
                 onDismiss = { ocrDialogOpen = false },

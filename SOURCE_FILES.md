@@ -71,6 +71,7 @@ MainActivity / Compose UI
 | 変更したいこと | 最初に読む文書 | 次に確認する文書 |
 | --- | --- | --- |
 | 画面、操作、検索、タグUI | `docs/app/src/main/java/com/lyco256/llm/MainActivity.kt.md` | `docs/app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt.md`, `ClipRepository.kt.md`, `Entities.kt.md` |
+| OCR全画面ビューア、Fit/zoom/pan、polygonハイライト | `docs/app/src/main/java/com/lyco256/llm/OcrUi.kt.md` | `OcrSession.kt.md`, `OcrViewerGeometry.kt.md`, `data/OcrTextRecognizer.kt.md` |
 | メディアグリッド現在位置ピル、表示区間ラベル | `docs/app/src/main/java/com/lyco256/llm/MediaGridScrollPosition.kt.md` | `TagHierarchyUiV2.kt.md`, `MediaGridMorph.kt.md`, `MediaGridScrollPositionTest.kt.md` |
 | メディアグリッド高速スクロールバー、thumb drag | `docs/app/src/main/java/com/lyco256/llm/MediaGridScrollbar.kt.md` | `TagHierarchyUiV2.kt.md`, `MediaGridScrollPosition.kt.md`, `MediaGridScrollbarTest.kt.md`。投稿日／いいね数順のdrag中はframe内全header boundaryのlabel入りピルを開始ordinal位置へ表示し、保存順では表示しない |
 | 共通Undo通知、5秒timeout、Swipe dismiss | `docs/app/src/main/java/com/lyco256/llm/UndoNotificationUi.kt.md` | `MainActivity.kt.md`, `data/UndoCoordinator.kt.md` |
@@ -117,6 +118,7 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/SettingsScreen.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/OcrUi.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/OcrSession.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/OcrViewerGeometry.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/TagColorUi.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/MediaGridPlaceholderRendering.kt.md`
@@ -180,6 +182,7 @@ MainActivity / Compose UI
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/PostStorageManagerRecoveryTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/OcrTextRecognizerTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/OcrSessionTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/OcrViewerGeometryTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/OcrSessionDialogComposeTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/MediaGridPersistentPreviewStoreTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/HeavyLocalWorkTrackerTest.kt.md`
