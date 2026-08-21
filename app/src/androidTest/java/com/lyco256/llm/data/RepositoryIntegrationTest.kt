@@ -2557,6 +2557,59 @@ class RepositoryIntegrationTest {
     }
 
     @Test
+    fun failedOcrDetectionDoesNotModifyClipOrUndo() = runBlocking {
+        val now = Instant.now().toString()
+        val previousUpdatedAt = "2026-08-20T00:00:00Z"
+        val clipId = storage.withDatabase { database ->
+            val clipId = database.clipDao().insertClip(
+                clip("901").copy(
+                    ocrText = "persisted OCR",
+                    ocrUpdatedAt = previousUpdatedAt,
+                ),
+            )
+            val imageDir = storage.imageDirectory()
+            imageDir.mkdirs()
+            val failedFile = imageDir.resolve("ocr-failed.jpg").apply {
+                writeBytes(bitmapBytes(2, 2, android.graphics.Color.RED))
+            }
+            database.clipDao().insertAssets(
+                listOf(
+                    AssetEntity(
+                        clipId = clipId,
+                        mediaKey = "ocr-failure",
+                        type = "photo",
+                        remoteUrl = "https://example.test/ocr-failure",
+                        previewUrl = null,
+                        localPath = failedFile.absolutePath,
+                        width = 2,
+                        height = 2,
+                        sizeBytes = failedFile.length(),
+                        downloadState = "downloaded",
+                        createdAt = now,
+                    ),
+                ),
+            )
+            clipId
+        }
+
+        val details = storage.withDatabase { database ->
+            ClipWithDetails(
+                clip = database.clipDao().getAllClips().single { it.id == clipId },
+                assets = database.clipDao().assetsForClipIds(listOf(clipId)),
+                tags = emptyList(),
+            )
+        }
+
+        assertNotNull(runCatching { repository.detectOcrText(details) }.exceptionOrNull())
+        storage.withDatabase { database ->
+            val unchanged = database.clipDao().getAllClips().single { it.id == clipId }
+            assertEquals("persisted OCR", unchanged.ocrText)
+            assertEquals(previousUpdatedAt, unchanged.ocrUpdatedAt)
+            assertEquals(null, database.undoDao().getSlot())
+        }
+    }
+
+    @Test
     fun fakeOcrGatewayCanSupplyArbitraryStructuredResult() = runBlocking {
         val expected = OcrRecognitionResult(
             imageWidth = 640,

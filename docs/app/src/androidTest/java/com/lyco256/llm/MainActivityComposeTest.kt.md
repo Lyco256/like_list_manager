@@ -185,6 +185,10 @@ The OCR dialog now uses the shared session controller. Existing UI coverage cont
 
 - 分類済みtoolbarからclearを除いたため、filterのDB非変更E2Eは検索/絞り込みDialog内の全クリア確認を実行してから適用する経路を使用します。
 
+## 2026-08 OCR session UI
+
+`OcrSessionDialogComposeTest` covers the shared OCR session dialog used by classified cards and media-grid post dialogs. `MainActivityComposeTest.ocrDialogSavesRecognizedTextAndCanBeCanceledWithoutWriting` keeps the real Activity card path covered, including saved-text startup, direct redetect without a warning dialog, and cancellation without changing the persisted OCR text.
+
 ## 2026-08-01 Phase 1 row reflow coverage
 
 - The integration build uses `TEST_HARNESS=true`; `testHarnessMediaGridUsesSameSurfaceRendererWithoutLegacyMorphCanvas` drives the TEST_HARNESS pinch and explicitly rejects the historical Morph canvas, while the rendering contract test verifies the same-surface modifier statically.

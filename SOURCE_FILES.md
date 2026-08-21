@@ -180,6 +180,7 @@ MainActivity / Compose UI
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/PostStorageManagerRecoveryTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/OcrTextRecognizerTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/OcrSessionTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/OcrSessionDialogComposeTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/MediaGridPersistentPreviewStoreTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/HeavyLocalWorkTrackerTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/UndoPayloadCodecTest.kt.md`
