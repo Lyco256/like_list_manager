@@ -134,6 +134,10 @@ clip削除ではDB削除成功後に、共有公開ロック下でasset ID由来
 - Added OCR detection for locally stored `photo` and `video_thumbnail` assets using the new OCR gateway abstraction.
 - Added `updateOcrText` persistence with a timestamp and changed local delete to a hard delete that removes rows and files.
 
+## 2026-08 structured OCR boundary
+
+`detectOcrText()` now receives `OcrRecognitionResult` from the gateway but continues to return a `String`, using only each image result's `fullText` and the existing `\n\n` separator between eligible images. OCR UI, `ocrText`/`ocrUpdatedAt` persistence, database schema, and source image files are unchanged. Structured regions are not persisted or exposed to the UI in this change.
+
 ## 2026-07 media thumbnail update
 
 - `photo` assets are downloaded from `media.url`, converted to WebP, and stored with quality 85.

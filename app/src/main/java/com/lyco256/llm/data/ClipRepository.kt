@@ -1320,7 +1320,7 @@ class ClipRepository internal constructor(
             val path = asset.localPath?.let(::File)?.takeIf(File::isFile) ?: return@mapNotNull null
             val bitmap = runCatching { BitmapFactory.decodeFile(path.absolutePath) }.getOrNull() ?: return@mapNotNull null
             try {
-                ocrTextGateway.recognize(bitmap).trim().takeIf(String::isNotBlank)
+                ocrTextGateway.recognize(bitmap).fullText.trim().takeIf(String::isNotBlank)
             } finally {
                 bitmap.recycle()
             }

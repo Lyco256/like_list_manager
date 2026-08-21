@@ -92,10 +92,33 @@ class RepositoryIntegrationTest {
         xApiClient = api,
         ocrTextGateway = FakeOcrTextGateway { bitmap ->
             when {
-                bitmap.width == 1 && bitmap.height == 1 -> ""
+                bitmap.width == 1 && bitmap.height == 1 -> OcrRecognitionResult(bitmap.width, bitmap.height, "")
                 bitmap.width == 2 && bitmap.height == 2 -> throw IllegalStateException("Fake OCR failure")
-                bitmap.width > bitmap.height -> "Landscape OCR\nSecond line"
-                else -> "Portrait OCR"
+                bitmap.width > bitmap.height -> OcrRecognitionResult(
+                    imageWidth = bitmap.width,
+                    imageHeight = bitmap.height,
+                    fullText = "Landscape OCR\nSecond line",
+                    regions = listOf(
+                        OcrTextRegion(
+                            text = "Landscape OCR",
+                            polygon = OcrPolygon(
+                                listOf(
+                                    OcrPoint(0f, 0f),
+                                    OcrPoint(2f, 0f),
+                                    OcrPoint(2f, 1f),
+                                    OcrPoint(0f, 1f),
+                                ),
+                            ),
+                            confidence = 0.9f,
+                        ),
+                        OcrTextRegion(
+                            text = "Second line",
+                            confidence = 0.8f,
+                            precedingSeparator = "\n",
+                        ),
+                    ),
+                )
+                else -> OcrRecognitionResult(bitmap.width, bitmap.height, "Portrait OCR")
             }
         },
         mediaGridPreviewEnqueuer = previewEnqueuer,
@@ -2515,6 +2538,59 @@ class RepositoryIntegrationTest {
             assertEquals(recognized, updated.ocrText)
             assertTrue(requireNotNull(updated.ocrUpdatedAt).isNotBlank())
         }
+    }
+
+    @Test
+    fun fakeOcrGatewayCanSupplyArbitraryStructuredResult() = runBlocking {
+        val expected = OcrRecognitionResult(
+            imageWidth = 640,
+            imageHeight = 480,
+            fullText = "Injected",
+            regions = listOf(
+                OcrTextRegion(
+                    text = "Injected",
+                    polygon = OcrPolygon(
+                        listOf(
+                            OcrPoint(1.5f, 2.5f),
+                            OcrPoint(30.25f, 3.5f),
+                            OcrPoint(29.75f, 20.5f),
+                            OcrPoint(0.75f, 19.5f),
+                        ),
+                    ),
+                    confidence = 0.73f,
+                ),
+            ),
+        )
+        val gateway = FakeOcrTextGateway { expected }
+        val bitmap = Bitmap.createBitmap(640, 480, Bitmap.Config.ARGB_8888)
+
+        try {
+            assertEquals(expected, gateway.recognize(bitmap))
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    @Test
+    fun mlKitCornerPointAdapterKeepsAllCoordinatesInCommonPolygon() {
+        val polygon = OcrPolygon.fromCornerPoints(
+            arrayOf(
+                android.graphics.Point(42, 70),
+                android.graphics.Point(30, 90),
+                android.graphics.Point(80, 20),
+                android.graphics.Point(12, 10),
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                OcrPoint(12f, 10f),
+                OcrPoint(80f, 20f),
+                OcrPoint(42f, 70f),
+                OcrPoint(30f, 90f),
+            ),
+            polygon?.points,
+        )
     }
 
     @Test
