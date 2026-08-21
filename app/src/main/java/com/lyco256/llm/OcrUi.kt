@@ -1,5 +1,7 @@
 package com.lyco256.llm
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -46,24 +48,26 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
 import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.OcrAssetRecognitionResult
 import com.lyco256.llm.data.OcrRecognitionResult
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 internal fun TweetOptionsMenuButton(
@@ -175,6 +179,7 @@ internal fun OcrSessionDialog(
     }
 
     OcrTextDialog(
+        sessionKey = sessionKey,
         previewAssets = previewAssets,
         text = state.draftText,
         structuredResult = state.structuredResult,
@@ -194,6 +199,7 @@ internal fun OcrSessionDialog(
 
 @Composable
 internal fun OcrTextDialog(
+    sessionKey: Long = 0L,
     previewAssets: List<OcrImagePage>,
     text: String,
     structuredResult: com.lyco256.llm.data.OcrPostRecognitionResult?,
@@ -205,15 +211,35 @@ internal fun OcrTextDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var currentAssetId by remember(previewAssets) { mutableStateOf(previewAssets.firstOrNull()?.assetId) }
-    val pageTransforms = remember(previewAssets) { mutableStateMapOf<Long, OcrViewerTransform>() }
+    var currentAssetId by remember(sessionKey, previewAssets) {
+        mutableStateOf(previewAssets.firstOrNull()?.assetId)
+    }
+    val pageTransforms = remember(sessionKey, previewAssets) {
+        mutableStateMapOf<Long, OcrViewerTransform>()
+    }
+    var previousStructuredAssetIds by remember(sessionKey, previewAssets) {
+        mutableStateOf<List<Long>?>(null)
+    }
     val currentPage = previewAssets.firstOrNull { it.assetId == currentAssetId }
     val currentPageIndex = previewAssets.indexOfFirst { it.assetId == currentAssetId }
 
     LaunchedEffect(previewAssets.map(OcrImagePage::assetId)) {
-        if (currentAssetId !in previewAssets.map(OcrImagePage::assetId)) {
-            currentAssetId = previewAssets.firstOrNull()?.assetId
-        }
+        currentAssetId = correctedOcrPageAssetId(
+            currentAssetId = currentAssetId,
+            previewAssetIds = previewAssets.map(OcrImagePage::assetId),
+            previousStructuredAssetIds = previousStructuredAssetIds,
+            newStructuredAssetIds = structuredResult?.assets?.map { it.assetId },
+        )
+    }
+    LaunchedEffect(structuredResult) {
+        val newStructuredAssetIds = structuredResult?.assets?.map { it.assetId }
+        currentAssetId = correctedOcrPageAssetId(
+            currentAssetId = currentAssetId,
+            previewAssetIds = previewAssets.map(OcrImagePage::assetId),
+            previousStructuredAssetIds = previousStructuredAssetIds,
+            newStructuredAssetIds = newStructuredAssetIds,
+        )
+        previousStructuredAssetIds = newStructuredAssetIds
     }
 
     fun requestPage(delta: Int) {
@@ -450,14 +476,32 @@ private fun OcrImagePageViewer(
                 translationY = transform.offsetY
             },
         ) {
-            AsyncImage(
-                model = page.localPath,
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize().testTag("ocr_image_asset_${page.assetId}"),
-            )
+            OcrRawBitmapImage(page)
             if (recognition != null) OcrPolygonOverlay(recognition.recognition)
         }
+    }
+}
+
+@Composable
+private fun OcrRawBitmapImage(page: OcrImagePage) {
+    var bitmap by remember(page.localPath) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(page.localPath) {
+        bitmap = withContext(Dispatchers.IO) {
+            runCatching { BitmapFactory.decodeFile(page.localPath) }.getOrNull()
+        }
+    }
+    val imageBitmap = bitmap?.asImageBitmap()
+    androidx.compose.foundation.Canvas(
+        modifier = Modifier.fillMaxSize().testTag("ocr_image_asset_${page.assetId}"),
+    ) {
+        val image = imageBitmap ?: return@Canvas
+        val imageRect = OcrViewerGeometry.fitImageRect(image.width, image.height, size.width, size.height)
+            ?: return@Canvas
+        drawImage(
+            image = image,
+            dstOffset = IntOffset(imageRect.left.toInt(), imageRect.top.toInt()),
+            dstSize = IntSize(imageRect.width.toInt(), imageRect.height.toInt()),
+        )
     }
 }
 

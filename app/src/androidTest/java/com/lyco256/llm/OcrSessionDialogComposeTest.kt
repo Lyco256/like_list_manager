@@ -129,6 +129,53 @@ class OcrSessionDialogComposeTest {
     }
 
     @Test
+    fun redetectResultRemovingCurrentAssetMovesToAnotherValidPage() {
+        var structured by mutableStateOf(
+            OcrPostRecognitionResult(
+                clipId = 7L,
+                assets = listOf(
+                    OcrAssetRecognitionResult(11L, "/tmp/ocr-first.webp", recognition(11L)),
+                    OcrAssetRecognitionResult(22L, "/tmp/ocr-second.webp", recognition(22L)),
+                ),
+                fullText = "first\nsecond",
+            ),
+        )
+        composeRule.setContent {
+            MaterialTheme {
+                OcrTextDialog(
+                    sessionKey = 1L,
+                    previewAssets = listOf(
+                        OcrImagePage(11L, "/tmp/ocr-first.webp", 100, 100),
+                        OcrImagePage(22L, "/tmp/ocr-second.webp", 100, 100),
+                    ),
+                    text = "second",
+                    structuredResult = structured,
+                    isProcessing = false,
+                    errorMessage = null,
+                    onTextChange = {},
+                    onRedetect = {},
+                    onConfirm = {},
+                    onDismiss = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("ocr_image_viewer").performTouchInput { swipeLeft() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("ocr_image_asset_22").assertIsDisplayed()
+
+        structured = structured.copy(
+            assets = listOf(
+                OcrAssetRecognitionResult(11L, "/tmp/ocr-first.webp", recognition(11L)),
+            ),
+            fullText = "first",
+        )
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("ocr_page_indicator").assertTextContains("1 / 2")
+        composeRule.onNodeWithTag("ocr_image_asset_11").assertIsDisplayed()
+    }
+
+    @Test
     fun saveDoesNotDismissBeforeCompletionAndFailureKeepsDraftForRetry() {
         var saveCalls = 0
         lateinit var completeSave: (String?) -> Unit
@@ -325,5 +372,11 @@ class OcrSessionDialogComposeTest {
             emptyList()
         },
         tags = emptyList(),
+    )
+
+    private fun recognition(id: Long): OcrRecognitionResult = OcrRecognitionResult(
+        imageWidth = 100,
+        imageHeight = 100,
+        fullText = id.toString(),
     )
 }

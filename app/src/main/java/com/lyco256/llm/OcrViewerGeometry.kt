@@ -147,3 +147,18 @@ internal object OcrViewerGeometry {
         }.toFloat() / 2f,
     )
 }
+
+internal fun correctedOcrPageAssetId(
+    currentAssetId: Long?,
+    previewAssetIds: List<Long>,
+    previousStructuredAssetIds: List<Long>?,
+    newStructuredAssetIds: List<Long>?,
+): Long? {
+    val fallback = previewAssetIds.firstOrNull()
+    if (currentAssetId == null || currentAssetId !in previewAssetIds) return fallback
+    if (previousStructuredAssetIds == null || newStructuredAssetIds == null) return currentAssetId
+    if (currentAssetId !in previousStructuredAssetIds || currentAssetId in newStructuredAssetIds) {
+        return currentAssetId
+    }
+    return previewAssetIds.firstOrNull { it in newStructuredAssetIds } ?: fallback
+}

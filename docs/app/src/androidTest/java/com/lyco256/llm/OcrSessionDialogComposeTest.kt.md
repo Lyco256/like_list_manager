@@ -8,3 +8,4 @@ OCR3では小型AlertDialogではなく全画面ビューア、asset IDページ
 - 保存中は編集、再検出、キャンセルを無効化し、成功callback後だけ閉じることを確認します。
 - 手動編集後のキャンセルと再オープンで、保存済み`ocrText`から再開することを確認します。
 - classifiedカードとmedia grid投稿ダイアログの両方が共通の`OcrSessionDialog`を使うことを確認します。
+- 再検出結果から現在assetが消えた場合に、別の有効なpreview assetへ移動することを確認します。

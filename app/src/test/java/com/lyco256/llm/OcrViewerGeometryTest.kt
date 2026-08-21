@@ -147,6 +147,45 @@ class OcrViewerGeometryTest {
         assertNull(OcrViewerGeometry.pageSwipeDirection(2, 1f, true, -200f, 400f))
     }
 
+    @Test
+    fun pageCorrectionKeepsPartialInitialResultOnItsCurrentPreviewPage() {
+        assertEquals(
+            11L,
+            correctedOcrPageAssetId(
+                currentAssetId = 11L,
+                previewAssetIds = listOf(11L, 22L),
+                previousStructuredAssetIds = null,
+                newStructuredAssetIds = listOf(22L),
+            ),
+        )
+    }
+
+    @Test
+    fun pageCorrectionMovesAwayWhenRedetectRemovesCurrentAsset() {
+        assertEquals(
+            22L,
+            correctedOcrPageAssetId(
+                currentAssetId = 11L,
+                previewAssetIds = listOf(11L, 22L),
+                previousStructuredAssetIds = listOf(11L, 22L),
+                newStructuredAssetIds = listOf(22L),
+            ),
+        )
+    }
+
+    @Test
+    fun pageCorrectionFallsBackToFirstPreviewWhenNewResultHasNoKnownAsset() {
+        assertEquals(
+            11L,
+            correctedOcrPageAssetId(
+                currentAssetId = 22L,
+                previewAssetIds = listOf(11L, 22L),
+                previousStructuredAssetIds = listOf(22L),
+                newStructuredAssetIds = emptyList(),
+            ),
+        )
+    }
+
     private fun box(left: Float, top: Float, right: Float, bottom: Float) = OcrPolygon(
         listOf(
             OcrPoint(left, top),
