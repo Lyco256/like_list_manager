@@ -139,6 +139,14 @@ class OcrViewerGeometryTest {
         assertNull(result.assetFor(33L))
     }
 
+    @Test
+    fun onlyFitScaleHorizontalDragCanSwitchPages() {
+        assertEquals(1, OcrViewerGeometry.pageSwipeDirection(2, 1f, false, -100f, 400f))
+        assertEquals(-1, OcrViewerGeometry.pageSwipeDirection(2, 1f, false, 100f, 400f))
+        assertNull(OcrViewerGeometry.pageSwipeDirection(2, 1.5f, false, -200f, 400f))
+        assertNull(OcrViewerGeometry.pageSwipeDirection(2, 1f, true, -200f, 400f))
+    }
+
     private fun box(left: Float, top: Float, right: Float, bottom: Float) = OcrPolygon(
         listOf(
             OcrPoint(left, top),

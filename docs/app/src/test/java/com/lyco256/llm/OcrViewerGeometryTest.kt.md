@@ -8,3 +8,4 @@ OCR3の画像座標基盤を検証します。
 - 境界外polygonのclipと斜め形状の維持。
 - NaN polygonの除外と正常polygonの継続。
 - asset IDによる構造化結果の対応。
+- Fit時だけのページswipe判定と、zoom中のページ切替抑止。

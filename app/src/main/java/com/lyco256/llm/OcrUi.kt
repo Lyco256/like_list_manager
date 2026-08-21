@@ -64,7 +64,6 @@ import coil.compose.AsyncImage
 import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.OcrAssetRecognitionResult
 import com.lyco256.llm.data.OcrRecognitionResult
-import kotlin.math.abs
 
 @Composable
 internal fun TweetOptionsMenuButton(
@@ -433,9 +432,13 @@ private fun OcrImagePageViewer(
                         previousPositions.keys.retainAll(pressed.map { it.id }.toSet())
                         event.changes.forEach { it.consume() }
                     }
-                    if (pageCount > 1 && gestureStartScale <= 1.001f && !gestureHadZoom && abs(gestureDeltaX) > size.width * 0.18f) {
-                        onPageChange(if (gestureDeltaX < 0f) 1 else -1)
-                    }
+                    OcrViewerGeometry.pageSwipeDirection(
+                        pageCount = pageCount,
+                        gestureStartScale = gestureStartScale,
+                        gestureHadZoom = gestureHadZoom,
+                        gestureDeltaX = gestureDeltaX,
+                        viewportWidth = size.width.toFloat(),
+                    )?.let(onPageChange)
                 }
             },
     ) {

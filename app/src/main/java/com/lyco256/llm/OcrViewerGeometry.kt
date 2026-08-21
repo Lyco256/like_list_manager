@@ -89,6 +89,20 @@ internal object OcrViewerGeometry {
     fun isValidPolygon(polygon: OcrPolygon, sourceWidth: Int, sourceHeight: Int): Boolean =
         clipPolygonToSource(polygon, sourceWidth.toFloat(), sourceHeight.toFloat()) != null
 
+    fun pageSwipeDirection(
+        pageCount: Int,
+        gestureStartScale: Float,
+        gestureHadZoom: Boolean,
+        gestureDeltaX: Float,
+        viewportWidth: Float,
+    ): Int? {
+        if (pageCount <= 1 || gestureStartScale > 1.001f || gestureHadZoom ||
+            !gestureDeltaX.isFinite() || !viewportWidth.isFinite() || viewportWidth <= 0f ||
+            abs(gestureDeltaX) <= viewportWidth * 0.18f
+        ) return null
+        return if (gestureDeltaX < 0f) 1 else -1
+    }
+
     private fun clipPolygonToSource(polygon: OcrPolygon, width: Float, height: Float): List<OcrPoint>? {
         if (width <= 0f || height <= 0f || polygon.points.any { !it.x.isFinite() || !it.y.isFinite() }) return null
         var clipped = polygon.points
