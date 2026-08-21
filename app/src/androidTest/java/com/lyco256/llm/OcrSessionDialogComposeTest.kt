@@ -176,6 +176,36 @@ class OcrSessionDialogComposeTest {
     }
 
     @Test
+    fun detectingKeepsThePreviousStructuredPolygonVisible() {
+        val structured = OcrPostRecognitionResult(
+            clipId = 7L,
+            assets = listOf(
+                OcrAssetRecognitionResult(11L, "/tmp/ocr-first.webp", recognitionWithPolygon(11L)),
+            ),
+            fullText = "first",
+        )
+        composeRule.setContent {
+            MaterialTheme {
+                OcrTextDialog(
+                    sessionKey = 1L,
+                    previewAssets = listOf(OcrImagePage(11L, "/tmp/ocr-first.webp", 100, 100)),
+                    text = "first",
+                    structuredResult = structured,
+                    isProcessing = true,
+                    errorMessage = null,
+                    onTextChange = {},
+                    onRedetect = {},
+                    onConfirm = {},
+                    onDismiss = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("ocr_detecting").assertIsDisplayed()
+        composeRule.onNodeWithTag("ocr_polygon_overlay").assertIsDisplayed()
+    }
+
+    @Test
     fun saveDoesNotDismissBeforeCompletionAndFailureKeepsDraftForRetry() {
         var saveCalls = 0
         lateinit var completeSave: (String?) -> Unit
@@ -378,5 +408,24 @@ class OcrSessionDialogComposeTest {
         imageWidth = 100,
         imageHeight = 100,
         fullText = id.toString(),
+    )
+
+    private fun recognitionWithPolygon(id: Long): OcrRecognitionResult = OcrRecognitionResult(
+        imageWidth = 100,
+        imageHeight = 100,
+        fullText = id.toString(),
+        regions = listOf(
+            OcrTextRegion(
+                text = id.toString(),
+                polygon = OcrPolygon(
+                    listOf(
+                        OcrPoint(10f, 10f),
+                        OcrPoint(50f, 10f),
+                        OcrPoint(50f, 30f),
+                        OcrPoint(10f, 30f),
+                    ),
+                ),
+            ),
+        ),
     )
 }
