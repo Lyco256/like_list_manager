@@ -198,6 +198,132 @@ class OcrSessionDialogComposeTest {
     }
 
     @Test
+    fun pinchAndPanDoNotSelectButAStaticTapAfterZoomDoes() {
+        composeRule.setContent {
+            MaterialTheme {
+                OcrTextDialog(
+                    previewAssets = listOf(OcrImagePage(11L, "/tmp/ocr.webp", 100, 100)),
+                    text = "first\nsecond",
+                    structuredResult = structuredWithRegions(),
+                    isProcessing = false,
+                    errorMessage = null,
+                    onTextChange = {},
+                    onRedetect = {},
+                    onConfirm = {},
+                    onDismiss = {},
+                )
+            }
+        }
+
+        val viewer = composeRule.onNodeWithTag("ocr_image_viewer")
+        viewer.performTouchInput {
+            down(0, center - androidx.compose.ui.geometry.Offset(30f, 0f))
+            down(1, center + androidx.compose.ui.geometry.Offset(30f, 0f))
+            moveTo(0, center - androidx.compose.ui.geometry.Offset(55f, 0f), 100)
+            moveTo(1, center + androidx.compose.ui.geometry.Offset(55f, 0f), 100)
+            up(0)
+            up(1)
+        }
+        composeRule.waitForIdle()
+        assertTrue(composeRule.onAllNodesWithTag("ocr_region_text").fetchSemanticsNodes().isEmpty())
+
+        viewer.performTouchInput { click(center) }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("ocr_region_text").assertTextContains("first")
+
+        viewer.performTouchInput {
+            down(0, center)
+            moveTo(0, center + androidx.compose.ui.geometry.Offset(30f, 0f), 100)
+            up(0)
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("ocr_region_text").assertTextContains("first")
+    }
+
+    @Test
+    fun selectingAnotherPolygonShowsItsCurrentValueAndRedetectFailureKeepsItAvailable() {
+        var processing by mutableStateOf(false)
+        var errorMessage by mutableStateOf<String?>(null)
+        val firstPolygon = OcrPolygon(
+            listOf(
+                OcrPoint(10f, 10f), OcrPoint(40f, 10f),
+                OcrPoint(40f, 40f), OcrPoint(10f, 40f),
+            ),
+        )
+        val secondPolygon = OcrPolygon(
+            listOf(
+                OcrPoint(60f, 60f), OcrPoint(90f, 60f),
+                OcrPoint(90f, 90f), OcrPoint(60f, 90f),
+            ),
+        )
+        var structured by mutableStateOf(
+            OcrPostRecognitionResult(
+                clipId = 7L,
+                assets = listOf(
+                    OcrAssetRecognitionResult(
+                        11L,
+                        "/tmp/ocr.webp",
+                        OcrRecognitionResult(
+                            100,
+                            100,
+                            "first\nsecond",
+                            listOf(
+                                OcrTextRegion("first", firstPolygon),
+                                OcrTextRegion("second", secondPolygon, precedingSeparator = "\n"),
+                            ),
+                        ),
+                    ),
+                ),
+                fullText = "first\nsecond",
+            ),
+        )
+        composeRule.setContent {
+            MaterialTheme {
+                OcrTextDialog(
+                    previewAssets = listOf(OcrImagePage(11L, "/tmp/ocr.webp", 100, 100)),
+                    text = structured.fullText,
+                    structuredResult = structured,
+                    isProcessing = processing,
+                    errorMessage = errorMessage,
+                    onTextChange = {},
+                    onRegionTextChange = { key, value ->
+                        structured = structured.withRegionText(key, value)!!
+                    },
+                    onRedetect = {},
+                    onConfirm = {},
+                    onDismiss = {},
+                )
+            }
+        }
+
+        val viewer = composeRule.onNodeWithTag("ocr_image_viewer")
+        viewer.performTouchInput {
+            click(center + androidx.compose.ui.geometry.Offset(center.x * 0.5f, center.y * 0.5f))
+        }
+        composeRule.onNodeWithTag("ocr_region_text").assertTextContains("second")
+        composeRule.onNodeWithTag("ocr_region_text").performTextReplacement("edited")
+        composeRule.onNodeWithTag("ocr_region_done").performClick()
+
+        composeRule.runOnIdle {
+            processing = true
+            errorMessage = null
+        }
+        composeRule.waitForIdle()
+        assertTrue(composeRule.onAllNodesWithTag("ocr_region_text").fetchSemanticsNodes().isEmpty())
+
+        composeRule.runOnIdle {
+            processing = false
+            errorMessage = "recognition failed"
+        }
+        composeRule.waitForIdle()
+        viewer.performTouchInput {
+            click(center + androidx.compose.ui.geometry.Offset(center.x * 0.5f, center.y * 0.5f))
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("ocr_region_text").assertTextContains("edited")
+    }
+
+    @Test
     fun detectionStartAndStructuredReplacementClearTheSelectedRegion() {
         var processing by mutableStateOf(false)
         var generation by mutableStateOf(1L)

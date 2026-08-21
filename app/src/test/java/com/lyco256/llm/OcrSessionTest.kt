@@ -290,6 +290,43 @@ class OcrSessionTest {
     }
 
     @Test
+    fun savePassesTheRebuiltStructuredDraftToTheExistingSavePath() {
+        val controller = OcrSessionController(clip())
+        var detectSuccess: ((OcrPostRecognitionResult) -> Unit)? = null
+        controller.startAutomaticDetection { _, onSuccess, _ -> detectSuccess = onSuccess }
+        detectSuccess!!.invoke(
+            OcrPostRecognitionResult(
+                clipId = 7L,
+                assets = listOf(
+                    OcrAssetRecognitionResult(
+                        1L,
+                        "/tmp/one.webp",
+                        OcrRecognitionResult(
+                            100,
+                            100,
+                            "one\ntwo",
+                            listOf(
+                                OcrTextRegion("one"),
+                                OcrTextRegion("two", precedingSeparator = "\n"),
+                            ),
+                        ),
+                    ),
+                ),
+                fullText = "one\ntwo",
+            ),
+        )
+        controller.editRegion(OcrRegionKey(1L, 0), "edited")
+
+        var saved = 0
+        controller.save({ _, text, complete ->
+            assertEquals("edited\ntwo", text)
+            complete(null)
+        }) { saved++ }
+
+        assertEquals(1, saved)
+    }
+
+    @Test
     fun staleSaveCompletionCannotCompleteAReplacementSave() {
         val controller = OcrSessionController(clip(savedText = "draft"))
         var firstComplete: ((String?) -> Unit)? = null
@@ -393,6 +430,36 @@ class OcrSessionTest {
         assertEquals("", edited.assets[0].recognition.fullText)
         assertEquals("second", edited.fullText)
         assertEquals("", edited.assets[0].recognition.regions[0].text)
+    }
+
+    @Test
+    fun emptyMiddleRegionDoesNotLeaveItsOwnSeparatorAsAnEmptyLine() {
+        val original = OcrPostRecognitionResult(
+            clipId = 7L,
+            assets = listOf(
+                OcrAssetRecognitionResult(
+                    1L,
+                    "/tmp/one.webp",
+                    OcrRecognitionResult(
+                        100,
+                        100,
+                        "first\n\n\nthird",
+                        listOf(
+                            OcrTextRegion("first"),
+                            OcrTextRegion("second", precedingSeparator = "\n\n"),
+                            OcrTextRegion("third", precedingSeparator = "\n"),
+                        ),
+                    ),
+                ),
+            ),
+            fullText = "first\n\n\nthird",
+        )
+
+        val edited = original.withRegionText(OcrRegionKey(1L, 1), "")!!
+
+        assertEquals("first\nthird", edited.assets.single().recognition.fullText)
+        assertEquals("first\nthird", edited.fullText)
+        assertEquals("", edited.assets.single().recognition.regions[1].text)
     }
 
     @Test
