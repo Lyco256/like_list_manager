@@ -5,6 +5,11 @@ import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.OcrAssetRecognitionResult
 import com.lyco256.llm.data.OcrPostRecognitionResult
 
+internal data class OcrRegionKey(
+    val assetId: Long,
+    val regionIndex: Int,
+)
+
 internal typealias OcrLegacyDetectHandler = (
     ClipWithDetails,
     (String) -> Unit,
@@ -33,11 +38,59 @@ internal data class OcrImagePage(
 internal fun OcrPostRecognitionResult.assetFor(assetId: Long): OcrAssetRecognitionResult? =
     assets.firstOrNull { it.assetId == assetId }
 
+internal fun OcrPostRecognitionResult.rebuildFromRegions(): OcrPostRecognitionResult {
+    val rebuiltAssets = assets.map { asset ->
+        asset.copy(
+            recognition = asset.recognition.copy(
+                fullText = asset.recognition.rebuildFullText(),
+            ),
+        )
+    }
+    return copy(
+        assets = rebuiltAssets,
+        fullText = rebuiltAssets
+            .map { it.recognition.fullText.takeIf(String::isNotBlank) }
+            .filterNotNull()
+            .joinToString("\n\n"),
+    )
+}
+
+private fun com.lyco256.llm.data.OcrRecognitionResult.rebuildFullText(): String {
+    if (regions.isEmpty()) return fullText
+    return buildString {
+        var emittedRegion = false
+        regions.forEach { region ->
+            if (region.text.isBlank()) return@forEach
+            if (emittedRegion) append(region.precedingSeparator)
+            append(region.text)
+            emittedRegion = true
+        }
+    }
+}
+
+internal fun OcrPostRecognitionResult.withRegionText(
+    key: OcrRegionKey,
+    text: String,
+): OcrPostRecognitionResult? {
+    var changed = false
+    val updatedAssets = assets.map { asset ->
+        if (asset.assetId != key.assetId) return@map asset
+        val updatedRegions = asset.recognition.regions.mapIndexed { index, region ->
+            if (index != key.regionIndex) return@mapIndexed region
+            changed = true
+            region.copy(text = text)
+        }
+        asset.copy(recognition = asset.recognition.copy(regions = updatedRegions))
+    }
+    return if (changed) copy(assets = updatedAssets).rebuildFromRegions() else null
+}
+
 internal data class OcrSessionState(
     val clipId: Long,
     val savedText: String,
     val draftText: String = savedText,
     val structuredResult: OcrPostRecognitionResult? = null,
+    val structuredResultGeneration: Long = 0L,
     val isDetecting: Boolean = false,
     val isSaving: Boolean = false,
     val errorMessage: String? = null,
@@ -71,8 +124,15 @@ internal class OcrSessionController(
     }
 
     fun editDraft(value: String) {
-        if (!active || state.isDetecting || state.isSaving) return
+        if (!active || state.isDetecting || state.isSaving || state.structuredResult != null) return
         publish(state.copy(draftText = value, errorMessage = null))
+    }
+
+    fun editRegion(key: OcrRegionKey, value: String) {
+        if (!active || state.isDetecting || state.isSaving) return
+        val current = state.structuredResult ?: return
+        val updated = current.withRegionText(key, value) ?: return
+        publish(state.copy(draftText = updated.fullText, structuredResult = updated, errorMessage = null))
     }
 
     fun save(save: OcrSaveResultHandler, onSaved: () -> Unit) {
@@ -111,10 +171,12 @@ internal class OcrSessionController(
         publish(state.copy(isDetecting = true, errorMessage = null))
         val onSuccess: (OcrPostRecognitionResult) -> Unit = success@{ result ->
             if (!active || !state.isDetecting || token != requestToken || result.clipId != state.clipId) return@success
+            val rebuilt = result.rebuildFromRegions()
             publish(
                 state.copy(
-                    draftText = result.fullText,
-                    structuredResult = result,
+                    draftText = rebuilt.fullText,
+                    structuredResult = rebuilt,
+                    structuredResultGeneration = state.structuredResultGeneration + 1L,
                     isDetecting = false,
                     errorMessage = null,
                 ),

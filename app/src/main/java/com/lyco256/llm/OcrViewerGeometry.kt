@@ -2,7 +2,9 @@ package com.lyco256.llm
 
 import com.lyco256.llm.data.OcrPoint
 import com.lyco256.llm.data.OcrPolygon
+import com.lyco256.llm.data.OcrTextRegion
 import kotlin.math.abs
+import kotlin.math.hypot
 
 internal data class OcrImageRect(
     val left: Float,
@@ -21,6 +23,12 @@ internal data class OcrViewerTransform(
 )
 
 internal object OcrViewerGeometry {
+    fun isPolygonTapGesture(
+        gestureHadMultiplePointers: Boolean,
+        gestureHadZoom: Boolean,
+        movedBeyondTouchSlop: Boolean,
+    ): Boolean = !gestureHadMultiplePointers && !gestureHadZoom && !movedBeyondTouchSlop
+
     fun fitImageRect(
         sourceWidth: Int,
         sourceHeight: Int,
@@ -89,6 +97,47 @@ internal object OcrViewerGeometry {
     fun isValidPolygon(polygon: OcrPolygon, sourceWidth: Int, sourceHeight: Int): Boolean =
         clipPolygonToSource(polygon, sourceWidth.toFloat(), sourceHeight.toFloat()) != null
 
+    fun hitTestRegionIndex(
+        regions: List<OcrTextRegion>,
+        sourceWidth: Int,
+        sourceHeight: Int,
+        viewportWidth: Float,
+        viewportHeight: Float,
+        transform: OcrViewerTransform,
+        point: OcrPoint,
+        edgeTolerance: Float,
+    ): Int? {
+        if (!point.x.isFinite() || !point.y.isFinite() || !edgeTolerance.isFinite()) return null
+        val candidates = regions.mapIndexedNotNull { index, region ->
+            val polygon = region.polygon ?: return@mapIndexedNotNull null
+            val points = mapPolygonToViewport(
+                polygon = polygon,
+                sourceWidth = sourceWidth,
+                sourceHeight = sourceHeight,
+                viewportWidth = viewportWidth,
+                viewportHeight = viewportHeight,
+                transform = transform,
+            ) ?: return@mapIndexedNotNull null
+            RegionHitCandidate(index, points, polygonArea(points))
+        }
+        val containing = candidates
+            .filter { candidate -> pointInPolygon(point, candidate.points) }
+            .minWithOrNull(compareBy<RegionHitCandidate> { it.area }.thenBy { it.index })
+        if (containing != null) return containing.index
+
+        val tolerance = edgeTolerance.coerceAtLeast(0f)
+        return candidates
+            .map { candidate -> candidate to distanceToPolygon(point, candidate.points) }
+            .filter { (_, distance) -> distance <= tolerance }
+            .minWithOrNull(
+                compareBy<Pair<RegionHitCandidate, Float>> { it.second }
+                    .thenBy { it.first.area }
+                    .thenBy { it.first.index },
+            )
+            ?.first
+            ?.index
+    }
+
     fun pageSwipeDirection(
         pageCount: Int,
         gestureStartScale: Float,
@@ -138,6 +187,45 @@ internal object OcrViewerGeometry {
         if (abs(denominator) < 0.00001f) return if (vertical) OcrPoint(bound, a.y) else OcrPoint(a.x, bound)
         val ratio = ((bound - if (vertical) a.x else a.y) / denominator).coerceIn(0f, 1f)
         return OcrPoint(a.x + (b.x - a.x) * ratio, a.y + (b.y - a.y) * ratio)
+    }
+
+    private data class RegionHitCandidate(
+        val index: Int,
+        val points: List<OcrPoint>,
+        val area: Float,
+    )
+
+    private fun pointInPolygon(point: OcrPoint, polygon: List<OcrPoint>): Boolean {
+        if (polygon.size < 3) return false
+        var inside = false
+        var previous = polygon.last()
+        polygon.forEach { current ->
+            val crosses = (current.y > point.y) != (previous.y > point.y)
+            if (crosses) {
+                val intersectionX = (previous.x - current.x) * (point.y - current.y) /
+                    (previous.y - current.y) + current.x
+                if (point.x < intersectionX) inside = !inside
+            }
+            previous = current
+        }
+        return inside || distanceToPolygon(point, polygon) <= 0.5f
+    }
+
+    private fun distanceToPolygon(point: OcrPoint, polygon: List<OcrPoint>): Float {
+        if (polygon.isEmpty()) return Float.POSITIVE_INFINITY
+        return polygon.indices.minOf { index ->
+            distanceToSegment(point, polygon[index], polygon[(index + 1) % polygon.size])
+        }
+    }
+
+    private fun distanceToSegment(point: OcrPoint, start: OcrPoint, end: OcrPoint): Float {
+        val dx = end.x - start.x
+        val dy = end.y - start.y
+        val lengthSquared = dx * dx + dy * dy
+        if (lengthSquared <= 0.00001f) return hypot(point.x - start.x, point.y - start.y)
+        val projection = ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared
+        val t = projection.coerceIn(0f, 1f)
+        return hypot(point.x - (start.x + dx * t), point.y - (start.y + dy * t))
     }
 
     private fun polygonArea(points: List<OcrPoint>): Float = abs(

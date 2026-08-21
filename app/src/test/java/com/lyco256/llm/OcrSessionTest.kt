@@ -3,8 +3,11 @@ package com.lyco256.llm
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.OcrAssetRecognitionResult
+import com.lyco256.llm.data.OcrPoint
 import com.lyco256.llm.data.OcrPostRecognitionResult
 import com.lyco256.llm.data.OcrRecognitionResult
+import com.lyco256.llm.data.OcrPolygon
+import com.lyco256.llm.data.OcrTextRegion
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -54,14 +57,17 @@ class OcrSessionTest {
         controller.startAutomaticDetection { _, onSuccess, _ -> firstSuccess = onSuccess }
         val firstResult = result(7, "first")
         firstSuccess!!.invoke(firstResult)
-        controller.editDraft("manual edit")
+        controller.editRegion(OcrRegionKey(1L, 0), "manual edit")
 
         var failure: ((String) -> Unit)? = null
         controller.redetect { _, _, onFailure -> failure = onFailure }
         failure!!.invoke("recognition failed")
 
         assertEquals("manual edit", controller.state.draftText)
-        assertEquals(firstResult, controller.state.structuredResult)
+        assertEquals(
+            "manual edit",
+            controller.state.structuredResult!!.assets.single().recognition.regions.single().text,
+        )
         assertEquals("recognition failed", controller.state.errorMessage)
         assertFalse(controller.state.isDetecting)
     }
@@ -73,7 +79,7 @@ class OcrSessionTest {
         controller.startAutomaticDetection { _, onSuccess, _ -> firstSuccess = onSuccess }
         val firstResult = result(7, "first")
         firstSuccess!!.invoke(firstResult)
-        controller.editDraft("manual edit")
+        controller.editRegion(OcrRegionKey(1L, 0), "manual edit")
 
         var redetectSuccess: ((OcrPostRecognitionResult) -> Unit)? = null
         controller.redetect { _, onSuccess, _ -> redetectSuccess = onSuccess }
@@ -205,7 +211,7 @@ class OcrSessionTest {
     fun manualEditCancelCannotPersistItsDraft() {
         val controller = OcrSessionController(clip(savedText = "persisted"))
         var saveCalls = 0
-        controller.editDraft("manual edit")
+        controller.editRegion(OcrRegionKey(1L, 0), "manual edit")
 
         assertTrue(controller.dismiss())
         controller.save({ _, _, _ -> saveCalls++ }) {}
@@ -268,14 +274,17 @@ class OcrSessionTest {
         controller.startAutomaticDetection { _, onSuccess, _ -> detectSuccess = onSuccess }
         val recognized = result(7, "recognized")
         detectSuccess!!.invoke(recognized)
-        controller.editDraft("edited")
+        controller.editRegion(OcrRegionKey(1L, 0), "edited")
         var complete: ((String?) -> Unit)? = null
 
         controller.save({ _, _, onComplete -> complete = onComplete }) {}
         complete!!.invoke("save failed")
 
         assertEquals("edited", controller.state.draftText)
-        assertEquals(recognized, controller.state.structuredResult)
+        assertEquals(
+            "edited",
+            controller.state.structuredResult!!.assets.single().recognition.regions.single().text,
+        )
         assertEquals("save failed", controller.state.errorMessage)
         assertFalse(controller.state.isSaving)
     }
@@ -312,6 +321,104 @@ class OcrSessionTest {
         assertEquals(1, saved)
     }
 
+    @Test
+    fun regionEditRebuildsAssetAndPostTextWithoutDroppingPolygonlessRegions() {
+        val original = OcrPostRecognitionResult(
+            clipId = 7L,
+            assets = listOf(
+                OcrAssetRecognitionResult(
+                    assetId = 1L,
+                    localPath = "/tmp/first.webp",
+                    recognition = OcrRecognitionResult(
+                        imageWidth = 100,
+                        imageHeight = 100,
+                        fullText = "first\nsecond",
+                        regions = listOf(
+                            OcrTextRegion("first", box(10f, 10f, 40f, 20f)),
+                            OcrTextRegion("second", polygon = null, precedingSeparator = "\n"),
+                            OcrTextRegion("", box(10f, 30f, 40f, 40f), precedingSeparator = "\n\n"),
+                        ),
+                    ),
+                ),
+                OcrAssetRecognitionResult(
+                    assetId = 2L,
+                    localPath = "/tmp/second.webp",
+                    recognition = OcrRecognitionResult(100, 100, "third", listOf(OcrTextRegion("third"))),
+                ),
+            ),
+            fullText = "first\nsecond\n\nthird",
+        )
+
+        val edited = original.withRegionText(OcrRegionKey(1L, 0), "edited")!!
+
+        assertEquals("edited\nsecond", edited.assets[0].recognition.fullText)
+        assertEquals("edited\nsecond\n\nthird", edited.fullText)
+        assertEquals(original.assets[0].recognition.regions[0].polygon, edited.assets[0].recognition.regions[0].polygon)
+        assertEquals(null, edited.assets[0].recognition.regions[1].polygon)
+        assertEquals("", edited.assets[0].recognition.regions[2].text)
+        assertEquals("third", edited.assets[1].recognition.fullText)
+    }
+
+    @Test
+    fun emptyRegionRemainsSelectableButDoesNotLeaveAssetSeparators() {
+        val original = OcrPostRecognitionResult(
+            clipId = 7L,
+            assets = listOf(
+                OcrAssetRecognitionResult(
+                    assetId = 1L,
+                    localPath = "/tmp/first.webp",
+                    recognition = OcrRecognitionResult(
+                        100,
+                        100,
+                        "first",
+                        listOf(OcrTextRegion("first", precedingSeparator = "\n")),
+                    ),
+                ),
+                OcrAssetRecognitionResult(
+                    assetId = 2L,
+                    localPath = "/tmp/second.webp",
+                    recognition = OcrRecognitionResult(
+                        100,
+                        100,
+                        "second",
+                        listOf(OcrTextRegion("second")),
+                    ),
+                ),
+            ),
+            fullText = "first\n\nsecond",
+        )
+
+        val edited = original.withRegionText(OcrRegionKey(1L, 0), "")!!
+
+        assertEquals("", edited.assets[0].recognition.fullText)
+        assertEquals("second", edited.fullText)
+        assertEquals("", edited.assets[0].recognition.regions[0].text)
+    }
+
+    @Test
+    fun controllerRegionEditUsesAssetIdAndRegionIndexAndBlocksWholeTextEditing() {
+        val controller = OcrSessionController(clip())
+        var success: ((OcrPostRecognitionResult) -> Unit)? = null
+        controller.startAutomaticDetection { _, onSuccess, _ -> success = onSuccess }
+        success!!.invoke(
+            OcrPostRecognitionResult(
+                clipId = 7L,
+                assets = listOf(
+                    OcrAssetRecognitionResult(1L, "/tmp/one.webp", OcrRecognitionResult(10, 10, "one", listOf(OcrTextRegion("one")))),
+                    OcrAssetRecognitionResult(2L, "/tmp/two.webp", OcrRecognitionResult(10, 10, "two", listOf(OcrTextRegion("two")))),
+                ),
+                fullText = "one\n\ntwo",
+            ),
+        )
+
+        controller.editDraft("must be ignored")
+        controller.editRegion(OcrRegionKey(2L, 0), "changed")
+
+        assertEquals("one\n\nchanged", controller.state.draftText)
+        assertEquals("one", controller.state.structuredResult!!.assets[0].recognition.regions[0].text)
+        assertEquals("changed", controller.state.structuredResult!!.assets[1].recognition.regions[0].text)
+    }
+
     private fun clip(savedText: String = ""): ClipWithDetails {
         val entity = ClipEntity(
             id = 7,
@@ -335,9 +442,23 @@ class OcrSessionTest {
                 OcrAssetRecognitionResult(
                     assetId = 1,
                     localPath = "/tmp/ocr.webp",
-                    recognition = OcrRecognitionResult(100, 80, text),
+                    recognition = OcrRecognitionResult(
+                        100,
+                        80,
+                        text,
+                        regions = listOf(com.lyco256.llm.data.OcrTextRegion(text = text)),
+                    ),
                 ),
             ),
             fullText = text,
         )
+
+    private fun box(left: Float, top: Float, right: Float, bottom: Float) = OcrPolygon(
+        listOf(
+            OcrPoint(left, top),
+            OcrPoint(right, top),
+            OcrPoint(right, bottom),
+            OcrPoint(left, bottom),
+        ),
+    )
 }

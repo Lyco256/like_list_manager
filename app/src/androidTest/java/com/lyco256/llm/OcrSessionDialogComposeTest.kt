@@ -13,6 +13,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -126,6 +127,112 @@ class OcrSessionDialogComposeTest {
         composeRule.onNodeWithTag("ocr_image_viewer").performTouchInput { swipeLeft() }
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("ocr_polygon_overlay").assertIsDisplayed()
+    }
+
+    @Test
+    fun polygonSelectionShowsSingleRegionEditorAndRebuildsThePostDraft() {
+        var structured by mutableStateOf(structuredWithRegions())
+        composeRule.setContent {
+            MaterialTheme {
+                OcrTextDialog(
+                    previewAssets = listOf(OcrImagePage(11L, "/tmp/ocr.webp", 100, 100)),
+                    text = structured.fullText,
+                    structuredResult = structured,
+                    isProcessing = false,
+                    errorMessage = null,
+                    onTextChange = { error("structured OCR must not expose whole-text editing") },
+                    onRegionTextChange = { key, value ->
+                        structured = structured.withRegionText(key, value)!!
+                    },
+                    onRedetect = {},
+                    onConfirm = {},
+                    onDismiss = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("ocr_image_viewer").performTouchInput { click(center) }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("ocr_region_text").assertTextContains("first")
+        composeRule.onNodeWithTag("ocr_polygon_overlay_selected").assertIsDisplayed()
+        assertTrue(composeRule.onAllNodesWithTag("ocr_result_text").fetchSemanticsNodes().isEmpty())
+
+        composeRule.onNodeWithTag("ocr_region_text").performTextReplacement("edited")
+        composeRule.onNodeWithTag("ocr_region_done").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("edited\nsecond", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("ocr_polygon_overlay").assertIsDisplayed()
+    }
+
+    @Test
+    fun polygonOutsideTapClearsSelectionAndPageChangeDoesNotSelectTheSwipeEnd() {
+        composeRule.setContent {
+            MaterialTheme {
+                OcrTextDialog(
+                    previewAssets = listOf(
+                        OcrImagePage(11L, "/tmp/ocr-first.webp", 100, 100),
+                        OcrImagePage(22L, "/tmp/ocr-second.webp", 100, 100),
+                    ),
+                    text = "first\n\nsecond",
+                    structuredResult = structuredWithRegions(),
+                    isProcessing = false,
+                    errorMessage = null,
+                    onTextChange = {},
+                    onRedetect = {},
+                    onConfirm = {},
+                    onDismiss = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("ocr_image_viewer").performTouchInput { click(center) }
+        composeRule.onNodeWithTag("ocr_region_text").assertIsDisplayed()
+        composeRule.onNodeWithTag("ocr_image_viewer").performTouchInput { click(topLeft) }
+        composeRule.waitForIdle()
+        assertTrue(composeRule.onAllNodesWithTag("ocr_region_text").fetchSemanticsNodes().isEmpty())
+
+        composeRule.onNodeWithTag("ocr_image_viewer").performTouchInput { swipeLeft() }
+        composeRule.waitForIdle()
+        assertTrue(composeRule.onAllNodesWithTag("ocr_region_text").fetchSemanticsNodes().isEmpty())
+        composeRule.onNodeWithTag("ocr_page_indicator").assertTextContains("2 / 2")
+    }
+
+    @Test
+    fun detectionStartAndStructuredReplacementClearTheSelectedRegion() {
+        var processing by mutableStateOf(false)
+        var generation by mutableStateOf(1L)
+        var structured by mutableStateOf(structuredWithRegions())
+        composeRule.setContent {
+            MaterialTheme {
+                OcrTextDialog(
+                    previewAssets = listOf(OcrImagePage(11L, "/tmp/ocr.webp", 100, 100)),
+                    text = structured.fullText,
+                    structuredResult = structured,
+                    structuredResultGeneration = generation,
+                    isProcessing = processing,
+                    errorMessage = null,
+                    onTextChange = {},
+                    onRedetect = {},
+                    onConfirm = {},
+                    onDismiss = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("ocr_image_viewer").performTouchInput { click(center) }
+        composeRule.onNodeWithTag("ocr_region_text").assertIsDisplayed()
+
+        composeRule.runOnIdle { processing = true }
+        composeRule.waitForIdle()
+        assertTrue(composeRule.onAllNodesWithTag("ocr_region_text").fetchSemanticsNodes().isEmpty())
+
+        composeRule.runOnIdle {
+            processing = false
+            generation++
+            structured = structured.copy(fullText = "replacement")
+        }
+        composeRule.waitForIdle()
+        assertTrue(composeRule.onAllNodesWithTag("ocr_region_text").fetchSemanticsNodes().isEmpty())
     }
 
     @Test
@@ -427,5 +534,35 @@ class OcrSessionDialogComposeTest {
                 ),
             ),
         ),
+    )
+
+    private fun structuredWithRegions(): OcrPostRecognitionResult = OcrPostRecognitionResult(
+        clipId = 7L,
+        assets = listOf(
+            OcrAssetRecognitionResult(
+                assetId = 11L,
+                localPath = "/tmp/ocr.webp",
+                recognition = OcrRecognitionResult(
+                    imageWidth = 100,
+                    imageHeight = 100,
+                    fullText = "first\nsecond",
+                    regions = listOf(
+                        OcrTextRegion(
+                            text = "first",
+                            polygon = OcrPolygon(
+                                listOf(
+                                    OcrPoint(10f, 10f),
+                                    OcrPoint(90f, 10f),
+                                    OcrPoint(90f, 90f),
+                                    OcrPoint(10f, 90f),
+                                ),
+                            ),
+                        ),
+                        OcrTextRegion(text = "second", precedingSeparator = "\n"),
+                    ),
+                ),
+            ),
+        ),
+        fullText = "first\nsecond",
     )
 }
