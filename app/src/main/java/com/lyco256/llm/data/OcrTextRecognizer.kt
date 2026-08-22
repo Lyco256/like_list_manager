@@ -54,7 +54,7 @@ data class OcrPolygon(
 }
 
 internal fun normalizeOcrPolygon(points: List<OcrPoint>): OcrPolygon? {
-    if (points.size != 4) return null
+    if (points.size != 4 || points.any { !it.x.isFinite() || !it.y.isFinite() }) return null
     return OcrPolygon(points.sortedClockwiseFromTopLeft())
 }
 
@@ -70,6 +70,16 @@ data class OcrRecognitionResult(
     val imageHeight: Int,
     val fullText: String,
     val regions: List<OcrTextRegion> = emptyList(),
+)
+
+enum class OcrEngine(val displayName: String) {
+    ML_KIT("ML Kit"),
+    PP_OCRV6_SMALL("PP-OCRv6 small"),
+}
+
+data class OcrDetectionMetadata(
+    val engine: OcrEngine,
+    val elapsedMs: Long,
 )
 
 internal data class OcrTextLineCandidate(

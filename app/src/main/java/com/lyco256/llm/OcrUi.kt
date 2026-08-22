@@ -31,6 +31,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -68,6 +69,8 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.OcrAssetRecognitionResult
+import com.lyco256.llm.data.OcrDetectionMetadata
+import com.lyco256.llm.data.OcrEngine
 import com.lyco256.llm.data.OcrRecognitionResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -163,6 +166,7 @@ internal fun OcrSessionDialog(
     sessionKey: Long,
     previewAssets: List<OcrImagePage>,
     onDetect: OcrStructuredDetectHandler,
+    onDetectForEngine: OcrComparisonDetectHandler? = null,
     onSave: OcrSaveResultHandler,
     onDismiss: () -> Unit,
 ) {
@@ -172,13 +176,18 @@ internal fun OcrSessionDialog(
     val controller = remember(clip.clip.id, sessionKey) {
         OcrSessionController(clip) { renderedState = it }
     }
+    var selectedEngine by remember(clip.clip.id, sessionKey) { mutableStateOf(OcrEngine.ML_KIT) }
     val state = renderedState ?: controller.state
 
     DisposableEffect(controller) {
         onDispose { controller.invalidate() }
     }
     LaunchedEffect(controller) {
-        controller.startAutomaticDetection(onDetect)
+        if (onDetectForEngine != null) {
+            controller.startAutomaticComparisonDetection(onDetectForEngine)
+        } else {
+            controller.startAutomaticDetection(onDetect)
+        }
     }
 
     OcrTextDialog(
@@ -187,12 +196,21 @@ internal fun OcrSessionDialog(
         text = state.draftText,
         structuredResult = state.structuredResult,
         structuredResultGeneration = state.structuredResultGeneration,
+        selectedEngine = selectedEngine,
+        detectionMetadata = state.detectionMetadata,
         isProcessing = state.isDetecting,
         isSaving = state.isSaving,
         errorMessage = state.errorMessage,
         onTextChange = controller::editDraft,
         onRegionTextChange = controller::editRegion,
-        onRedetect = { controller.redetect(onDetect) },
+        onEngineSelected = { selectedEngine = it },
+        onRedetect = {
+            if (onDetectForEngine != null) {
+                controller.redetect(selectedEngine, onDetectForEngine)
+            } else {
+                controller.redetect(onDetect)
+            }
+        },
         onConfirm = { controller.save(onSave, onDismiss) },
         onDismiss = {
             if (controller.dismiss()) {
@@ -217,6 +235,9 @@ internal fun OcrTextDialog(
     onRedetect: () -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
+    selectedEngine: OcrEngine = OcrEngine.ML_KIT,
+    detectionMetadata: OcrDetectionMetadata? = null,
+    onEngineSelected: (OcrEngine) -> Unit = {},
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
     var currentAssetId by remember(sessionKey, previewAssets) {
@@ -328,11 +349,39 @@ internal fun OcrTextDialog(
                 }
             }
 
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                    .testTag("ocr_engine_selector"),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("OCRエンジン", style = MaterialTheme.typography.labelLarge)
+                OcrEngine.entries.forEach { engine ->
+                    FilterChip(
+                        selected = selectedEngine == engine,
+                        onClick = { onEngineSelected(engine) },
+                        enabled = !isProcessing && !isSaving,
+                        label = { Text(engine.displayName) },
+                        modifier = Modifier.testTag("ocr_engine_${engine.name.lowercase()}"),
+                    )
+                }
+            }
+
             if (errorMessage != null) {
                 Text(
                     errorMessage,
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+
+            if (structuredResult != null && detectionMetadata != null) {
+                Text(
+                    text = "${detectionMetadata.engine.displayName} · ${formatOcrElapsedTime(detectionMetadata.elapsedMs)}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp)
+                        .testTag("ocr_detection_metadata"),
                 )
             }
 
@@ -463,6 +512,9 @@ internal fun OcrTextDialog(
         }
     }
 }
+
+private fun formatOcrElapsedTime(elapsedMs: Long): String =
+    String.format(java.util.Locale.US, "%.1fs", elapsedMs / 1_000.0)
 
 @Composable
 private fun OcrImagePageViewer(

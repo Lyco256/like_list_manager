@@ -148,3 +148,7 @@ UI項目を追加する場合は、対応するViewModel操作、Repository API�
 # メディアグリッド高速化追補
 
 メディアグリッドは`transformLatest`相当のlatest-wins処理で`Calculating`から`Ready`へ遷移する。Calculating中は旧セルを描画せずProgressを表示し、Ready後は静的グラデーション枠を描画して次フレーム以降に画像要求を開始する。
+
+## 2026-08 OCR engine comparison
+
+`MainViewModel`は選択された`OcrEngine`をRepositoryの共通比較検出へ渡し、成功時に構造化結果とmetadata、失敗時にerrorを返します。`MainScreen`は分類前、分類済みcard、media-grid投稿Dialogの全OCR入口へ同じ比較handlerを配線します。

@@ -3,6 +3,9 @@ package com.lyco256.llm
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.OcrAssetRecognitionResult
+import com.lyco256.llm.data.OcrDetectionMetadata
+import com.lyco256.llm.data.OcrDetectionResult
+import com.lyco256.llm.data.OcrEngine
 import com.lyco256.llm.data.OcrPoint
 import com.lyco256.llm.data.OcrPostRecognitionResult
 import com.lyco256.llm.data.OcrRecognitionResult
@@ -89,6 +92,47 @@ class OcrSessionTest {
         assertEquals("replacement", controller.state.draftText)
         assertEquals(replacement, controller.state.structuredResult)
         assertFalse(controller.state.isDetecting)
+    }
+
+    @Test
+    fun comparisonSelectionUsesTheRequestedEngineAndOnlySuccessfulResultsUpdateMetadata() {
+        val controller = OcrSessionController(clip())
+        val requestedEngines = mutableListOf<OcrEngine>()
+        var success: ((OcrDetectionResult) -> Unit)? = null
+        var failure: ((String) -> Unit)? = null
+        val detect: OcrComparisonDetectHandler = { _, engine, onSuccess, onFailure ->
+            requestedEngines += engine
+            success = onSuccess
+            failure = onFailure
+        }
+
+        controller.startAutomaticComparisonDetection(detect)
+        success!!.invoke(
+            OcrDetectionResult(
+                recognition = result(7, "ml result"),
+                metadata = OcrDetectionMetadata(OcrEngine.ML_KIT, 120L),
+            ),
+        )
+        assertEquals(OcrEngine.ML_KIT, controller.state.detectionMetadata?.engine)
+        assertEquals(120L, controller.state.detectionMetadata?.elapsedMs)
+
+        controller.redetect(OcrEngine.PP_OCRV6_SMALL, detect)
+        assertEquals(listOf(OcrEngine.ML_KIT, OcrEngine.PP_OCRV6_SMALL), requestedEngines)
+        failure!!.invoke("PP-OCR failed")
+        assertEquals("ml result", controller.state.draftText)
+        assertEquals(OcrEngine.ML_KIT, controller.state.detectionMetadata?.engine)
+        assertEquals("PP-OCR failed", controller.state.errorMessage)
+
+        controller.redetect(OcrEngine.PP_OCRV6_SMALL, detect)
+        success!!.invoke(
+            OcrDetectionResult(
+                recognition = result(7, "pp result"),
+                metadata = OcrDetectionMetadata(OcrEngine.PP_OCRV6_SMALL, 240L),
+            ),
+        )
+        assertEquals("pp result", controller.state.draftText)
+        assertEquals(OcrEngine.PP_OCRV6_SMALL, controller.state.detectionMetadata?.engine)
+        assertEquals(240L, controller.state.detectionMetadata?.elapsedMs)
     }
 
     @Test

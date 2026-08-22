@@ -25,3 +25,5 @@
 ## 変更時の確認
 
 callback URIはX Developer Console、Manifest、`XOAuthManager`の3か所で完全一致させます。
+
+OpenCV／ONNX Runtimeなどnative library変更時は、arm64 ELF alignmentと実機runtime smoke testも確認します。OpenCV 4.5.3の16KB対応はmanifest互換modeではなく、`ppocr-sdk/libs`の再build済みarm64 native libraryで行います。

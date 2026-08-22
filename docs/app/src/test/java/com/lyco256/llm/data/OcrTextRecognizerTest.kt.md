@@ -13,3 +13,4 @@
 - 構造化領域の読み順、行区切り、block間空行が既存全文と一致することを確認します。
 - corner pointsの4点保持、bounding boxからの4点polygon fallback、位置なし行、confidence、元画像寸法を確認します。
 - 構造化blockがない場合も全文fallbackを維持することを確認します。
+- PP-OCRv6 adapterの純粋変換について、SDK読み順、区切り、寸法、confidence、4点polygon、空文字除外、不正polygonでも文字を残すことを確認します。

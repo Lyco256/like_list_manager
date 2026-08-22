@@ -84,13 +84,15 @@ class RepositoryIntegrationTest {
         rgb565Publisher: MediaGridRgb565Publisher = MediaGridRgb565PackStore(context.filesDir),
         deleteUndoStore: DurableClipDeleteUndoStore = DurableClipDeleteUndoStore(context.filesDir),
         heavyLocalWorkTracker: HeavyLocalWorkTracker = HeavyLocalWorkTracker(),
+        mlKitOcrGateway: OcrTextGateway? = null,
+        ppOcrGateway: OcrTextGateway? = null,
     ) = ClipRepository(
         context = context,
         postStorageManager = storage,
         apiSettingsStore = settings,
         xOAuthManager = oauth,
         xApiClient = api,
-        ocrTextGateway = FakeOcrTextGateway { bitmap ->
+        ocrTextGateway = mlKitOcrGateway ?: FakeOcrTextGateway { bitmap ->
             when {
                 bitmap.width == 1 && bitmap.height == 1 -> OcrRecognitionResult(bitmap.width, bitmap.height, "")
                 bitmap.width == 2 && bitmap.height == 2 -> throw IllegalStateException("Fake OCR failure")
@@ -121,6 +123,7 @@ class RepositoryIntegrationTest {
                 else -> OcrRecognitionResult(bitmap.width, bitmap.height, "Portrait OCR")
             }
         },
+        ppOcrTextGateway = ppOcrGateway,
         mediaGridPreviewEnqueuer = previewEnqueuer,
         mediaGridRgb565RepairEnqueuer = repairEnqueuer,
         mediaGridRgb565PackStore = rgb565Publisher,
@@ -2605,6 +2608,73 @@ class RepositoryIntegrationTest {
             val unchanged = database.clipDao().getAllClips().single { it.id == clipId }
             assertEquals("persisted OCR", unchanged.ocrText)
             assertEquals(previousUpdatedAt, unchanged.ocrUpdatedAt)
+            assertEquals(null, database.undoDao().getSlot())
+        }
+    }
+
+    @Test
+    fun engineSpecificDetectionRoutesOnceAndDoesNotPersistComparisonState() = runBlocking {
+        var mlCalls = 0
+        var ppCalls = 0
+        val routedRepository = newRepository(
+            mlKitOcrGateway = FakeOcrTextGateway { bitmap ->
+                mlCalls++
+                OcrRecognitionResult(bitmap.width, bitmap.height, "ML result")
+            },
+            ppOcrGateway = FakeOcrTextGateway { bitmap ->
+                ppCalls++
+                OcrRecognitionResult(bitmap.width, bitmap.height, "PP result")
+            },
+        )
+        val now = Instant.now().toString()
+        val details = storage.withDatabase { database ->
+            val clipId = database.clipDao().insertClip(
+                clip("902").copy(ocrText = "persisted OCR", ocrUpdatedAt = "2026-08-20T00:00:00Z"),
+            )
+            val imageFile = storage.imageDirectory().resolve("ocr-engine-route.jpg").apply {
+                parentFile?.mkdirs()
+                writeBytes(bitmapBytes(2, 1, android.graphics.Color.GREEN))
+            }
+            database.clipDao().insertAssets(
+                listOf(
+                    AssetEntity(
+                        clipId = clipId,
+                        mediaKey = "ocr-engine-route",
+                        type = "photo",
+                        remoteUrl = null,
+                        previewUrl = null,
+                        localPath = imageFile.absolutePath,
+                        width = 2,
+                        height = 1,
+                        sizeBytes = imageFile.length(),
+                        downloadState = "downloaded",
+                        createdAt = now,
+                    ),
+                ),
+            )
+            ClipWithDetails(
+                clip = requireNotNull(database.clipDao().getClip(clipId)),
+                assets = database.clipDao().assetsForClipIds(listOf(clipId)),
+                tags = emptyList(),
+            )
+        }
+
+        val ml = routedRepository.detectOcrTextForEngine(details, OcrEngine.ML_KIT)
+        assertEquals("ML result", ml.recognition.fullText)
+        assertEquals(OcrEngine.ML_KIT, ml.metadata.engine)
+        assertEquals(1, mlCalls)
+        assertEquals(0, ppCalls)
+
+        val pp = routedRepository.detectOcrTextForEngine(details, OcrEngine.PP_OCRV6_SMALL)
+        assertEquals("PP result", pp.recognition.fullText)
+        assertEquals(OcrEngine.PP_OCRV6_SMALL, pp.metadata.engine)
+        assertEquals(1, mlCalls)
+        assertEquals(1, ppCalls)
+
+        storage.withDatabase { database ->
+            val unchanged = requireNotNull(database.clipDao().getClip(details.clip.id))
+            assertEquals("persisted OCR", unchanged.ocrText)
+            assertEquals("2026-08-20T00:00:00Z", unchanged.ocrUpdatedAt)
             assertEquals(null, database.undoDao().getSlot())
         }
     }

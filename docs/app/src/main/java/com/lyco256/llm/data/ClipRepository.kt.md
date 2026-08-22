@@ -142,6 +142,10 @@ clip削除ではDB削除成功後に、共有公開ロック下でasset ID由来
 
 OCR detection remains read-only. The existing `updateOcrText()` path is the only persistence path and still preserves field-level `ocrText` / `ocrUpdatedAt` updates, no-op behavior, and OCR edit Undo semantics. ViewModel save callbacks report success or failure so the UI closes only after a successful transaction.
 
+## 2026-08 OCR engine comparison
+
+`detectOcrTextForEngine()` selects ML Kit or PP-OCRv6 small once, then sends both through the same asset filtering, bitmap decode, ordering, result-combination, and error path. It returns `OcrDetectionResult` with the structured recognition and successful request metadata. Elapsed time starts immediately before the first gateway recognition call and ends after the structured result is assembled; detection remains read-only and does not persist the engine, timing, text, timestamp, or Undo state.
+
 ## 2026-07 media thumbnail update
 
 - `photo` assets are downloaded from `media.url`, converted to WebP, and stored with quality 85.

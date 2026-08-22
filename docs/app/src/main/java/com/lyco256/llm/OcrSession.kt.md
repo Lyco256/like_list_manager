@@ -9,3 +9,7 @@ OCR画面の未保存セッションと、遅延した検出／保存callbackの
 `OcrImagePage`はasset IDと表示可能なlocal pathを一体で保持し、`OcrPostRecognitionResult.assetFor()`はページのasset IDに一致する結果だけを返します。セッションを閉じるとページのzoom/panはUI側のremember stateとともに破棄され、再オープン時はFitへ戻ります。
 
 構造化結果があるセッションでは`OcrRegionKey(assetId, regionIndex)`でregionを識別し、`editRegion()`が対象`OcrTextRegion.text`を更新した構造化結果からasset全文・投稿全文・`draftText`を再構成します。region編集はDBへ直接書き込まず、保存時だけ既存のOCR保存経路へ`draftText`を渡します。空regionは構造化結果とpolygonに残しながら全文から除外し、polygonなしregionも全文再構成に含めます。構造化結果がある間の投稿全文編集は受け付けません。
+
+## 2026-08 OCR engine comparison
+
+比較用検出handlerは要求ごとに`OcrEngine`を受け取ります。空の保存済みOCRを開いたときの自動検出はML Kitです。選択変更だけでは検出せず、再検出は現在選択中のエンジンを使います。成功時だけdraft、構造化結果、表示用のエンジン名・所要時間を同時更新し、失敗や選択変更では直前に成功した結果とメタデータを保持します。選択状態とメタデータはセッション内だけにあり永続化しません。

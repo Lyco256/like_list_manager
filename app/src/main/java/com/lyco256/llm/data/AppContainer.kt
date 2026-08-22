@@ -70,6 +70,17 @@ class AppContainer(context: Context) {
     } else {
         MlKitOcrTextGateway()
     }
+    val ppOcrTextGateway: OcrTextGateway = if (BuildConfig.TEST_HARNESS) {
+        FakeOcrTextGateway { bitmap ->
+            OcrRecognitionResult(
+                imageWidth = bitmap.width,
+                imageHeight = bitmap.height,
+                fullText = "PP-OCR fake",
+            )
+        }
+    } else {
+        PaddleOcrTextGateway(context)
+    }
     val repository = ClipRepository(
         context = context,
         postStorageManager = postStorageManager,
@@ -77,9 +88,14 @@ class AppContainer(context: Context) {
         xOAuthManager = xOAuthManager,
         xApiClient = xApiClient,
         ocrTextGateway = ocrTextGateway,
+        ppOcrTextGateway = ppOcrTextGateway,
         includeSeedMedia = !BuildConfig.TEST_HARNESS,
         mediaGridPreviewEnqueuer = mediaGridPreviewEnqueuer,
         mediaGridRgb565RepairEnqueuer = mediaGridRgb565RepairEnqueuer,
         mediaGridRgb565PackStore = mediaGridRgb565PackStore,
     )
+
+    suspend fun closePaddleOcr() {
+        (ppOcrTextGateway as? PaddleOcrTextGateway)?.close()
+    }
 }

@@ -17,3 +17,5 @@
 ## 変更時の確認
 
 プラグイン追加時はVersion Catalogにもaliasを追加し、Gradle Syncと `assembleDebug` を確認します。
+
+`com.android.library` plugin aliasは公式PaddleOCR Android SDKをローカルlibrary moduleとしてビルドするため、ルートで`apply false`宣言します。

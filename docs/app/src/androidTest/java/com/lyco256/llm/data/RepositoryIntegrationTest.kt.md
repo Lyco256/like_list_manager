@@ -62,6 +62,8 @@ The OCR repository test verifies that locally stored `photo` and `video_thumbnai
 
 認識失敗時も、保存済み`ocrText`、`ocrUpdatedAt`、Undo slotを変更しないことを確認します。
 
+ML KitとPP-OCRv6 smallを別fake gatewayで注入し、要求したengineだけが1回呼ばれること、共通の構造化結果経路を通ること、比較検出後もDBのOCR本文・更新時刻・Undo slotが不変であることを確認します。
+
 ## 2026-07 media thumbnail coverage
 
 - Added repository tests for `photo` WebP saves, `video` / `animated_gif` preview-image saves on non-Wi-Fi contexts, preview decode failure, and mixed legacy local paths.

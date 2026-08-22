@@ -175,4 +175,45 @@ class OcrTextRecognizerTest {
         assertEquals("line one\nline two", result.fullText)
         assertEquals(listOf(OcrTextRegion("line one\nline two")), result.regions)
     }
+
+    @Test
+    fun paddleResultsMapToOrderedStructuredRegionsWithoutLosingInvalidBoxes() {
+        val mapped = listOf(
+            PaddleOcrRawResult(
+                text = " first ",
+                confidence = 0.91f,
+                points = listOf(
+                    OcrPoint(40f, 10f),
+                    OcrPoint(10f, 10f),
+                    OcrPoint(10f, 30f),
+                    OcrPoint(40f, 30f),
+                ),
+            ),
+            PaddleOcrRawResult(
+                text = "second",
+                confidence = 0.52f,
+                points = listOf(
+                    OcrPoint(Float.NaN, 1f),
+                    OcrPoint(2f, 1f),
+                    OcrPoint(2f, 3f),
+                    OcrPoint(Float.NaN, 3f),
+                ),
+            ),
+            PaddleOcrRawResult(
+                text = "   ",
+                confidence = 0.1f,
+                points = List(4) { OcrPoint(0f, 0f) },
+            ),
+        ).toOcrRecognitionResult(imageWidth = 320, imageHeight = 240)
+
+        assertEquals(320, mapped.imageWidth)
+        assertEquals(240, mapped.imageHeight)
+        assertEquals(listOf("first", "second"), mapped.regions.map { it.text })
+        assertEquals(listOf("", "\n"), mapped.regions.map { it.precedingSeparator })
+        assertEquals("first\nsecond", mapped.fullText)
+        assertEquals(0.91f, mapped.regions[0].confidence)
+        assertEquals(0.52f, mapped.regions[1].confidence)
+        assertEquals(4, mapped.regions[0].polygon?.points?.size)
+        assertNull(mapped.regions[1].polygon)
+    }
 }

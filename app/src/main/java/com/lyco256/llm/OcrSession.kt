@@ -3,6 +3,9 @@ package com.lyco256.llm
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.OcrAssetRecognitionResult
+import com.lyco256.llm.data.OcrDetectionMetadata
+import com.lyco256.llm.data.OcrDetectionResult
+import com.lyco256.llm.data.OcrEngine
 import com.lyco256.llm.data.OcrPostRecognitionResult
 
 internal data class OcrRegionKey(
@@ -19,6 +22,13 @@ internal typealias OcrLegacyDetectHandler = (
 internal typealias OcrStructuredDetectHandler = (
     ClipWithDetails,
     (OcrPostRecognitionResult) -> Unit,
+    (String) -> Unit,
+) -> Unit
+
+internal typealias OcrComparisonDetectHandler = (
+    ClipWithDetails,
+    OcrEngine,
+    (OcrDetectionResult) -> Unit,
     (String) -> Unit,
 ) -> Unit
 
@@ -91,6 +101,7 @@ internal data class OcrSessionState(
     val draftText: String = savedText,
     val structuredResult: OcrPostRecognitionResult? = null,
     val structuredResultGeneration: Long = 0L,
+    val detectionMetadata: OcrDetectionMetadata? = null,
     val isDetecting: Boolean = false,
     val isSaving: Boolean = false,
     val errorMessage: String? = null,
@@ -121,6 +132,22 @@ internal class OcrSessionController(
 
     fun redetect(detect: OcrStructuredDetectHandler) {
         startDetection(detect)
+    }
+
+    fun startAutomaticComparisonDetection(
+        detect: OcrComparisonDetectHandler,
+        engine: OcrEngine = OcrEngine.ML_KIT,
+    ) {
+        if (automaticDetectionStarted) return
+        automaticDetectionStarted = true
+        if (state.savedText.isBlank()) startDetection(detect, engine)
+    }
+
+    fun redetect(
+        engine: OcrEngine,
+        detect: OcrComparisonDetectHandler,
+    ) {
+        startDetection(detect, engine)
     }
 
     fun editDraft(value: String) {
@@ -187,6 +214,35 @@ internal class OcrSessionController(
             publish(state.copy(isDetecting = false, errorMessage = message))
         }
         runCatching { detect(clip, onSuccess, onFailure) }
+            .onFailure { error -> onFailure(error.message ?: "画像認識に失敗しました") }
+    }
+
+    private fun startDetection(
+        detect: OcrComparisonDetectHandler,
+        engine: OcrEngine,
+    ) {
+        if (!active || state.isDetecting || state.isSaving) return
+        val token = ++requestToken
+        publish(state.copy(isDetecting = true, errorMessage = null))
+        val onSuccess: (OcrDetectionResult) -> Unit = success@{ result ->
+            if (!active || !state.isDetecting || token != requestToken || result.recognition.clipId != state.clipId) return@success
+            val rebuilt = result.recognition.rebuildFromRegions()
+            publish(
+                state.copy(
+                    draftText = rebuilt.fullText,
+                    structuredResult = rebuilt,
+                    structuredResultGeneration = state.structuredResultGeneration + 1L,
+                    detectionMetadata = result.metadata,
+                    isDetecting = false,
+                    errorMessage = null,
+                ),
+            )
+        }
+        val onFailure: (String) -> Unit = failure@{ message ->
+            if (!active || !state.isDetecting || token != requestToken) return@failure
+            publish(state.copy(isDetecting = false, errorMessage = message))
+        }
+        runCatching { detect(clip, engine, onSuccess, onFailure) }
             .onFailure { error -> onFailure(error.message ?: "画像認識に失敗しました") }
     }
 

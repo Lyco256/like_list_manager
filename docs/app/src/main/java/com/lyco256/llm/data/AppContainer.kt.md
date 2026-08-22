@@ -53,3 +53,7 @@ Repositoryのconstructor変更や新しい共有サービス追加時は、こ�
 ## 2026-08 structured OCR boundary
 
 The test harness fake now returns `OcrRecognitionResult`, matching the production gateway boundary while keeping the existing deterministic full-text behavior. Tests can inject arbitrary structured regions without changing Repository or UI persistence behavior.
+
+## 2026-08 OCR engine comparison
+
+Production builds create one lazy reusable `PaddleOcrTextGateway` in addition to the existing ML Kit gateway and inject both into `ClipRepository`. The isolated test harness injects deterministic fakes for both engines. `closePaddleOcr()` is the process-level release path; model loading never runs during `AppContainer` construction.

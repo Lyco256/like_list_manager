@@ -183,6 +183,7 @@ afterEvaluate {
 }
 
 dependencies {
+    implementation(project(":ppocr-sdk"))
     testImplementation(libs.junit)
     testImplementation(libs.sqlite.jdbc)
     testImplementation(libs.json)

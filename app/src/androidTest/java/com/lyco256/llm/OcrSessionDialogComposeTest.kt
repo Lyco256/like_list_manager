@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.click
@@ -26,6 +27,9 @@ import com.lyco256.llm.data.AssetEntity
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.OcrAssetRecognitionResult
+import com.lyco256.llm.data.OcrDetectionMetadata
+import com.lyco256.llm.data.OcrDetectionResult
+import com.lyco256.llm.data.OcrEngine
 import com.lyco256.llm.data.OcrPoint
 import com.lyco256.llm.data.OcrPolygon
 import com.lyco256.llm.data.OcrPostRecognitionResult
@@ -42,6 +46,66 @@ import org.junit.Test
 class OcrSessionDialogComposeTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun engineSelectionWaitsForRedetectAndDisplayedMetadataChangesOnlyAfterSuccess() {
+        val requestedEngines = mutableListOf<OcrEngine>()
+        var success: ((OcrDetectionResult) -> Unit)? = null
+        var failure: ((String) -> Unit)? = null
+
+        composeRule.setContent {
+            MaterialTheme {
+                OcrSessionDialog(
+                    clip = clip(),
+                    sessionKey = 1L,
+                    previewAssets = emptyList(),
+                    onDetect = { _, _, _ -> error("comparison handler must be used") },
+                    onDetectForEngine = { _, engine, onSuccess, onFailure ->
+                        requestedEngines += engine
+                        success = onSuccess
+                        failure = onFailure
+                    },
+                    onSave = { _, _, _ -> },
+                    onDismiss = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("ocr_engine_ml_kit").assertIsSelected()
+        composeRule.onAllNodesWithTag("ocr_detection_metadata").assertCountEquals(0)
+        composeRule.onNodeWithTag("ocr_engine_pp_ocrv6_small").performClick()
+        composeRule.waitForIdle()
+        assertEquals(emptyList<OcrEngine>(), requestedEngines)
+
+        composeRule.onNodeWithTag("ocr_redetect").performClick()
+        composeRule.waitForIdle()
+        assertEquals(listOf(OcrEngine.PP_OCRV6_SMALL), requestedEngines)
+        composeRule.runOnIdle {
+            success!!(
+                OcrDetectionResult(
+                    recognition = structuredText(7L, "pp result"),
+                    metadata = OcrDetectionMetadata(OcrEngine.PP_OCRV6_SMALL, 2_400L),
+                ),
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("ocr_detection_metadata").assertTextContains("PP-OCRv6 small · 2.4s")
+        composeRule.onNodeWithText("pp result").assertIsDisplayed()
+
+        composeRule.onNodeWithTag("ocr_engine_ml_kit").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("ocr_detection_metadata").assertTextContains("PP-OCRv6 small · 2.4s")
+        assertEquals(1, requestedEngines.size)
+
+        composeRule.onNodeWithTag("ocr_redetect").performClick()
+        composeRule.waitForIdle()
+        assertEquals(listOf(OcrEngine.PP_OCRV6_SMALL, OcrEngine.ML_KIT), requestedEngines)
+        composeRule.runOnIdle { failure!!("ML Kit failed") }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("ML Kit failed").assertIsDisplayed()
+        composeRule.onNodeWithTag("ocr_detection_metadata").assertTextContains("PP-OCRv6 small · 2.4s")
+        composeRule.onNodeWithText("pp result").assertIsDisplayed()
+    }
 
     @Test
     fun fullScreenViewerUsesAssetPagesAndSwitchesAtFitScale() {
@@ -523,6 +587,8 @@ class OcrSessionDialogComposeTest {
     @Test
     fun mediaGridEntryUsesTheSameOcrSessionDialog() {
         var saveCalls = 0
+        var comparisonCalls = 0
+        var requestedEngine: OcrEngine? = null
         lateinit var completeSave: (String?) -> Unit
 
         composeRule.setContent {
@@ -540,6 +606,16 @@ class OcrSessionDialogComposeTest {
                         completeSave = complete
                     },
                     onOcrDetectStructured = { _, _, _ -> },
+                    onOcrDetectComparison = { details, engine, success, _ ->
+                        comparisonCalls++
+                        requestedEngine = engine
+                        success(
+                            OcrDetectionResult(
+                                recognition = structuredText(details.clip.id, "PP grid"),
+                                metadata = OcrDetectionMetadata(engine, 1_300L),
+                            ),
+                        )
+                    },
                     onDelete = {},
                     onAuthorClick = {},
                 )
@@ -551,6 +627,13 @@ class OcrSessionDialogComposeTest {
         composeRule.onNodeWithTag("tweet_options_ocr").performClick()
         composeRule.onNodeWithTag("ocr_full_screen").assertIsDisplayed()
         composeRule.onNodeWithTag("ocr_result_text").assertTextContains("persisted")
+        composeRule.onNodeWithTag("ocr_engine_pp_ocrv6_small").performClick()
+        composeRule.onNodeWithTag("ocr_redetect").performClick()
+        composeRule.waitForIdle()
+        assertEquals(1, comparisonCalls)
+        assertEquals(OcrEngine.PP_OCRV6_SMALL, requestedEngine)
+        composeRule.onNodeWithText("PP grid").assertIsDisplayed()
+        composeRule.onNodeWithTag("ocr_detection_metadata").assertTextContains("PP-OCRv6 small · 1.3s")
         composeRule.onNodeWithTag("ocr_cancel").performClick()
         composeRule.waitForIdle()
         assertEquals(0, saveCalls)
@@ -690,5 +773,22 @@ class OcrSessionDialogComposeTest {
             ),
         ),
         fullText = "first\nsecond",
+    )
+
+    private fun structuredText(clipId: Long, text: String): OcrPostRecognitionResult = OcrPostRecognitionResult(
+        clipId = clipId,
+        assets = listOf(
+            OcrAssetRecognitionResult(
+                assetId = 1L,
+                localPath = "/tmp/ocr.webp",
+                recognition = OcrRecognitionResult(
+                    imageWidth = 100,
+                    imageHeight = 100,
+                    fullText = text,
+                    regions = listOf(OcrTextRegion(text = text)),
+                ),
+            ),
+        ),
+        fullText = text,
     )
 }

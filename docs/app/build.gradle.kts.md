@@ -46,3 +46,10 @@ AndroidアプリモジュールのapplicationId、SDK、Java/Kotlin 21、Compose
 ## 2026-07 OCR update
 
 - Added the ML Kit Japanese text recognition dependency used by the OCR gateway.
+
+## 2026-08 OCR engine comparison
+
+- Adds the local `:ppocr-sdk` module. Its official implementation uses ONNX Runtime 1.21.1, the repository-bundled OpenCV Android 4.5.3 AAR, and coroutines 1.9.0.
+- PP-OCRv6 small detector/recognizer inference files are packaged as module assets; source model archives are not packaged.
+- The app keeps `minSdk 29`.
+- OpenCV Android remains version 4.5.3. The local AAR keeps the original Java API and replaces its arm64 native pair with the documented 16 KB-aligned rebuild.

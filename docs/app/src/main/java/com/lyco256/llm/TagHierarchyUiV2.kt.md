@@ -463,3 +463,7 @@ The toolbar is a full-width opaque background container with the unchanged Row b
 Morph中は`userScrollEnabled`、cell tap/long press、selection/Dialog導線を抑止する。checkpoint抑止はsession restore、legacy fallback pinch、Morphを独立理由として保持し、いずれか一つの終了で他を解除しない。source/filter/sort/session/display/lifecycle変更ではgeneration identityを再検証し、stale Canvasを除去する。
 
 production readinessはprepared pairのbounded slotとviewport交差範囲だけを走査し、resident prepared indexのasset存在を確認する。未準備方向、画像不足、selection、initial Progress、scroll中は共通modifierの既存fallbackへ進み、同一gestureから二重の列数変更を発行しない。
+
+## 2026-08 OCR engine comparison
+
+分類済みcard一覧とmedia-grid投稿Dialogは、engineを含む共通OCR比較handlerを`OcrSessionDialog`まで透過的に渡します。画面ごとに別のengine状態や検出処理は持ちません。

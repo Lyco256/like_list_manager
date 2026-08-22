@@ -33,3 +33,7 @@ MacrobenchmarkとUI Automator、および `com.android.test` plugin aliasも管�
 ## 2026-07 OCR update
 
 - Added the `mlkitTextJapanese` version entry and the `mlkit-text-japanese` library alias.
+
+## 2026-08 PaddleOCR SDK dependencies
+
+ONNX Runtime `1.21.1`, Kotlin coroutines `1.9.0`, AndroidX Test Monitor, and the Android library plugin alias support the official local `:ppocr-sdk` module. OpenCV remains `4.5.3` but is referenced as the local 16KB-arm64 rebuild documented under `ppocr-sdk/libs`, rather than as a version-catalog Maven alias.

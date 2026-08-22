@@ -94,6 +94,8 @@ import com.lyco256.llm.data.ClassifiedClipItem
 import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.LikeCountRefreshEstimate
 import com.lyco256.llm.data.OAuthSession
+import com.lyco256.llm.data.OcrDetectionResult
+import com.lyco256.llm.data.OcrEngine
 import com.lyco256.llm.data.OcrPostRecognitionResult
 import com.lyco256.llm.data.MediaGridClipSource
 import com.lyco256.llm.data.PostStorageEstimate
@@ -588,6 +590,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         onFailure: (String) -> Unit,
     ) = detectOcrText(clip, { onSuccess(it.fullText) }, onFailure)
 
+    fun detectOcrTextForEngine(
+        clip: ClipWithDetails,
+        engine: OcrEngine,
+        onSuccess: (OcrDetectionResult) -> Unit,
+        onFailure: (String) -> Unit,
+    ) = viewModelScope.launch {
+        runCatching { repository.detectOcrTextForEngine(clip, engine) }
+            .onSuccess(onSuccess)
+            .onFailure { onFailure(it.message ?: "画像認識に失敗しました") }
+    }
+
     fun moveClipToTrash(clip: ClipEntity) = viewModelScope.launch {
         repository.moveClipToTrash(clip)
     }
@@ -755,6 +768,7 @@ fun LikeListManagerUi(
                     onOcrDetect = viewModel::detectOcrTextLegacy,
                     onOcrSaveResult = viewModel::updateOcrText,
                     onOcrDetectStructured = viewModel::detectOcrText,
+                    onOcrDetectComparison = viewModel::detectOcrTextForEngine,
                     onDelete = viewModel::moveClipToTrash,
                     onAuthorClick = { clip ->
                         viewModel.closeMediaGridTweetDialog()
@@ -945,6 +959,7 @@ fun MainScreen(
                 onOcrDetect = viewModel::detectOcrTextLegacy,
                 onOcrSaveResult = viewModel::updateOcrText,
                 onOcrDetectStructured = viewModel::detectOcrText,
+                onOcrDetectComparison = viewModel::detectOcrTextForEngine,
                 onDelete = viewModel::moveClipToTrash,
                 onAuthorClick = { clip ->
                     viewModel.filterByAuthorFromClip(clip)
@@ -981,6 +996,7 @@ fun MainScreen(
                 onOcrDetect = viewModel::detectOcrTextLegacy,
                 onOcrSaveResult = viewModel::updateOcrText,
                 onOcrDetectStructured = viewModel::detectOcrText,
+                onOcrDetectComparison = viewModel::detectOcrTextForEngine,
                 onDelete = viewModel::moveClipToTrash,
                 onAuthorClick = viewModel::filterByAuthorFromClip,
             )
@@ -1458,6 +1474,7 @@ fun ClipListScreen(
     onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
         onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
     },
+    onOcrDetectComparison: OcrComparisonDetectHandler? = null,
     onDelete: (ClipEntity) -> Unit,
 ) {
     val pendingTagIds = remember { mutableStateMapOf<Long, Set<Long>>() }
@@ -1496,6 +1513,7 @@ fun ClipListScreen(
                         onOcrDetect = onOcrDetect,
                         onOcrSaveResult = onOcrSaveResult,
                         onOcrDetectStructured = onOcrDetectStructured,
+                        onOcrDetectComparison = onOcrDetectComparison,
                         onDelete = onDelete,
                     )
                 }
@@ -1522,6 +1540,7 @@ fun ClassifiedScreen(
     onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
         onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
     },
+    onOcrDetectComparison: OcrComparisonDetectHandler? = null,
     onDelete: (ClipEntity) -> Unit,
 ) {
     val expandedGroups = remember { mutableStateMapOf<Long, Boolean>() }
@@ -1553,6 +1572,7 @@ fun ClassifiedScreen(
                         onOcrDetect = onOcrDetect,
                         onOcrSaveResult = onOcrSaveResult,
                         onOcrDetectStructured = onOcrDetectStructured,
+                        onOcrDetectComparison = onOcrDetectComparison,
                         onDelete = onDelete,
                     )
                 }
@@ -1581,6 +1601,7 @@ fun TweetCard(
     onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
         onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
     },
+    onOcrDetectComparison: OcrComparisonDetectHandler? = null,
     onDelete: (ClipEntity) -> Unit,
 ) {
     val context = LocalContext.current
@@ -1726,6 +1747,7 @@ fun TweetCard(
                 sessionKey = ocrSessionKey,
                 previewAssets = ocrPreviewAssets,
                 onDetect = onOcrDetectStructured,
+                onDetectForEngine = onOcrDetectComparison,
                 onSave = onOcrSaveResult,
                 onDismiss = { ocrDialogOpen = false },
             )

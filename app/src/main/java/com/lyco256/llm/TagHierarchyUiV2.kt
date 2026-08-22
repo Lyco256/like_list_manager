@@ -352,6 +352,7 @@ fun EnhancedClipListScreen(
     onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
         onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
     },
+    onOcrDetectComparison: OcrComparisonDetectHandler? = null,
     onDelete: (ClipEntity) -> Unit,
     onAuthorClick: (ClipEntity) -> Unit = {},
 ) {
@@ -420,6 +421,7 @@ fun EnhancedClipListScreen(
                             onOcrDetect = onOcrDetect,
                             onOcrSaveResult = onOcrSaveResult,
                             onOcrDetectStructured = onOcrDetectStructured,
+                            onOcrDetectComparison = onOcrDetectComparison,
                             onDelete = onDelete,
                             onAuthorClick = onAuthorClick,
                         )
@@ -461,6 +463,7 @@ internal fun EnhancedClassifiedScreen(
     onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
         onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
     },
+    onOcrDetectComparison: OcrComparisonDetectHandler? = null,
     onDelete: (ClipEntity) -> Unit,
     onAuthorClick: (ClipEntity) -> Unit,
 ) {
@@ -503,6 +506,7 @@ internal fun EnhancedClassifiedScreen(
         onOcrDetect = onOcrDetect,
         onOcrSaveResult = onOcrSaveResult,
         onOcrDetectStructured = onOcrDetectStructured,
+        onOcrDetectComparison = onOcrDetectComparison,
         onDelete = onDelete,
         onAuthorClick = onAuthorClick,
     )
@@ -540,6 +544,7 @@ internal fun EnhancedClassifiedScreen(
     onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
         onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
     },
+    onOcrDetectComparison: OcrComparisonDetectHandler? = null,
     onDelete: (ClipEntity) -> Unit,
     onAuthorClick: (ClipEntity) -> Unit,
 ) {
@@ -860,6 +865,7 @@ internal fun EnhancedClassifiedScreen(
                             onOcrDetect = onOcrDetect,
                             onOcrSaveResult = onOcrSaveResult,
                             onOcrDetectStructured = onOcrDetectStructured,
+                            onOcrDetectComparison = onOcrDetectComparison,
                             onDelete = onDelete,
                             onAuthorClick = onAuthorClick,
                         )
@@ -934,6 +940,7 @@ fun MediaGridTweetDialog(
     onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
         onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
     },
+    onOcrDetectComparison: OcrComparisonDetectHandler? = null,
     onDelete: (ClipEntity) -> Unit,
     onAuthorClick: (ClipEntity) -> Unit,
 ) {
@@ -1021,6 +1028,7 @@ fun MediaGridTweetDialog(
                                     onOcrDetect = onOcrDetect,
                                     onOcrSaveResult = onOcrSaveResult,
                                     onOcrDetectStructured = onOcrDetectStructured,
+                                    onOcrDetectComparison = onOcrDetectComparison,
                                     onDelete = {
                                         onDismiss()
                                         onDelete(it)
@@ -1296,6 +1304,7 @@ private fun EnhancedTweetCard(
     onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
         onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
     },
+    onOcrDetectComparison: OcrComparisonDetectHandler? = null,
     onDelete: (ClipEntity) -> Unit,
     onAuthorClick: (ClipEntity) -> Unit,
     modifier: Modifier = Modifier,
@@ -1511,6 +1520,7 @@ private fun EnhancedTweetCard(
                 sessionKey = ocrSessionKey,
                 previewAssets = ocrPreviewAssets,
                 onDetect = onOcrDetectStructured,
+                onDetectForEngine = onOcrDetectComparison,
                 onSave = onOcrSaveResult,
                 onDismiss = { ocrDialogOpen = false },
             )

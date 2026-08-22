@@ -61,6 +61,11 @@ data class OcrPostRecognitionResult(
     val fullText: String,
 )
 
+data class OcrDetectionResult(
+    val recognition: OcrPostRecognitionResult,
+    val metadata: OcrDetectionMetadata,
+)
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class ClipRepository internal constructor(
     private val context: Context,
@@ -69,6 +74,7 @@ class ClipRepository internal constructor(
     private val xOAuthManager: OAuthGateway,
     private val xApiClient: XApiGateway,
     private val ocrTextGateway: OcrTextGateway = FakeOcrTextGateway(),
+    private val ppOcrTextGateway: OcrTextGateway? = null,
     private val includeSeedMedia: Boolean = true,
     private val mediaGridPreviewEnqueuer: MediaGridPreviewEnqueuer = NoOpMediaGridPreviewEnqueuer,
     private val mediaGridRgb565RepairEnqueuer: MediaGridRgb565RepairEnqueuer =
@@ -1323,7 +1329,36 @@ class ClipRepository internal constructor(
         }
     }
 
-    suspend fun detectOcrText(clip: ClipWithDetails): OcrPostRecognitionResult = withContext(Dispatchers.IO) {
+    suspend fun detectOcrText(clip: ClipWithDetails): OcrPostRecognitionResult =
+        detectOcrTextInternal(clip, ocrTextGateway)
+
+    suspend fun detectOcrTextForEngine(
+        clip: ClipWithDetails,
+        engine: OcrEngine,
+    ): OcrDetectionResult {
+        val gateway = when (engine) {
+            OcrEngine.ML_KIT -> ocrTextGateway
+            OcrEngine.PP_OCRV6_SMALL -> ppOcrTextGateway
+                ?: error("PP-OCRv6 small OCR gateway is not configured")
+        }
+        var gatewayStartedAt: Long? = null
+        val recognition = detectOcrTextInternal(clip, gateway) {
+            if (gatewayStartedAt == null) gatewayStartedAt = System.nanoTime()
+        }
+        val elapsedMs = gatewayStartedAt?.let { startedAt ->
+            ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(0L)
+        } ?: 0L
+        return OcrDetectionResult(
+            recognition = recognition,
+            metadata = OcrDetectionMetadata(engine = engine, elapsedMs = elapsedMs),
+        )
+    }
+
+    private suspend fun detectOcrTextInternal(
+        clip: ClipWithDetails,
+        gateway: OcrTextGateway,
+        onGatewayStart: (() -> Unit)? = null,
+    ): OcrPostRecognitionResult = withContext(Dispatchers.IO) {
         val eligibleAssets = clip.assets
             .filter { asset -> asset.localPath != null && asset.type in setOf("photo", "video_thumbnail") }
             .sortedBy { it.id }
@@ -1338,10 +1373,11 @@ class ClipRepository internal constructor(
             val path = asset.localPath?.let(::File)?.takeIf(File::isFile) ?: return@mapNotNull null
             val bitmap = runCatching { BitmapFactory.decodeFile(path.absolutePath) }.getOrNull() ?: return@mapNotNull null
             try {
+                onGatewayStart?.invoke()
                 OcrAssetRecognitionResult(
                     assetId = asset.id,
                     localPath = path.absolutePath,
-                    recognition = ocrTextGateway.recognize(bitmap),
+                    recognition = gateway.recognize(bitmap),
                 )
             } finally {
                 bitmap.recycle()
