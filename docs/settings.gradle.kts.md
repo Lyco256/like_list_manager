@@ -4,4 +4,4 @@
 
 ## 役割
 
-`:app` と隔離性能測定用の `:macrobenchmark` moduleを登録し、pluginとdependency repositoryを一元管理します。
+`:app`、`:macrobenchmark`、オフラインPP-OCRv6実行用の`:ppocr-sdk` moduleを登録し、pluginとdependency repositoryを一元管理します。OpenCVの16KB対応AARは`:ppocr-sdk/libs`からexclusive contentで解決します。

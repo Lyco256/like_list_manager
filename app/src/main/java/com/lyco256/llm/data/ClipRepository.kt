@@ -1323,7 +1323,10 @@ class ClipRepository internal constructor(
         }
     }
 
-    suspend fun detectOcrText(clip: ClipWithDetails): OcrPostRecognitionResult = withContext(Dispatchers.IO) {
+    suspend fun detectOcrText(
+        clip: ClipWithDetails,
+        mode: OcrQualityMode = OcrQualityMode.FAST,
+    ): OcrPostRecognitionResult = withContext(Dispatchers.IO) {
         val eligibleAssets = clip.assets
             .filter { asset -> asset.localPath != null && asset.type in setOf("photo", "video_thumbnail") }
             .sortedBy { it.id }
@@ -1341,7 +1344,7 @@ class ClipRepository internal constructor(
                 OcrAssetRecognitionResult(
                     assetId = asset.id,
                     localPath = path.absolutePath,
-                    recognition = ocrTextGateway.recognize(bitmap),
+                    recognition = ocrTextGateway.recognize(bitmap, mode),
                 )
             } finally {
                 bitmap.recycle()

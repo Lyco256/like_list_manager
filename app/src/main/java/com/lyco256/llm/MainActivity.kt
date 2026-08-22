@@ -95,6 +95,7 @@ import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.LikeCountRefreshEstimate
 import com.lyco256.llm.data.OAuthSession
 import com.lyco256.llm.data.OcrPostRecognitionResult
+import com.lyco256.llm.data.OcrQualityMode
 import com.lyco256.llm.data.MediaGridClipSource
 import com.lyco256.llm.data.PostStorageEstimate
 import com.lyco256.llm.data.PostStorageLocation
@@ -574,10 +575,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun detectOcrText(
         clip: ClipWithDetails,
+        mode: OcrQualityMode,
         onSuccess: (OcrPostRecognitionResult) -> Unit,
         onFailure: (String) -> Unit,
     ) = viewModelScope.launch {
-        runCatching { repository.detectOcrText(clip) }
+        runCatching { repository.detectOcrText(clip, mode) }
             .onSuccess(onSuccess)
             .onFailure { onFailure(it.message ?: "画像認識に失敗しました") }
     }
@@ -586,7 +588,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         clip: ClipWithDetails,
         onSuccess: (String) -> Unit,
         onFailure: (String) -> Unit,
-    ) = detectOcrText(clip, { onSuccess(it.fullText) }, onFailure)
+    ) = detectOcrText(clip, OcrQualityMode.FAST, { onSuccess(it.fullText) }, onFailure)
 
     fun moveClipToTrash(clip: ClipEntity) = viewModelScope.launch {
         repository.moveClipToTrash(clip)
@@ -1455,7 +1457,7 @@ fun ClipListScreen(
         onOcrSave(clip, text)
         complete(null)
     },
-    onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
+    onOcrDetectStructured: OcrStructuredDetectHandler = { details, _, success, failure ->
         onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
     },
     onDelete: (ClipEntity) -> Unit,
@@ -1519,7 +1521,7 @@ fun ClassifiedScreen(
         onOcrSave(clip, text)
         complete(null)
     },
-    onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
+    onOcrDetectStructured: OcrStructuredDetectHandler = { details, _, success, failure ->
         onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
     },
     onDelete: (ClipEntity) -> Unit,
@@ -1578,7 +1580,7 @@ fun TweetCard(
         onOcrSave(clip, text)
         complete(null)
     },
-    onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
+    onOcrDetectStructured: OcrStructuredDetectHandler = { details, _, success, failure ->
         onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
     },
     onDelete: (ClipEntity) -> Unit,

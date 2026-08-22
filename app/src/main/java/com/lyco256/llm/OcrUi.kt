@@ -3,6 +3,7 @@ package com.lyco256.llm
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -48,6 +50,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
@@ -68,6 +71,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.OcrAssetRecognitionResult
+import com.lyco256.llm.data.OcrQualityMode
 import com.lyco256.llm.data.OcrRecognitionResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -190,6 +194,8 @@ internal fun OcrSessionDialog(
         isProcessing = state.isDetecting,
         isSaving = state.isSaving,
         errorMessage = state.errorMessage,
+        qualityMode = state.qualityMode,
+        onQualityModeChange = controller::selectQualityMode,
         onTextChange = controller::editDraft,
         onRegionTextChange = controller::editRegion,
         onRedetect = { controller.redetect(onDetect) },
@@ -212,6 +218,8 @@ internal fun OcrTextDialog(
     isProcessing: Boolean,
     isSaving: Boolean = false,
     errorMessage: String?,
+    qualityMode: OcrQualityMode = OcrQualityMode.FAST,
+    onQualityModeChange: (OcrQualityMode) -> Unit = {},
     onTextChange: (String) -> Unit,
     onRegionTextChange: (OcrRegionKey, String) -> Unit = { _, _ -> },
     onRedetect: () -> Unit,
@@ -325,6 +333,35 @@ internal fun OcrTextDialog(
                     Icon(Icons.Filled.Check, contentDescription = null)
                     Spacer(Modifier.size(4.dp))
                     Text("保存")
+                }
+            }
+
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text("認識モード", style = MaterialTheme.typography.labelMedium)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                        .testTag("ocr_quality_mode"),
+                ) {
+                    OcrQualityModeSegment(
+                        mode = OcrQualityMode.FAST,
+                        selected = qualityMode == OcrQualityMode.FAST,
+                        enabled = !isProcessing && !isSaving,
+                        onClick = onQualityModeChange,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OcrQualityModeSegment(
+                        mode = OcrQualityMode.ACCURATE,
+                        selected = qualityMode == OcrQualityMode.ACCURATE,
+                        enabled = !isProcessing && !isSaving,
+                        onClick = onQualityModeChange,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
 
@@ -461,6 +498,30 @@ internal fun OcrTextDialog(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun OcrQualityModeSegment(
+    mode: OcrQualityMode,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: (OcrQualityMode) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    TextButton(
+        onClick = { onClick(mode) },
+        enabled = enabled,
+        modifier = modifier.testTag(
+            if (mode == OcrQualityMode.FAST) "ocr_quality_fast" else "ocr_quality_accurate",
+        ),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+        colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+            containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+            contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+        ),
+    ) {
+        Text(mode.displayName)
     }
 }
 

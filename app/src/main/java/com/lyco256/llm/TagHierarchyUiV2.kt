@@ -349,7 +349,7 @@ fun EnhancedClipListScreen(
         onOcrSave(clip, text)
         complete(null)
     },
-    onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
+    onOcrDetectStructured: OcrStructuredDetectHandler = { details, _, success, failure ->
         onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
     },
     onDelete: (ClipEntity) -> Unit,
@@ -458,7 +458,7 @@ internal fun EnhancedClassifiedScreen(
         onOcrSave(clip, text)
         complete(null)
     },
-    onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
+    onOcrDetectStructured: OcrStructuredDetectHandler = { details, _, success, failure ->
         onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
     },
     onDelete: (ClipEntity) -> Unit,
@@ -537,7 +537,7 @@ internal fun EnhancedClassifiedScreen(
         onOcrSave(clip, text)
         complete(null)
     },
-    onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
+    onOcrDetectStructured: OcrStructuredDetectHandler = { details, _, success, failure ->
         onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
     },
     onDelete: (ClipEntity) -> Unit,
@@ -931,7 +931,7 @@ fun MediaGridTweetDialog(
         onOcrSave(clip, text)
         complete(null)
     },
-    onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
+    onOcrDetectStructured: OcrStructuredDetectHandler = { details, _, success, failure ->
         onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
     },
     onDelete: (ClipEntity) -> Unit,
@@ -1293,7 +1293,7 @@ private fun EnhancedTweetCard(
         onOcrSave(clip, text)
         complete(null)
     },
-    onOcrDetectStructured: OcrStructuredDetectHandler = { details, success, failure ->
+    onOcrDetectStructured: OcrStructuredDetectHandler = { details, _, success, failure ->
         onOcrDetect(details, { text -> success(OcrPostRecognitionResult(details.clip.id, emptyList(), text)) }, failure)
     },
     onDelete: (ClipEntity) -> Unit,

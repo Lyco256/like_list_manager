@@ -8,6 +8,7 @@ UI helpers for the tweet options menu, summary dialog, and full-screen OCR viewe
 - Renders the three-dot tweet options menu and exposes OCR, summary, and local-delete actions with test tags, including per-clip button tags supplied by the caller.
 - Shows the summary edit dialog with a plain text field and save/cancel buttons.
 - Shows OCR in a full-screen modal with a Fit image viewer, asset-ID pages, page indicator, pinch zoom/pan, polygon highlight and selection, a single selected-region editor, separate detection/saving progress states, inline error text, redetect, and save/close buttons.
+- Shows a compact two-choice `認識モード` segmented control with `高速` and `高精度`; it exposes no internal model names, keeps the selection only in the current session, and disables both choices during detection or saving.
 
 `OcrSessionDialog` uses `OcrSessionController` for every OCR entry point. Each open creates a new unsaved session initialized from `clip.ocrText`; non-empty saved text skips automatic detection, while empty saved text starts one automatic request. Detection and manual edits update only the session draft. Redetect replaces the draft and structured post result only on success, and a failure keeps both. Save invokes the existing Repository OCR path with a completion callback and dismisses only after success; save failure keeps the full-screen viewer, draft, and previous polygons visible. Dismissal invalidates pending callbacks, and saving disables dismiss, edit, redetect, and duplicate save.
 

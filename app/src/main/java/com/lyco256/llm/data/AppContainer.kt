@@ -68,7 +68,7 @@ class AppContainer(context: Context) {
             }
         }
     } else {
-        MlKitOcrTextGateway()
+        PaddleOcrTextGateway(context)
     }
     val repository = ClipRepository(
         context = context,
@@ -82,4 +82,8 @@ class AppContainer(context: Context) {
         mediaGridRgb565RepairEnqueuer = mediaGridRgb565RepairEnqueuer,
         mediaGridRgb565PackStore = mediaGridRgb565PackStore,
     )
+
+    suspend fun closePaddleOcr() {
+        (ocrTextGateway as? PaddleOcrTextGateway)?.close()
+    }
 }

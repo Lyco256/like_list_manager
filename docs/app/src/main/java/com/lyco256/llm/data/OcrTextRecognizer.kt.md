@@ -1,18 +1,13 @@
-﻿
 # `OcrTextRecognizer.kt`
 
-OCR text gateway and formatting helpers.
+Engine-independent OCR result contract and quality-mode boundary.
 
 ## Responsibilities
 
-- Wraps ML Kit Japanese text recognition behind `OcrTextGateway`.
-- Provides a fake gateway for tests.
-- Formats ML Kit text into a stable line/block order for storage and assertions.
+- Defines `OcrQualityMode.FAST` (`高速`) and `OcrQualityMode.ACCURATE` (`高精度`).
+- Defines the common `OcrPoint`, four-point `OcrPolygon`, `OcrTextRegion`, and `OcrRecognitionResult` types.
+- Exposes `OcrTextGateway` and `FakeOcrTextGateway` without depending on a concrete OCR engine.
 
-## 2026-08 structured OCR boundary
+`OcrTextGateway.recognize()` receives only the product quality mode. Mapping that mode to PP-OCRv6 model assets is isolated in `PaddleOcrTextRecognizer.kt`.
 
-`OcrTextGateway.recognize()` returns the engine-independent `OcrRecognitionResult`. It keeps the source image width/height, the formatted full text, and ordered line-level `OcrTextRegion` values. Each region carries its text, an optional four-point source-coordinate `OcrPolygon`, optional confidence, and the separator that precedes it in the formatted text.
-
-`MlKitOcrTextGateway` converts ML Kit types at this boundary. Four corner points are preferred; when unavailable, a bounding box is converted to a four-point polygon. Lines without position data remain as text-only regions, and unavailable confidence remains `null`. Blank lines are omitted as regions without changing the existing full-text formatting.
-
-`FakeOcrTextGateway` accepts a `(Bitmap) -> OcrRecognitionResult` provider, allowing tests to inject arbitrary dimensions, line order, separators, polygons, and confidence values. `ClipRepository.detectOcrText()` carries this image-level result into the ordered post-level `OcrPostRecognitionResult`; no structured result is persisted.
+The common result keeps image width/height, formatted full text, ordered regions, optional confidence, and source-image four-point polygons. Polygon normalization rejects non-finite coordinates without dropping the recognized text. Structured results remain in the active OCR session and are not persisted here.

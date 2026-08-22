@@ -3,6 +3,7 @@ package com.lyco256.llm
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.OcrAssetRecognitionResult
+import com.lyco256.llm.data.OcrQualityMode
 import com.lyco256.llm.data.OcrPostRecognitionResult
 
 internal data class OcrRegionKey(
@@ -18,6 +19,7 @@ internal typealias OcrLegacyDetectHandler = (
 
 internal typealias OcrStructuredDetectHandler = (
     ClipWithDetails,
+    OcrQualityMode,
     (OcrPostRecognitionResult) -> Unit,
     (String) -> Unit,
 ) -> Unit
@@ -91,6 +93,7 @@ internal data class OcrSessionState(
     val draftText: String = savedText,
     val structuredResult: OcrPostRecognitionResult? = null,
     val structuredResultGeneration: Long = 0L,
+    val qualityMode: OcrQualityMode = OcrQualityMode.FAST,
     val isDetecting: Boolean = false,
     val isSaving: Boolean = false,
     val errorMessage: String? = null,
@@ -116,11 +119,16 @@ internal class OcrSessionController(
     fun startAutomaticDetection(detect: OcrStructuredDetectHandler) {
         if (automaticDetectionStarted) return
         automaticDetectionStarted = true
-        if (state.savedText.isBlank()) startDetection(detect)
+        if (state.savedText.isBlank()) startDetection(detect, OcrQualityMode.FAST)
+    }
+
+    fun selectQualityMode(mode: OcrQualityMode) {
+        if (!active || state.isDetecting || state.isSaving || state.qualityMode == mode) return
+        publish(state.copy(qualityMode = mode, errorMessage = null))
     }
 
     fun redetect(detect: OcrStructuredDetectHandler) {
-        startDetection(detect)
+        startDetection(detect, state.qualityMode)
     }
 
     fun editDraft(value: String) {
@@ -165,7 +173,10 @@ internal class OcrSessionController(
         saveToken++
     }
 
-    private fun startDetection(detect: OcrStructuredDetectHandler) {
+    private fun startDetection(
+        detect: OcrStructuredDetectHandler,
+        mode: OcrQualityMode,
+    ) {
         if (!active || state.isDetecting || state.isSaving) return
         val token = ++requestToken
         publish(state.copy(isDetecting = true, errorMessage = null))
@@ -186,7 +197,7 @@ internal class OcrSessionController(
             if (!active || !state.isDetecting || token != requestToken) return@failure
             publish(state.copy(isDetecting = false, errorMessage = message))
         }
-        runCatching { detect(clip, onSuccess, onFailure) }
+        runCatching { detect(clip, mode, onSuccess, onFailure) }
             .onFailure { error -> onFailure(error.message ?: "画像認識に失敗しました") }
     }
 

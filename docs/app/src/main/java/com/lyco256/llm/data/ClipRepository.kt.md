@@ -142,6 +142,10 @@ clip削除ではDB削除成功後に、共有公開ロック下でasset ID由来
 
 OCR detection remains read-only. The existing `updateOcrText()` path is the only persistence path and still preserves field-level `ocrText` / `ocrUpdatedAt` updates, no-op behavior, and OCR edit Undo semantics. ViewModel save callbacks report success or failure so the UI closes only after a successful transaction.
 
+## 2026-08 OCR7 quality modes
+
+`detectOcrText(clip, mode)` accepts only `OcrQualityMode`. Empty saved OCR is automatically detected once with `FAST`; saved OCR skips automatic detection. Each eligible local photo or video thumbnail is passed to the same gateway with the requested mode, while the result remains an unsaved `OcrPostRecognitionResult`. `ACCURATE` is resolved to PP-OCRv6 medium and `FAST` to PP-OCRv6 small inside the Paddle gateway.
+
 ## 2026-07 media thumbnail update
 
 - `photo` assets are downloaded from `media.url`, converted to WebP, and stored with quality 85.

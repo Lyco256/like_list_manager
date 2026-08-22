@@ -1366,7 +1366,7 @@ class UiStateRenderingTest {
                     onSummaryChange = { _, summary -> savedSummary = summary },
                     onOcrSave = { _, text -> savedOcr = text },
                     onOcrDetect = { _, onResult, _ -> onResult("") },
-                    onOcrDetectStructured = { _, _, onFailure -> onFailure("構造化OCRなし") },
+                    onOcrDetectStructured = { _, _, _, onFailure -> onFailure("構造化OCRなし") },
                     onDelete = { deletedClipId = it.id },
                     onAuthorClick = { clickedAuthor = true },
                 )

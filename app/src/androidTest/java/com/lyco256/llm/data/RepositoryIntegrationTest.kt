@@ -2641,7 +2641,7 @@ class RepositoryIntegrationTest {
     }
 
     @Test
-    fun mlKitCornerPointAdapterKeepsAllCoordinatesInCommonPolygon() {
+    fun cornerPointAdapterKeepsAllCoordinatesInCommonPolygon() {
         val polygon = OcrPolygon.fromCornerPoints(
             arrayOf(
                 android.graphics.Point(42, 70),

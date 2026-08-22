@@ -5,6 +5,7 @@ import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.OcrAssetRecognitionResult
 import com.lyco256.llm.data.OcrPoint
 import com.lyco256.llm.data.OcrPostRecognitionResult
+import com.lyco256.llm.data.OcrQualityMode
 import com.lyco256.llm.data.OcrRecognitionResult
 import com.lyco256.llm.data.OcrPolygon
 import com.lyco256.llm.data.OcrTextRegion
@@ -16,11 +17,70 @@ import org.junit.Test
 
 class OcrSessionTest {
     @Test
+    fun automaticDetectionUsesFastAndSavedTextSkipsDetection() {
+        val emptyController = OcrSessionController(clip())
+        var requestedMode: OcrQualityMode? = null
+        emptyController.startAutomaticDetection { _, mode, _, _ -> requestedMode = mode }
+
+        assertEquals(OcrQualityMode.FAST, requestedMode)
+
+        val savedController = OcrSessionController(clip(savedText = "saved"))
+        var savedDetectCalls = 0
+        savedController.startAutomaticDetection { _, _, _, _ -> savedDetectCalls++ }
+        assertEquals(0, savedDetectCalls)
+        assertEquals(OcrQualityMode.FAST, savedController.state.qualityMode)
+    }
+
+    @Test
+    fun modeSwitchOnlyChangesSelectionAndRedetectUsesTheSelection() {
+        val controller = OcrSessionController(clip())
+        var firstSuccess: ((OcrPostRecognitionResult) -> Unit)? = null
+        controller.startAutomaticDetection { _, _, onSuccess, _ -> firstSuccess = onSuccess }
+        firstSuccess!!.invoke(result(7, "first"))
+        val beforeSwitch = controller.state
+
+        controller.selectQualityMode(OcrQualityMode.ACCURATE)
+
+        assertEquals(OcrQualityMode.ACCURATE, controller.state.qualityMode)
+        assertEquals(beforeSwitch.draftText, controller.state.draftText)
+        assertEquals(beforeSwitch.structuredResult, controller.state.structuredResult)
+
+        var requestedMode: OcrQualityMode? = null
+        var redetectSuccess: ((OcrPostRecognitionResult) -> Unit)? = null
+        controller.redetect { _, mode, onSuccess, _ ->
+            requestedMode = mode
+            redetectSuccess = onSuccess
+        }
+        assertEquals(OcrQualityMode.ACCURATE, requestedMode)
+        redetectSuccess!!.invoke(result(7, "accurate"))
+
+        controller.selectQualityMode(OcrQualityMode.FAST)
+        controller.redetect { _, mode, _, _ -> requestedMode = mode }
+        assertEquals(OcrQualityMode.FAST, requestedMode)
+    }
+
+    @Test
+    fun modeCannotChangeWhileDetectingOrSaving() {
+        val controller = OcrSessionController(clip())
+        var firstSuccess: ((OcrPostRecognitionResult) -> Unit)? = null
+        controller.startAutomaticDetection { _, _, onSuccess, _ -> firstSuccess = onSuccess }
+        controller.selectQualityMode(OcrQualityMode.ACCURATE)
+        assertEquals(OcrQualityMode.FAST, controller.state.qualityMode)
+
+        firstSuccess!!.invoke(result(7, "detected"))
+        var complete: ((String?) -> Unit)? = null
+        controller.save({ _, _, onComplete -> complete = onComplete }) {}
+        controller.selectQualityMode(OcrQualityMode.ACCURATE)
+        assertEquals(OcrQualityMode.FAST, controller.state.qualityMode)
+        complete!!.invoke(null)
+    }
+
+    @Test
     fun savedTextStartsTheSessionWithoutAutomaticDetection() {
         val controller = OcrSessionController(clip(savedText = "saved"))
         var detectCalls = 0
 
-        controller.startAutomaticDetection { _, _, _ -> detectCalls++ }
+        controller.startAutomaticDetection { _, _, _, _ -> detectCalls++ }
 
         assertEquals(0, detectCalls)
         assertEquals("saved", controller.state.savedText)
@@ -35,7 +95,7 @@ class OcrSessionTest {
         var success: ((OcrPostRecognitionResult) -> Unit)? = null
         val result = result(7, "detected")
 
-        val detect: OcrStructuredDetectHandler = { _, onSuccess, _ ->
+        val detect: OcrStructuredDetectHandler = { _, _, onSuccess, _ ->
             detectCalls++
             success = onSuccess
         }
@@ -54,13 +114,13 @@ class OcrSessionTest {
     fun failedRedetectKeepsDraftAndPreviousStructuredResult() {
         val controller = OcrSessionController(clip())
         var firstSuccess: ((OcrPostRecognitionResult) -> Unit)? = null
-        controller.startAutomaticDetection { _, onSuccess, _ -> firstSuccess = onSuccess }
+        controller.startAutomaticDetection { _, _, onSuccess, _ -> firstSuccess = onSuccess }
         val firstResult = result(7, "first")
         firstSuccess!!.invoke(firstResult)
         controller.editRegion(OcrRegionKey(1L, 0), "manual edit")
 
         var failure: ((String) -> Unit)? = null
-        controller.redetect { _, _, onFailure -> failure = onFailure }
+        controller.redetect { _, _, _, onFailure -> failure = onFailure }
         failure!!.invoke("recognition failed")
 
         assertEquals("manual edit", controller.state.draftText)
@@ -76,13 +136,13 @@ class OcrSessionTest {
     fun successfulRedetectReplacesDraftAndStructuredResultWithoutPersistence() {
         val controller = OcrSessionController(clip())
         var firstSuccess: ((OcrPostRecognitionResult) -> Unit)? = null
-        controller.startAutomaticDetection { _, onSuccess, _ -> firstSuccess = onSuccess }
+        controller.startAutomaticDetection { _, _, onSuccess, _ -> firstSuccess = onSuccess }
         val firstResult = result(7, "first")
         firstSuccess!!.invoke(firstResult)
         controller.editRegion(OcrRegionKey(1L, 0), "manual edit")
 
         var redetectSuccess: ((OcrPostRecognitionResult) -> Unit)? = null
-        controller.redetect { _, onSuccess, _ -> redetectSuccess = onSuccess }
+        controller.redetect { _, _, onSuccess, _ -> redetectSuccess = onSuccess }
         val replacement = result(7, "replacement")
         redetectSuccess!!.invoke(replacement)
 
@@ -96,8 +156,8 @@ class OcrSessionTest {
         val controller = OcrSessionController(clip())
         var detectCalls = 0
 
-        controller.startAutomaticDetection { _, _, _ -> detectCalls++ }
-        controller.redetect { _, _, _ -> detectCalls++ }
+        controller.startAutomaticDetection { _, _, _, _ -> detectCalls++ }
+        controller.redetect { _, _, _, _ -> detectCalls++ }
 
         assertEquals(1, detectCalls)
         assertTrue(controller.state.isDetecting)
@@ -108,7 +168,7 @@ class OcrSessionTest {
         val controller = OcrSessionController(clip())
         var failure: ((String) -> Unit)? = null
 
-        controller.startAutomaticDetection { _, _, onFailure -> failure = onFailure }
+        controller.startAutomaticDetection { _, _, _, onFailure -> failure = onFailure }
         failure!!.invoke("recognition failed")
 
         assertEquals("", controller.state.draftText)
@@ -122,9 +182,9 @@ class OcrSessionTest {
         val controller = OcrSessionController(clip())
         var firstSuccess: ((OcrPostRecognitionResult) -> Unit)? = null
         var secondSuccess: ((OcrPostRecognitionResult) -> Unit)? = null
-        controller.startAutomaticDetection { _, onSuccess, _ -> firstSuccess = onSuccess }
+        controller.startAutomaticDetection { _, _, onSuccess, _ -> firstSuccess = onSuccess }
         firstSuccess!!(result(7, "first"))
-        controller.redetect { _, onSuccess, _ -> secondSuccess = onSuccess }
+        controller.redetect { _, _, onSuccess, _ -> secondSuccess = onSuccess }
         val oldResult = result(7, "old")
         val newResult = result(7, "new")
 
@@ -134,7 +194,7 @@ class OcrSessionTest {
         assertEquals("new", controller.state.draftText)
 
         var thirdSuccess: ((OcrPostRecognitionResult) -> Unit)? = null
-        controller.redetect { _, onSuccess, _ -> thirdSuccess = onSuccess }
+        controller.redetect { _, _, onSuccess, _ -> thirdSuccess = onSuccess }
         controller.dismiss()
         thirdSuccess!!(result(7, "after dismiss"))
         assertEquals("new", controller.state.draftText)
@@ -147,12 +207,12 @@ class OcrSessionTest {
         var firstFailure: ((String) -> Unit)? = null
         var secondFailure: ((String) -> Unit)? = null
 
-        controller.startAutomaticDetection { _, onSuccess, onFailure ->
+        controller.startAutomaticDetection { _, _, onSuccess, onFailure ->
             firstSuccess = onSuccess
             firstFailure = onFailure
         }
         firstSuccess!!.invoke(result(7, "baseline"))
-        controller.redetect { _, _, onFailure -> secondFailure = onFailure }
+        controller.redetect { _, _, _, onFailure -> secondFailure = onFailure }
 
         firstFailure!!.invoke("old failure")
         assertTrue(controller.state.isDetecting)
@@ -168,7 +228,7 @@ class OcrSessionTest {
         val controller = OcrSessionController(clip())
         var success: ((OcrPostRecognitionResult) -> Unit)? = null
 
-        controller.startAutomaticDetection { _, onSuccess, _ -> success = onSuccess }
+        controller.startAutomaticDetection { _, _, onSuccess, _ -> success = onSuccess }
         success!!.invoke(result(999, "other clip"))
 
         assertTrue(controller.state.isDetecting)
@@ -180,13 +240,13 @@ class OcrSessionTest {
     fun reopeningTheSameClipStartsWithPersistedTextOnly() {
         val firstSession = OcrSessionController(clip())
         var firstSuccess: ((OcrPostRecognitionResult) -> Unit)? = null
-        firstSession.startAutomaticDetection { _, onSuccess, _ -> firstSuccess = onSuccess }
+        firstSession.startAutomaticDetection { _, _, onSuccess, _ -> firstSuccess = onSuccess }
         firstSuccess!!.invoke(result(7, "discarded"))
         assertTrue(firstSession.dismiss())
 
         val reopenedSession = OcrSessionController(clip(savedText = "persisted"))
         var detectCalls = 0
-        reopenedSession.startAutomaticDetection { _, _, _ -> detectCalls++ }
+        reopenedSession.startAutomaticDetection { _, _, _, _ -> detectCalls++ }
 
         assertEquals(0, detectCalls)
         assertEquals("persisted", reopenedSession.state.draftText)
@@ -198,7 +258,7 @@ class OcrSessionTest {
         val controller = OcrSessionController(clip())
         var success: ((OcrPostRecognitionResult) -> Unit)? = null
         var saveCalls = 0
-        controller.startAutomaticDetection { _, onSuccess, _ -> success = onSuccess }
+        controller.startAutomaticDetection { _, _, onSuccess, _ -> success = onSuccess }
         success!!.invoke(result(7, "detected"))
 
         assertTrue(controller.dismiss())
@@ -223,10 +283,10 @@ class OcrSessionTest {
     fun successfulRedetectCancelCannotPersistItsDraft() {
         val controller = OcrSessionController(clip())
         var firstSuccess: ((OcrPostRecognitionResult) -> Unit)? = null
-        controller.startAutomaticDetection { _, onSuccess, _ -> firstSuccess = onSuccess }
+        controller.startAutomaticDetection { _, _, onSuccess, _ -> firstSuccess = onSuccess }
         firstSuccess!!.invoke(result(7, "first"))
         var redetectSuccess: ((OcrPostRecognitionResult) -> Unit)? = null
-        controller.redetect { _, onSuccess, _ -> redetectSuccess = onSuccess }
+        controller.redetect { _, _, onSuccess, _ -> redetectSuccess = onSuccess }
         redetectSuccess!!.invoke(result(7, "redetected"))
         var saveCalls = 0
 
@@ -271,7 +331,7 @@ class OcrSessionTest {
     fun saveFailureKeepsTheCurrentDraftAndStructuredResultForRetry() {
         val controller = OcrSessionController(clip())
         var detectSuccess: ((OcrPostRecognitionResult) -> Unit)? = null
-        controller.startAutomaticDetection { _, onSuccess, _ -> detectSuccess = onSuccess }
+        controller.startAutomaticDetection { _, _, onSuccess, _ -> detectSuccess = onSuccess }
         val recognized = result(7, "recognized")
         detectSuccess!!.invoke(recognized)
         controller.editRegion(OcrRegionKey(1L, 0), "edited")
@@ -293,7 +353,7 @@ class OcrSessionTest {
     fun savePassesTheRebuiltStructuredDraftToTheExistingSavePath() {
         val controller = OcrSessionController(clip())
         var detectSuccess: ((OcrPostRecognitionResult) -> Unit)? = null
-        controller.startAutomaticDetection { _, onSuccess, _ -> detectSuccess = onSuccess }
+        controller.startAutomaticDetection { _, _, onSuccess, _ -> detectSuccess = onSuccess }
         detectSuccess!!.invoke(
             OcrPostRecognitionResult(
                 clipId = 7L,
@@ -466,7 +526,7 @@ class OcrSessionTest {
     fun controllerRegionEditUsesAssetIdAndRegionIndexAndBlocksWholeTextEditing() {
         val controller = OcrSessionController(clip())
         var success: ((OcrPostRecognitionResult) -> Unit)? = null
-        controller.startAutomaticDetection { _, onSuccess, _ -> success = onSuccess }
+        controller.startAutomaticDetection { _, _, onSuccess, _ -> success = onSuccess }
         success!!.invoke(
             OcrPostRecognitionResult(
                 clipId = 7L,

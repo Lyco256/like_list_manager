@@ -2,6 +2,10 @@
 
 OCR画面の未保存セッションと、遅延した検出／保存callbackの競合防止を担当します。
 
+`OcrSessionState.qualityMode`は新しいsessionごとに`OcrQualityMode.FAST`へ初期化され、現在のsession keyの間だけ保持されます。Room、Preferences、SavedStateHandle、投稿Entityへ保存しません。保存済み`ocrText`がある投稿は自動検出せず、空の投稿だけ高速モードで1回自動検出します。
+
+モード変更は表示中のstructured result、polygon、draftを変更せず、再検出開始時に選択値を要求へ固定します。検出中・保存中は変更できず、再検出は成功時だけ結果を置き換えます。
+
 `OcrSessionController`は開始時の保存済み`ocrText`、現在のdraft、投稿単位の構造化OCR結果、検出中／保存中、エラーを保持します。検出要求ごとのtokenとセッションの有効状態を確認するため、dismiss後、再オープン後、再検出後に古い結果が現在の状態へ反映されません。
 
 保存中は文字編集、再検出、二重保存、dismissを受け付けません。保存callbackが成功した場合だけUIへ閉じる処理を通知し、失敗時はdraftと構造化結果を保持したままエラーを表示します。構造化結果とセッション情報は永続化しません。

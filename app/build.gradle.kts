@@ -183,6 +183,7 @@ afterEvaluate {
 }
 
 dependencies {
+    implementation(project(":ppocr-sdk"))
     testImplementation(libs.junit)
     testImplementation(libs.sqlite.jdbc)
     testImplementation(libs.json)
@@ -217,5 +218,4 @@ dependencies {
     implementation(libs.androidx.security.crypto)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.appauth)
-    implementation(libs.mlkit.text.japanese)
 }

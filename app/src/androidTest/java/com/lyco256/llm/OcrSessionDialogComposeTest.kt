@@ -29,6 +29,7 @@ import com.lyco256.llm.data.OcrAssetRecognitionResult
 import com.lyco256.llm.data.OcrPoint
 import com.lyco256.llm.data.OcrPolygon
 import com.lyco256.llm.data.OcrPostRecognitionResult
+import com.lyco256.llm.data.OcrQualityMode
 import com.lyco256.llm.data.OcrRecognitionResult
 import com.lyco256.llm.data.OcrTextRegion
 import com.lyco256.llm.data.TagEntity
@@ -42,6 +43,42 @@ import org.junit.Test
 class OcrSessionDialogComposeTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun qualityModeUsesProductLabelsAndDoesNotRunDetectionWhenSelected() {
+        var selectedMode by mutableStateOf(OcrQualityMode.FAST)
+        var redetectCalls = 0
+        composeRule.setContent {
+            MaterialTheme {
+                OcrTextDialog(
+                    previewAssets = emptyList(),
+                    text = "draft",
+                    structuredResult = null,
+                    isProcessing = false,
+                    errorMessage = null,
+                    qualityMode = selectedMode,
+                    onQualityModeChange = { selectedMode = it },
+                    onTextChange = {},
+                    onRedetect = { redetectCalls++ },
+                    onConfirm = {},
+                    onDismiss = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("ocr_quality_mode").assertIsDisplayed()
+        composeRule.onNodeWithText("認識モード").assertIsDisplayed()
+        composeRule.onNodeWithTag("ocr_quality_fast").assertIsDisplayed()
+        composeRule.onNodeWithTag("ocr_quality_accurate").assertIsDisplayed()
+        composeRule.onNodeWithTag("ocr_quality_accurate").performClick()
+        composeRule.waitForIdle()
+
+        assertEquals(OcrQualityMode.ACCURATE, selectedMode)
+        assertEquals(0, redetectCalls)
+        assertTrue(composeRule.onAllNodesWithTag("ocr_quality_mode").fetchSemanticsNodes().none {
+            it.config.toString().contains("PP-OCR")
+        })
+    }
 
     @Test
     fun fullScreenViewerUsesAssetPagesAndSwitchesAtFitScale() {
@@ -450,7 +487,7 @@ class OcrSessionDialogComposeTest {
                     clip = clip(),
                     sessionKey = 1L,
                     previewAssets = emptyList(),
-                    onDetect = { _, _, _ -> error("saved OCR must not auto-detect") },
+                    onDetect = { _, _, _, _ -> error("saved OCR must not auto-detect") },
                     onSave = { _, _, complete ->
                         saveCalls++
                         completeSave = complete
@@ -502,7 +539,7 @@ class OcrSessionDialogComposeTest {
                         clip = clip(),
                         sessionKey = sessionKey,
                         previewAssets = emptyList(),
-                        onDetect = { _, _, _ -> error("saved OCR must not auto-detect") },
+                        onDetect = { _, _, _, _ -> error("saved OCR must not auto-detect") },
                         onSave = { _, _, _ -> error("cancelled session must not save") },
                         onDismiss = { open = false },
                     )
@@ -539,7 +576,7 @@ class OcrSessionDialogComposeTest {
                         saveCalls++
                         completeSave = complete
                     },
-                    onOcrDetectStructured = { _, _, _ -> },
+                    onOcrDetectStructured = { _, _, _, _ -> },
                     onDelete = {},
                     onAuthorClick = {},
                 )

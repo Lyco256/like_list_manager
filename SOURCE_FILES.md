@@ -61,7 +61,7 @@ MainActivity / Compose UI
 - 保存先設定と移動復旧状態は内部SharedPreferencesへ保存
 - PhotoはWebP lossy quality 85で保存
 - 動画/GIF本体は保存せず、previewImageUrlからthumbnailを取得してWebPで保存する。新規同期ではWi-Fi待ち状態を作らない
-- OCR Gatewayは画像寸法、整形済み全文、読み順済みの行領域、元画像座標の4点polygon、confidenceを持つエンジン非依存の`OcrRecognitionResult`を返す。ML Kitのcorner pointsを優先し、bounding boxへフォールバックする。`ClipRepository.detectOcrText()`はasset ID・local path・画像単位結果を順序付きで保持する`OcrPostRecognitionResult`を返し、`fullText`は従来どおり空でない画像全文を空行で結合する。構造化結果は永続化せず、OCR画面では`OcrSessionController`の未保存セッションだけが保持する
+- OCR Gatewayは画像寸法、整形済み全文、読み順済みの行領域、元画像座標の4点polygon、confidenceを持つエンジン非依存の`OcrRecognitionResult`を返す。`OcrQualityMode`は`高速`／`高精度`だけを公開し、PaddleOCR実行層でPP-OCRv6 small／mediumへ解決する。`ClipRepository.detectOcrText()`はasset ID・local path・画像単位結果を順序付きで保持する`OcrPostRecognitionResult`を返し、`fullText`は従来どおり空でない画像全文を空行で結合する。構造化結果は永続化せず、OCR画面では`OcrSessionController`の未保存セッションだけが保持する
 - 投稿IDのunique制約で重複保存を防止
 - 月間取得数、月別API使用量履歴、警告/停止判定値、15分rate limitを記録
 - 初回サンプルデータはDBが空の場合だけ投入
@@ -71,7 +71,7 @@ MainActivity / Compose UI
 | 変更したいこと | 最初に読む文書 | 次に確認する文書 |
 | --- | --- | --- |
 | 画面、操作、検索、タグUI | `docs/app/src/main/java/com/lyco256/llm/MainActivity.kt.md` | `docs/app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt.md`, `ClipRepository.kt.md`, `Entities.kt.md` |
-| OCR全画面ビューア、Fit/zoom/pan、polygonハイライト | `docs/app/src/main/java/com/lyco256/llm/OcrUi.kt.md` | `OcrSession.kt.md`, `OcrViewerGeometry.kt.md`, `data/OcrTextRecognizer.kt.md` |
+| OCR全画面ビューア、Fit/zoom/pan、polygonハイライト | `docs/app/src/main/java/com/lyco256/llm/OcrUi.kt.md` | `OcrSession.kt.md`, `OcrViewerGeometry.kt.md`, `data/OcrTextRecognizer.kt.md`, `data/PaddleOcrTextRecognizer.kt.md` |
 | メディアグリッド現在位置ピル、表示区間ラベル | `docs/app/src/main/java/com/lyco256/llm/MediaGridScrollPosition.kt.md` | `TagHierarchyUiV2.kt.md`, `MediaGridMorph.kt.md`, `MediaGridScrollPositionTest.kt.md` |
 | メディアグリッド高速スクロールバー、thumb drag | `docs/app/src/main/java/com/lyco256/llm/MediaGridScrollbar.kt.md` | `TagHierarchyUiV2.kt.md`, `MediaGridScrollPosition.kt.md`, `MediaGridScrollbarTest.kt.md`。投稿日／いいね数順のdrag中はframe内全header boundaryのlabel入りピルを開始ordinal位置へ表示し、保存順では表示しない |
 | 共通Undo通知、5秒timeout、Swipe dismiss | `docs/app/src/main/java/com/lyco256/llm/UndoNotificationUi.kt.md` | `MainActivity.kt.md`, `data/UndoCoordinator.kt.md` |
@@ -119,6 +119,7 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/OcrUi.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/OcrSession.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/OcrViewerGeometry.kt.md`
+- `app/src/androidTest/java/com/lyco256/llm/OcrPaddleFlowIntegrationTest.kt`: 隔離実機で実Paddle推論を通したモード切替・再検出・polygon編集・再オープン確認
 - `docs/app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/TagColorUi.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/MediaGridPlaceholderRendering.kt.md`
@@ -150,6 +151,7 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/data/MediaGridPreviewWork.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/MediaGridPreviewWorker.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/OcrTextRecognizer.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/PaddleOcrTextRecognizer.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/TagColorPalette.kt.md`
 
 ### Tests
@@ -162,6 +164,7 @@ MainActivity / Compose UI
 - `docs/app/src/androidTest/java/com/lyco256/llm/CrossFeatureRegressionUiTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/TweetLikeDisplayUiTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/UndoNotificationUiTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/PaddleOcrRuntimeSmokeTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/TagHierarchyTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/TagManagementCompactRowContractTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/TagTreeGuideTest.kt.md`
