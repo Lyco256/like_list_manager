@@ -19,4 +19,4 @@ OCR text gateway and formatting helpers.
 
 ## 2026-08 OCR engine comparison
 
-`OcrEngine` identifies ML Kit and PP-OCRv6 small without leaking engine-specific result types into Repository or UI. `OcrDetectionMetadata` records the engine and elapsed recognition time for the last successful request. Polygon normalization rejects non-finite coordinates as invalid while retaining the recognized text through the engine adapter.
+`OcrEngine` keeps ML Kit for the legacy non-comparison route but exposes only PP-OCRv6 small, PP-OCRv6 medium, and PP-OCRv6 medium + tile in the comparison selector. `OcrDetectionMetadata` records the engine, elapsed recognition time, tile count, and tile failure count for the last successful request. `OcrGatewayRecognition` carries these non-persistent comparison details alongside the common result. Polygon normalization rejects non-finite coordinates as invalid while retaining the recognized text through the engine adapter.

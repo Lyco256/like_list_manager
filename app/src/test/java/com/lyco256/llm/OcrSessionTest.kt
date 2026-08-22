@@ -109,30 +109,31 @@ class OcrSessionTest {
         controller.startAutomaticComparisonDetection(detect)
         success!!.invoke(
             OcrDetectionResult(
-                recognition = result(7, "ml result"),
-                metadata = OcrDetectionMetadata(OcrEngine.ML_KIT, 120L),
+                recognition = result(7, "small result"),
+                metadata = OcrDetectionMetadata(OcrEngine.PP_OCRV6_SMALL, 120L),
             ),
         )
-        assertEquals(OcrEngine.ML_KIT, controller.state.detectionMetadata?.engine)
+        assertEquals(OcrEngine.PP_OCRV6_SMALL, controller.state.detectionMetadata?.engine)
         assertEquals(120L, controller.state.detectionMetadata?.elapsedMs)
 
-        controller.redetect(OcrEngine.PP_OCRV6_SMALL, detect)
-        assertEquals(listOf(OcrEngine.ML_KIT, OcrEngine.PP_OCRV6_SMALL), requestedEngines)
+        controller.redetect(OcrEngine.PP_OCRV6_MEDIUM, detect)
+        assertEquals(listOf(OcrEngine.PP_OCRV6_SMALL, OcrEngine.PP_OCRV6_MEDIUM), requestedEngines)
         failure!!.invoke("PP-OCR failed")
-        assertEquals("ml result", controller.state.draftText)
-        assertEquals(OcrEngine.ML_KIT, controller.state.detectionMetadata?.engine)
+        assertEquals("small result", controller.state.draftText)
+        assertEquals(OcrEngine.PP_OCRV6_SMALL, controller.state.detectionMetadata?.engine)
         assertEquals("PP-OCR failed", controller.state.errorMessage)
 
-        controller.redetect(OcrEngine.PP_OCRV6_SMALL, detect)
+        controller.redetect(OcrEngine.PP_OCRV6_MEDIUM_TILE, detect)
         success!!.invoke(
             OcrDetectionResult(
-                recognition = result(7, "pp result"),
-                metadata = OcrDetectionMetadata(OcrEngine.PP_OCRV6_SMALL, 240L),
+                recognition = result(7, "tile result"),
+                metadata = OcrDetectionMetadata(OcrEngine.PP_OCRV6_MEDIUM_TILE, 240L, tileCount = 6),
             ),
         )
-        assertEquals("pp result", controller.state.draftText)
-        assertEquals(OcrEngine.PP_OCRV6_SMALL, controller.state.detectionMetadata?.engine)
+        assertEquals("tile result", controller.state.draftText)
+        assertEquals(OcrEngine.PP_OCRV6_MEDIUM_TILE, controller.state.detectionMetadata?.engine)
         assertEquals(240L, controller.state.detectionMetadata?.elapsedMs)
+        assertEquals(6, controller.state.detectionMetadata?.tileCount)
     }
 
     @Test

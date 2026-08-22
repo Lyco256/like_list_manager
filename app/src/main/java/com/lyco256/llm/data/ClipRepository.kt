@@ -66,6 +66,12 @@ data class OcrDetectionResult(
     val metadata: OcrDetectionMetadata,
 )
 
+private data class OcrDetectionBatch(
+    val recognition: OcrPostRecognitionResult,
+    val tileCount: Int,
+    val tileFailureCount: Int,
+)
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class ClipRepository internal constructor(
     private val context: Context,
@@ -1330,66 +1336,87 @@ class ClipRepository internal constructor(
     }
 
     suspend fun detectOcrText(clip: ClipWithDetails): OcrPostRecognitionResult =
-        detectOcrTextInternal(clip, ocrTextGateway)
+        detectOcrTextInternal(clip) { bitmap ->
+            OcrGatewayRecognition(ocrTextGateway.recognize(bitmap))
+        }.recognition
 
     suspend fun detectOcrTextForEngine(
         clip: ClipWithDetails,
         engine: OcrEngine,
     ): OcrDetectionResult {
-        val gateway = when (engine) {
-            OcrEngine.ML_KIT -> ocrTextGateway
-            OcrEngine.PP_OCRV6_SMALL -> ppOcrTextGateway
-                ?: error("PP-OCRv6 small OCR gateway is not configured")
-        }
         var gatewayStartedAt: Long? = null
-        val recognition = detectOcrTextInternal(clip, gateway) {
+        val batch = detectOcrTextInternal(clip) { bitmap ->
             if (gatewayStartedAt == null) gatewayStartedAt = System.nanoTime()
+            when (engine) {
+                OcrEngine.ML_KIT -> OcrGatewayRecognition(ocrTextGateway.recognize(bitmap))
+                OcrEngine.PP_OCRV6_SMALL,
+                OcrEngine.PP_OCRV6_MEDIUM,
+                OcrEngine.PP_OCRV6_MEDIUM_TILE,
+                -> (ppOcrTextGateway ?: error("PP-OCRv6 OCR gateway is not configured"))
+                    .recognizeForComparison(bitmap, engine)
+            }
         }
         val elapsedMs = gatewayStartedAt?.let { startedAt ->
             ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(0L)
         } ?: 0L
         return OcrDetectionResult(
-            recognition = recognition,
-            metadata = OcrDetectionMetadata(engine = engine, elapsedMs = elapsedMs),
+            recognition = batch.recognition,
+            metadata = OcrDetectionMetadata(
+                engine = engine,
+                elapsedMs = elapsedMs,
+                tileCount = batch.tileCount,
+                tileFailureCount = batch.tileFailureCount,
+            ),
         )
     }
 
     private suspend fun detectOcrTextInternal(
         clip: ClipWithDetails,
-        gateway: OcrTextGateway,
-        onGatewayStart: (() -> Unit)? = null,
-    ): OcrPostRecognitionResult = withContext(Dispatchers.IO) {
+        recognize: suspend (Bitmap) -> OcrGatewayRecognition,
+    ): OcrDetectionBatch = withContext(Dispatchers.IO) {
         val eligibleAssets = clip.assets
             .filter { asset -> asset.localPath != null && asset.type in setOf("photo", "video_thumbnail") }
             .sortedBy { it.id }
         if (eligibleAssets.isEmpty()) {
-            return@withContext OcrPostRecognitionResult(
-                clipId = clip.clip.id,
-                assets = emptyList(),
-                fullText = "",
+            return@withContext OcrDetectionBatch(
+                recognition = OcrPostRecognitionResult(
+                    clipId = clip.clip.id,
+                    assets = emptyList(),
+                    fullText = "",
+                ),
+                tileCount = 0,
+                tileFailureCount = 0,
             )
         }
+        var tileCount = 0
+        var tileFailureCount = 0
         val assetResults = eligibleAssets.mapNotNull { asset ->
             val path = asset.localPath?.let(::File)?.takeIf(File::isFile) ?: return@mapNotNull null
             val bitmap = runCatching { BitmapFactory.decodeFile(path.absolutePath) }.getOrNull() ?: return@mapNotNull null
             try {
-                onGatewayStart?.invoke()
+                val output = recognize(bitmap)
+                tileCount += output.tileCount
+                tileFailureCount += output.tileFailureCount
                 OcrAssetRecognitionResult(
                     assetId = asset.id,
                     localPath = path.absolutePath,
-                    recognition = gateway.recognize(bitmap),
+                    recognition = output.recognition,
                 )
             } finally {
                 bitmap.recycle()
             }
         }
-        OcrPostRecognitionResult(
-            clipId = clip.clip.id,
-            assets = assetResults,
-            fullText = assetResults
-                .map { it.recognition.fullText.trim() }
-                .filter(String::isNotBlank)
-                .joinToString("\n\n"),
+        OcrDetectionBatch(
+            recognition = OcrPostRecognitionResult(
+                clipId = clip.clip.id,
+                assets = assetResults,
+                fullText = assetResults
+                    .map { it.recognition.fullText.trim() }
+                    .filter(String::isNotBlank)
+                    .joinToString("\n\n"),
+            ),
+            tileCount = tileCount,
+            tileFailureCount = tileFailureCount,
         )
     }
 

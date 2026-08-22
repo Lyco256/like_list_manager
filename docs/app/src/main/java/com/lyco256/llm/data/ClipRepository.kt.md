@@ -144,7 +144,7 @@ OCR detection remains read-only. The existing `updateOcrText()` path is the only
 
 ## 2026-08 OCR engine comparison
 
-`detectOcrTextForEngine()` selects ML Kit or PP-OCRv6 small once, then sends both through the same asset filtering, bitmap decode, ordering, result-combination, and error path. It returns `OcrDetectionResult` with the structured recognition and successful request metadata. Elapsed time starts immediately before the first gateway recognition call and ends after the structured result is assembled; detection remains read-only and does not persist the engine, timing, text, timestamp, or Undo state.
+`detectOcrTextForEngine()` routes the selected comparison condition through the same asset filtering, bitmap decode, ordering, result-combination, and error path. Production comparison conditions are PP-OCRv6 small, PP-OCRv6 medium, and PP-OCRv6 medium + tile; the legacy ML Kit route remains available to deterministic tests and non-comparison callers. It returns `OcrDetectionResult` with structured recognition and successful request metadata. Elapsed time starts immediately before the first gateway recognition call and ends after the structured result is assembled; detection remains read-only and does not persist the engine, timing, tile metadata, text, timestamp, or Undo state. Tile counts and partial failures are summed across eligible assets.
 
 ## 2026-07 media thumbnail update
 

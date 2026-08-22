@@ -56,4 +56,4 @@ The test harness fake now returns `OcrRecognitionResult`, matching the productio
 
 ## 2026-08 OCR engine comparison
 
-Production builds create one lazy reusable `PaddleOcrTextGateway` in addition to the existing ML Kit gateway and inject both into `ClipRepository`. The isolated test harness injects deterministic fakes for both engines. `closePaddleOcr()` is the process-level release path; model loading never runs during `AppContainer` construction.
+Production builds create one lazy reusable variant-aware `PaddleOcrTextGateway` in addition to the existing ML Kit gateway and inject both into `ClipRepository`. The gateway lazily caches separate small and medium SDK engines; medium + tile reuses medium. The isolated test harness injects deterministic fakes for both routes. `closePaddleOcr()` is the process-level release path; model loading never runs during `AppContainer` construction.

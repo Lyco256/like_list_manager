@@ -71,39 +71,39 @@ class OcrSessionDialogComposeTest {
             }
         }
 
-        composeRule.onNodeWithTag("ocr_engine_ml_kit").assertIsSelected()
+        composeRule.onNodeWithTag("ocr_engine_pp_ocrv6_small").assertIsSelected()
         composeRule.onAllNodesWithTag("ocr_detection_metadata").assertCountEquals(0)
-        composeRule.onNodeWithTag("ocr_engine_pp_ocrv6_small").performClick()
+        composeRule.onNodeWithTag("ocr_engine_pp_ocrv6_medium").performClick()
         composeRule.waitForIdle()
         assertEquals(emptyList<OcrEngine>(), requestedEngines)
 
         composeRule.onNodeWithTag("ocr_redetect").performClick()
         composeRule.waitForIdle()
-        assertEquals(listOf(OcrEngine.PP_OCRV6_SMALL), requestedEngines)
+        assertEquals(listOf(OcrEngine.PP_OCRV6_MEDIUM), requestedEngines)
         composeRule.runOnIdle {
             success!!(
                 OcrDetectionResult(
                     recognition = structuredText(7L, "pp result"),
-                    metadata = OcrDetectionMetadata(OcrEngine.PP_OCRV6_SMALL, 2_400L),
+                    metadata = OcrDetectionMetadata(OcrEngine.PP_OCRV6_MEDIUM, 2_400L),
                 ),
             )
         }
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("ocr_detection_metadata").assertTextContains("PP-OCRv6 small · 2.4s")
+        composeRule.onNodeWithTag("ocr_detection_metadata").assertTextContains("PP-OCRv6 medium · 2.4s")
         composeRule.onNodeWithText("pp result").assertIsDisplayed()
 
-        composeRule.onNodeWithTag("ocr_engine_ml_kit").performClick()
+        composeRule.onNodeWithTag("ocr_engine_pp_ocrv6_medium_tile").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("ocr_detection_metadata").assertTextContains("PP-OCRv6 small · 2.4s")
+        composeRule.onNodeWithTag("ocr_detection_metadata").assertTextContains("PP-OCRv6 medium · 2.4s")
         assertEquals(1, requestedEngines.size)
 
         composeRule.onNodeWithTag("ocr_redetect").performClick()
         composeRule.waitForIdle()
-        assertEquals(listOf(OcrEngine.PP_OCRV6_SMALL, OcrEngine.ML_KIT), requestedEngines)
-        composeRule.runOnIdle { failure!!("ML Kit failed") }
+        assertEquals(listOf(OcrEngine.PP_OCRV6_MEDIUM, OcrEngine.PP_OCRV6_MEDIUM_TILE), requestedEngines)
+        composeRule.runOnIdle { failure!!("medium tile failed") }
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("ML Kit failed").assertIsDisplayed()
-        composeRule.onNodeWithTag("ocr_detection_metadata").assertTextContains("PP-OCRv6 small · 2.4s")
+        composeRule.onNodeWithText("medium tile failed").assertIsDisplayed()
+        composeRule.onNodeWithTag("ocr_detection_metadata").assertTextContains("PP-OCRv6 medium · 2.4s")
         composeRule.onNodeWithText("pp result").assertIsDisplayed()
     }
 

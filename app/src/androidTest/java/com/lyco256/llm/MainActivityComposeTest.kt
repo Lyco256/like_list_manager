@@ -3301,21 +3301,21 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("ocr_image_viewer").assertIsDisplayed()
         composeRule.onNodeWithTag("ocr_result_text").assertExists()
         composeRule.onNodeWithTag("ocr_confirm").performClick()
-        waitUntil { ocrTextForClip(clipId) == "Landscape OCR\nSecond line" }
+        waitUntil { ocrTextForClip(clipId) == "PP-OCR fake" }
 
         composeRule.onNodeWithTag("tweet_options_button_$clipId", useUnmergedTree = true)
             .performClick()
         composeRule.onNodeWithTag("tweet_options_ocr").performClick()
         composeRule.onNodeWithTag("ocr_full_screen").assertIsDisplayed()
         assertTrue(composeRule.onAllNodesWithText("文字起こし中").fetchSemanticsNodes().isEmpty())
-        composeRule.onNodeWithText("Landscape OCR", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("PP-OCR fake", substring = true).assertIsDisplayed()
         composeRule.onNodeWithTag("ocr_redetect").performClick()
         assertTrue(composeRule.onAllNodesWithTag("ocr_redetect_warning_dialog").fetchSemanticsNodes().isEmpty())
         composeRule.waitUntil(timeoutMillis = 5_000) {
             composeRule.onAllNodesWithText("文字起こし中").fetchSemanticsNodes().isEmpty()
         }
         composeRule.onNodeWithTag("ocr_cancel").performClick()
-        assertEquals("Landscape OCR\nSecond line", ocrTextForClip(clipId))
+        assertEquals("PP-OCR fake", ocrTextForClip(clipId))
         assertTrue(java.io.File(photoPath).exists())
     }
 

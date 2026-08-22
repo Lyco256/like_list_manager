@@ -176,7 +176,7 @@ internal fun OcrSessionDialog(
     val controller = remember(clip.clip.id, sessionKey) {
         OcrSessionController(clip) { renderedState = it }
     }
-    var selectedEngine by remember(clip.clip.id, sessionKey) { mutableStateOf(OcrEngine.ML_KIT) }
+    var selectedEngine by remember(clip.clip.id, sessionKey) { mutableStateOf(OcrEngine.PP_OCRV6_SMALL) }
     val state = renderedState ?: controller.state
 
     DisposableEffect(controller) {
@@ -235,7 +235,7 @@ internal fun OcrTextDialog(
     onRedetect: () -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
-    selectedEngine: OcrEngine = OcrEngine.ML_KIT,
+    selectedEngine: OcrEngine = OcrEngine.PP_OCRV6_SMALL,
     detectionMetadata: OcrDetectionMetadata? = null,
     onEngineSelected: (OcrEngine) -> Unit = {},
 ) {
@@ -349,21 +349,26 @@ internal fun OcrTextDialog(
                 }
             }
 
-            Row(
+            Column(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
                     .testTag("ocr_engine_selector"),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Text("OCRエンジン", style = MaterialTheme.typography.labelLarge)
-                OcrEngine.entries.forEach { engine ->
-                    FilterChip(
-                        selected = selectedEngine == engine,
-                        onClick = { onEngineSelected(engine) },
-                        enabled = !isProcessing && !isSaving,
-                        label = { Text(engine.displayName) },
-                        modifier = Modifier.testTag("ocr_engine_${engine.name.lowercase()}"),
-                    )
+                Text("OCR条件", style = MaterialTheme.typography.labelLarge)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OcrEngine.entries.filter { it != OcrEngine.ML_KIT }.forEach { engine ->
+                        FilterChip(
+                            selected = selectedEngine == engine,
+                            onClick = { onEngineSelected(engine) },
+                            enabled = !isProcessing && !isSaving,
+                            label = { Text(engine.displayName) },
+                            modifier = Modifier.weight(1f)
+                                .testTag("ocr_engine_${engine.name.lowercase()}"),
+                        )
+                    }
                 }
             }
 
@@ -377,7 +382,21 @@ internal fun OcrTextDialog(
 
             if (structuredResult != null && detectionMetadata != null) {
                 Text(
-                    text = "${detectionMetadata.engine.displayName} · ${formatOcrElapsedTime(detectionMetadata.elapsedMs)}",
+                    text = buildString {
+                        append(detectionMetadata.engine.displayName)
+                        append(" · ")
+                        append(formatOcrElapsedTime(detectionMetadata.elapsedMs))
+                        if (detectionMetadata.tileCount > 0) {
+                            append(" · ")
+                            append(detectionMetadata.tileCount)
+                            append(" tiles")
+                        }
+                        if (detectionMetadata.tileFailureCount > 0) {
+                            append(" · ")
+                            append(detectionMetadata.tileFailureCount)
+                            append(" tile failures")
+                        }
+                    },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp)

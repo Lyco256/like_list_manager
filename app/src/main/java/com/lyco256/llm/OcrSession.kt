@@ -136,7 +136,7 @@ internal class OcrSessionController(
 
     fun startAutomaticComparisonDetection(
         detect: OcrComparisonDetectHandler,
-        engine: OcrEngine = OcrEngine.ML_KIT,
+        engine: OcrEngine = OcrEngine.PP_OCRV6_SMALL,
     ) {
         if (automaticDetectionStarted) return
         automaticDetectionStarted = true

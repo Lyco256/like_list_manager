@@ -5,6 +5,7 @@ import android.graphics.Color
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PaddleOcrRuntimeSmokeTest {
@@ -15,9 +16,14 @@ class PaddleOcrRuntimeSmokeTest {
             eraseColor(Color.WHITE)
         }
         try {
-            val result = gateway.recognize(bitmap)
-            assertEquals(64, result.imageWidth)
-            assertEquals(64, result.imageHeight)
+            val small = gateway.recognizeForComparison(bitmap, OcrEngine.PP_OCRV6_SMALL)
+            val medium = gateway.recognizeForComparison(bitmap, OcrEngine.PP_OCRV6_MEDIUM)
+            val tiled = gateway.recognizeForComparison(bitmap, OcrEngine.PP_OCRV6_MEDIUM_TILE)
+            assertEquals(64, small.recognition.imageWidth)
+            assertEquals(64, medium.recognition.imageHeight)
+            assertEquals(1, tiled.tileCount)
+            assertEquals(0, tiled.tileFailureCount)
+            assertTrue(tiled.recognition.fullText.isEmpty())
         } finally {
             bitmap.recycle()
             gateway.close()

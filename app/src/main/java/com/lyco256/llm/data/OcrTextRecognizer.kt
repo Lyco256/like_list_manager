@@ -75,11 +75,21 @@ data class OcrRecognitionResult(
 enum class OcrEngine(val displayName: String) {
     ML_KIT("ML Kit"),
     PP_OCRV6_SMALL("PP-OCRv6 small"),
+    PP_OCRV6_MEDIUM("PP-OCRv6 medium"),
+    PP_OCRV6_MEDIUM_TILE("PP-OCRv6 medium + tile"),
 }
 
 data class OcrDetectionMetadata(
     val engine: OcrEngine,
     val elapsedMs: Long,
+    val tileCount: Int = 0,
+    val tileFailureCount: Int = 0,
+)
+
+data class OcrGatewayRecognition(
+    val recognition: OcrRecognitionResult,
+    val tileCount: Int = 0,
+    val tileFailureCount: Int = 0,
 )
 
 internal data class OcrTextLineCandidate(
@@ -98,6 +108,11 @@ internal data class OcrTextBlockCandidate(
 
 interface OcrTextGateway {
     suspend fun recognize(bitmap: Bitmap): OcrRecognitionResult
+
+    suspend fun recognizeForComparison(
+        bitmap: Bitmap,
+        engine: OcrEngine,
+    ): OcrGatewayRecognition = OcrGatewayRecognition(recognize(bitmap))
 }
 
 class MlKitOcrTextGateway : OcrTextGateway {

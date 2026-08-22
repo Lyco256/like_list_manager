@@ -2671,6 +2671,16 @@ class RepositoryIntegrationTest {
         assertEquals(1, mlCalls)
         assertEquals(1, ppCalls)
 
+        val medium = routedRepository.detectOcrTextForEngine(details, OcrEngine.PP_OCRV6_MEDIUM)
+        assertEquals("PP result", medium.recognition.fullText)
+        assertEquals(OcrEngine.PP_OCRV6_MEDIUM, medium.metadata.engine)
+        assertEquals(2, ppCalls)
+
+        val tiled = routedRepository.detectOcrTextForEngine(details, OcrEngine.PP_OCRV6_MEDIUM_TILE)
+        assertEquals("PP result", tiled.recognition.fullText)
+        assertEquals(OcrEngine.PP_OCRV6_MEDIUM_TILE, tiled.metadata.engine)
+        assertEquals(3, ppCalls)
+
         storage.withDatabase { database ->
             val unchanged = requireNotNull(database.clipDao().getClip(details.clip.id))
             assertEquals("persisted OCR", unchanged.ocrText)

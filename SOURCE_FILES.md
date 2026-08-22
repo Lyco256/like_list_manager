@@ -61,7 +61,7 @@ MainActivity / Compose UI
 - 保存先設定と移動復旧状態は内部SharedPreferencesへ保存
 - PhotoはWebP lossy quality 85で保存
 - 動画/GIF本体は保存せず、previewImageUrlからthumbnailを取得してWebPで保存する。新規同期ではWi-Fi待ち状態を作らない
-- OCR Gatewayは画像寸法、整形済み全文、読み順済みの行領域、元画像座標の4点polygon、confidenceを持つエンジン非依存の`OcrRecognitionResult`を返す。ML Kitに加えて公式Android SDK＋同梱PP-OCRv6 smallを選択でき、両方をRepositoryの共通asset処理へ通す。初期値はML Kit、選択だけでは実行せず、成功した結果に限りengine名と時間をセッション表示する。構造化結果、選択、engine、時間は永続化しない
+- OCR Gatewayは画像寸法、整形済み全文、読み順済みの行領域、元画像座標の4点polygon、confidenceを持つエンジン非依存の`OcrRecognitionResult`を返す。比較UIは公式Android SDK＋同梱PP-OCRv6 small／medium／medium + tileを選択でき、全体OCR・タイルOCRともRepositoryの共通asset処理へ通す。初期値はsmall、選択だけでは実行せず、成功した結果に限り条件名・時間・tile数・失敗数をセッション表示する。構造化結果、選択、比較metadataは永続化しない
 - 投稿IDのunique制約で重複保存を防止
 - 月間取得数、月別API使用量履歴、警告/停止判定値、15分rate limitを記録
 - 初回サンプルデータはDBが空の場合だけ投入
