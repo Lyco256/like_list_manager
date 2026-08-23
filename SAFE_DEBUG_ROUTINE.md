@@ -48,14 +48,6 @@ Codexは、検証・ビルド・テスト・lint・実機操作を自己判断�
 
 USB接続とワイヤレスデバッグで入口は共通です。`testDeviceSerial`に登録したhardware serialと接続端末を照合し、USB接続がなければmDNSのADB TLS endpointを自動解決する。
 
-OCR8 visual smoke artifactの取得（直前の統合テストがSuccessの場合だけ）:
-
-```powershell
-.\scripts\run-safe-ocr-visual-check.cmd
-```
-
-この入口はtest packageの外部filesに生成されたOCR8用の決定的なPNGだけを、hardware serial照合済みの実機から`build/ocr8-visual/<timestamp>/`へ読み取り専用で取得する。アプリ起動、DB・画像・Preferences変更、削除、uninstallは行わない。
-
 Macrobenchmark:
 
 ```powershell
@@ -159,10 +151,6 @@ Build、UnitTest、Lintには通常検証と同じ共有state・部分実行を�
 長いbuild・unit test・lint中に端末が消灯してもCompose Activityを起動できるよう、隔離実機テストの直前に対象端末をwakeし、keyguard解除を要求してAwake状態を確認する。端末データやpackageは変更しない。
 
 テスト後も隔離テストアプリを端末へ残し、両アプリを共存させる。
-
-## OCR8 visual smoke artifact
-
-`run-safe-integration-check.cmd`には、横書き2×2、縦書き2列、複数assetの全文選択・region編集を実機Composeで描画する`OcrVisualSmokeIntegrationTest`が含まれる。統合テストがSuccessになった後だけ、上記の`run-safe-ocr-visual-check.cmd`でtest package外部filesのPNGをホストへ取得し、画像を目視確認する。取得入口はtest packageの生成artifact以外を読み取らない。
 
 ## Macrobenchmark
 

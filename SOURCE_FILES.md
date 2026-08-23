@@ -220,8 +220,6 @@ MainActivity / Compose UI
 - `docs/scripts/run-safe-debug-check.cmd.md`
 - `docs/scripts/run-safe-integration-check.ps1.md`
 - `docs/scripts/run-safe-integration-check.cmd.md`
-- `docs/scripts/run-safe-ocr-visual-check.ps1.md`
-- `docs/scripts/run-safe-ocr-visual-check.cmd.md`
 - `docs/scripts/run-safe-macrobenchmark-check.ps1.md`
 - `docs/scripts/run-safe-macrobenchmark-check.cmd.md`
 - `docs/scripts/run-safe-snapshot-check.ps1.md`
