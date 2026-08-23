@@ -191,6 +191,7 @@ MainActivity / Compose UI
 - `docs/app/src/test/java/com/lyco256/llm/OcrViewerGeometryTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/OcrViewerRevealTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/OcrSessionDialogComposeTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/OcrVisualSmokeIntegrationTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/MediaGridPersistentPreviewStoreTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/HeavyLocalWorkTrackerTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/UndoPayloadCodecTest.kt.md`
@@ -219,6 +220,8 @@ MainActivity / Compose UI
 - `docs/scripts/run-safe-debug-check.cmd.md`
 - `docs/scripts/run-safe-integration-check.ps1.md`
 - `docs/scripts/run-safe-integration-check.cmd.md`
+- `docs/scripts/run-safe-ocr-visual-check.ps1.md`
+- `docs/scripts/run-safe-ocr-visual-check.cmd.md`
 - `docs/scripts/run-safe-macrobenchmark-check.ps1.md`
 - `docs/scripts/run-safe-macrobenchmark-check.cmd.md`
 - `docs/scripts/run-safe-snapshot-check.ps1.md`
