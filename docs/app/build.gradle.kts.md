@@ -43,6 +43,7 @@ AndroidアプリモジュールのapplicationId、SDK、Java/Kotlin 21、Compose
 - Instrumentation Testは `scripts/run-safe-integration-check.cmd` から、メインと `.test` を別package・別UIDで共存させる許可済み実機だけで実行します。
 - `verifyTestEnvironmentIsolation` はdebug/testの生成BuildConfigとtest merged manifestを検査し、本番identity・保存名・API・OAuth receiverの混入を端末接続なしで失敗させます。
 
-## 2026-07 OCR update
+## 2026-08 OCR7 update
 
-- Added the ML Kit Japanese text recognition dependency used by the OCR gateway.
+- Adds the local `:ppocr-sdk` module for offline PP-OCRv6 small/medium ONNX inference.
+- Removes the ML Kit Japanese text recognition dependency.

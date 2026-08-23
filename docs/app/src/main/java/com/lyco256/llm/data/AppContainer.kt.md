@@ -49,3 +49,11 @@ Repositoryのconstructor変更や新しい共有サービス追加時は、こ�
 
 - Injects the OCR gateway into `ClipRepository`.
 - Test harness mode uses a deterministic fake OCR gateway so integration tests stay stable.
+
+## 2026-08 structured OCR boundary
+
+The test harness fake now returns `OcrRecognitionResult`, matching the production gateway boundary while keeping the existing deterministic full-text behavior. Tests can inject arbitrary structured regions without changing Repository or UI persistence behavior.
+
+## 2026-08 OCR7 PaddleOCR
+
+The production container injects `PaddleOcrTextGateway`, which runs the bundled PP-OCRv6 small/medium ONNX assets offline. The test variant injects the existing fake gateway. `closePaddleOcr()` releases the single active engine when the application receives critical memory pressure; no model choice is persisted.

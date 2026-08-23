@@ -13,6 +13,7 @@
 - `LikeListManagerApp : Application`
 - `container`: アプリ全体で共有する依存関係コンテナ
 - `onCreate`: `AppContainer(this)` を初期化
+- `onTrimMemory`: critical memory pressure時に現在のPaddleOCR engineを解放
 
 ## 関連ファイル
 

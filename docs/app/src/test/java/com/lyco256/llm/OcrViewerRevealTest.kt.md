@@ -1,0 +1,3 @@
+# `OcrViewerRevealTest.kt`
+
+全文からpolygonを選択したときの純粋transform補正を検証します。既にviewport内なら不変、画面外なら現在倍率を保った最小pan、polygonが大きすぎる場合だけ1倍下限へ縮小することを固定します。

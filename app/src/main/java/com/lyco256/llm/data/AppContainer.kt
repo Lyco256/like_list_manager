@@ -57,14 +57,18 @@ class AppContainer(context: Context) {
     val ocrTextGateway: OcrTextGateway = if (BuildConfig.TEST_HARNESS) {
         FakeOcrTextGateway { bitmap ->
             when {
-                bitmap.width == 1 && bitmap.height == 1 -> ""
+                bitmap.width == 1 && bitmap.height == 1 -> OcrRecognitionResult(bitmap.width, bitmap.height, "")
                 bitmap.width == 2 && bitmap.height == 2 -> throw IllegalStateException("Fake OCR failure")
-                bitmap.width > bitmap.height -> "Landscape OCR\nSecond line"
-                else -> "Portrait OCR"
+                bitmap.width > bitmap.height -> OcrRecognitionResult(
+                    imageWidth = bitmap.width,
+                    imageHeight = bitmap.height,
+                    fullText = "Landscape OCR\nSecond line",
+                )
+                else -> OcrRecognitionResult(bitmap.width, bitmap.height, "Portrait OCR")
             }
         }
     } else {
-        MlKitOcrTextGateway()
+        PaddleOcrTextGateway(context)
     }
     val repository = ClipRepository(
         context = context,
@@ -78,4 +82,8 @@ class AppContainer(context: Context) {
         mediaGridRgb565RepairEnqueuer = mediaGridRgb565RepairEnqueuer,
         mediaGridRgb565PackStore = mediaGridRgb565PackStore,
     )
+
+    suspend fun closePaddleOcr() {
+        (ocrTextGateway as? PaddleOcrTextGateway)?.close()
+    }
 }

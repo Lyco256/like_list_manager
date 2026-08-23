@@ -288,8 +288,9 @@ Updated visible labels: `Xで開く`, `概要設定`, `文字起こし`, `いい
 ## 2026-07 OCR update
 
 - Enhanced tweet cards now share the same OCR menu, summary dialog, and save flow as the main list.
-- OCR recognition only runs when requested from the menu, and reopening OCR with existing text reuses the saved text until `再検出` is confirmed.
-- The tweet options menu exposes `tweet_options_ocr`, `tweet_options_summary`, and `tweet_options_local_delete`, and the OCR redetect confirmation uses `ocr_redetect_warning_dialog`.
+- OCR recognition uses the shared session flow from the main list, unclassified cards, classified cards, and the MediaGrid tweet dialog. Reopening with saved text reuses it without automatic detection; an empty saved value runs automatic detection once.
+- Redetect starts directly without a confirmation dialog. Draft text and structured asset/path results remain local until save succeeds, and save failure keeps the card dialog open.
+- The tweet options menu exposes `tweet_options_ocr`, `tweet_options_summary`, and `tweet_options_local_delete`.
 - The like-count popup now carries `clip_like_popup_<id>` so instrumentation tests can wait for the popup itself instead of only waiting on its text.
 ## 2026-07 classified media grid
 

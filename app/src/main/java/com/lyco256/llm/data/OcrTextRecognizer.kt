@@ -1,145 +1,81 @@
 package com.lyco256.llm.data
 
 import android.graphics.Bitmap
-import android.graphics.Rect
-import com.google.android.gms.tasks.Task
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.Text
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
+import android.graphics.Point
 
-internal data class OcrTextBounds(
-    val left: Int,
-    val top: Int,
-    val right: Int,
-    val bottom: Int,
-) {
-    val width: Int get() = right - left
-    val height: Int get() = bottom - top
-    val centerX: Int get() = left + width / 2
+enum class OcrQualityMode(val displayName: String) {
+    FAST("高速"),
+    ACCURATE("高精度"),
 }
 
-internal data class OcrTextLineCandidate(
-    val text: String,
-    val bounds: OcrTextBounds?,
-    val order: Int,
+data class OcrPoint(
+    val x: Float,
+    val y: Float,
 )
 
-internal data class OcrTextBlockCandidate(
-    val lines: List<OcrTextLineCandidate>,
-    val bounds: OcrTextBounds?,
-    val order: Int,
+data class OcrPolygon(
+    val points: List<OcrPoint>,
+) {
+    init {
+        require(points.size == 4) { "OCR polygon must contain exactly four points" }
+    }
+
+    companion object {
+        internal fun fromCornerPoints(points: Array<Point>): OcrPolygon? =
+            normalizeOcrPolygon(points.map { OcrPoint(it.x.toFloat(), it.y.toFloat()) })
+    }
+}
+
+internal fun normalizeOcrPolygon(points: List<OcrPoint>): OcrPolygon? {
+    if (points.size != 4 || points.any { !it.x.isFinite() || !it.y.isFinite() }) return null
+    return OcrPolygon(points.sortedClockwiseFromTopLeft())
+}
+
+data class OcrTextRegion(
+    val text: String,
+    val polygon: OcrPolygon? = null,
+    val confidence: Float? = null,
+    val precedingSeparator: String = "",
+)
+
+data class OcrRecognitionResult(
+    val imageWidth: Int,
+    val imageHeight: Int,
+    val fullText: String,
+    val regions: List<OcrTextRegion> = emptyList(),
+    val textLayout: OcrTextLayout? = null,
+    val regionRanges: List<OcrRegionTextRange> = emptyList(),
 )
 
 interface OcrTextGateway {
-    suspend fun recognize(bitmap: Bitmap): String
-}
-
-class MlKitOcrTextGateway : OcrTextGateway {
-    private val recognizer = TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
-
-    override suspend fun recognize(bitmap: Bitmap): String {
-        val image = InputImage.fromBitmap(bitmap, 0)
-        val result = recognizer.process(image).await()
-        return result.toFormattedText(isVerticalImage = bitmap.height > bitmap.width)
-    }
+    suspend fun recognize(
+        bitmap: Bitmap,
+        mode: OcrQualityMode = OcrQualityMode.FAST,
+    ): OcrRecognitionResult
 }
 
 class FakeOcrTextGateway(
-    private val recognizer: (Bitmap) -> String = { "Fake OCR" },
-) : OcrTextGateway {
-    override suspend fun recognize(bitmap: Bitmap): String = recognizer(bitmap)
-}
-
-internal fun Text.toFormattedText(isVerticalImage: Boolean): String {
-    val blocks = textBlocks.mapIndexedNotNull { blockIndex, block ->
-        val blockBounds = block.boundingBox?.toBounds()
-        val lines = block.lines.mapIndexedNotNull { lineIndex, line ->
-            val text = line.text.trim()
-            if (text.isBlank()) return@mapIndexedNotNull null
-            OcrTextLineCandidate(
-                text = text,
-                bounds = line.boundingBox?.toBounds(),
-                order = lineIndex,
-            )
-        }
-        if (lines.isEmpty() && block.lines.all { it.text.isBlank() }) return@mapIndexedNotNull null
-        OcrTextBlockCandidate(lines = lines, bounds = blockBounds, order = blockIndex)
-    }
-    return if (blocks.isEmpty()) {
-        text.trim()
-    } else {
-        formatOcrText(blocks, isVerticalImage = isVerticalImage)
-    }
-}
-
-internal fun formatOcrText(
-    blocks: List<OcrTextBlockCandidate>,
-    isVerticalImage: Boolean,
-): String {
-    if (blocks.isEmpty()) return ""
-    val sortedBlocks = blocks.sortedWith(
-        compareBy<OcrTextBlockCandidate> { it.sortCategory(isVerticalImage) }
-            .thenBy { it.sortPosition(isVerticalImage) }
-            .thenBy { it.order },
-    )
-    return sortedBlocks.mapNotNull { block ->
-        val sortedLines = block.lines.sortedWith(
-            compareBy<OcrTextLineCandidate> { it.sortCategory(block, isVerticalImage) }
-                .thenBy { it.sortPosition(block, isVerticalImage) }
-                .thenBy { it.order },
+    private val recognizer: (Bitmap) -> OcrRecognitionResult = { bitmap ->
+        OcrRecognitionResult(
+            imageWidth = bitmap.width,
+            imageHeight = bitmap.height,
+            fullText = "Fake OCR",
         )
-        sortedLines.mapNotNull { it.text.trim().takeIf(String::isNotBlank) }
-            .joinToString("\n")
-            .takeIf(String::isNotBlank)
-    }.joinToString("\n\n")
+    },
+) : OcrTextGateway {
+    override suspend fun recognize(bitmap: Bitmap, mode: OcrQualityMode): OcrRecognitionResult =
+        recognizer(bitmap)
 }
 
-private fun OcrTextBlockCandidate.sortCategory(isVerticalImage: Boolean): Int = when {
-    bounds == null -> 1
-    isVerticalBlock() && isVerticalImage -> 0
-    isHorizontalBlock() && !isVerticalImage -> 0
-    isMiddleBlock() -> 1
-    else -> 2
-}
-
-private fun OcrTextBlockCandidate.sortPosition(isVerticalImage: Boolean): Int = bounds?.let { box ->
-    if (isVerticalImage) box.top * 10_000 + box.left else box.centerX * 10_000 + box.top
-} ?: order
-
-private fun OcrTextLineCandidate.sortCategory(block: OcrTextBlockCandidate, isVerticalImage: Boolean): Int = when {
-    bounds == null -> 1
-    else -> 0
-}
-
-private fun OcrTextLineCandidate.sortPosition(block: OcrTextBlockCandidate, isVerticalImage: Boolean): Int = bounds?.let { box ->
-    when {
-        block.isVerticalBlock() -> box.top * 10_000 + box.left
-        block.isHorizontalBlock() -> box.centerX * 10_000 + box.top
-        isVerticalImage -> box.top * 10_000 + box.left
-        else -> box.centerX * 10_000 + box.top
+private fun List<OcrPoint>.sortedClockwiseFromTopLeft(): List<OcrPoint> {
+    val centerX = averageOf { it.x }
+    val centerY = averageOf { it.y }
+    val clockwise = sortedBy { point -> kotlin.math.atan2(point.y - centerY, point.x - centerX) }
+    val topLeftIndex = clockwise.indices.minBy { index ->
+        clockwise[index].x + clockwise[index].y
     }
-} ?: order
-
-private fun OcrTextBlockCandidate.isVerticalBlock(): Boolean = bounds?.let {
-    it.height >= it.width * 1.25
-} == true
-
-private fun OcrTextBlockCandidate.isHorizontalBlock(): Boolean = bounds?.let {
-    it.width >= it.height * 1.15
-} == true
-
-private fun OcrTextBlockCandidate.isMiddleBlock(): Boolean = !isVerticalBlock() && !isHorizontalBlock()
-
-private fun Rect.toBounds(): OcrTextBounds = OcrTextBounds(left, top, right, bottom)
-
-private suspend fun <T> Task<T>.await(): T = suspendCancellableCoroutine { continuation ->
-    addOnSuccessListener { continuation.resume(it) }
-    addOnFailureListener { continuation.resumeWithException(it) }
-    addOnCanceledListener {
-        continuation.cancel()
-    }
+    return clockwise.drop(topLeftIndex) + clockwise.take(topLeftIndex)
 }
+
+private fun List<OcrPoint>.averageOf(selector: (OcrPoint) -> Float): Float =
+    sumOf { selector(it).toDouble() }.toFloat() / size

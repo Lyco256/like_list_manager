@@ -3297,24 +3297,25 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("tweet_options_button_$clipId", useUnmergedTree = true)
             .performClick()
         composeRule.onNodeWithTag("tweet_options_ocr").performClick()
-        composeRule.onNodeWithTag("ocr_dialog").assertIsDisplayed()
-        composeRule.onNodeWithTag("clip_open_x_$clipId").assertIsDisplayed()
+        composeRule.onNodeWithTag("ocr_full_screen").assertIsDisplayed()
+        composeRule.onNodeWithTag("ocr_image_viewer").assertIsDisplayed()
         composeRule.onNodeWithTag("ocr_result_text").assertExists()
-        composeRule.onNodeWithTag("ocr_result_text").performTextReplacement("Saved OCR Text")
         composeRule.onNodeWithTag("ocr_confirm").performClick()
-        waitUntil { ocrTextForClip(clipId) == "Saved OCR Text" }
+        waitUntil { ocrTextForClip(clipId) == "Landscape OCR\nSecond line" }
 
         composeRule.onNodeWithTag("tweet_options_button_$clipId", useUnmergedTree = true)
             .performClick()
         composeRule.onNodeWithTag("tweet_options_ocr").performClick()
-        composeRule.onNodeWithTag("ocr_dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("ocr_full_screen").assertIsDisplayed()
         assertTrue(composeRule.onAllNodesWithText("文字起こし中").fetchSemanticsNodes().isEmpty())
-        composeRule.onNodeWithText("Saved OCR Text", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Landscape OCR", substring = true).assertIsDisplayed()
         composeRule.onNodeWithTag("ocr_redetect").performClick()
-        composeRule.onNodeWithTag("ocr_redetect_warning_dialog").assertIsDisplayed()
-        composeRule.onNodeWithTag("ocr_redetect_warning_confirm").performClick()
+        assertTrue(composeRule.onAllNodesWithTag("ocr_redetect_warning_dialog").fetchSemanticsNodes().isEmpty())
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithText("文字起こし中").fetchSemanticsNodes().isEmpty()
+        }
         composeRule.onNodeWithTag("ocr_cancel").performClick()
-        assertEquals("Saved OCR Text", ocrTextForClip(clipId))
+        assertEquals("Landscape OCR\nSecond line", ocrTextForClip(clipId))
         assertTrue(java.io.File(photoPath).exists())
     }
 

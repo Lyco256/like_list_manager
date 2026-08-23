@@ -134,6 +134,22 @@ clip削除ではDB削除成功後に、共有公開ロック下でasset ID由来
 - Added OCR detection for locally stored `photo` and `video_thumbnail` assets using the new OCR gateway abstraction.
 - Added `updateOcrText` persistence with a timestamp and changed local delete to a hard delete that removes rows and files.
 
+## 2026-08 structured OCR boundary
+
+`detectOcrText()` now returns an `OcrPostRecognitionResult` containing the clip ID, ordered `OcrAssetRecognitionResult` entries (`assetId`, `localPath`, and the image-level `OcrRecognitionResult`), and the compatibility `fullText`. Eligible assets remain limited to locally available `photo` and `video_thumbnail` entries sorted by asset ID. The full text still joins non-blank image full texts with `\n\n`. Structured results are not persisted; the OCR UI keeps them only in the active unsaved session.
+
+## 2026-08 OCR session flow
+
+OCR detection remains read-only. The existing `updateOcrText()` path is the only persistence path and still preserves field-level `ocrText` / `ocrUpdatedAt` updates, no-op behavior, and OCR edit Undo semantics. ViewModel save callbacks report success or failure so the UI closes only after a successful transaction.
+
+## 2026-08 OCR7 quality modes
+
+`detectOcrText(clip, mode)` accepts only `OcrQualityMode`. Empty saved OCR is automatically detected once with `FAST`; saved OCR skips automatic detection. Each eligible local photo or video thumbnail is passed to the same gateway with the requested mode, while the result remains an unsaved `OcrPostRecognitionResult`. `ACCURATE` is resolved to PP-OCRv6 medium and `FAST` to PP-OCRv6 small inside the Paddle gateway.
+
+## 2026-08 OCR8 reading order
+
+`detectOcrText()` applies `withReadingOrder()` immediately after each OCR success. Raw region index, polygon, confidence, and per-region edit identity remain intact while image geometry supplies direction, text groups, reading order, asset full text, and ranges. `rebuildOcrPostText()` also creates post-level ranges with asset offsets and group/asset separators. The layout is session-only; the persistence path receives only the reconstructed OCR full text.
+
 ## 2026-07 media thumbnail update
 
 - `photo` assets are downloaded from `media.url`, converted to WebP, and stored with quality 85.

@@ -92,10 +92,33 @@ class RepositoryIntegrationTest {
         xApiClient = api,
         ocrTextGateway = FakeOcrTextGateway { bitmap ->
             when {
-                bitmap.width == 1 && bitmap.height == 1 -> ""
+                bitmap.width == 1 && bitmap.height == 1 -> OcrRecognitionResult(bitmap.width, bitmap.height, "")
                 bitmap.width == 2 && bitmap.height == 2 -> throw IllegalStateException("Fake OCR failure")
-                bitmap.width > bitmap.height -> "Landscape OCR\nSecond line"
-                else -> "Portrait OCR"
+                bitmap.width > bitmap.height -> OcrRecognitionResult(
+                    imageWidth = bitmap.width,
+                    imageHeight = bitmap.height,
+                    fullText = "Landscape OCR\nSecond line",
+                    regions = listOf(
+                        OcrTextRegion(
+                            text = "Landscape OCR",
+                            polygon = OcrPolygon(
+                                listOf(
+                                    OcrPoint(0f, 0f),
+                                    OcrPoint(2f, 0f),
+                                    OcrPoint(2f, 1f),
+                                    OcrPoint(0f, 1f),
+                                ),
+                            ),
+                            confidence = 0.9f,
+                        ),
+                        OcrTextRegion(
+                            text = "Second line",
+                            confidence = 0.8f,
+                            precedingSeparator = "\n",
+                        ),
+                    ),
+                )
+                else -> OcrRecognitionResult(bitmap.width, bitmap.height, "Portrait OCR")
             }
         },
         mediaGridPreviewEnqueuer = previewEnqueuer,
@@ -2491,6 +2514,16 @@ class RepositoryIntegrationTest {
                         downloadState = "downloaded",
                         createdAt = now,
                     ),
+                    AssetEntity(
+                        clipId = clipId,
+                        mediaKey = "video-body-not-ocr",
+                        type = "video",
+                        remoteUrl = "https://example.test/video",
+                        previewUrl = null,
+                        localPath = null,
+                        downloadState = "remote",
+                        createdAt = now,
+                    ),
                 ),
             )
             clipId
@@ -2504,17 +2537,129 @@ class RepositoryIntegrationTest {
 
         val recognized = repository.detectOcrText(clipWithDetails)
 
-        assertEquals("Landscape OCR\nSecond line\n\nPortrait OCR", recognized)
+        assertEquals("Landscape OCR Second line\n\nPortrait OCR", recognized.fullText)
+        assertEquals(clipId, recognized.clipId)
+        assertEquals(listOf("ocr-photo.jpg", "ocr-thumb.png"), recognized.assets.map { File(it.localPath).name })
+        assertEquals(listOf("photo", "thumb"), recognized.assets.map { asset ->
+            clipWithDetails.assets.single { it.id == asset.assetId }.mediaKey
+        })
+        assertEquals(listOf("Landscape OCR Second line", "Portrait OCR"), recognized.assets.map { it.recognition.fullText })
         assertEquals(null, storage.withDatabase { it.undoDao().getSlot() })
 
         val clip = clipWithDetails.clip
-        repository.updateOcrText(clip, recognized)
+        repository.updateOcrText(clip, recognized.fullText)
 
         storage.withDatabase { database ->
             val updated = database.clipDao().getAllClips().single { it.id == clipId }
-            assertEquals(recognized, updated.ocrText)
+            assertEquals(recognized.fullText, updated.ocrText)
             assertTrue(requireNotNull(updated.ocrUpdatedAt).isNotBlank())
         }
+    }
+
+    @Test
+    fun failedOcrDetectionDoesNotModifyClipOrUndo() = runBlocking {
+        val now = Instant.now().toString()
+        val previousUpdatedAt = "2026-08-20T00:00:00Z"
+        val clipId = storage.withDatabase { database ->
+            val clipId = database.clipDao().insertClip(
+                clip("901").copy(
+                    ocrText = "persisted OCR",
+                    ocrUpdatedAt = previousUpdatedAt,
+                ),
+            )
+            val imageDir = storage.imageDirectory()
+            imageDir.mkdirs()
+            val failedFile = imageDir.resolve("ocr-failed.jpg").apply {
+                writeBytes(bitmapBytes(2, 2, android.graphics.Color.RED))
+            }
+            database.clipDao().insertAssets(
+                listOf(
+                    AssetEntity(
+                        clipId = clipId,
+                        mediaKey = "ocr-failure",
+                        type = "photo",
+                        remoteUrl = "https://example.test/ocr-failure",
+                        previewUrl = null,
+                        localPath = failedFile.absolutePath,
+                        width = 2,
+                        height = 2,
+                        sizeBytes = failedFile.length(),
+                        downloadState = "downloaded",
+                        createdAt = now,
+                    ),
+                ),
+            )
+            clipId
+        }
+
+        val details = storage.withDatabase { database ->
+            ClipWithDetails(
+                clip = database.clipDao().getAllClips().single { it.id == clipId },
+                assets = database.clipDao().assetsForClipIds(listOf(clipId)),
+                tags = emptyList(),
+            )
+        }
+
+        assertNotNull(runCatching { repository.detectOcrText(details) }.exceptionOrNull())
+        storage.withDatabase { database ->
+            val unchanged = database.clipDao().getAllClips().single { it.id == clipId }
+            assertEquals("persisted OCR", unchanged.ocrText)
+            assertEquals(previousUpdatedAt, unchanged.ocrUpdatedAt)
+            assertEquals(null, database.undoDao().getSlot())
+        }
+    }
+
+    @Test
+    fun fakeOcrGatewayCanSupplyArbitraryStructuredResult() = runBlocking {
+        val expected = OcrRecognitionResult(
+            imageWidth = 640,
+            imageHeight = 480,
+            fullText = "Injected",
+            regions = listOf(
+                OcrTextRegion(
+                    text = "Injected",
+                    polygon = OcrPolygon(
+                        listOf(
+                            OcrPoint(1.5f, 2.5f),
+                            OcrPoint(30.25f, 3.5f),
+                            OcrPoint(29.75f, 20.5f),
+                            OcrPoint(0.75f, 19.5f),
+                        ),
+                    ),
+                    confidence = 0.73f,
+                ),
+            ),
+        )
+        val gateway = FakeOcrTextGateway { expected }
+        val bitmap = Bitmap.createBitmap(640, 480, Bitmap.Config.ARGB_8888)
+
+        try {
+            assertEquals(expected, gateway.recognize(bitmap))
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    @Test
+    fun cornerPointAdapterKeepsAllCoordinatesInCommonPolygon() {
+        val polygon = OcrPolygon.fromCornerPoints(
+            arrayOf(
+                android.graphics.Point(42, 70),
+                android.graphics.Point(30, 90),
+                android.graphics.Point(80, 20),
+                android.graphics.Point(12, 10),
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                OcrPoint(12f, 10f),
+                OcrPoint(80f, 20f),
+                OcrPoint(42f, 70f),
+                OcrPoint(30f, 90f),
+            ),
+            polygon?.points,
+        )
     }
 
     @Test

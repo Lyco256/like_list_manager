@@ -30,6 +30,7 @@ AndroidX Test Rules、Room testing、Compose UI Test、MockWebServer、sqlite-jd
 
 MacrobenchmarkとUI Automator、および `com.android.test` plugin aliasも管理します。
 
-## 2026-07 OCR update
+## 2026-08 OCR7 update
 
-- Added the `mlkitTextJapanese` version entry and the `mlkit-text-japanese` library alias.
+- Adds ONNX Runtime and coroutines aliases used by the local `:ppocr-sdk` module.
+- Removes the ML Kit Japanese text recognition version and alias.
