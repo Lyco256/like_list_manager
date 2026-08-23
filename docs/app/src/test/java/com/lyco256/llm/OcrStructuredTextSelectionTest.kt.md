@@ -1,0 +1,3 @@
+# `OcrStructuredTextSelectionTest.kt`
+
+post全文のregion rangeが同じ再構成結果から生成され、region編集後に後続rangeが更新されることを確認します。自動space、group区切り、polygonなしregionが選択対象にならず、有効polygonのoffsetだけが安定した`OcrRegionKey`へ解決されることを固定します。

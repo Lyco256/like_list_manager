@@ -59,6 +59,7 @@ data class OcrPostRecognitionResult(
     val clipId: Long,
     val assets: List<OcrAssetRecognitionResult>,
     val fullText: String,
+    val regionRanges: List<OcrPostRegionTextRange> = emptyList(),
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -1344,7 +1345,7 @@ class ClipRepository internal constructor(
                 OcrAssetRecognitionResult(
                     assetId = asset.id,
                     localPath = path.absolutePath,
-                    recognition = ocrTextGateway.recognize(bitmap, mode),
+                    recognition = ocrTextGateway.recognize(bitmap, mode).withReadingOrder(),
                 )
             } finally {
                 bitmap.recycle()
@@ -1357,7 +1358,7 @@ class ClipRepository internal constructor(
                 .map { it.recognition.fullText.trim() }
                 .filter(String::isNotBlank)
                 .joinToString("\n\n"),
-        )
+        ).rebuildOcrPostText()
     }
 
     private suspend fun invalidateUndoBeforeNodeMoveOrReorder() {

@@ -2537,13 +2537,13 @@ class RepositoryIntegrationTest {
 
         val recognized = repository.detectOcrText(clipWithDetails)
 
-        assertEquals("Landscape OCR\nSecond line\n\nPortrait OCR", recognized.fullText)
+        assertEquals("Landscape OCR Second line\n\nPortrait OCR", recognized.fullText)
         assertEquals(clipId, recognized.clipId)
         assertEquals(listOf("ocr-photo.jpg", "ocr-thumb.png"), recognized.assets.map { File(it.localPath).name })
         assertEquals(listOf("photo", "thumb"), recognized.assets.map { asset ->
             clipWithDetails.assets.single { it.id == asset.assetId }.mediaKey
         })
-        assertEquals(listOf("Landscape OCR\nSecond line", "Portrait OCR"), recognized.assets.map { it.recognition.fullText })
+        assertEquals(listOf("Landscape OCR Second line", "Portrait OCR"), recognized.assets.map { it.recognition.fullText })
         assertEquals(null, storage.withDatabase { it.undoDao().getSlot() })
 
         val clip = clipWithDetails.clip

@@ -10,4 +10,4 @@ Engine-independent OCR result contract and quality-mode boundary.
 
 `OcrTextGateway.recognize()` receives only the product quality mode. Mapping that mode to PP-OCRv6 model assets is isolated in `PaddleOcrTextRecognizer.kt`.
 
-The common result keeps image width/height, formatted full text, ordered regions, optional confidence, and source-image four-point polygons. Polygon normalization rejects non-finite coordinates without dropping the recognized text. Structured results remain in the active OCR session and are not persisted here.
+The common result keeps image width/height, formatted full text, raw-indexed regions, optional confidence, source-image four-point polygons, and the session-only `OcrTextLayout` / per-region ranges produced after OCR success. Polygon normalization rejects non-finite coordinates without dropping the recognized text. The layout and ranges are not persisted.

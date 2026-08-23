@@ -43,6 +43,8 @@ data class OcrRecognitionResult(
     val imageHeight: Int,
     val fullText: String,
     val regions: List<OcrTextRegion> = emptyList(),
+    val textLayout: OcrTextLayout? = null,
+    val regionRanges: List<OcrRegionTextRange> = emptyList(),
 )
 
 interface OcrTextGateway {

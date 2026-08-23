@@ -146,6 +146,10 @@ OCR detection remains read-only. The existing `updateOcrText()` path is the only
 
 `detectOcrText(clip, mode)` accepts only `OcrQualityMode`. Empty saved OCR is automatically detected once with `FAST`; saved OCR skips automatic detection. Each eligible local photo or video thumbnail is passed to the same gateway with the requested mode, while the result remains an unsaved `OcrPostRecognitionResult`. `ACCURATE` is resolved to PP-OCRv6 medium and `FAST` to PP-OCRv6 small inside the Paddle gateway.
 
+## 2026-08 OCR8 reading order
+
+`detectOcrText()` applies `withReadingOrder()` immediately after each OCR success. Raw region index, polygon, confidence, and per-region edit identity remain intact while image geometry supplies direction, text groups, reading order, asset full text, and ranges. `rebuildOcrPostText()` also creates post-level ranges with asset offsets and group/asset separators. The layout is session-only; the persistence path receives only the reconstructed OCR full text.
+
 ## 2026-07 media thumbnail update
 
 - `photo` assets are downloaded from `media.url`, converted to WebP, and stored with quality 85.

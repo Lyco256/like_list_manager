@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -66,6 +67,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -73,6 +77,7 @@ import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.OcrAssetRecognitionResult
 import com.lyco256.llm.data.OcrQualityMode
 import com.lyco256.llm.data.OcrRecognitionResult
+import com.lyco256.llm.data.OcrPostRegionTextRange
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -239,6 +244,7 @@ internal fun OcrTextDialog(
     var selectedRegionKey by remember(sessionKey, previewAssets) {
         mutableStateOf<OcrRegionKey?>(null)
     }
+    var revealRequestToken by remember(sessionKey, previewAssets) { mutableStateOf(0L) }
     val currentPage = previewAssets.firstOrNull { it.assetId == currentAssetId }
     val currentPageIndex = previewAssets.indexOfFirst { it.assetId == currentAssetId }
     val selectedRegion = selectedRegionKey
@@ -274,8 +280,10 @@ internal fun OcrTextDialog(
     LaunchedEffect(isProcessing) {
         if (isProcessing) clearRegionSelection()
     }
-    LaunchedEffect(selectedRegionKey, selectedRegion) {
-        if (selectedRegionKey != null && selectedRegion == null) clearRegionSelection()
+    LaunchedEffect(selectedRegionKey, selectedRegion, currentPage?.assetId) {
+        if (selectedRegionKey != null && selectedRegionKey?.assetId == currentPage?.assetId && selectedRegion == null) {
+            clearRegionSelection()
+        }
     }
 
     fun requestPage(delta: Int) {
@@ -283,6 +291,15 @@ internal fun OcrTextDialog(
         val index = (currentPageIndex + delta).coerceIn(0, previewAssets.lastIndex)
         currentAssetId = previewAssets[index].assetId
         clearRegionSelection()
+    }
+
+    fun selectRegionFromText(offset: Int) {
+        if (isProcessing || isSaving) return
+        val key = structuredResult?.regionKeyAtTextOffset(offset) ?: return
+        if (previewAssets.none { it.assetId == key.assetId }) return
+        currentAssetId = key.assetId
+        selectedRegionKey = key
+        revealRequestToken++
     }
 
     BackHandler { onDismiss() }
@@ -395,6 +412,7 @@ internal fun OcrTextDialog(
                         selectedRegionIndex = selectedRegionKey
                             ?.takeIf { it.assetId == currentPage.assetId }
                             ?.regionIndex,
+                        revealRequestToken = revealRequestToken,
                         transform = pageTransforms[currentPage.assetId] ?: OcrViewerTransform(),
                         onTransformChanged = { pageTransforms[currentPage.assetId] = it },
                         onPageChange = ::requestPage,
@@ -478,10 +496,10 @@ internal fun OcrTextDialog(
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
                             Text("OCR全文", style = MaterialTheme.typography.labelLarge)
-                            Text(
+                            OcrStructuredTextView(
                                 text = text,
-                                modifier = Modifier.fillMaxWidth(),
-                                minLines = 3,
+                                ranges = structuredResult.regionRanges,
+                                onRegionTap = ::selectRegionFromText,
                             )
                         }
                     } else {
@@ -526,12 +544,36 @@ private fun OcrQualityModeSegment(
 }
 
 @Composable
+private fun OcrStructuredTextView(
+    text: String,
+    ranges: List<OcrPostRegionTextRange>,
+    onRegionTap: (Int) -> Unit,
+) {
+    var textLayoutResult by remember(text, ranges) { mutableStateOf<TextLayoutResult?>(null) }
+    Text(
+        text = AnnotatedString(text),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("ocr_result_text_value")
+            .pointerInput(text, ranges) {
+                detectTapGestures { position ->
+                    val offset = textLayoutResult?.getOffsetForPosition(position) ?: return@detectTapGestures
+                    if (ranges.any { offset >= it.start && offset < it.end }) onRegionTap(offset)
+                }
+            },
+        minLines = 3,
+        onTextLayout = { textLayoutResult = it },
+    )
+}
+
+@Composable
 private fun OcrImagePageViewer(
     page: OcrImagePage,
     pageIndex: Int,
     pageCount: Int,
     recognition: OcrAssetRecognitionResult?,
     selectedRegionIndex: Int?,
+    revealRequestToken: Long,
     transform: OcrViewerTransform,
     onTransformChanged: (OcrViewerTransform) -> Unit,
     onPageChange: (Int) -> Unit,
@@ -545,10 +587,26 @@ private fun OcrImagePageViewer(
     val latestTransform by rememberUpdatedState(transform)
     val latestRecognition by rememberUpdatedState(recognition)
     val latestOnRegionTap by rememberUpdatedState(onRegionTap)
+    var viewportSize by remember(page.assetId) { mutableStateOf(IntSize.Zero) }
+    LaunchedEffect(revealRequestToken, viewportSize, page.assetId, recognition?.assetId) {
+        if (revealRequestToken == 0L || selectedRegionIndex == null || viewportSize.width <= 0 || viewportSize.height <= 0) return@LaunchedEffect
+        val selectedPolygon = recognition?.recognition?.regions?.getOrNull(selectedRegionIndex)?.polygon ?: return@LaunchedEffect
+        val next = OcrViewerGeometry.revealPolygonTransform(
+            polygon = selectedPolygon,
+            sourceWidth = sourceWidth,
+            sourceHeight = sourceHeight,
+            viewportWidth = viewportSize.width.toFloat(),
+            viewportHeight = viewportSize.height.toFloat(),
+            current = transform,
+            maxZoom = maxZoom,
+        )
+        if (next != transform) onTransformChanged(next)
+    }
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF171717))
+            .onSizeChanged { viewportSize = it }
             .pointerInput(page.assetId, pageIndex, pageCount, sourceWidth, sourceHeight) {
                 awaitEachGesture {
                     val firstDown = awaitFirstDown(requireUnconsumed = false)

@@ -5,6 +5,8 @@ import com.lyco256.llm.data.OcrPolygon
 import com.lyco256.llm.data.OcrTextRegion
 import kotlin.math.abs
 import kotlin.math.hypot
+import kotlin.math.max
+import kotlin.math.min
 
 internal data class OcrImageRect(
     val left: Float,
@@ -96,6 +98,65 @@ internal object OcrViewerGeometry {
 
     fun isValidPolygon(polygon: OcrPolygon, sourceWidth: Int, sourceHeight: Int): Boolean =
         clipPolygonToSource(polygon, sourceWidth.toFloat(), sourceHeight.toFloat()) != null
+
+    fun revealPolygonTransform(
+        polygon: OcrPolygon,
+        sourceWidth: Int,
+        sourceHeight: Int,
+        viewportWidth: Float,
+        viewportHeight: Float,
+        current: OcrViewerTransform,
+        maxZoom: Float = 5f,
+    ): OcrViewerTransform {
+        val imageRect = fitImageRect(sourceWidth, sourceHeight, viewportWidth, viewportHeight) ?: return current
+        val clipped = clipPolygonToSource(polygon, sourceWidth.toFloat(), sourceHeight.toFloat()) ?: return current
+        val fitPoints = clipped.map { point ->
+            OcrPoint(
+                imageRect.left + point.x / sourceWidth * imageRect.width,
+                imageRect.top + point.y / sourceHeight * imageRect.height,
+            )
+        }
+        fun bounds(scale: Float, offsetX: Float = 0f, offsetY: Float = 0f): OcrImageRect {
+            val transformed = fitPoints.map { transformPoint(it, viewportWidth, viewportHeight, OcrViewerTransform(scale, offsetX, offsetY)) }
+            return OcrImageRect(
+                left = transformed.minOf { it.x },
+                top = transformed.minOf { it.y },
+                right = transformed.maxOf { it.x },
+                bottom = transformed.maxOf { it.y },
+            )
+        }
+        val currentPolygon = bounds(current.scale, current.offsetX, current.offsetY)
+        if (currentPolygon.left >= 0f && currentPolygon.top >= 0f &&
+            currentPolygon.right <= viewportWidth && currentPolygon.bottom <= viewportHeight
+        ) return current
+
+        val currentScale = current.scale.coerceIn(1f, maxZoom)
+        val baseBounds = bounds(currentScale)
+        val fitScale = minOf(
+            if (baseBounds.width > 0f) viewportWidth / baseBounds.width * currentScale else currentScale,
+            if (baseBounds.height > 0f) viewportHeight / baseBounds.height * currentScale else currentScale,
+        )
+        val scale = min(currentScale, fitScale.coerceAtLeast(1f)).coerceIn(1f, maxZoom)
+        val noOffsetPolygon = bounds(scale)
+        val noOffsetImage = transformRect(imageRect, viewportWidth, viewportHeight, OcrViewerTransform(scale))
+        val imageMinX = if (noOffsetImage.width <= viewportWidth) 0f else viewportWidth - noOffsetImage.right
+        val imageMaxX = if (noOffsetImage.width <= viewportWidth) 0f else -noOffsetImage.left
+        val imageMinY = if (noOffsetImage.height <= viewportHeight) 0f else viewportHeight - noOffsetImage.bottom
+        val imageMaxY = if (noOffsetImage.height <= viewportHeight) 0f else -noOffsetImage.top
+        val polygonMinX = -noOffsetPolygon.left
+        val polygonMaxX = viewportWidth - noOffsetPolygon.right
+        val polygonMinY = -noOffsetPolygon.top
+        val polygonMaxY = viewportHeight - noOffsetPolygon.bottom
+        val minX = max(imageMinX, polygonMinX)
+        val maxX = min(imageMaxX, polygonMaxX)
+        val minY = max(imageMinY, polygonMinY)
+        val maxY = min(imageMaxY, polygonMaxY)
+        return OcrViewerTransform(
+            scale = scale,
+            offsetX = if (minX <= maxX) current.offsetX.coerceIn(minX, maxX) else current.offsetX.coerceIn(imageMinX, imageMaxX),
+            offsetY = if (minY <= maxY) current.offsetY.coerceIn(minY, maxY) else current.offsetY.coerceIn(imageMinY, imageMaxY),
+        )
+    }
 
     fun hitTestRegionIndex(
         regions: List<OcrTextRegion>,

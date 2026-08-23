@@ -5,6 +5,8 @@ import com.lyco256.llm.data.ClipWithDetails
 import com.lyco256.llm.data.OcrAssetRecognitionResult
 import com.lyco256.llm.data.OcrQualityMode
 import com.lyco256.llm.data.OcrPostRecognitionResult
+import com.lyco256.llm.data.OcrPostRegionTextRange
+import com.lyco256.llm.data.rebuildOcrText
 
 internal data class OcrRegionKey(
     val assetId: Long,
@@ -40,26 +42,50 @@ internal data class OcrImagePage(
 internal fun OcrPostRecognitionResult.assetFor(assetId: Long): OcrAssetRecognitionResult? =
     assets.firstOrNull { it.assetId == assetId }
 
+internal fun OcrPostRecognitionResult.regionKeyAtTextOffset(offset: Int): OcrRegionKey? {
+    if (offset < 0) return null
+    val range = regionRanges.firstOrNull { offset >= it.start && offset < it.end } ?: return null
+    val asset = assetFor(range.assetId) ?: return null
+    val region = asset.recognition.regions.getOrNull(range.regionIndex) ?: return null
+    val polygon = region.polygon ?: return null
+    if (!OcrViewerGeometry.isValidPolygon(polygon, asset.recognition.imageWidth, asset.recognition.imageHeight)) return null
+    return OcrRegionKey(range.assetId, range.regionIndex)
+}
+
 internal fun OcrPostRecognitionResult.rebuildFromRegions(): OcrPostRecognitionResult {
     val rebuiltAssets = assets.map { asset ->
         asset.copy(
-            recognition = asset.recognition.copy(
-                fullText = asset.recognition.rebuildFullText(),
-            ),
+            recognition = if (asset.recognition.textLayout == null) {
+                asset.recognition.rebuildLegacyOcrText()
+            } else {
+                asset.recognition.rebuildOcrText()
+            },
         )
     }
-    return copy(
-        assets = rebuiltAssets,
-        fullText = rebuiltAssets
-            .map { it.recognition.fullText.takeIf(String::isNotBlank) }
-            .filterNotNull()
-            .joinToString("\n\n"),
-    )
+    val ranges = mutableListOf<OcrPostRegionTextRange>()
+    val fullText = buildString {
+        rebuiltAssets.forEach { asset ->
+            val assetText = asset.recognition.fullText
+            if (assetText.isBlank()) return@forEach
+            if (isNotEmpty()) append("\n\n")
+            val offset = length
+            append(assetText)
+            asset.recognition.regionRanges.forEach { range ->
+                ranges += OcrPostRegionTextRange(
+                    assetId = asset.assetId,
+                    regionIndex = range.regionIndex,
+                    start = range.start + offset,
+                    end = range.end + offset,
+                )
+            }
+        }
+    }
+    return copy(assets = rebuiltAssets, fullText = fullText, regionRanges = ranges)
 }
 
-private fun com.lyco256.llm.data.OcrRecognitionResult.rebuildFullText(): String {
-    if (regions.isEmpty()) return fullText
-    return buildString {
+private fun com.lyco256.llm.data.OcrRecognitionResult.rebuildLegacyOcrText(): com.lyco256.llm.data.OcrRecognitionResult {
+    if (regions.isEmpty()) return this
+    val rebuilt = buildString {
         var emittedRegion = false
         regions.forEach { region ->
             if (region.text.isBlank()) return@forEach
@@ -68,6 +94,7 @@ private fun com.lyco256.llm.data.OcrRecognitionResult.rebuildFullText(): String 
             emittedRegion = true
         }
     }
+    return copy(fullText = rebuilt, regionRanges = emptyList())
 }
 
 internal fun OcrPostRecognitionResult.withRegionText(

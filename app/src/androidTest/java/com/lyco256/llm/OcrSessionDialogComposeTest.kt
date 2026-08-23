@@ -32,6 +32,7 @@ import com.lyco256.llm.data.OcrPostRecognitionResult
 import com.lyco256.llm.data.OcrQualityMode
 import com.lyco256.llm.data.OcrRecognitionResult
 import com.lyco256.llm.data.OcrTextRegion
+import com.lyco256.llm.data.withReadingOrder
 import com.lyco256.llm.data.TagEntity
 import com.lyco256.llm.data.TagHierarchy
 import com.lyco256.llm.data.TagWithCount
@@ -199,6 +200,47 @@ class OcrSessionDialogComposeTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("edited\nsecond", substring = true).assertIsDisplayed()
         composeRule.onNodeWithTag("ocr_polygon_overlay").assertIsDisplayed()
+    }
+
+    @Test
+    fun structuredFullTextTapSelectsTheMatchingPolygonAndUsesTheRegionEditor() {
+        val recognition = OcrRecognitionResult(
+            imageWidth = 100,
+            imageHeight = 100,
+            fullText = "raw",
+            regions = listOf(
+                OcrTextRegion("first", box(10f, 10f, 40f, 25f)),
+                OcrTextRegion("second", box(50f, 10f, 90f, 25f)),
+            ),
+        ).withReadingOrder()
+        val structured = OcrPostRecognitionResult(
+            clipId = 7L,
+            assets = listOf(OcrAssetRecognitionResult(11L, "/tmp/ocr.webp", recognition)),
+            fullText = recognition.fullText,
+        ).rebuildFromRegions()
+
+        composeRule.setContent {
+            MaterialTheme {
+                OcrTextDialog(
+                    previewAssets = listOf(OcrImagePage(11L, "/tmp/ocr.webp", 100, 100)),
+                    text = structured.fullText,
+                    structuredResult = structured,
+                    isProcessing = false,
+                    errorMessage = null,
+                    onTextChange = { error("structured OCR must not expose whole-text editing") },
+                    onRedetect = {},
+                    onConfirm = {},
+                    onDismiss = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("ocr_result_text_value").performTouchInput {
+            click(topLeft + androidx.compose.ui.geometry.Offset(8f, 8f))
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("ocr_region_text").assertTextContains("first")
+        composeRule.onNodeWithTag("ocr_polygon_overlay_selected").assertIsDisplayed()
     }
 
     @Test
@@ -696,6 +738,15 @@ class OcrSessionDialogComposeTest {
                     ),
                 ),
             ),
+        ),
+    )
+
+    private fun box(left: Float, top: Float, right: Float, bottom: Float) = OcrPolygon(
+        listOf(
+            OcrPoint(left, top),
+            OcrPoint(right, top),
+            OcrPoint(right, bottom),
+            OcrPoint(left, bottom),
         ),
     )
 
