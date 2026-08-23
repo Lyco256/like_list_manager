@@ -11,3 +11,4 @@ OCR3では小型AlertDialogではなく全画面ビューア、asset IDページ
 - 再検出結果から現在assetが消えた場合に、別の有効なpreview assetへ移動することを確認します。
 - 検出中でも直前のstructured polygonと現在画像を維持したまま進捗表示することを確認します。
 - OCR全文のregion文字列タップが同じ`selectedRegionKey`経路でpolygonを選択し、既存のregion編集TextFieldへ接続することを確認します。
+- OCR全文の別asset文字列タップが対象ページへ移動して対応polygonを選択し、同じregion編集TextFieldへ接続することを確認します。

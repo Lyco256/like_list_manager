@@ -9,6 +9,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertCountEquals
@@ -18,6 +19,7 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
@@ -240,6 +242,65 @@ class OcrSessionDialogComposeTest {
         }
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("ocr_region_text").assertTextContains("first")
+        composeRule.onNodeWithTag("ocr_polygon_overlay_selected").assertIsDisplayed()
+    }
+
+    @Test
+    fun structuredFullTextTapSwitchesToAnotherAssetAndKeepsItsRegionEditable() {
+        fun recognition(text: String): OcrRecognitionResult = OcrRecognitionResult(
+            imageWidth = 100,
+            imageHeight = 100,
+            fullText = "raw",
+            regions = listOf(
+                OcrTextRegion(
+                    text = text,
+                    polygon = box(10f, 10f, 70f, 28f),
+                ),
+            ),
+        ).withReadingOrder()
+
+        val first = recognition("first")
+        val second = recognition("second")
+        val structured = OcrPostRecognitionResult(
+            clipId = 7L,
+            assets = listOf(
+                OcrAssetRecognitionResult(11L, "/tmp/ocr-first.webp", first),
+                OcrAssetRecognitionResult(22L, "/tmp/ocr-second.webp", second),
+            ),
+            fullText = "",
+        ).rebuildFromRegions()
+
+        composeRule.setContent {
+            MaterialTheme {
+                OcrTextDialog(
+                    previewAssets = listOf(
+                        OcrImagePage(11L, "/tmp/ocr-first.webp", 100, 100),
+                        OcrImagePage(22L, "/tmp/ocr-second.webp", 100, 100),
+                    ),
+                    text = structured.fullText,
+                    structuredResult = structured,
+                    isProcessing = false,
+                    errorMessage = null,
+                    onTextChange = { error("structured OCR must not expose whole-text editing") },
+                    onRedetect = {},
+                    onConfirm = {},
+                    onDismiss = {},
+                )
+            }
+        }
+
+        var secondPosition = androidx.compose.ui.geometry.Offset.Zero
+        val textLayoutResults = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        composeRule.onNodeWithTag("ocr_result_text_value").performSemanticsAction(SemanticsActions.GetTextLayoutResult) { getResults ->
+            getResults(textLayoutResults)
+        }
+        secondPosition = textLayoutResults.first().getBoundingBox(structured.fullText.indexOf("second")).center
+        composeRule.onNodeWithTag("ocr_result_text_value").performTouchInput {
+            click(secondPosition)
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("ocr_page_indicator").assertTextContains("2 / 2")
+        composeRule.onNodeWithTag("ocr_region_text").assertTextContains("second")
         composeRule.onNodeWithTag("ocr_polygon_overlay_selected").assertIsDisplayed()
     }
 

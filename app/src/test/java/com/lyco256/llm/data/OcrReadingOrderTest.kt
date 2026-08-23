@@ -111,6 +111,23 @@ class OcrReadingOrderTest {
     }
 
     @Test
+    fun verticalWideAdjacentColumnsStayInOneGroupButFarColumnDoesNotJoin() {
+        val result = recognition(
+            200,
+            200,
+            listOf(
+                region("右上", box(150f, 10f, 160f, 35f)),
+                region("右下", box(150f, 55f, 160f, 80f)),
+                region("左", box(30f, 10f, 40f, 35f)),
+            ),
+        ).withReadingOrder()
+
+        assertEquals(OcrDominantOrientation.VERTICAL_DOMINANT, result.textLayout!!.dominantOrientation)
+        assertEquals(listOf(listOf(0, 1), listOf(2)), result.textLayout.orderedGroups)
+        assertEquals("右上右下\n\n左", result.fullText)
+    }
+
+    @Test
     fun separateBubblesSizeMismatchAndTenPercentGapDoNotJoin() {
         val result = recognition(
             200,
