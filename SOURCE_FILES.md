@@ -17,6 +17,10 @@ MainActivity / Compose UI
         -> Room DB + images
   -> DerivedSearchStorage -> noBackupFilesDir/derived_search/search_index.db
       -> lexical_documents + normal FTS5 + trigram FTS5
+
+  SudachiLexicalTextAnalyzer (独立した後続検索用コンポーネント)
+    -> build生成assetのSudachi Full ZIP
+    -> noBackupFilesDir/sudachi/20260723/system_full.dic
 ```
 
 依存関係は `LikeListManagerApp` が所有する `AppContainer` で組み立てます。
@@ -88,6 +92,7 @@ MainActivity / Compose UI
 | X APIのendpointやresponse | `docs/app/src/main/java/com/lyco256/llm/data/XApiClient.kt.md` | `ClipRepository.kt.md`, `Entities.kt.md` |
 | Xログイン、scope、callback | `docs/app/src/main/java/com/lyco256/llm/data/XOAuthManager.kt.md` | `AndroidManifest.xml.md`, `ApiSettingsStore.kt.md`, `MainActivity.kt.md` |
 | 派生検索DB、FTS5、trigram候補検索 | `docs/app/src/main/java/com/lyco256/llm/data/DerivedSearchStorage.kt.md` | `app/src/main/java/com/lyco256/llm/data/DerivedSearchStorage.kt`, `DerivedSearchStorageIntegrationTest.kt` |
+| Sudachi Fullの辞書準備、配置、検索用4表現生成 | `docs/app/src/main/java/com/lyco256/llm/data/SudachiLexicalTextAnalyzer.kt.md` | `app/src/main/java/com/lyco256/llm/data/SudachiLexicalTextAnalyzer.kt`, `SudachiDictionaryInstallerTest.kt`, `SudachiLexicalTextAnalyzerIntegrationTest.kt` |
 | DB列、table、relation | `docs/app/src/main/java/com/lyco256/llm/data/Entities.kt.md` | `LikeListDatabase.kt.md`, `Daos.kt.md`, `ClipRepository.kt.md` |
 | queryやtransaction | `docs/app/src/main/java/com/lyco256/llm/data/Daos.kt.md` | `Entities.kt.md`, `ClipRepository.kt.md` |
 | 依存ライブラリ、SDK | `docs/app/build.gradle.kts.md` | `docs/gradle/libs.versions.toml.md` |
@@ -160,6 +165,7 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/data/PaddleOcrTextRecognizer.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/TagColorPalette.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/DerivedSearchStorage.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/SudachiLexicalTextAnalyzer.kt.md`
 
 ### Tests
 

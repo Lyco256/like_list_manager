@@ -7,6 +7,22 @@ plugins {
 
 import org.gradle.api.tasks.testing.Test
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.net.URL
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+import java.util.zip.ZipFile
+
+private val SUDACHI_DICTIONARY_VERSION = "20260723"
+private val SUDACHI_DICTIONARY_ARCHIVE_NAME = "sudachi-dictionary-20260723-full.zip"
+private val SUDACHI_DICTIONARY_ARCHIVE_URL =
+    "https://d2ej7fkh96fzlu.cloudfront.net/sudachidict/sudachi-dictionary-20260723-full.zip"
+private val SUDACHI_DICTIONARY_ARCHIVE_SHA256 =
+    "fc87525a4c7639ea46d81a3e4e3976853240ec07e3db3991190c920a02efe107"
+private val SUDACHI_DICTIONARY_MAX_ARCHIVE_BYTES = 300L * 1024L * 1024L
+private val SUDACHI_MAX_BUNDLED_ASSET_BYTES = 1L * 1024L * 1024L * 1024L
 
 android {
     namespace = "com.lyco256.llm"
@@ -219,4 +235,162 @@ dependencies {
     implementation(libs.androidx.security.crypto)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.appauth)
+    implementation(libs.sudachi)
+}
+
+val sudachiGeneratedAssetsDir = layout.buildDirectory.dir("generated/sudachi/full/assets")
+val prepareSudachiFullDictionary = tasks.register("prepareSudachiFullDictionary") {
+    outputs.dir(sudachiGeneratedAssetsDir)
+    outputs.upToDateWhen { false }
+
+    doLast {
+        fun sha256(file: File): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+            FileInputStream(file).use { input ->
+                val buffer = ByteArray(1024 * 1024)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    digest.update(buffer, 0, read)
+                }
+            }
+            return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+        }
+
+        fun deleteExact(file: File) {
+            if (file.exists() && !file.delete()) {
+                throw GradleException("Failed to remove ${file.absolutePath}")
+            }
+        }
+
+        data class ArchiveInfo(
+            val archiveSha256: String,
+            val archiveByteSize: Long,
+            val systemDictionaryEntryName: String,
+            val systemDictionarySha256: String,
+            val systemDictionaryByteSize: Long,
+        )
+
+        fun inspectArchive(file: File): ArchiveInfo? {
+            if (!file.isFile || file.length() > SUDACHI_DICTIONARY_MAX_ARCHIVE_BYTES) return null
+            val archiveSha256 = sha256(file)
+            if (!archiveSha256.equals(SUDACHI_DICTIONARY_ARCHIVE_SHA256, ignoreCase = true)) return null
+
+            val systemEntries = ZipFile(file).use { zip ->
+                zip.entries().asSequence()
+                    .filter { entry -> !entry.isDirectory && entry.name.substringAfterLast('/') == "system_full.dic" }
+                    .toList()
+            }
+            if (systemEntries.size != 1) {
+                throw GradleException(
+                    "Sudachi Full archive must contain exactly one system_full.dic entry, found ${systemEntries.size}",
+                )
+            }
+            val systemEntry = systemEntries.single()
+            val systemDigest = MessageDigest.getInstance("SHA-256")
+            var systemBytes = 0L
+            ZipFile(file).use { zip ->
+                zip.getInputStream(zip.getEntry(systemEntry.name)).use { input ->
+                    val buffer = ByteArray(1024 * 1024)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        systemBytes += read.toLong()
+                        systemDigest.update(buffer, 0, read)
+                    }
+                }
+            }
+            return ArchiveInfo(
+                archiveSha256 = archiveSha256,
+                archiveByteSize = file.length(),
+                systemDictionaryEntryName = systemEntry.name,
+                systemDictionarySha256 = systemDigest.digest().joinToString("") { byte -> "%02x".format(byte) },
+                systemDictionaryByteSize = systemBytes,
+            )
+        }
+
+        fun downloadArchive(destination: File) {
+            val partial = File(destination.parentFile, "$SUDACHI_DICTIONARY_ARCHIVE_NAME.partial")
+            deleteExact(partial)
+            try {
+                val connection = URL(SUDACHI_DICTIONARY_ARCHIVE_URL).openConnection().apply {
+                    connectTimeout = 30_000
+                    readTimeout = 120_000
+                }
+                connection.getInputStream().use { input ->
+                    FileOutputStream(partial).use { output ->
+                        val buffer = ByteArray(1024 * 1024)
+                        var total = 0L
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            total += read.toLong()
+                            if (total > SUDACHI_DICTIONARY_MAX_ARCHIVE_BYTES) {
+                                throw GradleException("Sudachi Full archive exceeds the 300 MiB limit")
+                            }
+                            output.write(buffer, 0, read)
+                        }
+                        output.fd.sync()
+                    }
+                }
+                Files.move(
+                    partial.toPath(),
+                    destination.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            } finally {
+                deleteExact(partial)
+            }
+        }
+
+        val cacheDir = File(gradle.gradleUserHomeDir, "caches/like-list-manager/sudachi/$SUDACHI_DICTIONARY_VERSION")
+        if (!cacheDir.exists() && !cacheDir.mkdirs()) {
+            throw GradleException("Failed to create Sudachi cache directory: ${cacheDir.absolutePath}")
+        }
+        val cacheFile = File(cacheDir, SUDACHI_DICTIONARY_ARCHIVE_NAME)
+        val archiveInfo = inspectArchive(cacheFile) ?: run {
+            deleteExact(cacheFile)
+            downloadArchive(cacheFile)
+            inspectArchive(cacheFile)
+                ?: run {
+                    deleteExact(cacheFile)
+                    throw GradleException("Downloaded Sudachi Full archive SHA-256 does not match the pinned value")
+                }
+        }
+
+        val ocrBytes = fileTree(rootProject.file("ppocr-sdk/src/main/assets/models"))
+            .matching { include("**/*.onnx") }
+            .files
+            .sumOf(File::length)
+        if (ocrBytes + archiveInfo.archiveByteSize > SUDACHI_MAX_BUNDLED_ASSET_BYTES) {
+            throw GradleException("OCR ONNX files plus Sudachi Full archive exceed the 1 GiB asset limit")
+        }
+
+        val generatedRoot = sudachiGeneratedAssetsDir.get().asFile
+        project.delete(generatedRoot)
+        val generatedDictionaryDir = File(generatedRoot, "sudachi/$SUDACHI_DICTIONARY_VERSION")
+        if (!generatedDictionaryDir.mkdirs()) {
+            throw GradleException("Failed to create generated Sudachi asset directory")
+        }
+        cacheFile.copyTo(File(generatedDictionaryDir, SUDACHI_DICTIONARY_ARCHIVE_NAME), overwrite = true)
+        File(generatedDictionaryDir, "metadata.json").writeText(
+            """
+            {
+              "dictionaryVersion": "$SUDACHI_DICTIONARY_VERSION",
+              "archiveFileName": "$SUDACHI_DICTIONARY_ARCHIVE_NAME",
+              "archiveUrl": "$SUDACHI_DICTIONARY_ARCHIVE_URL",
+              "archiveSha256": "${archiveInfo.archiveSha256}",
+              "archiveByteSize": ${archiveInfo.archiveByteSize},
+              "systemDictionaryEntryName": "${archiveInfo.systemDictionaryEntryName}",
+              "systemDictionarySha256": "${archiveInfo.systemDictionarySha256}",
+              "systemDictionaryByteSize": ${archiveInfo.systemDictionaryByteSize}
+            }
+            """.trimIndent(),
+        )
+    }
+}
+
+android.sourceSets.getByName("main").assets.srcDir(sudachiGeneratedAssetsDir)
+tasks.matching { task -> task.name.startsWith("merge") && task.name.endsWith("Assets") }.configureEach {
+    dependsOn(prepareSudachiFullDictionary)
 }

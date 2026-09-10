@@ -1,0 +1,11 @@
+Sudachi Japanese Morphological Analyzer for Java
+Dependency: com.worksap.nlp:sudachi:0.8.0
+Project: https://github.com/WorksApplications/Sudachi
+
+Copyright and license:
+This dependency is distributed under the Apache License, Version 2.0.
+The complete Apache License, Version 2.0 text is retained in
+SUDACHIDICT_FULL_20260723_LEGAL.txt under the LICENSE-2.0.txt section.
+
+License URL:
+https://www.apache.org/licenses/LICENSE-2.0.txt
