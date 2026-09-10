@@ -1,0 +1,23 @@
+Gemma Terms of Use
+
+Canonical terms:
+https://ai.google.dev/gemma/terms
+
+The bundled EmbeddingGemma model is a Gemma Service and is provided under and
+subject to the Gemma Terms of Use. The canonical terms are incorporated here
+by reference so that this source tree identifies the license governing the
+bundled model. The terms require that distributions include this notice and
+provide recipients a copy of the agreement, include the use restrictions in
+the Gemma Prohibited Use Policy, and comply with applicable laws.
+
+The current agreement, including its definitions, distribution conditions,
+use restrictions, disclaimer, termination, governing law, and appendix of
+covered Gemma models, is maintained by Google at the canonical URL above.
+EmbeddingGemma is listed in that appendix. The canonical page is authoritative
+if this pointer and the online agreement ever differ.
+
+Required distribution notice:
+"Gemma is provided under and subject to the Gemma Terms of Use found at
+ai.google.dev/gemma/terms"
+
+Terms page last checked for this project: 2026-09-10.

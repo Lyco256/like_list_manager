@@ -1,0 +1,12 @@
+DJL Hugging Face Tokenizers
+
+Dependencies:
+- ai.djl.huggingface:tokenizers:0.33.0
+- ai.djl.android:tokenizer-native:0.33.0
+
+License: Apache License 2.0.
+Project: https://github.com/deepjavalibrary/djl
+License text: https://www.apache.org/licenses/LICENSE-2.0
+
+The project retains the Apache License 2.0 text in ppocr-sdk/LICENSE. This
+notice identifies the exact DJL artifacts used by the local tokenizer runtime.

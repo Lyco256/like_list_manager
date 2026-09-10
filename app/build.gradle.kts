@@ -22,7 +22,83 @@ private val SUDACHI_DICTIONARY_ARCHIVE_URL =
 private val SUDACHI_DICTIONARY_ARCHIVE_SHA256 =
     "fc87525a4c7639ea46d81a3e4e3976853240ec07e3db3991190c920a02efe107"
 private val SUDACHI_DICTIONARY_MAX_ARCHIVE_BYTES = 300L * 1024L * 1024L
-private val SUDACHI_MAX_BUNDLED_ASSET_BYTES = 1L * 1024L * 1024L * 1024L
+private val EMBEDDINGGEMMA_REVISION = "75a84c732f1884df76bec365346230e32f582c82"
+private val EMBEDDINGGEMMA_REPOSITORY = "onnx-community/embeddinggemma-300m-ONNX"
+private val EMBEDDINGGEMMA_MAX_BUNDLE_BYTES = 300L * 1024L * 1024L
+private val ALL_BUNDLED_ASSET_MAX_BYTES = 1L * 1024L * 1024L * 1024L
+
+private data class PinnedAsset(
+    val name: String,
+    val sha256: String,
+)
+
+private val EMBEDDINGGEMMA_ASSETS = listOf(
+    PinnedAsset(
+        name = "model_q4.onnx",
+        sha256 = "ad1dfee81a70f7944b9b9d1cc6e48075b832881cf33fab2f2b248be78f3f0043",
+    ),
+    PinnedAsset(
+        name = "model_q4.onnx_data",
+        sha256 = "599962c3143b040de2dd05e5975be3e9091dd067cacc6a8f7186e3203bab9e02",
+    ),
+    PinnedAsset(
+        name = "tokenizer.json",
+        sha256 = "4dda02faaf32bc91031dc8c88457ac272b00c1016cc679757d1c441b248b9c47",
+    ),
+)
+
+private fun sha256(file: File): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    FileInputStream(file).use { input ->
+        val buffer = ByteArray(1024 * 1024)
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            digest.update(buffer, 0, read)
+        }
+    }
+    return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+}
+
+private fun deleteExact(file: File) {
+    if (file.exists() && !file.delete()) {
+        throw GradleException("Failed to remove ${file.absolutePath}")
+    }
+}
+
+private fun downloadAsset(destination: File, url: String, maxBytes: Long) {
+    val partial = File(destination.parentFile, "${destination.name}.partial")
+    deleteExact(partial)
+    try {
+        val connection = URL(url).openConnection().apply {
+            connectTimeout = 30_000
+            readTimeout = 120_000
+        }
+        connection.getInputStream().use { input ->
+            FileOutputStream(partial).use { output ->
+                val buffer = ByteArray(1024 * 1024)
+                var total = 0L
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    total += read.toLong()
+                    if (total > maxBytes) {
+                        throw GradleException("Downloaded asset exceeds its configured size limit: $url")
+                    }
+                    output.write(buffer, 0, read)
+                }
+                output.fd.sync()
+            }
+        }
+        Files.move(
+            partial.toPath(),
+            destination.toPath(),
+            StandardCopyOption.REPLACE_EXISTING,
+        )
+    } finally {
+        deleteExact(partial)
+    }
+}
 
 android {
     namespace = "com.lyco256.llm"
@@ -236,6 +312,9 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.appauth)
     implementation(libs.sudachi)
+    implementation(libs.onnxruntime.android)
+    implementation(libs.djl.huggingface.tokenizers)
+    implementation(libs.djl.android.tokenizer.native)
 }
 
 val sudachiGeneratedAssetsDir = layout.buildDirectory.dir("generated/sudachi/full/assets")
@@ -244,25 +323,6 @@ val prepareSudachiFullDictionary = tasks.register("prepareSudachiFullDictionary"
     outputs.upToDateWhen { false }
 
     doLast {
-        fun sha256(file: File): String {
-            val digest = MessageDigest.getInstance("SHA-256")
-            FileInputStream(file).use { input ->
-                val buffer = ByteArray(1024 * 1024)
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    digest.update(buffer, 0, read)
-                }
-            }
-            return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
-        }
-
-        fun deleteExact(file: File) {
-            if (file.exists() && !file.delete()) {
-                throw GradleException("Failed to remove ${file.absolutePath}")
-            }
-        }
-
         data class ArchiveInfo(
             val archiveSha256: String,
             val archiveByteSize: Long,
@@ -358,14 +418,6 @@ val prepareSudachiFullDictionary = tasks.register("prepareSudachiFullDictionary"
                 }
         }
 
-        val ocrBytes = fileTree(rootProject.file("ppocr-sdk/src/main/assets/models"))
-            .matching { include("**/*.onnx") }
-            .files
-            .sumOf(File::length)
-        if (ocrBytes + archiveInfo.archiveByteSize > SUDACHI_MAX_BUNDLED_ASSET_BYTES) {
-            throw GradleException("OCR ONNX files plus Sudachi Full archive exceed the 1 GiB asset limit")
-        }
-
         val generatedRoot = sudachiGeneratedAssetsDir.get().asFile
         project.delete(generatedRoot)
         val generatedDictionaryDir = File(generatedRoot, "sudachi/$SUDACHI_DICTIONARY_VERSION")
@@ -390,7 +442,112 @@ val prepareSudachiFullDictionary = tasks.register("prepareSudachiFullDictionary"
     }
 }
 
+val embeddingGemmaGeneratedAssetsDir = layout.buildDirectory.dir("generated/embeddinggemma/assets")
+val prepareEmbeddingGemmaAssets = tasks.register("prepareEmbeddingGemmaAssets") {
+    outputs.dir(embeddingGemmaGeneratedAssetsDir)
+    outputs.upToDateWhen { false }
+
+    doLast {
+        val cacheDir = File(
+            gradle.gradleUserHomeDir,
+            "caches/like-list-manager/embeddinggemma/$EMBEDDINGGEMMA_REVISION",
+        )
+        if (!cacheDir.exists() && !cacheDir.mkdirs()) {
+            throw GradleException("Failed to create EmbeddingGemma cache directory: ${cacheDir.absolutePath}")
+        }
+
+        val verifiedFiles = EMBEDDINGGEMMA_ASSETS.map { asset ->
+            val cacheFile = File(cacheDir, asset.name)
+            val valid = cacheFile.isFile && cacheFile.length() > 0L &&
+                runCatching { sha256(cacheFile).equals(asset.sha256, ignoreCase = true) }.getOrDefault(false)
+            if (!valid) {
+                deleteExact(cacheFile)
+                val remotePath = if (asset.name == "tokenizer.json") asset.name else "onnx/${asset.name}"
+                val url =
+                    "https://huggingface.co/$EMBEDDINGGEMMA_REPOSITORY/resolve/$EMBEDDINGGEMMA_REVISION/$remotePath"
+                downloadAsset(cacheFile, url, EMBEDDINGGEMMA_MAX_BUNDLE_BYTES)
+                val downloadedHash = if (cacheFile.isFile && cacheFile.length() > 0L) sha256(cacheFile) else ""
+                if (!downloadedHash.equals(asset.sha256, ignoreCase = true)) {
+                    deleteExact(cacheFile)
+                    throw GradleException(
+                        "Downloaded EmbeddingGemma asset SHA-256 does not match the pinned value: ${asset.name}",
+                    )
+                }
+            }
+            asset to cacheFile
+        }
+
+        val embeddingBytes = verifiedFiles.sumOf { (_, file) -> file.length() }
+        if (embeddingBytes > EMBEDDINGGEMMA_MAX_BUNDLE_BYTES) {
+            throw GradleException(
+                "EmbeddingGemma assets exceed the 300 MiB limit: $embeddingBytes bytes",
+            )
+        }
+
+        val generatedRoot = embeddingGemmaGeneratedAssetsDir.get().asFile
+        project.delete(generatedRoot)
+        val generatedModelDir = File(generatedRoot, "embeddinggemma/$EMBEDDINGGEMMA_REVISION")
+        if (!generatedModelDir.mkdirs()) {
+            throw GradleException("Failed to create generated EmbeddingGemma asset directory")
+        }
+        verifiedFiles.forEach { (_, file) ->
+            file.copyTo(File(generatedModelDir, file.name), overwrite = true)
+        }
+        File(generatedModelDir, "metadata.json").writeText(
+            buildString {
+                appendLine("{")
+                appendLine("  \"repository\": \"$EMBEDDINGGEMMA_REPOSITORY\",")
+                appendLine("  \"revision\": \"$EMBEDDINGGEMMA_REVISION\",")
+                appendLine("  \"files\": [")
+                verifiedFiles.forEachIndexed { index, (asset, file) ->
+                    val comma = if (index + 1 == verifiedFiles.size) "" else ","
+                    appendLine(
+                        "    {\"name\": \"${asset.name}\", \"sha256\": \"${asset.sha256}\", " +
+                            "\"byteSize\": ${file.length()}}$comma",
+                    )
+                }
+                appendLine("  ]")
+                appendLine("}")
+            },
+        )
+    }
+}
+
+val verifyBundledModelCapacity = tasks.register("verifyBundledModelCapacity") {
+    dependsOn(prepareSudachiFullDictionary, prepareEmbeddingGemmaAssets)
+    doLast {
+        fun mib(bytes: Long): String = "%.3f MiB".format(bytes / (1024.0 * 1024.0))
+
+        val ocrBytes = fileTree(rootProject.file("ppocr-sdk/src/main/assets/models"))
+            .matching { include("**/*.onnx") }
+            .files
+            .sumOf(File::length)
+        val sudachiFile = File(
+            sudachiGeneratedAssetsDir.get().asFile,
+            "sudachi/$SUDACHI_DICTIONARY_VERSION/$SUDACHI_DICTIONARY_ARCHIVE_NAME",
+        )
+        val sudachiBytes = sudachiFile.length()
+        val embeddingBytes = EMBEDDINGGEMMA_ASSETS.sumOf { asset ->
+            File(
+                embeddingGemmaGeneratedAssetsDir.get().asFile,
+                "embeddinggemma/$EMBEDDINGGEMMA_REVISION/${asset.name}",
+            ).length()
+        }
+        val totalBytes = ocrBytes + sudachiBytes + embeddingBytes
+        if (totalBytes > ALL_BUNDLED_ASSET_MAX_BYTES) {
+            throw GradleException(
+                "OCR + Sudachi + EmbeddingGemma assets exceed the 1 GiB limit: $totalBytes bytes",
+            )
+        }
+        logger.lifecycle(
+            "Bundled model sizes: EmbeddingGemma=${mib(embeddingBytes)}, " +
+                "OCR=${mib(ocrBytes)}, Sudachi=${mib(sudachiBytes)}, total=${mib(totalBytes)}",
+        )
+    }
+}
+
 android.sourceSets.getByName("main").assets.srcDir(sudachiGeneratedAssetsDir)
+android.sourceSets.getByName("main").assets.srcDir(embeddingGemmaGeneratedAssetsDir)
 tasks.matching { task -> task.name.startsWith("merge") && task.name.endsWith("Assets") }.configureEach {
-    dependsOn(prepareSudachiFullDictionary)
+    dependsOn(verifyBundledModelCapacity)
 }

@@ -1,0 +1,10 @@
+ONNX Runtime Android
+
+Dependency: com.microsoft.onnxruntime:onnxruntime-android:1.21.1
+
+License: MIT License.
+Project: https://github.com/microsoft/onnxruntime
+License: https://github.com/microsoft/onnxruntime/blob/v1.21.1/LICENSE
+
+The app and the bundled ppocr-sdk use this same ONNX Runtime version. This
+notice identifies the version used by the local EmbeddingGemma runtime.

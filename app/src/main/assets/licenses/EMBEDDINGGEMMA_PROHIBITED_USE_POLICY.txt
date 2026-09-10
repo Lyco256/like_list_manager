@@ -1,0 +1,30 @@
+Gemma Prohibited Use Policy
+
+Canonical policy:
+https://ai.google.dev/gemma/prohibited_use_policy
+
+The bundled EmbeddingGemma model must not be used to:
+
+- infringe, misappropriate, or otherwise violate another person's or entity's
+  rights;
+- facilitate dangerous, illegal, malicious, criminal, terrorist, or illegal
+  substance-related activity;
+- engage in illegal or unlicensed professional practice, including legal,
+  medical, accounting, or financial practice;
+- abuse, harm, interfere with, or disrupt services, including spam, scams,
+  phishing, fraud, or malware;
+- override or circumvent safety filters or intentionally contravene this
+  policy;
+- promote hatred, harassment, bullying, violence, self-harm, or harmful
+  distribution of personally identifying information;
+- track or monitor people without consent, or infer sensitive/private
+  information without the rights, authorizations, and consents required by law;
+- misinform, misrepresent provenance, impersonate people to deceive, make
+  misleading claims of expertise, make automated decisions affecting rights
+  or well-being, or generate defamatory content; or
+- generate sexually explicit content for pornography or sexual gratification.
+
+The complete policy, including its examples and any future updates, is
+maintained at the canonical URL above and is incorporated by reference.
+
+Policy last checked for this project: 2026-09-10.

@@ -33,4 +33,5 @@ MacrobenchmarkとUI Automator、および `com.android.test` plugin aliasも管�
 ## 2026-08 OCR7 update
 
 - Adds ONNX Runtime and coroutines aliases used by the local `:ppocr-sdk` module.
+- Adds `onnxruntime-android:1.21.1` directly to `:app` and pins DJL Hugging Face Tokenizers / Android native tokenizer to `0.33.0` for the isolated local EmbeddingGemma runtime.
 - Removes the ML Kit Japanese text recognition version and alias.

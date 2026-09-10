@@ -1,0 +1,19 @@
+Bundled model provenance
+
+Repository: onnx-community/embeddinggemma-300m-ONNX
+Revision: 75a84c732f1884df76bec365346230e32f582c82
+Repository URL:
+https://huggingface.co/onnx-community/embeddinggemma-300m-ONNX/tree/75a84c732f1884df76bec365346230e32f582c82
+License shown by the source repository: Gemma
+
+Files included by the build only:
+
+- onnx/model_q4.onnx
+  SHA-256: ad1dfee81a70f7944b9b9d1cc6e48075b832881cf33fab2f2b248be78f3f0043
+- onnx/model_q4.onnx_data
+  SHA-256: 599962c3143b040de2dd05e5975be3e9091dd067cacc6a8f7186e3203bab9e02
+- tokenizer.json
+  SHA-256: 4dda02faaf32bc91031dc8c88457ac272b00c1016cc679757d1c441b248b9c47
+
+The model files are downloaded only by the pinned Gradle build task, are not
+committed to the source tree, and are not fetched by the Android runtime.
