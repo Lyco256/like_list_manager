@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.lyco256.llm.BuildConfig
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -133,6 +134,88 @@ class LexicalIndexSynchronizerIntegrationTest {
     }
 
     @Test
+    fun inFlightReconcileFinishesBeforeTheLatestSnapshotIsApplied() = runBlocking {
+        val clipId = insertClip("coalesce")
+        analyzer.blockedText = "coalesce text"
+        synchronizer.start(scope)
+        analyzer.blockedAnalysisStarted.await()
+
+        database.clipDao().updateSummary(clipId, "intermediate summary")
+        database.clipDao().updateSummary(clipId, "latest summary")
+        analyzer.blockedText = null
+        analyzer.releaseBlockedAnalysis.complete(Unit)
+
+        awaitFingerprint(clipId)
+        assertTrue(analyzer.completedTexts.contains("coalesce text"))
+        assertTrue(analyzer.texts.contains("latest summary"))
+        assertTrue(analyzer.texts.none { it == "intermediate summary" })
+    }
+
+    @Test
+    fun stoppingDuringReconcileKeepsCommittedClipsAndRetriesOnlyUncommittedClips() = runBlocking {
+        val committedId = insertClip("committed")
+        val pendingId = insertClip("pending")
+        analyzer.blockedText = "pending text"
+        synchronizer.start(scope)
+
+        awaitFingerprint(committedId)
+        analyzer.blockedAnalysisStarted.await()
+        synchronizer.stop()
+
+        assertTrue(committedId in derivedSearchStorage.getAllClipFingerprints())
+        assertTrue(pendingId !in derivedSearchStorage.getAllClipFingerprints())
+
+        analyzer.blockedText = null
+        analyzer.clear()
+        synchronizer = newSynchronizer()
+        synchronizer.start(scope)
+        awaitComplete(2)
+
+        assertTrue(analyzer.texts.contains("pending text"))
+        assertTrue(analyzer.texts.none { it == "committed text" })
+    }
+
+    @Test
+    fun sameClipIdFromANewDatabaseIsReindexedWhenSourceContentDiffers() = runBlocking {
+        val clipId = insertClip("shared", summary = "old summary")
+        synchronizer.start(scope)
+        awaitFingerprint(clipId)
+        analyzer.clear()
+
+        val replacementDatabase = Room.inMemoryDatabaseBuilder(context, LikeListDatabase::class.java).build()
+        try {
+            replacementDatabase.clipDao().insertClip(
+                ClipEntity(
+                    id = clipId,
+                    xPostId = "replacement-post",
+                    authorName = "replacement display",
+                    authorUsername = "replacement user",
+                    text = "replacement text",
+                    postUrl = "https://example.test/replacement",
+                    xCreatedAt = "created-replacement",
+                    savedAt = "saved-replacement",
+                    syncedAt = "synced-replacement",
+                    summary = "replacement summary",
+                ),
+            )
+            databaseFlow.value = null
+            delay(100)
+            databaseFlow.value = replacementDatabase
+
+            val expected = LexicalDocumentBuilder.fingerprint(
+                requireNotNull(replacementDatabase.clipDao().getClip(clipId)),
+            )
+            awaitCondition { derivedSearchStorage.getAllClipFingerprints()[clipId] == expected }
+            assertTrue(analyzer.texts.contains("replacement text"))
+            assertTrue(derivedSearchStorage.searchNormal("old summary").none { it.clipId == clipId })
+            assertTrue(derivedSearchStorage.searchNormal("replacement summary").any { it.clipId == clipId })
+        } finally {
+            databaseFlow.value = null
+            replacementDatabase.close()
+        }
+    }
+
+    @Test
     fun oneAnalyzerFailureDoesNotFailPrimaryOrBlockOtherClips() = runBlocking {
         analyzer.failText = "bad text"
         val failedId = insertClip("failed", text = "bad text")
@@ -218,11 +301,20 @@ class LexicalIndexSynchronizerIntegrationTest {
 
     private class RecordingAnalyzer : LexicalTextAnalyzer {
         val texts = mutableListOf<String>()
+        val completedTexts = mutableListOf<String>()
         var failText: String? = null
+        var blockedText: String? = null
+        val blockedAnalysisStarted = CompletableDeferred<Unit>()
+        val releaseBlockedAnalysis = CompletableDeferred<Unit>()
 
         override suspend fun analyze(text: String): SudachiLexicalTextAnalysis {
+            if (blockedText == text) {
+                blockedAnalysisStarted.complete(Unit)
+                releaseBlockedAnalysis.await()
+            }
             failText?.takeIf { it == text }?.let { error("synthetic analyzer failure") }
             texts += text
+            completedTexts += text
             return SudachiLexicalTextAnalysis(
                 normalizedText = "clip=${text.hashCode()}:$text",
                 readingText = "reading:$text",
@@ -231,6 +323,9 @@ class LexicalIndexSynchronizerIntegrationTest {
             )
         }
 
-        fun clear() = texts.clear()
+        fun clear() {
+            texts.clear()
+            completedTexts.clear()
+        }
     }
 }

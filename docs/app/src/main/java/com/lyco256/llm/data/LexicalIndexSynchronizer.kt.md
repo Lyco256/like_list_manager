@@ -5,7 +5,7 @@
 - `PostStorageManager.database`の`null`は0件として扱わず、派生indexを消去しません。新しいDBが公開された時点で再concileします。
 - 派生側のfingerprint mapを1回取得し、削除clipを先に削除してから、未登録またはfingerprint変更clipだけを逐次Sudachi解析します。
 - Sudachi解析完了後に`DerivedSearchStorage.replaceClipDocuments`を呼ぶため、解析中にSQLite write transactionを保持しません。
-- Roomの新しいsnapshotが来た場合は古いreconcileをキャンセルして最新snapshotへ追従し、変更clipを無制限にqueueしません。
+- Roomの新しいsnapshotが来た場合も現在のreconcileはclip単位の処理を完了し、処理待ちsnapshotは`conflate`で最新1件へ畳み込んでから追従します。変更clipを無制限にqueueしません。
 - 解析または派生DB書き込みの失敗はそのclipのfingerprintを更新せず、他clipを継続します。同期coroutineの未処理例外はアプリへ伝播させず、内部`LexicalIndexSyncState`へ状態と失敗理由を保持します。
 - productionでは`LikeListManagerApp`が起動後に1回だけ開始し、TEST_HARNESSでは自動開始せず専用integration testが明示開始します。
 

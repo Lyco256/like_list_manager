@@ -1,3 +1,3 @@
 # `LexicalIndexRepositoryUndoIntegrationTest.kt`
 
-実際の`ClipRepository`概要編集Undo、OCR編集Undo、投稿削除Undoを通し、Repositoryへ派生更新を個別に組み込まなくても`clips` table監視だけでfingerprintとdocumentが再同期されることを確認します。
+実際の`ClipRepository`概要編集Undo、OCR編集Undo、投稿削除Undoを通し、Repositoryへ派生更新を個別に組み込まなくても`clips` table監視だけでfingerprintとdocumentが再同期されることを確認します。別テストでは、実ファイルDB・asset・画像ファイル・Undo slotをsnapshotし、同期だけでは正本データを変更しないことも確認します。

@@ -19,6 +19,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.security.MessageDigest
 
 @RunWith(AndroidJUnit4::class)
 class LexicalIndexRepositoryUndoIntegrationTest {
@@ -71,6 +72,53 @@ class LexicalIndexRepositoryUndoIntegrationTest {
         scope.cancel()
         storage.database.value?.close()
         cleanup()
+    }
+
+    @Test
+    fun synchronizerDoesNotChangePrimaryClipAssetsImagesOrUndoData() = runBlocking {
+        val clipId = storage.withDatabase { database ->
+            database.clipDao().insertClip(
+                ClipEntity(
+                    xPostId = "invariance-post",
+                    authorName = "Invariance display",
+                    authorUsername = "invariance-user",
+                    text = "invariance body",
+                    postUrl = "https://example.test/invariance",
+                    xCreatedAt = "created-invariance",
+                    savedAt = "saved-invariance",
+                    syncedAt = "synced-invariance",
+                ),
+            )
+        }
+        val imageFile = File(storage.imageDirectory(), "invariance.webp").apply {
+            writeBytes(byteArrayOf(1, 2, 3, 5, 8, 13))
+        }
+        storage.withDatabase { database ->
+            database.clipDao().insertAssets(
+                listOf(
+                    AssetEntity(
+                        clipId = clipId,
+                        mediaKey = "invariance-media",
+                        type = "photo",
+                        remoteUrl = "https://example.test/invariance.webp",
+                        previewUrl = null,
+                        localPath = imageFile.absolutePath,
+                        sizeBytes = imageFile.length(),
+                        createdAt = "created-invariance",
+                    ),
+                ),
+            )
+        }
+        repository.updateSummary(
+            requireNotNull(storage.withDatabase { it.clipDao().getClip(clipId) }),
+            "pending undo summary",
+        )
+        val before = primarySnapshot()
+
+        synchronizer.start(scope)
+        awaitFingerprint(clipId)
+
+        assertEquals(before, primarySnapshot())
     }
 
     @Test
@@ -135,6 +183,32 @@ class LexicalIndexRepositoryUndoIntegrationTest {
         }
     }
 
+    private suspend fun primarySnapshot(): PrimarySnapshot = storage.withDatabase { database ->
+        val imagesRoot = storage.imageDirectory()
+        PrimarySnapshot(
+            clips = database.clipDao().getAllClips(),
+            assets = database.clipDao().getAllAssets(),
+            undo = database.undoDao().getSlot(),
+            imageFiles = imagesRoot.walkTopDown()
+                .filter(File::isFile)
+                .associate { file ->
+                    file.relativeTo(imagesRoot).path to ImageSnapshot(file.length(), file.sha256())
+                },
+        )
+    }
+
+    private data class PrimarySnapshot(
+        val clips: List<ClipEntity>,
+        val assets: List<AssetEntity>,
+        val undo: UndoEntity?,
+        val imageFiles: Map<String, ImageSnapshot>,
+    )
+
+    private data class ImageSnapshot(
+        val length: Long,
+        val sha256: String,
+    )
+
     private fun cleanup() {
         context.deleteDatabase(storageConfig.databaseName)
         File(context.filesDir, storageConfig.imagesDirectory).deleteRecursively()
@@ -143,5 +217,8 @@ class LexicalIndexRepositoryUndoIntegrationTest {
         File(context.filesDir, DurableClipDeleteUndoStore.DIRECTORY_NAME).deleteRecursively()
         File(context.noBackupFilesDir, DerivedSearchStorage.DIRECTORY_NAME).deleteRecursively()
     }
-}
 
+    private fun File.sha256(): String = MessageDigest.getInstance("SHA-256")
+        .digest(readBytes())
+        .joinToString("") { byte -> "%02x".format(byte) }
+}
