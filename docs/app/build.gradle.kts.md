@@ -13,6 +13,7 @@ AndroidアプリモジュールのapplicationId、SDK、Java/Kotlin 21、Compose
 - Compose: 全画面UI
 - `androidx.compose.material:material-icons-extended`: タグ種別やナビゲーションのアイコン表示
 - Room/KSP: 投稿、タグ、同期状態のDB
+- `androidx.sqlite:sqlite-bundled:2.7.0`: 正本Room DBと分離した再生成可能な派生検索DB、通常FTS5、trigram FTS5
 - Coil: 投稿画像表示
 - WorkManager: 新規local assetの永続JPEG previewを非expedited unique workで直列生成
 - Security Crypto: Client IDとOAuthセッションの暗号化保存
@@ -26,6 +27,7 @@ AndroidアプリモジュールのapplicationId、SDK、Java/Kotlin 21、Compose
 ## 関連ファイル
 
 - `../gradle/libs.versions.toml.md`: aliasとバージョンの定義元です。
+- `src/main/java/com/lyco256/llm/data/DerivedSearchStorage.kt.md`: 派生検索DBの保存、FTS5、復旧、並行アクセス制御です。
 - `src/main/AndroidManifest.xml.md`: アプリ構成と権限です。
 - `src/main/java/com/lyco256/llm/data/XOAuthManager.kt.md`: AppAuthの利用箇所です。
 

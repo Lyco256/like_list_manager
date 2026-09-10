@@ -15,6 +15,8 @@ MainActivity / Compose UI
       -> ApiSettingsStore -> EncryptedSharedPreferences
       -> PostStorageManager -> internal storage / SD card app-specific storage
         -> Room DB + images
+  -> DerivedSearchStorage -> noBackupFilesDir/derived_search/search_index.db
+      -> lexical_documents + normal FTS5 + trigram FTS5
 ```
 
 依存関係は `LikeListManagerApp` が所有する `AppContainer` で組み立てます。
@@ -65,6 +67,8 @@ MainActivity / Compose UI
 - 投稿IDのunique制約で重複保存を防止
 - 月間取得数、月別API使用量履歴、警告/停止判定値、15分rate limitを記録
 - 初回サンプルデータはDBが空の場合だけ投入
+- 派生検索ストレージは正本Room・画像・Undo・保存先設定から独立した再生成可能DBとして保持し、アプリ起動時のindex化や既存検索UIへの接続は行わない
+- `DerivedSearchStorage`はBundled SQLite 2.7.0、通常FTS5、trigram FTS5、FULLMUTEX単一connection、clip単位transaction置換／削除、schema不一致・破損時の1回再作成を担当する
 
 ## 変更目的別の入口
 
@@ -83,6 +87,7 @@ MainActivity / Compose UI
 | 投稿DB・画像の保存先、SDカード移動 | `docs/app/src/main/java/com/lyco256/llm/data/PostStorageManager.kt.md` | `AppContainer.kt.md`, `ClipRepository.kt.md`, `MainActivity.kt.md` |
 | X APIのendpointやresponse | `docs/app/src/main/java/com/lyco256/llm/data/XApiClient.kt.md` | `ClipRepository.kt.md`, `Entities.kt.md` |
 | Xログイン、scope、callback | `docs/app/src/main/java/com/lyco256/llm/data/XOAuthManager.kt.md` | `AndroidManifest.xml.md`, `ApiSettingsStore.kt.md`, `MainActivity.kt.md` |
+| 派生検索DB、FTS5、trigram候補検索 | `docs/app/src/main/java/com/lyco256/llm/data/DerivedSearchStorage.kt.md` | `app/src/main/java/com/lyco256/llm/data/DerivedSearchStorage.kt`, `DerivedSearchStorageIntegrationTest.kt` |
 | DB列、table、relation | `docs/app/src/main/java/com/lyco256/llm/data/Entities.kt.md` | `LikeListDatabase.kt.md`, `Daos.kt.md`, `ClipRepository.kt.md` |
 | queryやtransaction | `docs/app/src/main/java/com/lyco256/llm/data/Daos.kt.md` | `Entities.kt.md`, `ClipRepository.kt.md` |
 | 依存ライブラリ、SDK | `docs/app/build.gradle.kts.md` | `docs/gradle/libs.versions.toml.md` |
@@ -154,6 +159,7 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/data/OcrReadingOrder.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/PaddleOcrTextRecognizer.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/TagColorPalette.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/DerivedSearchStorage.kt.md`
 
 ### Tests
 
@@ -166,6 +172,7 @@ MainActivity / Compose UI
 - `docs/app/src/androidTest/java/com/lyco256/llm/TweetLikeDisplayUiTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/UndoNotificationUiTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/PaddleOcrRuntimeSmokeTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/DerivedSearchStorageIntegrationTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/TagHierarchyTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/TagManagementCompactRowContractTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/TagTreeGuideTest.kt.md`
