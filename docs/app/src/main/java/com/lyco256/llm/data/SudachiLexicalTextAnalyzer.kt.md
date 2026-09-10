@@ -6,7 +6,7 @@ Sudachi Full 20260723を完全ローカルで使う、既存検索経路から�
 - Androidでは生成assetのZIPから`system_full.dic`だけを`noBackupFilesDir/sudachi/20260723`へ一時ファイル経由で展開します。展開中のhash／size検証、file descriptor同期、同一ディレクトリ内置換を行い、配置済み辞書が一致すれば再展開しません。
 - コンポーネント生成時は辞書を初期化せず、blank入力も空結果を返します。初回の非blank解析で`Config`と`DictionaryFactory.create(Config)`からDictionary／Tokenizerを一度だけ作り、解析呼び出しは内部Mutexで直列化します。
 - `normalizedText`、`readingText`、`romanizedText`、`compactText`を不変結果として返します。ローマ字化はAndroid標準ICUの`Katakana-Latin`、`Katakana-Latin/BGN`、`Latin-ASCII`だけを使います。
-- `close`はIO dispatcher上で冪等にDictionaryを閉じ、close後の解析は`IllegalStateException`を返します。Room、DerivedSearchStorage、Repository、既存検索、UI、OCRへ接続しません。
+- `LexicalTextAnalyzer`を実装し、`LexicalIndexSynchronizer`から検索対象fieldごとの解析に使われます。`close`はIO dispatcher上で冪等にDictionaryを閉じ、close後の解析は`IllegalStateException`を返します。検索クエリ、Repository保存、既存検索UI、OCR認識へは接続しません。
 
 ## 検証
 

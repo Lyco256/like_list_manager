@@ -89,7 +89,48 @@ class DerivedSearchStorageIntegrationTest {
             assertEquals(0L, connection.queryCount("lexical_documents", 7L))
             assertEquals(0L, connection.queryCount("lexical_documents_fts", 7L))
             assertEquals(0L, connection.queryCount("lexical_documents_trigram_fts", 7L))
+            assertEquals(0L, connection.queryCount("lexical_sync_state", 7L))
         }
+    }
+
+    @Test
+    fun fingerprintSurvivesReopenAndIsRemovedWithTheClip() = runBlocking {
+        storage.replaceClipDocuments(8L, "fingerprint-a", fixtureDocuments(8L))
+        assertEquals(mapOf(8L to "fingerprint-a"), storage.getAllClipFingerprints())
+
+        storage.close()
+        storage = DerivedSearchStorage(context)
+        assertEquals(mapOf(8L to "fingerprint-a"), storage.getAllClipFingerprints())
+
+        storage.deleteClipDocuments(8L)
+        assertTrue(storage.getAllClipFingerprints().isEmpty())
+    }
+
+    @Test
+    fun documentAndFingerprintRollbackTogetherWhenReplacementFails() = runBlocking {
+        storage.replaceClipDocuments(1L, "clip-one", fixtureDocuments(1L))
+        storage.replaceClipDocuments(2L, "clip-two-old", fixtureDocuments(2L))
+        val conflictingDocument = fixtureDocuments(1L).first { it.sourceType == "body" }.copy(clipId = 2L)
+
+        try {
+            storage.replaceClipDocuments(2L, "clip-two-new", listOf(conflictingDocument))
+            throw AssertionError("Expected the duplicate document id to fail")
+        } catch (_: Exception) {
+            // The transaction must restore clip 2's old document and fingerprint.
+        }
+
+        assertEquals("clip-two-old", storage.getAllClipFingerprints().getValue(2L))
+        assertTrue(storage.searchNormal("Bundled Needle").any { it.clipId == 2L })
+    }
+
+    @Test
+    fun clearRemovesDocumentsAndFingerprintsTogether() = runBlocking {
+        storage.replaceClipDocuments(9L, "clip-nine", fixtureDocuments(9L))
+        storage.clear()
+
+        assertTrue(storage.getAllClipFingerprints().isEmpty())
+        assertTrue(storage.searchNormal("Bundled Needle").isEmpty())
+        assertTrue(storage.searchTrigram("Needle").isEmpty())
     }
 
     @Test

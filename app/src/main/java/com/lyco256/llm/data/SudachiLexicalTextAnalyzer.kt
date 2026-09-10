@@ -220,7 +220,7 @@ internal class SudachiDictionaryInstaller(
 class SudachiLexicalTextAnalyzer internal constructor(
     private val installer: SudachiDictionaryInstaller,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-) {
+) : LexicalTextAnalyzer {
     constructor(context: Context) : this(
         installer = SudachiDictionaryInstaller(
             directory = File(
@@ -249,7 +249,7 @@ class SudachiLexicalTextAnalyzer internal constructor(
         )
     }
 
-    suspend fun analyze(text: String): SudachiLexicalTextAnalysis = withContext(ioDispatcher) {
+    override suspend fun analyze(text: String): SudachiLexicalTextAnalysis = withContext(ioDispatcher) {
         mutex.withLock {
             check(!closed) { "SudachiLexicalTextAnalyzer is closed" }
             if (text.isBlank()) return@withLock EMPTY_ANALYSIS

@@ -17,6 +17,9 @@ class LikeListManagerApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        if (!BuildConfig.TEST_HARNESS) {
+            container.lexicalIndexSynchronizer.start(resourceScope)
+        }
     }
 
     override fun onTrimMemory(level: Int) {

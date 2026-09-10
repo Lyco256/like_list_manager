@@ -15,10 +15,14 @@ MainActivity / Compose UI
       -> ApiSettingsStore -> EncryptedSharedPreferences
       -> PostStorageManager -> internal storage / SD card app-specific storage
         -> Room DB + images
-  -> DerivedSearchStorage -> noBackupFilesDir/derived_search/search_index.db
-      -> lexical_documents + normal FTS5 + trigram FTS5
 
-  SudachiLexicalTextAnalyzer (独立した後続検索用コンポーネント)
+  PostStorageManager.database -> LexicalIndexSynchronizer
+    -> LexicalDocumentBuilder -> LexicalTextAnalyzer
+      -> SudachiLexicalTextAnalyzer -> Sudachi Full dictionary
+    -> DerivedSearchStorage -> noBackupFilesDir/derived_search/search_index.db
+        -> lexical_documents + normal FTS5 + trigram FTS5 + lexical_sync_state
+
+  SudachiLexicalTextAnalyzer
     -> build生成assetのSudachi Full ZIP
     -> noBackupFilesDir/sudachi/20260723/system_full.dic
 ```
@@ -59,7 +63,7 @@ MainActivity / Compose UI
 ### 保存と同期
 
 - Roomで投稿、画像情報、タググループ、タグ、投稿タグ関連、同期状態を保存
-- DB version 9でタグ階層、いいね数、同期継続token、月別API使用量履歴、OCR文字列、単一永続Undo slotを保持する。version 7→8で `isDeleted` を廃止し、8→9で `undo_slot` を追加するほか、1→2から6→7までの非破壊移行も維持
+- Room DB version 9でタグ階層、いいね数、同期継続token、月別API使用量履歴、OCR文字列、単一永続Undo slotを保持する。version 7→8で `isDeleted` を廃止し、8→9で `undo_slot` を追加するほか、1→2から6→7までの非破壊移行も維持。正本Room schemaはlexical同期では変更しない
 - Client IDとOAuth tokenは暗号化SharedPreferencesへ保存
 - Room DBと画像は内部ストレージまたはSDカードのアプリ専用領域へまとめて保存
 - 保存先変更時はコピー、容量・件数・DB整合性検証、切り替え、旧データ削除を行う
@@ -71,8 +75,9 @@ MainActivity / Compose UI
 - 投稿IDのunique制約で重複保存を防止
 - 月間取得数、月別API使用量履歴、警告/停止判定値、15分rate limitを記録
 - 初回サンプルデータはDBが空の場合だけ投入
-- 派生検索ストレージは正本Room・画像・Undo・保存先設定から独立した再生成可能DBとして保持し、アプリ起動時のindex化や既存検索UIへの接続は行わない
-- `DerivedSearchStorage`はBundled SQLite 2.7.0、通常FTS5、trigram FTS5、FULLMUTEX単一connection、clip単位transaction置換／削除、schema不一致・破損時の1回再作成を担当する
+- 派生検索ストレージは正本Room・画像・Undo・保存先設定から独立した再生成可能DBとして保持し、既存検索UIへは接続しない。productionではApplication起動後に専用synchronizerが非同期reconcileを開始し、TEST_HARNESSでは明示起動時だけ動作する
+- `LexicalIndexSynchronizer`は現在の`PostStorageManager.database`から`ClipDao.observeAllClips()`だけを監視し、5つの検索対象fieldのfingerprint差分で逐次処理する。解析失敗はそのclipを未同期のまま残し、正本操作へ伝播させない
+- `DerivedSearchStorage`はBundled SQLite 2.7.0、通常FTS5、trigram FTS5、FULLMUTEX単一connection、clip単位のdocument／両FTS／fingerprint transaction置換・削除、schema不一致・破損時の1回再作成を担当する。派生schemaはversion 2
 
 ## 変更目的別の入口
 
@@ -92,7 +97,8 @@ MainActivity / Compose UI
 | X APIのendpointやresponse | `docs/app/src/main/java/com/lyco256/llm/data/XApiClient.kt.md` | `ClipRepository.kt.md`, `Entities.kt.md` |
 | Xログイン、scope、callback | `docs/app/src/main/java/com/lyco256/llm/data/XOAuthManager.kt.md` | `AndroidManifest.xml.md`, `ApiSettingsStore.kt.md`, `MainActivity.kt.md` |
 | 派生検索DB、FTS5、trigram候補検索 | `docs/app/src/main/java/com/lyco256/llm/data/DerivedSearchStorage.kt.md` | `app/src/main/java/com/lyco256/llm/data/DerivedSearchStorage.kt`, `DerivedSearchStorageIntegrationTest.kt` |
-| Sudachi Fullの辞書準備、配置、検索用4表現生成 | `docs/app/src/main/java/com/lyco256/llm/data/SudachiLexicalTextAnalyzer.kt.md` | `app/src/main/java/com/lyco256/llm/data/SudachiLexicalTextAnalyzer.kt`, `SudachiDictionaryInstallerTest.kt`, `SudachiLexicalTextAnalyzerIntegrationTest.kt` |
+| 正本clipから派生Lexical Indexへの同期 | `docs/app/src/main/java/com/lyco256/llm/data/LexicalIndexSynchronizer.kt.md` | `LexicalDocumentBuilder.kt.md`, `DerivedSearchStorage.kt.md`, `LexicalIndexSynchronizerIntegrationTest.kt.md`, `LexicalIndexRepositoryUndoIntegrationTest.kt.md` |
+| Sudachi Fullの辞書準備、配置、検索用4表現生成 | `docs/app/src/main/java/com/lyco256/llm/data/SudachiLexicalTextAnalyzer.kt.md` | `app/src/main/java/com/lyco256/llm/data/SudachiLexicalTextAnalyzer.kt`, `LexicalDocumentBuilder.kt`, `SudachiDictionaryInstallerTest.kt`, `SudachiLexicalTextAnalyzerIntegrationTest.kt` |
 | DB列、table、relation | `docs/app/src/main/java/com/lyco256/llm/data/Entities.kt.md` | `LikeListDatabase.kt.md`, `Daos.kt.md`, `ClipRepository.kt.md` |
 | queryやtransaction | `docs/app/src/main/java/com/lyco256/llm/data/Daos.kt.md` | `Entities.kt.md`, `ClipRepository.kt.md` |
 | 依存ライブラリ、SDK | `docs/app/build.gradle.kts.md` | `docs/gradle/libs.versions.toml.md` |
@@ -145,6 +151,8 @@ MainActivity / Compose UI
 ### Data・API
 
 - `docs/app/src/main/java/com/lyco256/llm/data/AppContainer.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/LexicalDocumentBuilder.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/LexicalIndexSynchronizer.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/Entities.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/Daos.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/LikeListDatabase.kt.md`
@@ -179,6 +187,8 @@ MainActivity / Compose UI
 - `docs/app/src/androidTest/java/com/lyco256/llm/UndoNotificationUiTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/PaddleOcrRuntimeSmokeTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/DerivedSearchStorageIntegrationTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/LexicalIndexSynchronizerIntegrationTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/LexicalIndexRepositoryUndoIntegrationTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/TagHierarchyTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/TagManagementCompactRowContractTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/TagTreeGuideTest.kt.md`
@@ -206,6 +216,7 @@ MainActivity / Compose UI
 - `docs/app/src/androidTest/java/com/lyco256/llm/OcrSessionDialogComposeTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/OcrVisualSmokeIntegrationTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/MediaGridPersistentPreviewStoreTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/data/LexicalDocumentBuilderTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/HeavyLocalWorkTrackerTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/UndoPayloadCodecTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/UndoDaoIntegrationTest.kt.md`

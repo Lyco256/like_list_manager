@@ -12,7 +12,7 @@
 
 - `LikeListManagerApp : Application`
 - `container`: アプリ全体で共有する依存関係コンテナ
-- `onCreate`: `AppContainer(this)` を初期化
+- `onCreate`: `AppContainer(this)` を初期化し、production variantだけ`LexicalIndexSynchronizer`をApplication所有のIO scopeで非同期開始する。TEST_HARNESSでは暗黙起動しない
 - `onTrimMemory`: critical memory pressure時に現在のPaddleOCR engineを解放
 
 ## 関連ファイル
@@ -23,4 +23,4 @@
 
 ## 変更時の確認
 
-起動時に重い処理を直接追加しないでください。DBや暗号化ストレージのI/OはRepository側のIO dispatcherで行います。
+起動時に辞書展開・辞書ロード・既存clip解析を同期実行しないでください。Lexical同期はApplicationのバックグラウンドscopeで開始し、TEST_HARNESSの専用integration testからだけ明示起動します。

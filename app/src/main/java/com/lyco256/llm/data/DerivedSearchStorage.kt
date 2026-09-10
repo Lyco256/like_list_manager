@@ -52,7 +52,19 @@ class DerivedSearchStorage(
     val databasePath: File
         get() = databaseFile
 
-    suspend fun replaceClipDocuments(clipId: Long, documents: List<LexicalDocument>) = withStorage {
+    /**
+     * Compatibility overload for callers that only exercise the original storage foundation.
+     * Synchronization code must use the fingerprint-bearing overload below.
+     */
+    suspend fun replaceClipDocuments(clipId: Long, documents: List<LexicalDocument>) =
+        replaceClipDocuments(clipId, LEGACY_FINGERPRINT, documents)
+
+    suspend fun replaceClipDocuments(
+        clipId: Long,
+        sourceFingerprint: String,
+        documents: List<LexicalDocument>,
+    ) = withStorage {
+        require(sourceFingerprint.isNotBlank()) { "Source fingerprint must not be blank" }
         require(documents.all { it.clipId == clipId }) { "All lexical documents must belong to clip $clipId" }
         require(documents.map { it.documentId }.distinct().size == documents.size) {
             "Lexical document IDs must be unique"
@@ -65,9 +77,11 @@ class DerivedSearchStorage(
                 "DELETE FROM lexical_documents WHERE clip_id = ?",
             ) { statement -> statement.bindLong(1, clipId) }
             documents.forEach { document ->
+                insertDocument(document, LEXICAL_DOCUMENTS_TABLE)
                 insertDocument(document, NORMAL_FTS_TABLE)
                 insertDocument(document, TRIGRAM_FTS_TABLE)
             }
+            upsertFingerprint(clipId, sourceFingerprint)
         }
     }
 
@@ -77,7 +91,18 @@ class DerivedSearchStorage(
             execute("DELETE FROM lexical_documents WHERE clip_id = ?") { statement ->
                 statement.bindLong(1, clipId)
             }
+            execute("DELETE FROM lexical_sync_state WHERE clip_id = ?") { statement ->
+                statement.bindLong(1, clipId)
+            }
         }
+    }
+
+    suspend fun getAllClipFingerprints(): Map<Long, String> = withStorage {
+        queryRows(
+            sql = "SELECT clip_id, source_fingerprint FROM lexical_sync_state ORDER BY clip_id",
+            bind = {},
+            map = { statement -> statement.getLong(0) to statement.getText(1) },
+        ).toMap()
     }
 
     suspend fun searchNormal(query: String, limit: Int = DEFAULT_SEARCH_LIMIT): List<LexicalSearchResult> =
@@ -91,6 +116,7 @@ class DerivedSearchStorage(
             execute("DELETE FROM $NORMAL_FTS_TABLE")
             execute("DELETE FROM $TRIGRAM_FTS_TABLE")
             execute("DELETE FROM lexical_documents")
+            execute("DELETE FROM lexical_sync_state")
         }
     }
 
@@ -200,6 +226,14 @@ class DerivedSearchStorage(
                 execute("CREATE INDEX lexical_documents_clip_id ON lexical_documents(clip_id)")
                 execute(
                     """
+                    CREATE TABLE lexical_sync_state (
+                        clip_id INTEGER NOT NULL PRIMARY KEY,
+                        source_fingerprint TEXT NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                execute(
+                    """
                     CREATE VIRTUAL TABLE $NORMAL_FTS_TABLE USING fts5(
                         document_id UNINDEXED,
                         clip_id UNINDEXED,
@@ -275,6 +309,19 @@ class DerivedSearchStorage(
             statement.bindText(7, document.readingText)
             statement.bindText(8, document.romanizedText)
             statement.bindText(9, document.compactText)
+        }
+    }
+
+    private fun SQLiteConnection.upsertFingerprint(clipId: Long, sourceFingerprint: String) {
+        execute(
+            """
+            INSERT INTO lexical_sync_state(clip_id, source_fingerprint)
+            VALUES (?, ?)
+            ON CONFLICT(clip_id) DO UPDATE SET source_fingerprint = excluded.source_fingerprint
+            """.trimIndent(),
+        ) { statement ->
+            statement.bindLong(1, clipId)
+            statement.bindText(2, sourceFingerprint)
         }
     }
 
@@ -361,13 +408,17 @@ class DerivedSearchStorage(
     companion object {
         const val DIRECTORY_NAME = "derived_search"
         const val DATABASE_NAME = "search_index.db"
-        const val SCHEMA_VERSION = 1
+        const val SCHEMA_VERSION = 2
         const val DEFAULT_SEARCH_LIMIT = 100
 
+        private const val LEGACY_FINGERPRINT = "legacy-foundation-document"
+
+        private const val LEXICAL_DOCUMENTS_TABLE = "lexical_documents"
         private const val NORMAL_FTS_TABLE = "lexical_documents_fts"
         private const val TRIGRAM_FTS_TABLE = "lexical_documents_trigram_fts"
         private val REQUIRED_OBJECTS = listOf(
             "lexical_documents",
+            "lexical_sync_state",
             NORMAL_FTS_TABLE,
             TRIGRAM_FTS_TABLE,
         )

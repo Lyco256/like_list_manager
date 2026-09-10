@@ -24,11 +24,13 @@
 
 `PostStorageManager` → `ApiSettingsStore` / `XOAuthManager` → `ClipRepository` の順で生成します。Room Databaseは保存先マネージャーが現在の保存先に対して開閉します。
 
-メディアグリッド用の共有ImageLoader、prepared-image作成器、WorkManager enqueuerをここで1インスタンスずつ生成します。preloaderは画面ライフサイクル単位でUI側が所有します。benchmark settings、metrics、counterなどの計測依存は生成せず、本番引数にも含めません。benchmark専用Activity・importer・frame計測は `app/src/benchmark` 側に隔離されています。
+メディアグリッド用の共有ImageLoader、prepared-image作成器、WorkManager enqueuerをここで1インスタンスずつ生成します。さらに、正本DBのFlow、独立派生検索DB、Sudachi解析器、`LexicalIndexSynchronizer`を1組だけ生成します。preloaderは画面ライフサイクル単位でUI側が所有します。benchmark settings、metrics、counterなどの計測依存は生成せず、本番引数にも含めません。benchmark専用Activity・importer・frame計測は `app/src/benchmark` 側に隔離されています。
 
 ## 関連ファイル
 
 - `../LikeListManagerApp.kt.md`: AppContainerの所有者です。
+- `LexicalIndexSynchronizer.kt.md`: Room clip監視とfingerprint差分reconcileを担当します。
+- `LexicalDocumentBuilder.kt.md`: 5種類のsource documentとfingerprintを生成します。
 - `LikeListDatabase.kt.md`: Room Databaseを定義します。
 - `PostStorageManager.kt.md`: Room DBと画像の保存先、移動、復旧を管理します。
 - `ApiSettingsStore.kt.md`: Client IDとOAuthセッションを保存します。

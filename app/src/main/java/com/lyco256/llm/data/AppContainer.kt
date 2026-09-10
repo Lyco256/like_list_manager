@@ -47,6 +47,13 @@ class AppContainer(context: Context) {
             preferencesName = BuildConfig.STORAGE_PREFERENCES_NAME,
         ),
     )
+    val derivedSearchStorage = DerivedSearchStorage(context)
+    val lexicalTextAnalyzer: LexicalTextAnalyzer = SudachiLexicalTextAnalyzer(context)
+    val lexicalIndexSynchronizer = LexicalIndexSynchronizer(
+        databaseFlow = postStorageManager.database,
+        derivedSearchStorage = derivedSearchStorage,
+        analyzer = lexicalTextAnalyzer,
+    )
     val apiSettingsStore: SettingsStore = if (BuildConfig.TEST_HARNESS) {
         InMemorySettingsStore()
     } else {
