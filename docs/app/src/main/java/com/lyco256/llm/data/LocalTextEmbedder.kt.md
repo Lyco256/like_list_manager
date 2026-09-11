@@ -20,7 +20,7 @@ Gradleが固定URLから取得したgenerated assetのmetadataとSHA-256を検�
 
 モデル初期化失敗は`EmbeddingRuntimeInitializationException`へ包み、synchronizerが同じreconcile中に全sourceへ約200MB級の初期化を繰り返さないようにします。次回のstartまたは新しいsnapshotで再試行できます。
 
-配置中断時の`.partial`だけをモデル専用ディレクトリ内で削除し、各ファイルをSHA-256・byte size確認後に原子的に置換します。破損時は該当ファイルだけを復旧します。モデル出力は768要素、finite、正のL2 normを満たさない場合に明示的な推論エラーとします。
+配置中断時の`.partial`だけをモデル専用ディレクトリ内で削除し、各ファイルをSHA-256・byte size確認後に原子的に置換します。このasset検証・copy処理は`LocalRuntimeAssetInstaller`をJapanese CLIPと共有し、既存のEmbeddingGemma挙動を変えずに破損時は該当ファイルだけを復旧します。モデル出力は768要素、finite、正のL2 normを満たさない場合に明示的な推論エラーとします。
 
 ## prompt
 

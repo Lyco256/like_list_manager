@@ -1,0 +1,13 @@
+Japanese CLIP runtime assets
+
+Repository: AUXOUT-TEAM/clip-japanese-base-v2-onnx
+Revision: c924148be2e25b6e4d98e66d8dc1768adb72d079
+
+Files used by the runtime:
+- onnx/text_model_q4f16.onnx
+- onnx/vision_model_q4f16.onnx
+- tokenizer.json
+
+This application retrieves these files only at build time from the pinned
+revision, verifies their fixed SHA-256 values, and executes only the generated
+local copies at runtime.

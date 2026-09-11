@@ -25,6 +25,9 @@ private val SUDACHI_DICTIONARY_MAX_ARCHIVE_BYTES = 300L * 1024L * 1024L
 private val EMBEDDINGGEMMA_REVISION = "75a84c732f1884df76bec365346230e32f582c82"
 private val EMBEDDINGGEMMA_REPOSITORY = "onnx-community/embeddinggemma-300m-ONNX"
 private val EMBEDDINGGEMMA_MAX_BUNDLE_BYTES = 300L * 1024L * 1024L
+private val JAPANESE_CLIP_REVISION = "c924148be2e25b6e4d98e66d8dc1768adb72d079"
+private val JAPANESE_CLIP_REPOSITORY = "AUXOUT-TEAM/clip-japanese-base-v2-onnx"
+private val JAPANESE_CLIP_MAX_BUNDLE_BYTES = 300L * 1024L * 1024L
 private val ALL_BUNDLED_ASSET_MAX_BYTES = 1L * 1024L * 1024L * 1024L
 
 private data class PinnedAsset(
@@ -44,6 +47,30 @@ private val EMBEDDINGGEMMA_ASSETS = listOf(
     PinnedAsset(
         name = "tokenizer.json",
         sha256 = "4dda02faaf32bc91031dc8c88457ac272b00c1016cc679757d1c441b248b9c47",
+    ),
+)
+
+private data class JapaneseClipPinnedAsset(
+    val name: String,
+    val remotePath: String,
+    val sha256: String,
+)
+
+private val JAPANESE_CLIP_ASSETS = listOf(
+    JapaneseClipPinnedAsset(
+        name = "text_model_q4f16.onnx",
+        remotePath = "onnx/text_model_q4f16.onnx",
+        sha256 = "653d6e3393d4c989cee268a5280fccd96dab1f6a93223e56bcb6cb9757503cb6",
+    ),
+    JapaneseClipPinnedAsset(
+        name = "vision_model_q4f16.onnx",
+        remotePath = "onnx/vision_model_q4f16.onnx",
+        sha256 = "ef224e6127d6b66e79eab7ec2b4245acfa9ca070f0c66dbb27e93732bf09a76f",
+    ),
+    JapaneseClipPinnedAsset(
+        name = "tokenizer.json",
+        remotePath = "tokenizer.json",
+        sha256 = "c11bafa5bdbcc1470ef2c81c6f32686547acace5c5e5a6b67a1d3b8501df6b86",
     ),
 )
 
@@ -513,8 +540,78 @@ val prepareEmbeddingGemmaAssets = tasks.register("prepareEmbeddingGemmaAssets") 
     }
 }
 
+val japaneseClipGeneratedAssetsDir = layout.buildDirectory.dir("generated/japanese-clip/assets")
+val prepareJapaneseClipAssets = tasks.register("prepareJapaneseClipAssets") {
+    outputs.dir(japaneseClipGeneratedAssetsDir)
+    outputs.upToDateWhen { false }
+
+    doLast {
+        val cacheDir = File(
+            gradle.gradleUserHomeDir,
+            "caches/like-list-manager/japanese-clip/$JAPANESE_CLIP_REVISION",
+        )
+        if (!cacheDir.exists() && !cacheDir.mkdirs()) {
+            throw GradleException("Failed to create Japanese CLIP cache directory: ${cacheDir.absolutePath}")
+        }
+
+        val verifiedFiles = JAPANESE_CLIP_ASSETS.map { asset ->
+            val cacheFile = File(cacheDir, asset.name)
+            val valid = cacheFile.isFile && cacheFile.length() > 0L &&
+                runCatching { sha256(cacheFile).equals(asset.sha256, ignoreCase = true) }.getOrDefault(false)
+            if (!valid) {
+                deleteExact(cacheFile)
+                val url =
+                    "https://huggingface.co/$JAPANESE_CLIP_REPOSITORY/resolve/$JAPANESE_CLIP_REVISION/${asset.remotePath}"
+                downloadAsset(cacheFile, url, JAPANESE_CLIP_MAX_BUNDLE_BYTES)
+                val downloadedHash = if (cacheFile.isFile && cacheFile.length() > 0L) sha256(cacheFile) else ""
+                if (!downloadedHash.equals(asset.sha256, ignoreCase = true)) {
+                    deleteExact(cacheFile)
+                    throw GradleException(
+                        "Downloaded Japanese CLIP asset SHA-256 does not match the pinned value: ${asset.name}",
+                    )
+                }
+            }
+            asset to cacheFile
+        }
+
+        val japaneseClipBytes = verifiedFiles.sumOf { (_, file) -> file.length() }
+        if (japaneseClipBytes > JAPANESE_CLIP_MAX_BUNDLE_BYTES) {
+            throw GradleException(
+                "Japanese CLIP assets exceed the 300 MiB limit: $japaneseClipBytes bytes",
+            )
+        }
+
+        val generatedRoot = japaneseClipGeneratedAssetsDir.get().asFile
+        project.delete(generatedRoot)
+        val generatedModelDir = File(generatedRoot, "japanese_clip/$JAPANESE_CLIP_REVISION")
+        if (!generatedModelDir.mkdirs()) {
+            throw GradleException("Failed to create generated Japanese CLIP asset directory")
+        }
+        verifiedFiles.forEach { (asset, file) ->
+            file.copyTo(File(generatedModelDir, asset.name), overwrite = true)
+        }
+        File(generatedModelDir, "metadata.json").writeText(
+            buildString {
+                appendLine("{")
+                appendLine("  \"repository\": \"$JAPANESE_CLIP_REPOSITORY\",")
+                appendLine("  \"revision\": \"$JAPANESE_CLIP_REVISION\",")
+                appendLine("  \"files\": [")
+                verifiedFiles.forEachIndexed { index, (asset, file) ->
+                    val comma = if (index + 1 == verifiedFiles.size) "" else ","
+                    appendLine(
+                        "    {\"name\": \"${asset.name}\", \"sha256\": \"${asset.sha256}\", " +
+                            "\"byteSize\": ${file.length()}}$comma",
+                    )
+                }
+                appendLine("  ]")
+                appendLine("}")
+            },
+        )
+    }
+}
+
 val verifyBundledModelCapacity = tasks.register("verifyBundledModelCapacity") {
-    dependsOn(prepareSudachiFullDictionary, prepareEmbeddingGemmaAssets)
+    dependsOn(prepareSudachiFullDictionary, prepareEmbeddingGemmaAssets, prepareJapaneseClipAssets)
     doLast {
         fun mib(bytes: Long): String = "%.3f MiB".format(bytes / (1024.0 * 1024.0))
 
@@ -533,21 +630,34 @@ val verifyBundledModelCapacity = tasks.register("verifyBundledModelCapacity") {
                 "embeddinggemma/$EMBEDDINGGEMMA_REVISION/${asset.name}",
             ).length()
         }
-        val totalBytes = ocrBytes + sudachiBytes + embeddingBytes
+        val japaneseClipBytes = JAPANESE_CLIP_ASSETS.sumOf { asset ->
+            File(
+                japaneseClipGeneratedAssetsDir.get().asFile,
+                "japanese_clip/$JAPANESE_CLIP_REVISION/${asset.name}",
+            ).length()
+        }
+        if (japaneseClipBytes > JAPANESE_CLIP_MAX_BUNDLE_BYTES) {
+            throw GradleException(
+                "Japanese CLIP assets exceed the 300 MiB limit: $japaneseClipBytes bytes",
+            )
+        }
+        val totalBytes = ocrBytes + sudachiBytes + embeddingBytes + japaneseClipBytes
         if (totalBytes > ALL_BUNDLED_ASSET_MAX_BYTES) {
             throw GradleException(
                 "OCR + Sudachi + EmbeddingGemma assets exceed the 1 GiB limit: $totalBytes bytes",
             )
         }
         logger.lifecycle(
-            "Bundled model sizes: EmbeddingGemma=${mib(embeddingBytes)}, " +
-                "OCR=${mib(ocrBytes)}, Sudachi=${mib(sudachiBytes)}, total=${mib(totalBytes)}",
+            "Bundled model sizes: JapaneseCLIP=${mib(japaneseClipBytes)}, " +
+                "EmbeddingGemma=${mib(embeddingBytes)}, OCR=${mib(ocrBytes)}, " +
+                "Sudachi=${mib(sudachiBytes)}, total=${mib(totalBytes)}",
         )
     }
 }
 
 android.sourceSets.getByName("main").assets.srcDir(sudachiGeneratedAssetsDir)
 android.sourceSets.getByName("main").assets.srcDir(embeddingGemmaGeneratedAssetsDir)
+android.sourceSets.getByName("main").assets.srcDir(japaneseClipGeneratedAssetsDir)
 tasks.matching { task -> task.name.startsWith("merge") && task.name.endsWith("Assets") }.configureEach {
     dependsOn(verifyBundledModelCapacity)
 }

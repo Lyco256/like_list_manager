@@ -20,7 +20,7 @@ AndroidアプリモジュールのapplicationId、SDK、Java/Kotlin 21、Compose
 - AppAuth: OAuth 2.0 Authorization Code + PKCE
 - ONNX Runtime Android:既存OCRと同じ`1.21.1`をEmbeddingGemmaのCPU推論にも共用
 - DJL Hugging Face Tokenizers / Android native: `0.33.0`でgenerated `tokenizer.json`を完全ローカル初期化
-- build-time model preparation: 固定revision・SHA-256・一時cache・generated asset・300 MiB/1 GiB容量検査
+- build-time model preparation: EmbeddingGemmaとJapanese CLIPを固定revision・SHA-256・一時cache・generated assetへ配置し、各300 MiBおよびOCR＋Sudachi＋EmbeddingGemma＋Japanese CLIPの1 GiB容量を検査
 - JUnit 4: 階層・絞り込みロジックのローカル単体テスト
 - org.json: Android非依存のJVM unit testで `UndoPayloadCodec` のJSON round trip/不正payload拒否を検証
 - unit test classpath補強: 日本語を含む作業パスでJUnitがテスト/本体クラスを読み込めない環境差を避けるため、`Test` タスク実行前に `debug` と `debugUnitTest` のKotlin/Java出力を一時ASCIIパスへコピーし、そのパスをclasspath先頭へ追加する
@@ -34,6 +34,7 @@ AndroidアプリモジュールのapplicationId、SDK、Java/Kotlin 21、Compose
 - `src/main/AndroidManifest.xml.md`: アプリ構成と権限です。
 - `src/main/java/com/lyco256/llm/data/XOAuthManager.kt.md`: AppAuthの利用箇所です。
 - `src/main/java/com/lyco256/llm/data/LocalTextEmbedder.kt.md`: EmbeddingGemmaの固定asset配置、DJL tokenizer、ONNX Runtime lifecycleです。
+- `src/main/java/com/lyco256/llm/data/LocalMultimodalEmbedder.kt.md`: Japanese CLIPの固定asset、CLYP tokenizer、画像前処理、q4f16 ONNX Runtime lifecycleです。
 
 ## 変更時の確認
 

@@ -1,0 +1,5 @@
+The Japanese CLIP tokenizer is derived from rinna/japanese-roberta-base and
+is distributed under the MIT License. See JAPANESE_CLIP_LICENSE.rinna-MIT.txt.
+
+The ONNX text and vision graphs are an ONNX conversion and q4f16 quantization
+of line-corporation/clip-japanese-base-v2. See JAPANESE_CLIP_LICENSE.txt.

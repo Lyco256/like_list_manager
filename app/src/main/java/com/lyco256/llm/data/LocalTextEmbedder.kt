@@ -10,19 +10,13 @@ import android.content.Context
 import android.content.res.AssetManager
 import java.io.File
 import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.io.InputStream
-import java.nio.file.AtomicMoveNotSupportedException
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
-import java.security.MessageDigest
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 
 object EmbeddingGemmaModelSpec {
     const val REPOSITORY = "onnx-community/embeddinggemma-300m-ONNX"
@@ -90,9 +84,7 @@ fun interface DocumentEmbedder {
 class EmbeddingRuntimeInitializationException(cause: Throwable) :
     IllegalStateException("EmbeddingGemma runtime initialization failed", cause)
 
-internal interface EmbeddingAssetSource {
-    fun open(path: String): InputStream
-}
+internal interface EmbeddingAssetSource : LocalAssetSource
 
 private class AssetManagerEmbeddingAssetSource(
     private val assetManager: AssetManager,
@@ -114,140 +106,20 @@ internal class EmbeddingGemmaAssetInstaller(
     private val assetRoot: String = EmbeddingGemmaModelSpec.ASSET_ROOT,
 ) {
     fun install(): InstalledEmbeddingGemmaAssets {
-        val metadata = readAndValidateMetadata()
-        if (!modelDirectory.exists() && !modelDirectory.mkdirs()) {
-            throw IllegalStateException("Failed to create embedding model directory: ${modelDirectory.absolutePath}")
-        }
-        cleanInterruptedCopies()
-
-        metadata.forEach { asset ->
-            val destination = File(modelDirectory, asset.name)
-            if (!isValid(destination, asset)) {
-                copyAssetAtomically(asset, destination)
-            }
-            check(isValid(destination, asset)) {
-                "Installed embedding asset failed verification: ${asset.name}"
-            }
-        }
-
+        val files = LocalRuntimeAssetInstaller(
+            source = source,
+            modelDirectory = modelDirectory,
+            expectedAssets = expectedAssets.map { LocalRuntimeAssetSpec(it.name, it.sha256) },
+            expectedRepository = expectedRepository,
+            expectedRevision = expectedRevision,
+            assetRoot = assetRoot,
+            metadataFileName = EmbeddingGemmaModelSpec.METADATA_FILE,
+            label = "EmbeddingGemma",
+        ).install()
         return InstalledEmbeddingGemmaAssets(
-            modelFile = File(modelDirectory, EmbeddingGemmaModelSpec.MODEL_FILE),
-            tokenizerFile = File(modelDirectory, EmbeddingGemmaModelSpec.TOKENIZER_FILE),
+            modelFile = requireNotNull(files[EmbeddingGemmaModelSpec.MODEL_FILE]),
+            tokenizerFile = requireNotNull(files[EmbeddingGemmaModelSpec.TOKENIZER_FILE]),
         )
-    }
-
-    private fun readAndValidateMetadata(): List<MetadataAsset> {
-        val metadataPath = "$assetRoot/${EmbeddingGemmaModelSpec.METADATA_FILE}"
-        val json = source.open(metadataPath).bufferedReader(Charsets.UTF_8).use { JSONObject(it.readText()) }
-        check(json.getString("repository") == expectedRepository) {
-            "Unexpected EmbeddingGemma repository in generated metadata"
-        }
-        check(json.getString("revision") == expectedRevision) {
-            "Unexpected EmbeddingGemma revision in generated metadata"
-        }
-
-        val expected = expectedAssets.associateBy { it.name }
-        val files = json.getJSONArray("files")
-        check(files.length() == expected.size) { "EmbeddingGemma metadata contains an unexpected file count" }
-        val metadata = buildList {
-            for (index in 0 until files.length()) {
-                val item = files.getJSONObject(index)
-                val name = item.getString("name")
-                val expectedAsset = expected[name]
-                    ?: error("Unexpected EmbeddingGemma asset in metadata: $name")
-                val sha256 = item.getString("sha256")
-                check(sha256.equals(expectedAsset.sha256, ignoreCase = true)) {
-                    "EmbeddingGemma metadata SHA-256 does not match the pinned value: $name"
-                }
-                val byteSize = item.getLong("byteSize")
-                check(byteSize > 0L) { "EmbeddingGemma asset has an invalid byte size: $name" }
-                add(MetadataAsset(name, sha256.lowercase(), byteSize))
-            }
-        }
-        check(metadata.map { it.name }.toSet() == expected.keys) {
-            "EmbeddingGemma metadata file set does not match the pinned asset set"
-        }
-        return metadata
-    }
-
-    private fun cleanInterruptedCopies() {
-        modelDirectory.listFiles()
-            .orEmpty()
-            .filter { it.isFile && it.name.endsWith(".partial") }
-            .forEach { partial ->
-                check(partial.delete()) { "Failed to remove interrupted embedding copy: ${partial.name}" }
-            }
-    }
-
-    private fun isValid(file: File, asset: MetadataAsset): Boolean {
-        if (!file.isFile || file.length() != asset.byteSize) return false
-        return runCatching { sha256(file).equals(asset.sha256, ignoreCase = true) }.getOrDefault(false)
-    }
-
-    private fun copyAssetAtomically(asset: MetadataAsset, destination: File) {
-        val partial = File(modelDirectory, ".${asset.name}.partial")
-        if (partial.exists() && !partial.delete()) {
-            throw IllegalStateException("Failed to remove interrupted embedding copy: ${partial.name}")
-        }
-        try {
-            val sourcePath = "$assetRoot/${asset.name}"
-            var byteSize = 0L
-            val digest = MessageDigest.getInstance("SHA-256")
-            source.open(sourcePath).use { input ->
-                FileOutputStream(partial).use { output ->
-                    val buffer = ByteArray(1024 * 1024)
-                    while (true) {
-                        val read = input.read(buffer)
-                        if (read < 0) break
-                        byteSize += read.toLong()
-                        digest.update(buffer, 0, read)
-                        output.write(buffer, 0, read)
-                    }
-                    output.fd.sync()
-                }
-            }
-            val copiedHash = digest.digest().joinToString("") { byte -> "%02x".format(byte) }
-            check(byteSize == asset.byteSize && copiedHash.equals(asset.sha256, ignoreCase = true)) {
-                "Generated EmbeddingGemma asset failed verification: ${asset.name}"
-            }
-            try {
-                Files.move(
-                    partial.toPath(),
-                    destination.toPath(),
-                    StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING,
-                )
-            } catch (_: AtomicMoveNotSupportedException) {
-                Files.move(
-                    partial.toPath(),
-                    destination.toPath(),
-                    StandardCopyOption.REPLACE_EXISTING,
-                )
-            }
-        } finally {
-            if (partial.exists() && !partial.delete()) {
-                throw IllegalStateException("Failed to remove incomplete embedding copy: ${partial.name}")
-            }
-        }
-    }
-
-    private data class MetadataAsset(
-        val name: String,
-        val sha256: String,
-        val byteSize: Long,
-    )
-
-    private fun sha256(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        FileInputStream(file).use { input ->
-            val buffer = ByteArray(1024 * 1024)
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                digest.update(buffer, 0, read)
-            }
-        }
-        return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
     }
 }
 
