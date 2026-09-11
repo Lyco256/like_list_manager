@@ -20,6 +20,7 @@ class LikeListManagerApp : Application() {
         if (!BuildConfig.TEST_HARNESS) {
             container.lexicalIndexSynchronizer.start(resourceScope)
             container.semanticIndexSynchronizer.start(resourceScope)
+            container.imageEmbeddingSynchronizer.start(resourceScope)
         }
     }
 

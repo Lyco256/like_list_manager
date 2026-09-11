@@ -12,7 +12,7 @@
 
 - `LikeListManagerApp : Application`
 - `container`: アプリ全体で共有する依存関係コンテナ
-- `onCreate`: `AppContainer(this)` を初期化し、production variantだけ`LexicalIndexSynchronizer`と`SemanticIndexSynchronizer`をApplication所有のIO scopeで非同期開始する。TEST_HARNESSではどちらも暗黙起動しない
+- `onCreate`: `AppContainer(this)` を初期化し、production variantだけ`LexicalIndexSynchronizer`、`SemanticIndexSynchronizer`、`ImageEmbeddingSynchronizer`をApplication所有のIO scopeで非同期開始する。TEST_HARNESSではいずれも暗黙起動しない
 - `onTrimMemory`: critical memory pressure時に現在のPaddleOCR engineを解放
 
 ## 関連ファイル
@@ -23,4 +23,4 @@
 
 ## 変更時の確認
 
-起動時に辞書展開・辞書ロード・既存clip解析・EmbeddingGemmaモデル初期化を同期実行しないでください。lexical／semantic同期はApplicationのバックグラウンドscopeで開始し、TEST_HARNESSの専用integration testからだけ明示起動します。モデル初期化は最初のsemantic document要求まで遅延します。
+起動時に辞書展開・辞書ロード・既存clip解析・EmbeddingGemma／Japanese CLIPモデル初期化・画像backfillを同期実行しないでください。lexical／semantic／image同期はApplicationのバックグラウンドscopeで開始し、TEST_HARNESSの専用integration testからだけ明示起動します。モデル初期化は最初の要求まで遅延します。

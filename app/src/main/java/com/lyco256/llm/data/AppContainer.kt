@@ -60,6 +60,12 @@ class AppContainer(context: Context) {
         derivedSearchStorage = derivedSearchStorage,
         embedder = localTextEmbedder,
     )
+    val localMultimodalEmbedder: LocalMultimodalEmbedder = LocalMultimodalEmbedder(context)
+    val imageEmbeddingSynchronizer = ImageEmbeddingSynchronizer(
+        databaseFlow = postStorageManager.database,
+        derivedSearchStorage = derivedSearchStorage,
+        embedder = localMultimodalEmbedder,
+    )
     val apiSettingsStore: SettingsStore = if (BuildConfig.TEST_HARNESS) {
         InMemorySettingsStore()
     } else {

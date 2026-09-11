@@ -193,7 +193,7 @@ class LocalMultimodalEmbedder internal constructor(
     private val assetSource: JapaneseClipAssetSource,
     private val modelDirectory: File,
     private val ioDispatcher: CoroutineDispatcher,
-) : AutoCloseable {
+) : AutoCloseable, ImageEmbedder {
     constructor(context: Context) : this(
         assetSource = AssetManagerJapaneseClipAssetSource(context.assets),
         modelDirectory = File(
@@ -239,7 +239,7 @@ class LocalMultimodalEmbedder internal constructor(
         }
     }
 
-    suspend fun embedImage(bitmap: Bitmap): MultimodalEmbedding {
+    override suspend fun embedImage(bitmap: Bitmap): MultimodalEmbedding {
         require(!bitmap.isRecycled) { "Japanese CLIP image must not be recycled" }
         require(bitmap.width > 0 && bitmap.height > 0) { "Japanese CLIP image must have positive dimensions" }
         return withContext(ioDispatcher) {

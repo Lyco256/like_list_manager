@@ -181,6 +181,94 @@ class DerivedSearchStorage(
         )
     }
 
+    suspend fun replaceImageEmbedding(
+        assetId: Long,
+        clipId: Long,
+        sourceFingerprint: String,
+        embeddingBlob: ByteArray,
+    ) = withStorage {
+        require(assetId > 0L) { "Image embedding asset ID must be positive" }
+        require(clipId > 0L) { "Image embedding clip ID must be positive" }
+        require(sourceFingerprint.isNotBlank()) { "Image embedding source fingerprint must not be blank" }
+        ImageEmbeddingBlobCodec.decode(embeddingBlob)
+
+        inTransaction {
+            execute(
+                """
+                INSERT INTO image_embeddings(asset_id, clip_id, source_fingerprint, embedding)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(asset_id) DO UPDATE SET
+                    clip_id = excluded.clip_id,
+                    source_fingerprint = excluded.source_fingerprint,
+                    embedding = excluded.embedding
+                """.trimIndent(),
+            ) { statement ->
+                statement.bindLong(1, assetId)
+                statement.bindLong(2, clipId)
+                statement.bindText(3, sourceFingerprint)
+                statement.bindBlob(4, embeddingBlob)
+            }
+        }
+    }
+
+    suspend fun deleteImageEmbedding(assetId: Long) = withStorage {
+        execute("DELETE FROM image_embeddings WHERE asset_id = ?") { statement ->
+            statement.bindLong(1, assetId)
+        }
+    }
+
+    suspend fun deleteImageEmbeddingsForClip(clipId: Long) = withStorage {
+        execute("DELETE FROM image_embeddings WHERE clip_id = ?") { statement ->
+            statement.bindLong(1, clipId)
+        }
+    }
+
+    suspend fun getAllImageEmbeddingFingerprints(): Map<Long, String> = withStorage {
+        queryRows(
+            sql = "SELECT asset_id, source_fingerprint FROM image_embeddings ORDER BY asset_id",
+            bind = {},
+            map = { statement -> statement.getLong(0) to statement.getText(1) },
+        ).toMap()
+    }
+
+    suspend fun getImageEmbedding(assetId: Long): ImageEmbeddingDocument? = withStorage {
+        queryRows(
+            sql = """
+                SELECT asset_id, clip_id, source_fingerprint, embedding
+                FROM image_embeddings
+                WHERE asset_id = ?
+                LIMIT 1
+            """.trimIndent(),
+            bind = { statement -> statement.bindLong(1, assetId) },
+            map = { statement -> decodeImageEmbedding(statement) },
+        ).singleOrNull()
+    }
+
+    suspend fun getImageEmbeddingsForClip(clipId: Long): List<ImageEmbeddingDocument> = withStorage {
+        queryRows(
+            sql = """
+                SELECT asset_id, clip_id, source_fingerprint, embedding
+                FROM image_embeddings
+                WHERE clip_id = ?
+                ORDER BY asset_id
+            """.trimIndent(),
+            bind = { statement -> statement.bindLong(1, clipId) },
+            map = { statement -> decodeImageEmbedding(statement) },
+        )
+    }
+
+    suspend fun getAllImageEmbeddings(): List<ImageEmbeddingDocument> = withStorage {
+        queryRows(
+            sql = """
+                SELECT asset_id, clip_id, source_fingerprint, embedding
+                FROM image_embeddings
+                ORDER BY asset_id
+            """.trimIndent(),
+            bind = {},
+            map = { statement -> decodeImageEmbedding(statement) },
+        )
+    }
+
     suspend fun getAllClipFingerprints(): Map<Long, String> = withStorage {
         queryRows(
             sql = "SELECT clip_id, source_fingerprint FROM lexical_sync_state ORDER BY clip_id",
@@ -203,6 +291,7 @@ class DerivedSearchStorage(
             execute("DELETE FROM lexical_sync_state")
             execute("DELETE FROM semantic_documents")
             execute("DELETE FROM semantic_source_sync_state")
+            execute("DELETE FROM image_embeddings")
         }
     }
 
@@ -371,6 +460,17 @@ class DerivedSearchStorage(
                     )
                     """.trimIndent(),
                 )
+                execute(
+                    """
+                    CREATE TABLE image_embeddings (
+                        asset_id INTEGER NOT NULL PRIMARY KEY,
+                        clip_id INTEGER NOT NULL,
+                        source_fingerprint TEXT NOT NULL,
+                        embedding BLOB NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                execute("CREATE INDEX image_embeddings_clip_id ON image_embeddings(clip_id)")
                 execute("PRAGMA user_version = $SCHEMA_VERSION")
             }
             return
@@ -446,6 +546,17 @@ class DerivedSearchStorage(
             sourceType = sourceType,
             sourceOrdinal = sourceOrdinal,
             embedding = SemanticEmbeddingBlobCodec.decode(statement.getBlob(4)),
+        )
+    }
+
+    private fun decodeImageEmbedding(statement: SQLiteStatement): ImageEmbeddingDocument {
+        val sourceFingerprint = statement.getText(2)
+        require(sourceFingerprint.isNotBlank()) { "Image embedding source fingerprint must not be blank" }
+        return ImageEmbeddingDocument(
+            assetId = statement.getLong(0),
+            clipId = statement.getLong(1),
+            sourceFingerprint = sourceFingerprint,
+            embedding = ImageEmbeddingBlobCodec.decode(statement.getBlob(3)),
         )
     }
 
@@ -574,7 +685,7 @@ class DerivedSearchStorage(
     companion object {
         const val DIRECTORY_NAME = "derived_search"
         const val DATABASE_NAME = "search_index.db"
-        const val SCHEMA_VERSION = 3
+        const val SCHEMA_VERSION = 4
         const val DEFAULT_SEARCH_LIMIT = 100
 
         private const val LEGACY_FINGERPRINT = "legacy-foundation-document"
@@ -584,6 +695,7 @@ class DerivedSearchStorage(
         private const val TRIGRAM_FTS_TABLE = "lexical_documents_trigram_fts"
         private const val SEMANTIC_DOCUMENTS_TABLE = "semantic_documents"
         private const val SEMANTIC_SOURCE_SYNC_STATE_TABLE = "semantic_source_sync_state"
+        private const val IMAGE_EMBEDDINGS_TABLE = "image_embeddings"
         private val REQUIRED_OBJECTS = listOf(
             "lexical_documents",
             "lexical_sync_state",
@@ -591,6 +703,8 @@ class DerivedSearchStorage(
             TRIGRAM_FTS_TABLE,
             SEMANTIC_DOCUMENTS_TABLE,
             SEMANTIC_SOURCE_SYNC_STATE_TABLE,
+            IMAGE_EMBEDDINGS_TABLE,
+            "image_embeddings_clip_id",
         )
     }
 }

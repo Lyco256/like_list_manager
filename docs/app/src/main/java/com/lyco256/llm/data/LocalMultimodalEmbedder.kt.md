@@ -2,7 +2,7 @@
 
 ## 役割
 
-Japanese CLIPのtext／image embeddingを端末内だけで実行する独立runtimeです。既存の`LocalTextEmbedder`、正本Room、`DerivedSearchStorage`、semantic同期、検索UI、OCRには接続しません。将来の呼び出し側が必要な modality だけを遅延初期化できる境界として保持します。
+Japanese CLIPのtext／image embeddingを端末内だけで実行するruntimeです。`ImageEmbedder`としてimage同期へ注入されますが、正本Room、`DerivedSearchStorage`、semantic同期、検索UI、OCRを直接参照しません。text APIは既存どおり独立しており、呼び出し側が必要なmodalityだけを遅延初期化できます。
 
 ## 固定資産と前処理
 
@@ -24,3 +24,5 @@ textはDJL tokenizerへ`addSpecialTokens=false`で渡し、最大76 raw tokenを
 
 - `LocalMultimodalEmbedderTest`: 256次元出力のfinite／L2検証、token input、metadata／SHA再利用、単一ファイル復旧、partial cleanup、copy失敗をfake assetで確認します。
 - `LocalMultimodalEmbedderIntegrationTest`: 隔離された`com.lyco256.llm.test`で実際のq4f16 ONNX Runtime CPU text／vision推論、lazy/reuse、同時呼び出し、bad input、close、asset復旧、画像前処理、正本DB・画像・Undo・派生DBの不変性を確認します。類似度、検索品質、実データ画像の目視評価は行いません。
+
+`ImageEmbeddingSynchronizer`は同じprocessのこのruntime instanceを`ImageEmbedder`として共有し、vision sessionをassetごとに作り直しません。

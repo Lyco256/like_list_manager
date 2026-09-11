@@ -92,9 +92,9 @@ MainActivity / Compose UI
 - 初回サンプルデータはDBが空の場合だけ投入
 - 派生検索ストレージは正本Room・画像・Undo・保存先設定から独立した再生成可能DBとして保持し、既存検索UIへは接続しない。productionではApplication起動後に専用synchronizerが非同期reconcileを開始し、TEST_HARNESSでは明示起動時だけ動作する
 - `LexicalIndexSynchronizer`は現在の`PostStorageManager.database`から`ClipDao.observeAllClips()`だけを監視し、5つの検索対象fieldのfingerprint差分で逐次処理する。解析失敗はそのclipを未同期のまま残し、正本操作へ伝播させない
-- `DerivedSearchStorage`はBundled SQLite 2.7.0、通常FTS5、trigram FTS5、semantic embedding BLOB、FULLMUTEX単一connection、clip／source単位のdocument・fingerprint transaction置換・削除、schema不一致・破損時の1回再作成を担当する。派生schemaはversion 3
+- `DerivedSearchStorage`はBundled SQLite 2.7.0、通常FTS5、trigram FTS5、semantic embedding BLOB、画像embedding BLOB、FULLMUTEX単一connection、clip／source単位のdocument・fingerprint transaction置換・削除、schema不一致・破損時の1回再作成を担当する。派生schemaはversion 4
 - `LocalTextEmbedder`は固定revisionのEmbeddingGemma 300M Q4、DJL tokenizer、ONNX Runtime CPU sessionを完全ローカルで扱う。query/document prompt、2048 token truncation、768次元・finite・L2 normalize検証、遅延初期化、session再利用、並行要求の直列化、close、モデル専用noBackup配置を担当し、`DocumentEmbedder`としてsemantic同期へ注入される。既存のlexical検索UI・ANN・順位付けへは未接続
-- `LocalMultimodalEmbedder`は固定revisionのJapanese CLIP q4f16、CLYP tokenizer、224黒背景center-pad、OpenAI CLIP normalization、ONNX Runtime CPU text/vision sessionを完全ローカルで扱う。256次元・finite・L2 normalize検証、modality別遅延初期化、session再利用、並行要求の直列化、close、モデル専用noBackup配置を担当する。既存のLocalTextEmbedder、semantic同期、検索UI・ANN・順位付けへは未接続
+- `LocalMultimodalEmbedder`は固定revisionのJapanese CLIP q4f16、CLYP tokenizer、224黒背景center-pad、OpenAI CLIP normalization、ONNX Runtime CPU text/vision sessionを完全ローカルで扱う。256次元・finite・L2 normalize検証、modality別遅延初期化、session再利用、並行要求の直列化、close、モデル専用noBackup配置を担当する。画像embedding同期へimage実装を注入し、既存のLocalTextEmbedder、semantic同期、検索UI・ANN・順位付けへは未接続
 - `LocalRuntimeAssetInstaller`はEmbeddingGemmaとJapanese CLIPのgenerated metadata、SHA-256、byte size、専用directory内atomic copy／部分復旧を共有する内部utilityであり、各runtimeの固定specと出力wrapperは分離して保持する
 - `SemanticIndexSynchronizer`は正本Roomの`ClipEntity.text`／`summary`／`ocrText`だけをUnicode code point chunkへ分割し、固定順・逐次でEmbeddingGemmaを実行する。source fingerprint差分、空source削除、clip削除、DB null停止、途中失敗時の旧データ保持、production自動起動／TEST_HARNESS明示起動を担当する
 
@@ -118,6 +118,7 @@ MainActivity / Compose UI
 | 派生検索DB、FTS5、trigram候補検索 | `docs/app/src/main/java/com/lyco256/llm/data/DerivedSearchStorage.kt.md` | `app/src/main/java/com/lyco256/llm/data/DerivedSearchStorage.kt`, `DerivedSearchStorageIntegrationTest.kt` |
 | 正本clipから派生Lexical Indexへの同期 | `docs/app/src/main/java/com/lyco256/llm/data/LexicalIndexSynchronizer.kt.md` | `LexicalDocumentBuilder.kt.md`, `DerivedSearchStorage.kt.md`, `LexicalIndexSynchronizerIntegrationTest.kt.md`, `LexicalIndexRepositoryUndoIntegrationTest.kt.md` |
 | 正本clipからsemantic embeddingへの同期 | `docs/app/src/main/java/com/lyco256/llm/data/SemanticIndexSynchronizer.kt.md` | `SemanticTextChunker.kt.md`, `LocalTextEmbedder.kt.md`, `DerivedSearchStorage.kt.md`, `SemanticIndexSynchronizerIntegrationTest.kt.md`, `SemanticIndexEmbeddingIntegrationTest.kt.md` |
+| 正本assetから画像embeddingへの同期 | `docs/app/src/main/java/com/lyco256/llm/data/ImageEmbeddingSynchronizer.kt.md` | `LocalImageEmbeddingBitmapDecoder.kt.md`, `ImageEmbeddingFingerprint.kt.md`, `ImageEmbeddingBlobCodec.kt.md`, `DerivedSearchStorage.kt.md`, `ImageEmbeddingSynchronizerIntegrationTest.kt.md`, `ImageEmbeddingVisionIntegrationTest.kt.md` |
 | Sudachi Fullの辞書準備、配置、検索用4表現生成 | `docs/app/src/main/java/com/lyco256/llm/data/SudachiLexicalTextAnalyzer.kt.md` | `app/src/main/java/com/lyco256/llm/data/SudachiLexicalTextAnalyzer.kt`, `LexicalDocumentBuilder.kt`, `SudachiDictionaryInstallerTest.kt`, `SudachiLexicalTextAnalyzerIntegrationTest.kt` |
 | EmbeddingGemmaの完全ローカルtext embedding | `docs/app/src/main/java/com/lyco256/llm/data/LocalTextEmbedder.kt.md` | `app/src/main/java/com/lyco256/llm/data/LocalTextEmbedder.kt`, `LocalTextEmbedderTest.kt`, `LocalTextEmbedderIntegrationTest.kt` |
 | Japanese CLIPの完全ローカルtext／image embedding | `docs/app/src/main/java/com/lyco256/llm/data/LocalMultimodalEmbedder.kt.md` | `app/src/main/java/com/lyco256/llm/data/LocalMultimodalEmbedder.kt`, `LocalMultimodalEmbedderTest.kt`, `LocalMultimodalEmbedderIntegrationTest.kt` |
@@ -196,6 +197,11 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/data/PaddleOcrTextRecognizer.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/TagColorPalette.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/DerivedSearchStorage.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/ImageEmbeddingModels.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/ImageEmbeddingBlobCodec.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/ImageEmbeddingFingerprint.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/LocalImageEmbeddingBitmapDecoder.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/ImageEmbeddingSynchronizer.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/SudachiLexicalTextAnalyzer.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/LocalTextEmbedder.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/LocalMultimodalEmbedder.kt.md`
@@ -222,6 +228,10 @@ MainActivity / Compose UI
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/SemanticSearchStorageIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/SemanticIndexSynchronizerIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/SemanticIndexEmbeddingIntegrationTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/ImageEmbeddingBitmapDecoderIntegrationTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/ImageEmbeddingStorageIntegrationTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/ImageEmbeddingSynchronizerIntegrationTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/ImageEmbeddingVisionIntegrationTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/LocalMultimodalEmbedderTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LocalMultimodalEmbedderIntegrationTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/TagHierarchyTest.kt.md`
