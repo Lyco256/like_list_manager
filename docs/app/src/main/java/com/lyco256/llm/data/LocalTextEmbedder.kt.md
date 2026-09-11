@@ -2,7 +2,7 @@
 
 ## 役割
 
-EmbeddingGemma 300M Q4を端末内だけで実行する独立したtext embedding runtimeです。正本Room DB、`DerivedSearchStorage`、`LexicalIndexSynchronizer`、既存検索、UI、OCRへは接続しません。
+EmbeddingGemma 300M Q4を端末内だけで実行するtext embedding runtimeです。`DocumentEmbedder`の最小境界を実装し、`AppContainer`では1インスタンスを`SemanticIndexSynchronizer`へ注入します。正本Room DB、`DerivedSearchStorage`、既存検索、UI、OCRの編集経路を直接参照せず、semantic同期から渡された文書だけを埋め込みます。
 
 ## 固定資産
 
@@ -18,6 +18,8 @@ Gradleが固定URLから取得したgenerated assetのmetadataとSHA-256を検�
 
 `LocalTextEmbedder`生成時はモデル、tokenizer、ONNX sessionを作りません。最初の非blank入力で一度だけ初期化し、内部lockでsession/tokenizerの利用とcloseを直列化します。推論処理は`Dispatchers.IO`へ移し、入力はDJLのlocal `InputStream` tokenizerへ渡します。DJLのoffline/telemetry opt-out system propertyはtokenizer生成前に設定します。
 
+モデル初期化失敗は`EmbeddingRuntimeInitializationException`へ包み、synchronizerが同じreconcile中に全sourceへ約200MB級の初期化を繰り返さないようにします。次回のstartまたは新しいsnapshotで再試行できます。
+
 配置中断時の`.partial`だけをモデル専用ディレクトリ内で削除し、各ファイルをSHA-256・byte size確認後に原子的に置換します。破損時は該当ファイルだけを復旧します。モデル出力は768要素、finite、正のL2 normを満たさない場合に明示的な推論エラーとします。
 
 ## prompt
@@ -29,3 +31,4 @@ Gradleが固定URLから取得したgenerated assetのmetadataとSHA-256を検�
 
 - `LocalTextEmbedderTest`: prompt、blank reject、出力構造、asset metadata検証、再利用、部分復旧、copy失敗を確認します。
 - `LocalTextEmbedderIntegrationTest`: generated asset、tokenizer、ONNX external data、768次元出力、長文truncation、繰り返し／並行実行、close、正本データ非変更を実モデルで確認します。semantic精度や順位は判定しません。
+- `SemanticIndexEmbeddingIntegrationTest`: 実際のEmbeddingGemmaを正本Roomのtext/summary/OCR、Unicode chunk、独立派生DBへ接続し、初回同期・長文chunk・更新・削除・同じclip IDの復元を確認します。embedding値の意味、類似度、順位は判定しません。

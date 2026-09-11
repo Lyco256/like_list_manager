@@ -97,6 +97,90 @@ class DerivedSearchStorage(
         }
     }
 
+    suspend fun replaceSemanticSource(
+        clipId: Long,
+        sourceType: SemanticSourceType,
+        sourceFingerprint: String,
+        documents: List<SemanticDocument>,
+    ) = withStorage {
+        require(sourceFingerprint.isNotBlank()) { "Semantic source fingerprint must not be blank" }
+        require(documents.isNotEmpty()) { "Semantic source must contain at least one document" }
+        require(documents.all { document ->
+            document.clipId == clipId && document.sourceType == sourceType
+        }) { "All semantic documents must belong to $clipId/$sourceType" }
+        require(documents.map(SemanticDocument::sourceOrdinal).toSet() == (0 until documents.size).toSet()) {
+            "Semantic document ordinals must be consecutive from zero"
+        }
+        require(documents.map(SemanticDocument::documentId).distinct().size == documents.size) {
+            "Semantic document IDs must be unique"
+        }
+        documents.forEach { document ->
+            require(document.documentId == SemanticTextChunker.documentId(clipId, sourceType, document.sourceOrdinal)) {
+                "Semantic document ID does not match its source"
+            }
+            SemanticEmbeddingBlobCodec.encode(document.embedding)
+        }
+
+        inTransaction {
+            deleteSemanticSourceRows(clipId, sourceType)
+            documents.forEach { document -> insertSemanticDocument(document) }
+            upsertSemanticFingerprint(clipId, sourceType, sourceFingerprint)
+        }
+    }
+
+    suspend fun deleteSemanticSource(clipId: Long, sourceType: SemanticSourceType) = withStorage {
+        inTransaction { deleteSemanticSourceRows(clipId, sourceType) }
+    }
+
+    suspend fun deleteSemanticClip(clipId: Long) = withStorage {
+        inTransaction {
+            execute("DELETE FROM semantic_documents WHERE clip_id = ?") { statement ->
+                statement.bindLong(1, clipId)
+            }
+            execute("DELETE FROM semantic_source_sync_state WHERE clip_id = ?") { statement ->
+                statement.bindLong(1, clipId)
+            }
+        }
+    }
+
+    suspend fun getAllSemanticSourceFingerprints(): Map<SemanticSourceKey, String> = withStorage {
+        queryRows(
+            sql = "SELECT clip_id, source_type, source_fingerprint FROM semantic_source_sync_state ORDER BY clip_id, source_type",
+            bind = {},
+            map = { statement ->
+                SemanticSourceKey(
+                    clipId = statement.getLong(0),
+                    sourceType = SemanticSourceType.fromStorageValue(statement.getText(1)),
+                ) to statement.getText(2)
+            },
+        ).toMap()
+    }
+
+    suspend fun getSemanticDocuments(clipId: Long): List<SemanticDocument> = withStorage {
+        queryRows(
+            sql = """
+                SELECT document_id, clip_id, source_type, source_ordinal, embedding
+                FROM semantic_documents
+                WHERE clip_id = ?
+                ORDER BY source_type, source_ordinal
+            """.trimIndent(),
+            bind = { statement -> statement.bindLong(1, clipId) },
+            map = { statement -> decodeSemanticDocument(statement) },
+        )
+    }
+
+    suspend fun getAllSemanticDocuments(): List<SemanticDocument> = withStorage {
+        queryRows(
+            sql = """
+                SELECT document_id, clip_id, source_type, source_ordinal, embedding
+                FROM semantic_documents
+                ORDER BY clip_id, source_type, source_ordinal
+            """.trimIndent(),
+            bind = {},
+            map = { statement -> decodeSemanticDocument(statement) },
+        )
+    }
+
     suspend fun getAllClipFingerprints(): Map<Long, String> = withStorage {
         queryRows(
             sql = "SELECT clip_id, source_fingerprint FROM lexical_sync_state ORDER BY clip_id",
@@ -117,6 +201,8 @@ class DerivedSearchStorage(
             execute("DELETE FROM $TRIGRAM_FTS_TABLE")
             execute("DELETE FROM lexical_documents")
             execute("DELETE FROM lexical_sync_state")
+            execute("DELETE FROM semantic_documents")
+            execute("DELETE FROM semantic_source_sync_state")
         }
     }
 
@@ -263,6 +349,28 @@ class DerivedSearchStorage(
                     )
                     """.trimIndent(),
                 )
+                execute(
+                    """
+                    CREATE TABLE semantic_documents (
+                        document_id TEXT NOT NULL PRIMARY KEY,
+                        clip_id INTEGER NOT NULL,
+                        source_type TEXT NOT NULL,
+                        source_ordinal INTEGER NOT NULL,
+                        embedding BLOB NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                execute("CREATE INDEX semantic_documents_clip_source ON semantic_documents(clip_id, source_type, source_ordinal)")
+                execute(
+                    """
+                    CREATE TABLE semantic_source_sync_state (
+                        clip_id INTEGER NOT NULL,
+                        source_type TEXT NOT NULL,
+                        source_fingerprint TEXT NOT NULL,
+                        PRIMARY KEY(clip_id, source_type)
+                    )
+                    """.trimIndent(),
+                )
                 execute("PRAGMA user_version = $SCHEMA_VERSION")
             }
             return
@@ -309,6 +417,64 @@ class DerivedSearchStorage(
             statement.bindText(7, document.readingText)
             statement.bindText(8, document.romanizedText)
             statement.bindText(9, document.compactText)
+        }
+    }
+
+    private fun SQLiteConnection.insertSemanticDocument(document: SemanticDocument) {
+        execute(
+            """
+            INSERT INTO semantic_documents(
+                document_id, clip_id, source_type, source_ordinal, embedding
+            ) VALUES (?, ?, ?, ?, ?)
+            """.trimIndent(),
+        ) { statement ->
+            statement.bindText(1, document.documentId)
+            statement.bindLong(2, document.clipId)
+            statement.bindText(3, document.sourceType.storageValue)
+            statement.bindLong(4, document.sourceOrdinal.toLong())
+            statement.bindBlob(5, SemanticEmbeddingBlobCodec.encode(document.embedding))
+        }
+    }
+
+    private fun decodeSemanticDocument(statement: SQLiteStatement): SemanticDocument {
+        val clipId = statement.getLong(1)
+        val sourceType = SemanticSourceType.fromStorageValue(statement.getText(2))
+        val sourceOrdinal = statement.getLong(3).toInt()
+        return SemanticDocument(
+            documentId = statement.getText(0),
+            clipId = clipId,
+            sourceType = sourceType,
+            sourceOrdinal = sourceOrdinal,
+            embedding = SemanticEmbeddingBlobCodec.decode(statement.getBlob(4)),
+        )
+    }
+
+    private fun SQLiteConnection.deleteSemanticSourceRows(clipId: Long, sourceType: SemanticSourceType) {
+        execute("DELETE FROM semantic_documents WHERE clip_id = ? AND source_type = ?") { statement ->
+            statement.bindLong(1, clipId)
+            statement.bindText(2, sourceType.storageValue)
+        }
+        execute("DELETE FROM semantic_source_sync_state WHERE clip_id = ? AND source_type = ?") { statement ->
+            statement.bindLong(1, clipId)
+            statement.bindText(2, sourceType.storageValue)
+        }
+    }
+
+    private fun SQLiteConnection.upsertSemanticFingerprint(
+        clipId: Long,
+        sourceType: SemanticSourceType,
+        sourceFingerprint: String,
+    ) {
+        execute(
+            """
+            INSERT INTO semantic_source_sync_state(clip_id, source_type, source_fingerprint)
+            VALUES (?, ?, ?)
+            ON CONFLICT(clip_id, source_type) DO UPDATE SET source_fingerprint = excluded.source_fingerprint
+            """.trimIndent(),
+        ) { statement ->
+            statement.bindLong(1, clipId)
+            statement.bindText(2, sourceType.storageValue)
+            statement.bindText(3, sourceFingerprint)
         }
     }
 
@@ -408,7 +574,7 @@ class DerivedSearchStorage(
     companion object {
         const val DIRECTORY_NAME = "derived_search"
         const val DATABASE_NAME = "search_index.db"
-        const val SCHEMA_VERSION = 2
+        const val SCHEMA_VERSION = 3
         const val DEFAULT_SEARCH_LIMIT = 100
 
         private const val LEGACY_FINGERPRINT = "legacy-foundation-document"
@@ -416,11 +582,15 @@ class DerivedSearchStorage(
         private const val LEXICAL_DOCUMENTS_TABLE = "lexical_documents"
         private const val NORMAL_FTS_TABLE = "lexical_documents_fts"
         private const val TRIGRAM_FTS_TABLE = "lexical_documents_trigram_fts"
+        private const val SEMANTIC_DOCUMENTS_TABLE = "semantic_documents"
+        private const val SEMANTIC_SOURCE_SYNC_STATE_TABLE = "semantic_source_sync_state"
         private val REQUIRED_OBJECTS = listOf(
             "lexical_documents",
             "lexical_sync_state",
             NORMAL_FTS_TABLE,
             TRIGRAM_FTS_TABLE,
+            SEMANTIC_DOCUMENTS_TABLE,
+            SEMANTIC_SOURCE_SYNC_STATE_TABLE,
         )
     }
 }

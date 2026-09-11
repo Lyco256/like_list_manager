@@ -19,6 +19,7 @@ import java.security.MessageDigest
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -81,6 +82,13 @@ class TextEmbedding private constructor(private val components: FloatArray) {
         }
     }
 }
+
+fun interface DocumentEmbedder {
+    suspend fun embedDocument(text: String): TextEmbedding
+}
+
+class EmbeddingRuntimeInitializationException(cause: Throwable) :
+    IllegalStateException("EmbeddingGemma runtime initialization failed", cause)
 
 internal interface EmbeddingAssetSource {
     fun open(path: String): InputStream
@@ -247,7 +255,7 @@ class LocalTextEmbedder internal constructor(
     private val assetSource: EmbeddingAssetSource,
     private val modelDirectory: File,
     private val ioDispatcher: CoroutineDispatcher,
-) : AutoCloseable {
+) : DocumentEmbedder, AutoCloseable {
     constructor(context: Context) : this(
         assetSource = AssetManagerEmbeddingAssetSource(context.assets),
         modelDirectory = File(
@@ -275,7 +283,7 @@ class LocalTextEmbedder internal constructor(
         prompt = EmbeddingPrompts::query,
     )
 
-    suspend fun embedDocument(text: String): TextEmbedding = embed(
+    override suspend fun embedDocument(text: String): TextEmbedding = embed(
         text = text,
         prompt = EmbeddingPrompts::document,
     )
@@ -294,9 +302,17 @@ class LocalTextEmbedder internal constructor(
         return withContext(ioDispatcher) {
             lock.withLock {
                 check(!closed) { "LocalTextEmbedder is closed" }
-                val currentRuntime = runtime ?: createRuntime().also {
-                    runtime = it
-                    initializationCountForTest += 1
+                val currentRuntime = runtime ?: run {
+                    try {
+                        createRuntime()
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Throwable) {
+                        throw EmbeddingRuntimeInitializationException(error)
+                    }.also {
+                        runtime = it
+                        initializationCountForTest += 1
+                    }
                 }
                 currentRuntime.embed(prompt(text))
             }

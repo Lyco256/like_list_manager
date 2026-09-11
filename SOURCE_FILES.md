@@ -22,6 +22,11 @@ MainActivity / Compose UI
     -> DerivedSearchStorage -> noBackupFilesDir/derived_search/search_index.db
         -> lexical_documents + normal FTS5 + trigram FTS5 + lexical_sync_state
 
+  PostStorageManager.database -> SemanticIndexSynchronizer
+    -> SemanticTextChunker -> LocalTextEmbedder (DocumentEmbedder)
+      -> DerivedSearchStorage
+        -> semantic_documents + semantic_source_sync_state
+
   SudachiLexicalTextAnalyzer
     -> build生成assetのSudachi Full ZIP
     -> noBackupFilesDir/sudachi/20260723/system_full.dic
@@ -82,8 +87,9 @@ MainActivity / Compose UI
 - 初回サンプルデータはDBが空の場合だけ投入
 - 派生検索ストレージは正本Room・画像・Undo・保存先設定から独立した再生成可能DBとして保持し、既存検索UIへは接続しない。productionではApplication起動後に専用synchronizerが非同期reconcileを開始し、TEST_HARNESSでは明示起動時だけ動作する
 - `LexicalIndexSynchronizer`は現在の`PostStorageManager.database`から`ClipDao.observeAllClips()`だけを監視し、5つの検索対象fieldのfingerprint差分で逐次処理する。解析失敗はそのclipを未同期のまま残し、正本操作へ伝播させない
-- `DerivedSearchStorage`はBundled SQLite 2.7.0、通常FTS5、trigram FTS5、FULLMUTEX単一connection、clip単位のdocument／両FTS／fingerprint transaction置換・削除、schema不一致・破損時の1回再作成を担当する。派生schemaはversion 2
-- `LocalTextEmbedder`は固定revisionのEmbeddingGemma 300M Q4、DJL tokenizer、ONNX Runtime CPU sessionを完全ローカルで扱う。query/document prompt、2048 token truncation、768次元・finite・L2 normalize検証、遅延初期化、session再利用、並行要求の直列化、close、モデル専用noBackup配置を担当する。既存検索系へは未接続
+- `DerivedSearchStorage`はBundled SQLite 2.7.0、通常FTS5、trigram FTS5、semantic embedding BLOB、FULLMUTEX単一connection、clip／source単位のdocument・fingerprint transaction置換・削除、schema不一致・破損時の1回再作成を担当する。派生schemaはversion 3
+- `LocalTextEmbedder`は固定revisionのEmbeddingGemma 300M Q4、DJL tokenizer、ONNX Runtime CPU sessionを完全ローカルで扱う。query/document prompt、2048 token truncation、768次元・finite・L2 normalize検証、遅延初期化、session再利用、並行要求の直列化、close、モデル専用noBackup配置を担当し、`DocumentEmbedder`としてsemantic同期へ注入される。既存のlexical検索UI・ANN・順位付けへは未接続
+- `SemanticIndexSynchronizer`は正本Roomの`ClipEntity.text`／`summary`／`ocrText`だけをUnicode code point chunkへ分割し、固定順・逐次でEmbeddingGemmaを実行する。source fingerprint差分、空source削除、clip削除、DB null停止、途中失敗時の旧データ保持、production自動起動／TEST_HARNESS明示起動を担当する
 
 ## 変更目的別の入口
 
@@ -104,6 +110,7 @@ MainActivity / Compose UI
 | Xログイン、scope、callback | `docs/app/src/main/java/com/lyco256/llm/data/XOAuthManager.kt.md` | `AndroidManifest.xml.md`, `ApiSettingsStore.kt.md`, `MainActivity.kt.md` |
 | 派生検索DB、FTS5、trigram候補検索 | `docs/app/src/main/java/com/lyco256/llm/data/DerivedSearchStorage.kt.md` | `app/src/main/java/com/lyco256/llm/data/DerivedSearchStorage.kt`, `DerivedSearchStorageIntegrationTest.kt` |
 | 正本clipから派生Lexical Indexへの同期 | `docs/app/src/main/java/com/lyco256/llm/data/LexicalIndexSynchronizer.kt.md` | `LexicalDocumentBuilder.kt.md`, `DerivedSearchStorage.kt.md`, `LexicalIndexSynchronizerIntegrationTest.kt.md`, `LexicalIndexRepositoryUndoIntegrationTest.kt.md` |
+| 正本clipからsemantic embeddingへの同期 | `docs/app/src/main/java/com/lyco256/llm/data/SemanticIndexSynchronizer.kt.md` | `SemanticTextChunker.kt.md`, `LocalTextEmbedder.kt.md`, `DerivedSearchStorage.kt.md`, `SemanticIndexSynchronizerIntegrationTest.kt.md`, `SemanticIndexEmbeddingIntegrationTest.kt.md` |
 | Sudachi Fullの辞書準備、配置、検索用4表現生成 | `docs/app/src/main/java/com/lyco256/llm/data/SudachiLexicalTextAnalyzer.kt.md` | `app/src/main/java/com/lyco256/llm/data/SudachiLexicalTextAnalyzer.kt`, `LexicalDocumentBuilder.kt`, `SudachiDictionaryInstallerTest.kt`, `SudachiLexicalTextAnalyzerIntegrationTest.kt` |
 | EmbeddingGemmaの完全ローカルtext embedding | `docs/app/src/main/java/com/lyco256/llm/data/LocalTextEmbedder.kt.md` | `app/src/main/java/com/lyco256/llm/data/LocalTextEmbedder.kt`, `LocalTextEmbedderTest.kt`, `LocalTextEmbedderIntegrationTest.kt` |
 | DB列、table、relation | `docs/app/src/main/java/com/lyco256/llm/data/Entities.kt.md` | `LikeListDatabase.kt.md`, `Daos.kt.md`, `ClipRepository.kt.md` |
@@ -182,6 +189,10 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/data/DerivedSearchStorage.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/SudachiLexicalTextAnalyzer.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/LocalTextEmbedder.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/SemanticModels.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/SemanticTextChunker.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/SemanticEmbeddingCodec.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/SemanticIndexSynchronizer.kt.md`
 
 ### Tests
 
@@ -197,6 +208,9 @@ MainActivity / Compose UI
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/DerivedSearchStorageIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LexicalIndexSynchronizerIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LexicalIndexRepositoryUndoIntegrationTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/SemanticSearchStorageIntegrationTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/SemanticIndexSynchronizerIntegrationTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/SemanticIndexEmbeddingIntegrationTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/TagHierarchyTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/TagManagementCompactRowContractTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/TagTreeGuideTest.kt.md`
@@ -259,9 +273,9 @@ MainActivity / Compose UI
 
 ## 現在の未実装・制約
 
-- 自動バックグラウンド同期は未実装
+- X API由来の自動バックグラウンド同期は未実装（派生lexical／semantic indexの起動時同期は実装済み）
 - backup/import/exportは未実装
-- EmbeddingGemma runtimeは生成・配置・推論まで実装済みだが、既存の検索UI・派生検索DB・Lexical Indexへは未接続
+- EmbeddingGemmaのsemantic source同期と派生embedding保存は実装済み。既存の検索UI・ANN・semantic順位付けへの接続は未実装
 - 任意フォルダへの保存とアンインストール後の投稿データ保持は未実装
 - タグ色変更は12色パレットで実装済み
 - 動画/GIF本体は保存しない

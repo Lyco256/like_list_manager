@@ -54,6 +54,12 @@ class AppContainer(context: Context) {
         derivedSearchStorage = derivedSearchStorage,
         analyzer = lexicalTextAnalyzer,
     )
+    val localTextEmbedder: DocumentEmbedder = LocalTextEmbedder(context)
+    val semanticIndexSynchronizer = SemanticIndexSynchronizer(
+        databaseFlow = postStorageManager.database,
+        derivedSearchStorage = derivedSearchStorage,
+        embedder = localTextEmbedder,
+    )
     val apiSettingsStore: SettingsStore = if (BuildConfig.TEST_HARNESS) {
         InMemorySettingsStore()
     } else {
