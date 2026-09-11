@@ -16,6 +16,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
@@ -112,14 +114,22 @@ class ImageEmbeddingSynchronizerIntegrationTest {
         assertEquals(originalSignature, movedSignature)
         val movedAsset = requireNotNull(database.clipDao().getAsset(assetId)).copy(localPath = movedPath.absolutePath)
         assertEquals(initialFingerprint, ImageEmbeddingFingerprint.calculate(movedAsset, movedSignature))
+        val pathChangeStarted = CompletableDeferred<Unit>()
+        val pathChangeMonitor = launch {
+            synchronizer.state.collect { state ->
+                if (state.status == ImageEmbeddingSyncStatus.SYNCING) pathChangeStarted.complete(Unit)
+            }
+        }
         database.clipDao().updateAsset(
             movedAsset,
         )
+        pathChangeStarted.await()
         awaitCondition {
             synchronizer.state.value.status == ImageEmbeddingSyncStatus.COMPLETE &&
                 embedder.calls == 0 &&
                 storage.getAllImageEmbeddingFingerprints()[assetId] == initialFingerprint
         }
+        pathChangeMonitor.cancel()
 
         movedPath.appendText("changed")
         check(movedPath.setLastModified(originalPath.lastModified() + 1_000L))
@@ -132,6 +142,30 @@ class ImageEmbeddingSynchronizerIntegrationTest {
                 storage.getAllImageEmbeddingFingerprints()[assetId] != initialFingerprint
         }
         assertTrue(storage.getAllImageEmbeddingFingerprints().getValue(assetId) != initialFingerprint)
+    }
+
+    @Test
+    fun addingANewAssetAfterInitialSyncOnlyEmbedsTheNewAsset() = runBlocking {
+        val clipId = insertClip("add")
+        val firstPath = writeFile("add-first.bin", "first")
+        val firstId = insertAsset(clipId, "photo", firstPath)
+        synchronizer.start(scope)
+        awaitComplete(targetCount = 1, processedCount = 1, reembeddedCount = 1)
+
+        decoder.clear()
+        embedder.clear()
+        val secondPath = writeFile("add-second.bin", "second")
+        val secondId = insertAsset(clipId, "photo", secondPath)
+
+        awaitCondition {
+            synchronizer.state.value.status == ImageEmbeddingSyncStatus.COMPLETE &&
+                synchronizer.state.value.targetAssetCount == 2 &&
+                synchronizer.state.value.processedAssetCount == 2 &&
+                synchronizer.state.value.reembeddedAssetCount == 1 &&
+                storage.getAllImageEmbeddingFingerprints().keys == setOf(firstId, secondId)
+        }
+        assertEquals(listOf(secondPath.absolutePath), decoder.paths.toList())
+        assertEquals(1, embedder.calls)
     }
 
     @Test
@@ -204,6 +238,33 @@ class ImageEmbeddingSynchronizerIntegrationTest {
     }
 
     @Test
+    fun rapidSnapshotsConvergeToTheLatestAssetSet() = runBlocking {
+        val clipId = insertClip("snapshots")
+        val firstPath = writeFile("snapshots-first.bin", "first")
+        val firstId = insertAsset(clipId, "photo", firstPath)
+        val gate = CompletableDeferred<Unit>()
+        embedder.blockOnCall = 1
+        embedder.blockGate = gate
+
+        synchronizer.start(scope)
+        awaitCondition {
+            embedder.calls == 1 && storage.getImageEmbedding(firstId) == null
+        }
+
+        val secondPath = writeFile("snapshots-second.bin", "second")
+        val thirdPath = writeFile("snapshots-third.bin", "third")
+        val secondId = insertAsset(clipId, "photo", secondPath)
+        val thirdId = insertAsset(clipId, "photo", thirdPath)
+
+        awaitCondition {
+            synchronizer.state.value.status == ImageEmbeddingSyncStatus.COMPLETE &&
+                synchronizer.state.value.targetAssetCount == 3 &&
+                storage.getAllImageEmbeddingFingerprints().keys == setOf(firstId, secondId, thirdId)
+        }
+        assertTrue(embedder.calls >= 3)
+    }
+
+    @Test
     fun stoppingDuringInitialInferenceKeepsCommittedRowsAndReusesThemAfterRestart() = runBlocking {
         val clipId = insertClip("interrupted")
         val firstPath = writeFile("interrupted-first.bin", "first")
@@ -260,6 +321,66 @@ class ImageEmbeddingSynchronizerIntegrationTest {
                 synchronizer.state.value.reembeddedAssetCount == 1
         }
         assertTrue(storage.getAllImageEmbeddingFingerprints().getValue(assetId) != old.sourceFingerprint)
+    }
+
+    @Test
+    fun decodeFailureContinuesWithTheOtherAssets() = runBlocking {
+        val clipId = insertClip("decode-continue")
+        val firstPath = writeFile("decode-continue-first.bin", "first")
+        val secondPath = writeFile("decode-continue-second.bin", "second")
+        val firstId = insertAsset(clipId, "photo", firstPath)
+        val secondId = insertAsset(clipId, "photo", secondPath)
+        synchronizer.start(scope)
+        awaitComplete(targetCount = 2, processedCount = 2, reembeddedCount = 2)
+        val oldFirst = requireNotNull(storage.getImageEmbedding(firstId)).sourceFingerprint
+        val oldSecond = requireNotNull(storage.getImageEmbedding(secondId)).sourceFingerprint
+
+        firstPath.appendText("changed")
+        secondPath.appendText("changed")
+        decoder.clear()
+        decoder.failPath = firstPath.absolutePath
+        database.withTransaction {
+            database.clipDao().updateAsset(requireNotNull(database.clipDao().getAsset(firstId)).copy(downloadState = "changed"))
+            database.clipDao().updateAsset(requireNotNull(database.clipDao().getAsset(secondId)).copy(downloadState = "changed"))
+        }
+
+        awaitCondition {
+            synchronizer.state.value.status == ImageEmbeddingSyncStatus.FAILED &&
+                firstId in synchronizer.state.value.failedAssetIds &&
+                embedder.calls == 3 &&
+                storage.getAllImageEmbeddingFingerprints().getValue(secondId) != oldSecond
+        }
+        assertEquals(oldFirst, storage.getAllImageEmbeddingFingerprints().getValue(firstId))
+        assertEquals(listOf(firstPath.absolutePath, secondPath.absolutePath), decoder.paths.toList())
+    }
+
+    @Test
+    fun sourceSignatureChangeDuringInferenceDoesNotCommitTheResult() = runBlocking {
+        val clipId = insertClip("signature-race")
+        val path = writeFile("signature-race.bin", "stable")
+        val assetId = insertAsset(clipId, "photo", path)
+        synchronizer.start(scope)
+        awaitComplete(targetCount = 1, processedCount = 1, reembeddedCount = 1)
+        val old = requireNotNull(storage.getImageEmbedding(assetId))
+
+        path.appendText("before-inference")
+        val gate = CompletableDeferred<Unit>()
+        embedder.blockOnCall = 2
+        embedder.blockGate = gate
+        database.clipDao().updateAsset(
+            requireNotNull(database.clipDao().getAsset(assetId)).copy(downloadState = "changed"),
+        )
+        awaitCondition { embedder.calls == 2 }
+
+        path.appendText("during-inference")
+        gate.complete(Unit)
+
+        awaitCondition {
+            synchronizer.state.value.status == ImageEmbeddingSyncStatus.FAILED &&
+                assetId in synchronizer.state.value.failedAssetIds
+        }
+        assertEquals(old.sourceFingerprint, storage.getAllImageEmbeddingFingerprints().getValue(assetId))
+        assertEquals(old.embedding.toList(), requireNotNull(storage.getImageEmbedding(assetId)).embedding.toList())
     }
 
     @Test

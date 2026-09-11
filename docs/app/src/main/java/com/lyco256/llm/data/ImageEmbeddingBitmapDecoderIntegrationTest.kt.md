@@ -1,3 +1,3 @@
 # `ImageEmbeddingBitmapDecoderIntegrationTest.kt`
 
-Android標準BitmapFactoryによる小画像、PNG／WebP、大きなlandscape／portrait画像、破損fileのdecodeを確認します。大画像のdecode後長辺がbounded範囲に収まり、小画像を拡大しないことを検証します。
+隔離test fileをAndroid標準`BitmapFactory`でdecodeし、小さい画像の非拡大、大きいlandscape／portraitのbounded dimensions、2の累乗`inSampleSize`、PNG／WebP、破損fileの拒否、入力fileの内容と更新時刻の不変を確認します。

@@ -55,6 +55,8 @@ class ImageEmbeddingBitmapDecoderIntegrationTest {
         val decoder = LocalImageEmbeddingBitmapDecoder()
         val small = writeBitmap("small.webp", 40, 20, Bitmap.CompressFormat.WEBP_LOSSY)
         val corrupt = File(directory, "corrupt.bin").apply { writeText("not an image") }
+        val originalBytes = small.readBytes()
+        val originalLastModified = small.lastModified()
 
         val decoded = decoder.decode(small)
         try {
@@ -63,6 +65,8 @@ class ImageEmbeddingBitmapDecoderIntegrationTest {
         } finally {
             decoded.recycle()
         }
+        assertEquals(originalBytes.toList(), small.readBytes().toList())
+        assertEquals(originalLastModified, small.lastModified())
 
         assertTrue(runCatching { decoder.decode(corrupt) }.isFailure)
     }

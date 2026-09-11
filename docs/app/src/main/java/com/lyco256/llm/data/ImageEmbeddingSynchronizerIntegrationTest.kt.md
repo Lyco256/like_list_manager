@@ -1,3 +1,3 @@
 # `ImageEmbeddingSynchronizerIntegrationTest.kt`
 
-隔離Room DBとtest fileを使い、fake decoder／fake image embedderで対象asset、fingerprint再利用、path-only変更、file signature変更、削除／復元、DB null、保存先切替、初回推論途中停止からの再開、decode／推論失敗時の旧row保持とreconcile継続境界を確認します。remote／preview URLからの取得は行いません。
+隔離Room DBとtest fileを使い、fake decoder／fake image embedderで対象asset、初回後の新規追加時に追加assetだけを推論する差分同期、fingerprint再利用、path-only変更、file signature変更、推論中のsignature変化によるcommit抑止、削除／復元、DB null、保存先切替、初回推論途中停止からの再開、短時間の複数snapshotから最新集合への収束、decode失敗後の他asset継続、decode／推論失敗時の旧row保持とreconcile継続境界を確認します。remote／preview URLからの取得は行いません。
