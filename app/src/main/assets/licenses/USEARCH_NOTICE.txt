@@ -1,0 +1,19 @@
+USearch Android integration
+
+Upstream repository: https://github.com/unum-cloud/USearch
+Fixed upstream tag: v2.26.0
+License: Apache License 2.0 (see USEARCH_LICENSE_APACHE-2.0.txt)
+
+Vendored Java binding source:
+- java/cloud/unum/usearch/Index.java from the v2.26.0 tag
+- java/cloud/unum/usearch/NativeUtils.java from the v2.26.0 tag
+
+Native release artifacts:
+- usearch_android_arm64_2.26.0.zip
+  SHA-256: 480751585525b93446850d1b38586eac984044e82b480f6c64cef09c0ff48696
+- usearch_android_arm32_2.26.0.zip
+  SHA-256: 5c71f67473f45821b57306330f621eb50b46285847e33095f0839d267bec2485
+
+The release archives are downloaded only at build time, verified by the pinned
+SHA-256 values, and unpacked into generated JNI libraries. They are not fetched
+at application runtime. NativeUtils.java retains its upstream MIT license header.

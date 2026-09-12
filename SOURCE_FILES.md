@@ -40,6 +40,10 @@ MainActivity / Compose UI
     -> generated Japanese CLIP q4f16 assets
     -> noBackupFilesDir/multimodal_embedding/japanese_clip/<revision>/
     -> local CLYP tokenizer + ONNX Runtime CPU text/vision sessions
+
+  LocalAnnIndexSnapshot（独立した不変ANN runtime。既存検索へ未接続）
+    -> vendored USearch v2.26.0 Java binding
+    -> generated arm64-v8a / armeabi-v7a JNI adapter + official libusearch_c.so
 ```
 
 依存関係は `LikeListManagerApp` が所有する `AppContainer` で組み立てます。
@@ -95,6 +99,7 @@ MainActivity / Compose UI
 - `DerivedSearchStorage`はBundled SQLite 2.7.0、通常FTS5、trigram FTS5、semantic embedding BLOB、画像embedding BLOB、FULLMUTEX単一connection、clip／source単位のdocument・fingerprint transaction置換・削除、schema不一致・破損時の1回再作成を担当する。派生schemaはversion 4
 - `LocalTextEmbedder`は固定revisionのEmbeddingGemma 300M Q4、DJL tokenizer、ONNX Runtime CPU sessionを完全ローカルで扱う。query/document prompt、2048 token truncation、768次元・finite・L2 normalize検証、遅延初期化、session再利用、並行要求の直列化、close、モデル専用noBackup配置を担当し、`DocumentEmbedder`としてsemantic同期へ注入される。既存のlexical検索UI・ANN・順位付けへは未接続
 - `LocalMultimodalEmbedder`は固定revisionのJapanese CLIP q4f16、CLYP tokenizer、224黒背景center-pad、OpenAI CLIP normalization、ONNX Runtime CPU text/vision sessionを完全ローカルで扱う。256次元・finite・L2 normalize検証、modality別遅延初期化、session再利用、並行要求の直列化、close、モデル専用noBackup配置を担当する。画像embedding同期へimage実装を注入し、既存のLocalTextEmbedder、semantic同期、検索UI・ANN・順位付けへは未接続
+- `LocalAnnIndexSnapshot`はUSearch v2.26.0をcosine／Float32／connectivity 32／expansion 256で使い、256／768次元の入力検証、内部L2 normalize、不変snapshot、候補限定のexact cosine rerank、並行search／close lifecycleを担当する。DB同期、index永続化、検索UI、ランキングへは未接続
 - `LocalRuntimeAssetInstaller`はEmbeddingGemmaとJapanese CLIPのgenerated metadata、SHA-256、byte size、専用directory内atomic copy／部分復旧を共有する内部utilityであり、各runtimeの固定specと出力wrapperは分離して保持する
 - `SemanticIndexSynchronizer`は正本Roomの`ClipEntity.text`／`summary`／`ocrText`だけをUnicode code point chunkへ分割し、固定順・逐次でEmbeddingGemmaを実行する。source fingerprint差分、空source削除、clip削除、DB null停止、途中失敗時の旧データ保持、production自動起動／TEST_HARNESS明示起動を担当する
 
@@ -119,6 +124,7 @@ MainActivity / Compose UI
 | 正本clipから派生Lexical Indexへの同期 | `docs/app/src/main/java/com/lyco256/llm/data/LexicalIndexSynchronizer.kt.md` | `LexicalDocumentBuilder.kt.md`, `DerivedSearchStorage.kt.md`, `LexicalIndexSynchronizerIntegrationTest.kt.md`, `LexicalIndexRepositoryUndoIntegrationTest.kt.md` |
 | 正本clipからsemantic embeddingへの同期 | `docs/app/src/main/java/com/lyco256/llm/data/SemanticIndexSynchronizer.kt.md` | `SemanticTextChunker.kt.md`, `LocalTextEmbedder.kt.md`, `DerivedSearchStorage.kt.md`, `SemanticIndexSynchronizerIntegrationTest.kt.md`, `SemanticIndexEmbeddingIntegrationTest.kt.md` |
 | 正本assetから画像embeddingへの同期 | `docs/app/src/main/java/com/lyco256/llm/data/ImageEmbeddingSynchronizer.kt.md` | `LocalImageEmbeddingBitmapDecoder.kt.md`, `ImageEmbeddingFingerprint.kt.md`, `ImageEmbeddingBlobCodec.kt.md`, `DerivedSearchStorage.kt.md`, `ImageEmbeddingSynchronizerIntegrationTest.kt.md`, `ImageEmbeddingVisionIntegrationTest.kt.md` |
+| 完全ローカルANN snapshot runtime | `docs/app/src/main/java/com/lyco256/llm/data/LocalAnnIndexSnapshot.kt.md` | `app/src/main/java/com/lyco256/llm/data/LocalAnnIndexSnapshot.kt`, `LocalAnnIndexSnapshotTest.kt`, `LocalAnnIndexSnapshotIntegrationTest.kt`, `app/build.gradle.kts` |
 | Sudachi Fullの辞書準備、配置、検索用4表現生成 | `docs/app/src/main/java/com/lyco256/llm/data/SudachiLexicalTextAnalyzer.kt.md` | `app/src/main/java/com/lyco256/llm/data/SudachiLexicalTextAnalyzer.kt`, `LexicalDocumentBuilder.kt`, `SudachiDictionaryInstallerTest.kt`, `SudachiLexicalTextAnalyzerIntegrationTest.kt` |
 | EmbeddingGemmaの完全ローカルtext embedding | `docs/app/src/main/java/com/lyco256/llm/data/LocalTextEmbedder.kt.md` | `app/src/main/java/com/lyco256/llm/data/LocalTextEmbedder.kt`, `LocalTextEmbedderTest.kt`, `LocalTextEmbedderIntegrationTest.kt` |
 | Japanese CLIPの完全ローカルtext／image embedding | `docs/app/src/main/java/com/lyco256/llm/data/LocalMultimodalEmbedder.kt.md` | `app/src/main/java/com/lyco256/llm/data/LocalMultimodalEmbedder.kt`, `LocalMultimodalEmbedderTest.kt`, `LocalMultimodalEmbedderIntegrationTest.kt` |
@@ -205,6 +211,7 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/data/SudachiLexicalTextAnalyzer.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/LocalTextEmbedder.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/LocalMultimodalEmbedder.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/LocalAnnIndexSnapshot.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/LocalRuntimeAssetInstaller.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/SemanticModels.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/SemanticTextChunker.kt.md`
@@ -298,7 +305,8 @@ MainActivity / Compose UI
 
 - X API由来の自動バックグラウンド同期は未実装（派生lexical／semantic indexの起動時同期は実装済み）
 - backup/import/exportは未実装
-- EmbeddingGemmaのsemantic source同期と派生embedding保存は実装済み。既存の検索UI・ANN・semantic順位付けへの接続は未実装
+- EmbeddingGemmaのsemantic source同期と派生embedding保存、USearchによる独立ANN runtimeは実装済み。既存の検索UI・DB同期・ANN順位付けへの接続は未実装
+- USearch v2.26.0のnative release archiveはbuild時に固定SHA-256検証してgenerated JNI libsへ展開する。release zipとgenerated `.so` はsource treeへcommitしない
 - 任意フォルダへの保存とアンインストール後の投稿データ保持は未実装
 - タグ色変更は12色パレットで実装済み
 - 動画/GIF本体は保存しない

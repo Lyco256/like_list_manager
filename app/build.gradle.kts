@@ -29,6 +29,31 @@ private val JAPANESE_CLIP_REVISION = "c924148be2e25b6e4d98e66d8dc1768adb72d079"
 private val JAPANESE_CLIP_REPOSITORY = "AUXOUT-TEAM/clip-japanese-base-v2-onnx"
 private val JAPANESE_CLIP_MAX_BUNDLE_BYTES = 300L * 1024L * 1024L
 private val ALL_BUNDLED_ASSET_MAX_BYTES = 1L * 1024L * 1024L * 1024L
+private val USEARCH_VERSION = "2.26.0"
+private val USEARCH_NDK_VERSION = "28.2.13676358"
+private val USEARCH_MAX_ARCHIVE_BYTES = 8L * 1024L * 1024L
+
+private data class UsearchAbi(
+    val name: String,
+    val archiveName: String,
+    val archiveSha256: String,
+    val compilerTarget: String,
+)
+
+private val USEARCH_ABIS = listOf(
+    UsearchAbi(
+        name = "arm64-v8a",
+        archiveName = "usearch_android_arm64_2.26.0.zip",
+        archiveSha256 = "480751585525b93446850d1b38586eac984044e82b480f6c64cef09c0ff48696",
+        compilerTarget = "aarch64-linux-android29",
+    ),
+    UsearchAbi(
+        name = "armeabi-v7a",
+        archiveName = "usearch_android_arm32_2.26.0.zip",
+        archiveSha256 = "5c71f67473f45821b57306330f621eb50b46285847e33095f0839d267bec2485",
+        compilerTarget = "armv7a-linux-androideabi29",
+    ),
+)
 
 private data class PinnedAsset(
     val name: String,
@@ -130,6 +155,7 @@ private fun downloadAsset(destination: File, url: String, maxBytes: Long) {
 android {
     namespace = "com.lyco256.llm"
     compileSdk = 36
+    ndkVersion = USEARCH_NDK_VERSION
 
     defaultConfig {
         applicationId = "com.lyco256.llm"
@@ -660,4 +686,159 @@ android.sourceSets.getByName("main").assets.srcDir(embeddingGemmaGeneratedAssets
 android.sourceSets.getByName("main").assets.srcDir(japaneseClipGeneratedAssetsDir)
 tasks.matching { task -> task.name.startsWith("merge") && task.name.endsWith("Assets") }.configureEach {
     dependsOn(verifyBundledModelCapacity)
+}
+
+val usearchGeneratedRoot = layout.buildDirectory.dir("generated/usearch")
+val usearchJniLibsDir = usearchGeneratedRoot.map { it.dir("jniLibs") }
+val usearchAdapterSource = layout.projectDirectory.file("src/main/cpp/usearch_jni_bridge.c")
+
+val prepareUsearchNative = tasks.register("prepareUsearchNative") {
+    group = "build setup"
+    description = "Downloads and verifies the pinned USearch Android release artifacts."
+    outputs.dir(usearchGeneratedRoot)
+    outputs.upToDateWhen { false }
+    doLast {
+        val generatedRoot = usearchGeneratedRoot.get().asFile
+        val cacheRoot = File(gradle.gradleUserHomeDir, "caches/like-list-manager/usearch/$USEARCH_VERSION")
+        project.delete(generatedRoot)
+
+        fun extractEntry(zip: ZipFile, entryName: String, destination: File) {
+            val partial = File(destination.parentFile, ".${destination.name}.partial")
+            deleteExact(partial)
+            try {
+                zip.getInputStream(zip.getEntry(entryName)).use { input ->
+                    FileOutputStream(partial).use { output ->
+                        input.copyTo(output)
+                        output.fd.sync()
+                    }
+                }
+                Files.move(partial.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            } finally {
+                deleteExact(partial)
+            }
+        }
+
+        var copiedHeader = false
+        USEARCH_ABIS.forEach { abi ->
+            val cacheDirectory = File(cacheRoot, abi.name)
+            if (!cacheDirectory.exists() && !cacheDirectory.mkdirs()) {
+                throw GradleException("Failed to create USearch cache directory: ${cacheDirectory.absolutePath}")
+            }
+            val archive = File(cacheDirectory, abi.archiveName)
+            val validCache = archive.isFile && archive.length() <= USEARCH_MAX_ARCHIVE_BYTES &&
+                sha256(archive).equals(abi.archiveSha256, ignoreCase = true)
+            if (!validCache) {
+                deleteExact(archive)
+                downloadAsset(
+                    archive,
+                    "https://github.com/unum-cloud/USearch/releases/download/v$USEARCH_VERSION/${abi.archiveName}",
+                    USEARCH_MAX_ARCHIVE_BYTES,
+                )
+                check(sha256(archive).equals(abi.archiveSha256, ignoreCase = true)) {
+                    "USearch ${abi.archiveName} SHA-256 does not match the pinned release"
+                }
+            }
+
+            ZipFile(archive).use { zip ->
+                val libraryEntries = zip.entries().asSequence().filter {
+                    !it.isDirectory && it.name.substringAfterLast('/') == "libusearch_c.so"
+                }.toList()
+                check(libraryEntries.size == 1) {
+                    "USearch ${abi.archiveName} must contain exactly one libusearch_c.so"
+                }
+                val headerEntries = zip.entries().asSequence().filter {
+                    !it.isDirectory && it.name.substringAfterLast('/') == "usearch.h"
+                }.toList()
+                check(headerEntries.size == 1) {
+                    "USearch ${abi.archiveName} must contain exactly one usearch.h"
+                }
+
+                val abiOutput = File(generatedRoot, "jniLibs/${abi.name}").apply { mkdirs() }
+                extractEntry(zip, libraryEntries.single().name, File(abiOutput, "libusearch_c.so"))
+                if (!copiedHeader) {
+                    val includeDirectory = File(generatedRoot, "include").apply { mkdirs() }
+                    extractEntry(zip, headerEntries.single().name, File(includeDirectory, "usearch.h"))
+                    copiedHeader = true
+                }
+            }
+        }
+    }
+}
+
+val compileUsearchJni = tasks.register("compileUsearchJni") {
+    group = "build setup"
+    description = "Builds the small Android load adapter for the pinned USearch C release."
+    dependsOn(prepareUsearchNative)
+    inputs.file(usearchAdapterSource)
+    outputs.dir(usearchJniLibsDir)
+    doLast {
+        val generatedRoot = usearchGeneratedRoot.get().asFile
+        val sdkDirectory = android.sdkDirectory
+        val ndkDirectory = File(sdkDirectory, "ndk/$USEARCH_NDK_VERSION")
+        check(ndkDirectory.isDirectory) { "Required Android NDK is missing: ${ndkDirectory.absolutePath}" }
+        val hostTag = when {
+            System.getProperty("os.name").startsWith("Windows", ignoreCase = true) -> "windows-x86_64"
+            System.getProperty("os.name").startsWith("Linux", ignoreCase = true) -> "linux-x86_64"
+            else -> error("Unsupported host OS for the USearch Android adapter")
+        }
+        val toolchain = File(ndkDirectory, "toolchains/llvm/prebuilt/$hostTag")
+        val compiler = File(toolchain, "bin/clang.exe").takeIf { it.isFile }
+            ?: File(toolchain, "bin/clang").takeIf { it.isFile }
+            ?: error("Android clang compiler is missing under ${toolchain.absolutePath}")
+        val includeDirectory = File(generatedRoot, "include")
+        USEARCH_ABIS.forEach { abi ->
+            val abiOutput = File(generatedRoot, "jniLibs/${abi.name}")
+            val adapter = File(abiOutput, "libusearch.so")
+            project.exec {
+                commandLine(
+                    compiler.absolutePath,
+                    "--target=${abi.compilerTarget}",
+                    "-std=c11",
+                    "-O2",
+                    "-fPIC",
+                    "-shared",
+                    "-I${includeDirectory.absolutePath}",
+                    "${usearchAdapterSource.asFile.absolutePath}",
+                    "-L${abiOutput.absolutePath}",
+                    "-Wl,-soname,libusearch.so",
+                    "-Wl,-z,relro",
+                    "-Wl,-z,now",
+                    "-Wl,-l:libusearch_c.so",
+                    "-o",
+                    adapter.absolutePath,
+                )
+            }
+            check(adapter.isFile && adapter.length() > 0L) {
+                "USearch JNI adapter was not generated for ${abi.name}"
+            }
+        }
+    }
+}
+
+val verifyUsearchNativePackaging = tasks.register("verifyUsearchNativePackaging") {
+    group = "verification"
+    description = "Checks that both pinned USearch ABIs have generated native libraries."
+    dependsOn(compileUsearchJni)
+    doLast {
+        USEARCH_ABIS.forEach { abi ->
+            val directory = File(usearchJniLibsDir.get().asFile, abi.name)
+            listOf("libusearch_c.so", "libusearch.so").forEach { filename ->
+                val library = File(directory, filename)
+                check(library.isFile && library.length() > 0L) {
+                    "Missing generated USearch native library: ${library.absolutePath}"
+                }
+            }
+        }
+    }
+}
+
+android.sourceSets.getByName("main").jniLibs.srcDir(usearchJniLibsDir)
+tasks.matching { task ->
+    task.name.startsWith("merge") &&
+        (task.name.endsWith("JniLibFolders") || task.name.endsWith("NativeLibs"))
+}.configureEach {
+    dependsOn(compileUsearchJni)
+}
+tasks.matching { task -> task.name == "verifyTestEnvironmentIsolation" }.configureEach {
+    dependsOn(verifyUsearchNativePackaging)
 }
