@@ -2,7 +2,7 @@
 
 ## 役割
 
-USearch v2.26.0を使った、完全ローカルな不変HNSW ANN snapshotのwrapperです。現在のEmbedding同期、`DerivedSearchStorage`、検索UI、画像重複検索には接続しません。
+USearch v2.26.0を使った、完全ローカルな不変HNSW ANN snapshotのwrapperです。`LocalSearchEngine` が派生DBのrevisionごとに構築し所有します。既存検索UI、画像重複検索には接続しません。
 
 ## 入力と検索
 
@@ -16,6 +16,8 @@ USearch v2.26.0を使った、完全ローカルな不変HNSW ANN snapshotのwra
 ## Lifecycleとnative境界
 
 `LocalAnnIndexSnapshot`はbuild完了まで外部へ公開されません。buildはDefault dispatcher上で実行し、cancellation・例外時はpartial backendをcloseします。完成後のsearchとcloseはwrapper内でserializeし、closeは冪等、close後searchは`IllegalStateException`です。
+
+`withContext` の戻りdispatcherで完成snapshotの受け渡しがcancelされた場合も、外側で保持したsnapshotをcloseします。
 
 対応ABIは`arm64-v8a`と`armeabi-v7a`だけです。native Indexを作る前に端末ABIを検査し、その他のABIでは明示的な`IllegalStateException`として拒否します。
 

@@ -3,6 +3,9 @@ package com.lyco256.llm.data
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.LinkedBlockingQueue
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -218,6 +221,27 @@ class LocalAnnIndexSnapshotTest {
         releaseAdd.countDown()
         val error = runCatching { build.await() }.exceptionOrNull()
         assertTrue(error is CancellationException)
+        assertEquals(1, factory.closeCount)
+    }
+
+    @Test
+    fun cancellationDuringCompletedSnapshotDeliveryClosesBackend() = runBlocking {
+        val queue = LinkedBlockingQueue<Runnable>()
+        val callerDispatcher = object : CoroutineDispatcher() {
+            override fun dispatch(context: CoroutineContext, block: Runnable) { queue.add(block) }
+        }
+        val factory = RecordingFactory(searchResults = { longArrayOf() })
+        val request = async(callerDispatcher) {
+            LocalAnnIndexSnapshot.buildForTesting(256,
+                listOf(LocalAnnEntry(1L, FloatArray(256) { 1f })), factory)
+        }
+        checkNotNull(queue.poll(5, TimeUnit.SECONDS)).run()
+        val completedDelivery = checkNotNull(queue.poll(5, TimeUnit.SECONDS))
+        assertEquals(1, factory.addedVectors.size)
+        assertEquals(0, factory.closeCount)
+        request.cancel()
+        completedDelivery.run()
+        assertTrue(runCatching { request.await() }.exceptionOrNull() is CancellationException)
         assertEquals(1, factory.closeCount)
     }
 

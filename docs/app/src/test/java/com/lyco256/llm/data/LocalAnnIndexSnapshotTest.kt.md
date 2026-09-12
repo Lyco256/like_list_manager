@@ -1,0 +1,5 @@
+# LocalAnnIndexSnapshotTest
+
+256/768次元のvalidation、copy/normalize、exact rerank、candidate count、close、build failure、実coroutine cancellationをfake backendで確認する。
+
+実装9では、buildが正常完了し元dispatcherへの受け渡しだけが待機する状態をqueue dispatcherで作り、その間のcancelで完成backendもcloseするテストを追加。native/model精度評価は行わない。

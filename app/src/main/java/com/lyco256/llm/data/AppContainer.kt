@@ -54,13 +54,16 @@ class AppContainer(context: Context) {
         derivedSearchStorage = derivedSearchStorage,
         analyzer = lexicalTextAnalyzer,
     )
-    val localTextEmbedder: DocumentEmbedder = LocalTextEmbedder(context)
+    val localTextEmbedder = LocalTextEmbedder(context)
     val semanticIndexSynchronizer = SemanticIndexSynchronizer(
         databaseFlow = postStorageManager.database,
         derivedSearchStorage = derivedSearchStorage,
         embedder = localTextEmbedder,
     )
     val localMultimodalEmbedder: LocalMultimodalEmbedder = LocalMultimodalEmbedder(context)
+    val localSearchEngine = LocalSearchEngine(
+        derivedSearchStorage, lexicalTextAnalyzer, localTextEmbedder, localMultimodalEmbedder,
+    )
     val imageEmbeddingSynchronizer = ImageEmbeddingSynchronizer(
         databaseFlow = postStorageManager.database,
         derivedSearchStorage = derivedSearchStorage,

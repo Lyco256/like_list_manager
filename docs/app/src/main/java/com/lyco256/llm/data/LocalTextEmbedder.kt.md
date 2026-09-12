@@ -2,6 +2,8 @@
 
 ## 役割
 
+`QueryEmbedder` の最小interfaceとして既存 `embedQuery()` を公開する。同じruntimeを `LocalSearchEngine` とSemantic同期で共有する。モデル・prompt・推論仕様は変更しない。
+
 EmbeddingGemma 300M Q4を端末内だけで実行するtext embedding runtimeです。`DocumentEmbedder`の最小境界を実装し、`AppContainer`では1インスタンスを`SemanticIndexSynchronizer`へ注入します。正本Room DB、`DerivedSearchStorage`、既存検索、UI、OCRの編集経路を直接参照せず、semantic同期から渡された文書だけを埋め込みます。
 
 ## 固定資産

@@ -72,16 +72,29 @@ class LocalAnnIndexSnapshot private constructor(
         suspend fun build(
             dimension: Int,
             entries: List<LocalAnnEntry>,
-        ): LocalAnnIndexSnapshot = withContext(Dispatchers.Default) {
-            buildInternal(dimension, entries, UsearchAnnBackendFactory)
-        }
+        ): LocalAnnIndexSnapshot = buildOwned(dimension, entries, UsearchAnnBackendFactory)
 
         internal suspend fun buildForTesting(
             dimension: Int,
             entries: List<LocalAnnEntry>,
             backendFactory: LocalAnnBackendFactory,
-        ): LocalAnnIndexSnapshot = withContext(Dispatchers.Default) {
-            buildInternal(dimension, entries, backendFactory)
+        ): LocalAnnIndexSnapshot = buildOwned(dimension, entries, backendFactory)
+
+        private suspend fun buildOwned(
+            dimension: Int,
+            entries: List<LocalAnnEntry>,
+            backendFactory: LocalAnnBackendFactory,
+        ): LocalAnnIndexSnapshot {
+            // withContext can cancel delivery after a successful native build.
+            var built: LocalAnnIndexSnapshot? = null
+            return try {
+                withContext(Dispatchers.Default) {
+                    buildInternal(dimension, entries, backendFactory).also { built = it }
+                }
+            } catch (failure: Throwable) {
+                built?.close()
+                throw failure
+            }
         }
 
         private suspend fun buildInternal(

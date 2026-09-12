@@ -47,6 +47,8 @@
 
 ## 合格ゲート
 
+ローカル検索エンジン（実装9）: 自動・隔離実機確認済み。`LocalSearchEngineTest` / `LocalSearchLexicalTest` / `LocalSearchEngineIntegrationTest` でliteral FTS、実768/256 ANN、clip統合、revision再利用・交換、rollback、cancel、closeを固定fixtureで確認する。`LocalAnnIndexSnapshotTest` で完成snapshotのdispatcher受け渡し時cancelによる解放も確認する。cache更新→FTSの順序と途中lexical変更への再整合、fuzzy document tokenのone-to-one割当を確認済み。2026-09-12に `run-safe-integration-check.cmd`、その後 `run-safe-debug-check.cmd -InstallToDevice` がともにSuccess。正本Room・既存検索UI・一覧挙動は変更せず、検索品質・実データ目視は対象外。
+
 - 通常必須: debug／integration共通Build task集合、`testDebugUnitTest`、`lintDebug`。phase別入力と成功stateにより自動省略し、main入力不変時の変更unit test classだけは限定実行できる。判断不能時はphase全体へ戻る
 - 実機必須: `verifyTestEnvironmentIsolation`、`connectedIntegrationTestAndroidTest`
 - 安全実行入口: `scripts/run-safe-integration-check.cmd`

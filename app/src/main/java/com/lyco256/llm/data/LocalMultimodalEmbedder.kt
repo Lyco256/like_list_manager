@@ -189,11 +189,15 @@ internal fun preprocessJapaneseClipImage(bitmap: Bitmap): FloatArray {
     }
 }
 
+fun interface MultimodalTextEmbedder {
+    suspend fun embedText(text: String): MultimodalEmbedding
+}
+
 class LocalMultimodalEmbedder internal constructor(
     private val assetSource: JapaneseClipAssetSource,
     private val modelDirectory: File,
     private val ioDispatcher: CoroutineDispatcher,
-) : AutoCloseable, ImageEmbedder {
+) : AutoCloseable, ImageEmbedder, MultimodalTextEmbedder {
     constructor(context: Context) : this(
         assetSource = AssetManagerJapaneseClipAssetSource(context.assets),
         modelDirectory = File(
@@ -228,7 +232,7 @@ class LocalMultimodalEmbedder internal constructor(
     internal val visionOutputNamesForTest: Set<String>
         get() = lock.withLock { visionSession?.outputNames.orEmpty() }
 
-    suspend fun embedText(text: String): MultimodalEmbedding {
+    override suspend fun embedText(text: String): MultimodalEmbedding {
         require(text.isNotBlank()) { "Japanese CLIP text input must not be blank" }
         return withContext(ioDispatcher) {
             lock.withLock {

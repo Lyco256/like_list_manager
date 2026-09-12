@@ -2,6 +2,8 @@
 
 ## 役割
 
+`MultimodalTextEmbedder` の最小interfaceとして既存 `embedText()` を公開し、`LocalSearchEngine` のcross-modal queryへ同じruntimeを共有する。モデル・前処理・推論仕様は変更しない。
+
 Japanese CLIPのtext／image embeddingを端末内だけで実行するruntimeです。`ImageEmbedder`としてimage同期へ注入されますが、正本Room、`DerivedSearchStorage`、semantic同期、検索UI、OCRを直接参照しません。text APIは既存どおり独立しており、呼び出し側が必要なmodalityだけを遅延初期化できます。
 
 ## 固定資産と前処理

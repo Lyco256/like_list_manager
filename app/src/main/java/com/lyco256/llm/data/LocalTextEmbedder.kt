@@ -81,6 +81,10 @@ fun interface DocumentEmbedder {
     suspend fun embedDocument(text: String): TextEmbedding
 }
 
+fun interface QueryEmbedder {
+    suspend fun embedQuery(text: String): TextEmbedding
+}
+
 class EmbeddingRuntimeInitializationException(cause: Throwable) :
     IllegalStateException("EmbeddingGemma runtime initialization failed", cause)
 
@@ -127,7 +131,7 @@ class LocalTextEmbedder internal constructor(
     private val assetSource: EmbeddingAssetSource,
     private val modelDirectory: File,
     private val ioDispatcher: CoroutineDispatcher,
-) : DocumentEmbedder, AutoCloseable {
+) : DocumentEmbedder, QueryEmbedder, AutoCloseable {
     constructor(context: Context) : this(
         assetSource = AssetManagerEmbeddingAssetSource(context.assets),
         modelDirectory = File(
@@ -150,7 +154,7 @@ class LocalTextEmbedder internal constructor(
     internal val outputNamesForTest: Set<String>
         get() = lock.withLock { runtime?.outputNames.orEmpty() }
 
-    suspend fun embedQuery(text: String): TextEmbedding = embed(
+    override suspend fun embedQuery(text: String): TextEmbedding = embed(
         text = text,
         prompt = EmbeddingPrompts::query,
     )

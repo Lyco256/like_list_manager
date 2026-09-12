@@ -34,6 +34,15 @@ data class LexicalSearchResult(
     val sourceOrdinal: Int,
 )
 
+data class SearchDataSnapshot<T>(val revision: Long, val documents: List<T>)
+
+data class LexicalRetrievalSnapshot(
+    val revision: Long,
+    /** Null means the caller's revision is current; an empty list means an empty corpus. */
+    val documents: List<LexicalDocument>?,
+    val candidateDocumentIds: Set<String>,
+)
+
 /**
  * Owns the independent, rebuildable SQLite database used by future lexical retrieval layers.
  *
@@ -48,6 +57,9 @@ class DerivedSearchStorage(
     private val databaseFile = File(databaseDirectory, DATABASE_NAME)
     private val mutex = Mutex()
     private var connection: SQLiteConnection? = null
+    private var lexicalRevision = 0L
+    private var semanticRevision = 0L
+    private var imageRevision = 0L
 
     val databasePath: File
         get() = databaseFile
@@ -83,6 +95,7 @@ class DerivedSearchStorage(
             }
             upsertFingerprint(clipId, sourceFingerprint)
         }
+        lexicalRevision++
     }
 
     suspend fun deleteClipDocuments(clipId: Long) = withStorage {
@@ -95,6 +108,7 @@ class DerivedSearchStorage(
                 statement.bindLong(1, clipId)
             }
         }
+        lexicalRevision++
     }
 
     suspend fun replaceSemanticSource(
@@ -126,10 +140,12 @@ class DerivedSearchStorage(
             documents.forEach { document -> insertSemanticDocument(document) }
             upsertSemanticFingerprint(clipId, sourceType, sourceFingerprint)
         }
+        semanticRevision++
     }
 
     suspend fun deleteSemanticSource(clipId: Long, sourceType: SemanticSourceType) = withStorage {
         inTransaction { deleteSemanticSourceRows(clipId, sourceType) }
+        semanticRevision++
     }
 
     suspend fun deleteSemanticClip(clipId: Long) = withStorage {
@@ -141,6 +157,7 @@ class DerivedSearchStorage(
                 statement.bindLong(1, clipId)
             }
         }
+        semanticRevision++
     }
 
     suspend fun getAllSemanticSourceFingerprints(): Map<SemanticSourceKey, String> = withStorage {
@@ -209,18 +226,21 @@ class DerivedSearchStorage(
                 statement.bindBlob(4, embeddingBlob)
             }
         }
+        imageRevision++
     }
 
     suspend fun deleteImageEmbedding(assetId: Long) = withStorage {
         execute("DELETE FROM image_embeddings WHERE asset_id = ?") { statement ->
             statement.bindLong(1, assetId)
         }
+        imageRevision++
     }
 
     suspend fun deleteImageEmbeddingsForClip(clipId: Long) = withStorage {
         execute("DELETE FROM image_embeddings WHERE clip_id = ?") { statement ->
             statement.bindLong(1, clipId)
         }
+        imageRevision++
     }
 
     suspend fun getAllImageEmbeddingFingerprints(): Map<Long, String> = withStorage {
@@ -293,7 +313,70 @@ class DerivedSearchStorage(
             execute("DELETE FROM semantic_source_sync_state")
             execute("DELETE FROM image_embeddings")
         }
+        lexicalRevision++
+        semanticRevision++
+        imageRevision++
     }
+
+    suspend fun getAllLexicalDocuments(): List<LexicalDocument> = withStorage { readLexicalDocuments() }
+
+    suspend fun getLexicalSnapshot(): SearchDataSnapshot<LexicalDocument> = withStorage {
+        SearchDataSnapshot(lexicalRevision, readLexicalDocuments())
+    }
+
+    /** Revision and rows (if changed) are read in the same mutex interval. */
+    suspend fun getSemanticSnapshot(knownRevision: Long? = null): SearchDataSnapshot<SemanticDocument>? = withStorage {
+        if (knownRevision == semanticRevision) null else SearchDataSnapshot(
+            semanticRevision,
+            queryRows(
+                "SELECT document_id, clip_id, source_type, source_ordinal, embedding FROM semantic_documents " +
+                    "ORDER BY clip_id, source_type, source_ordinal, document_id",
+                {}, ::decodeSemanticDocument,
+            ),
+        )
+    }
+
+    suspend fun getImageSnapshot(knownRevision: Long? = null): SearchDataSnapshot<ImageEmbeddingDocument>? = withStorage {
+        if (knownRevision == imageRevision) null else SearchDataSnapshot(
+            imageRevision,
+            queryRows(
+                "SELECT asset_id, clip_id, source_fingerprint, embedding FROM image_embeddings ORDER BY asset_id",
+                {}, ::decodeImageEmbedding,
+            ),
+        )
+    }
+
+    /** FTS candidates and lexical cache refresh refer to exactly the same corpus. */
+    internal suspend fun retrieveLexical(
+        knownRevision: Long?,
+        queries: Fts5LiteralQueries,
+    ): LexicalRetrievalSnapshot = withStorage {
+        val documents = if (knownRevision == lexicalRevision) null else readLexicalDocuments()
+        val count = queryLong("SELECT COUNT(*) FROM lexical_documents")
+        val ids = linkedSetOf<String>()
+        if (count > 0) {
+            listOf(NORMAL_FTS_TABLE to queries.normal, TRIGRAM_FTS_TABLE to queries.trigram).forEach { (table, literals) ->
+                literals.forEach { literal ->
+                    ids.addAll(queryRows(
+                        "SELECT document_id FROM $table WHERE $table MATCH ? LIMIT ?",
+                        { statement -> statement.bindText(1, literal); statement.bindLong(2, count) },
+                        { statement -> statement.getText(0) },
+                    ))
+                }
+            }
+        }
+        LexicalRetrievalSnapshot(lexicalRevision, documents, ids)
+    }
+
+    private fun SQLiteConnection.readLexicalDocuments(): List<LexicalDocument> = queryRows(
+        "SELECT document_id, clip_id, source_type, source_ordinal, raw_text, normalized_text, " +
+            "reading_text, romanized_text, compact_text FROM lexical_documents ORDER BY clip_id, document_id",
+        {},
+        { row -> LexicalDocument(
+            row.getText(0), row.getLong(1), row.getText(2), row.getLong(3).toInt(),
+            row.getText(4), row.getText(5), row.getText(6), row.getText(7), row.getText(8),
+        ) },
+    )
 
     /** Closes the private connection. A later operation may safely reopen the derived DB. */
     suspend fun close() = mutex.withLock {
@@ -363,6 +446,9 @@ class DerivedSearchStorage(
                 if (attempt == 0) {
                     firstFailure = error
                     deleteDerivedDatabaseFiles()
+                    lexicalRevision++
+                    semanticRevision++
+                    imageRevision++
                 } else {
                     throw IllegalStateException(
                         "派生検索DBの再作成に失敗しました",
