@@ -1,6 +1,6 @@
 # LocalSearchEngine
 
-文字列queryから `LocalSearchResult(clipId, score)` を返す、完全ローカルの独立検索API。既存検索UI、一覧、Room、保存・編集・Undoへは接続しない。
+文字列queryから `LocalSearchResult(clipId, score)` を返す、完全ローカルの共有検索API。`AppContainer.localSearchEngine`を分類済み検索UIが借用し、UIは検索結果のranked clip IDだけを表示順へ反映する。エンジン自体はRoomの正本、保存・編集・Undo、Compose UIを変更しない。
 
 - `AppContainer` の共有Sudachi、EmbeddingGemma、Japanese CLIPを借用する。生成時とblank検索時は解析器・model・ANNを初期化しない。
 - `DerivedSearchStorage` の読み出し専用境界からlexical / semantic / imageのrevisionとdocumentを取得する。lexicalのFTS候補とcache更新は同じstorage mutex区間のデータを使う。
@@ -12,7 +12,7 @@
 - text source weightは本文1.00／概要0.95／OCR0.90。画像はclip内最大cosine。cosineはfinite確認後0〜1へclampする。
 - `LocalSearchTuning` に重み `0.64 lexical + 0.24 text + 0.12 image` と足切り `lexical >= 0.30 OR text >= 0.20 OR image >= 0.18` を集約する。
 - 総合score降順、lexical score降順、clipId昇順。公開scoreは内部ランキング用でpercentageではない。
-- `search()` はDefault dispatcherと内部Mutexで直列化し、両modelは逐次推論する。走査・build準備・集約ではcancellationを確認し、partial resultを返さない。
+- `search()` はDefault dispatcherと内部Mutexで直列化し、両modelは逐次推論する。走査・build準備・集約ではcancellationを確認し、partial resultを返さない。`ClassifiedSearchEngine`はUIが共有runtimeを借用するためのread-only境界であり、UI側の世代管理・cancel・retry・clearは`MainViewModel`が担当する。
 - `suspend close()` は検索と直列化し冪等。所有ANNとcacheを解放する。共有runtime／storageはcloseしない。close後のblankを含むsearchはIllegalStateException。
 
 `LocalSearchEngineTest` はfake境界でcache、候補集約、異常・cancel・closeを確認する。`LocalSearchEngineIntegrationTest` は隔離派生DB、fake query runtime、実FTS / 768 ANN / 256 ANNを統合する。自然言語の品質・実データ目視評価は行わない。

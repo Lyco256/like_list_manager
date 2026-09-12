@@ -89,6 +89,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import coil.compose.AsyncImage
 import com.lyco256.llm.data.ApiSettings
+import com.lyco256.llm.data.ClassifiedSearchEngine
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClassifiedClipItem
 import com.lyco256.llm.data.ClipWithDetails
@@ -126,6 +127,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.io.File
 import java.time.Instant
@@ -138,6 +141,8 @@ open class MainActivity : ComponentActivity() {
     protected open val initialAppTab: AppTab = AppTab.Unclassified
     protected open val initialClassifiedDisplayMode: ClassifiedDisplayMode = ClassifiedDisplayMode.Card
     protected open val persistScreenState: Boolean = true
+    protected open fun createMainViewModelFactory(): ViewModelProvider.Factory =
+        MainViewModel.factory(application)
     private val authorizationLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val data = result.data
         if (data == null) {
@@ -151,7 +156,7 @@ open class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        viewModel = ViewModelProvider(this, MainViewModel.factory(application))[MainViewModel::class.java]
+        viewModel = ViewModelProvider(this, createMainViewModelFactory())[MainViewModel::class.java]
         setContent {
             LikeListManagerUi(
                 viewModel = viewModel,
@@ -187,7 +192,7 @@ enum class ClassifiedDisplayMode {
 }
 
 enum class SearchMode(val label: String) {
-    Literal("リテラル"),
+    Smart("スマート"),
     Regex("正規表現"),
 }
 
@@ -233,25 +238,68 @@ data class ClassifiedSortState(
     val postTimeDescending: Boolean = true,
 )
 
-data class TweetFilterState(
+data class ClassifiedSearchCriteria(
     val query: String = "",
-    val searchMode: SearchMode = SearchMode.Literal,
-    val searchTargets: Set<SearchTarget> = SearchTarget.entries.toSet(),
+    val mode: SearchMode = SearchMode.Smart,
+    val regexTargets: Set<SearchTarget> = SearchTarget.entries.toSet(),
+) {
+    val normalizedQuery: String get() = query.trim()
+    val regexError: String? = if (mode == SearchMode.Regex && normalizedQuery.isNotBlank()) {
+        runCatching { Regex(normalizedQuery, RegexOption.IGNORE_CASE) }.exceptionOrNull()?.message
+    } else {
+        null
+    }
+
+    val canApply: Boolean
+        get() = normalizedQuery.isNotBlank() &&
+            (mode == SearchMode.Smart || (regexTargets.isNotEmpty() && regexError == null))
+}
+
+enum class ClassifiedSearchExecutionStatus { INACTIVE, LOADING, READY, FAILED }
+
+data class ClassifiedSearchState(
+    val criteria: ClassifiedSearchCriteria = ClassifiedSearchCriteria(),
+    val status: ClassifiedSearchExecutionStatus = ClassifiedSearchExecutionStatus.INACTIVE,
+    val rankedClipIds: List<Long> = emptyList(),
+    val errorMessage: String? = null,
+    val requestGeneration: Long = 0L,
+) {
+    val isActive: Boolean
+        get() = criteria.normalizedQuery.isNotBlank() && status != ClassifiedSearchExecutionStatus.INACTIVE
+    val isLoading: Boolean get() = isActive && status == ClassifiedSearchExecutionStatus.LOADING
+    val isReady: Boolean get() = isActive && status == ClassifiedSearchExecutionStatus.READY
+    val isFailed: Boolean get() = isActive && status == ClassifiedSearchExecutionStatus.FAILED
+
+    /** Lightweight identity used by scroll/session caches; ranked IDs are intentionally not serialized here. */
+    val mediaGridIdentity: String
+        get() = if (!isActive) {
+            "inactive"
+        } else {
+            buildString {
+                append(criteria.mode.name)
+                append(':')
+                append(criteria.normalizedQuery)
+                if (criteria.mode == SearchMode.Regex) {
+                    append(':')
+                    append(criteria.regexTargets.sortedBy { it.name }.joinToString(","))
+                }
+                append(':')
+                append(requestGeneration)
+                append(':')
+                append(status.name)
+            }
+        }
+}
+
+data class TweetFilterState(
     val startDate: LocalDate? = null,
     val endDate: LocalDate? = null,
     val selectedAuthors: Set<TweetAuthorKey> = emptySet(),
     val tagFilters: Map<TagNodeRef, TagFilterState> = emptyMap(),
     val taggedOnly: Boolean = true,
 ) {
-    val regexError: String? = if (searchMode == SearchMode.Regex && query.isNotBlank()) {
-        runCatching { Regex(query, RegexOption.IGNORE_CASE) }.exceptionOrNull()?.message ?: null
-    } else {
-        null
-    }
-
     val hasActiveFilters: Boolean =
-        query.isNotBlank() ||
-            startDate != null ||
+        startDate != null ||
             endDate != null ||
             selectedAuthors.isNotEmpty() ||
             tagFilters.isNotEmpty() ||
@@ -270,6 +318,7 @@ data class MainUiState(
     val settingsSnapshot: SettingsSnapshot = SettingsSnapshot(),
     val filters: TweetFilterState = TweetFilterState(),
     val sort: ClassifiedSortState = ClassifiedSortState(),
+    val searchState: ClassifiedSearchState = ClassifiedSearchState(),
 ) {
     val isInitialClipLoading: Boolean
         get() = !hasReceivedInitialClipEmission &&
@@ -280,13 +329,10 @@ data class MainUiState(
     val authorSavedCountByAuthor: Map<TweetAuthorKey, Int> by lazy {
         authorOptions.associate { it.key to it.count }
     }
-    val classified: List<ClipWithDetails> by lazy { sortClipsForDisplay(
-        clips = filterClipsForSearch(clips, tagHierarchy, filters),
-        hierarchy = tagHierarchy,
-        filters = filters,
-        sort = sort,
-    ) }
-    val query: String = filters.query
+    val classified: List<ClipWithDetails> by lazy {
+        classifiedClipsForDisplay(clips, tagHierarchy, filters, sort, searchState)
+    }
+    val query: String = searchState.criteria.query
     val tagFilters: Map<TagNodeRef, TagFilterState> = filters.tagFilters
 }
 
@@ -295,6 +341,8 @@ data class MediaGridDataKey(
     val hierarchyRevision: Long,
     val filter: TweetFilterState,
     val sort: ClassifiedSortState,
+    val searchIdentity: String = "inactive",
+    val searchGeneration: Long = 0L,
 )
 
 data class ClassifiedMediaGridState(
@@ -330,6 +378,14 @@ private data class RepositoryUiState(
     val storageState: PostStorageState,
 )
 
+private data class MediaGridPreparationInputs(
+    val snapshot: com.lyco256.llm.data.MediaGridSourceSnapshot,
+    val hierarchy: TagHierarchy,
+    val filters: TweetFilterState,
+    val sort: ClassifiedSortState,
+    val searchState: ClassifiedSearchState,
+)
+
 internal data class InitialClipListState(
     val clips: List<ClipWithDetails> = emptyList(),
     val hasReceivedInitialEmission: Boolean = false,
@@ -338,14 +394,21 @@ internal data class InitialClipListState(
         InitialClipListState(clips = value, hasReceivedInitialEmission = true)
 }
 
-class MainViewModel(application: Application) : AndroidViewModel(application) {
+class MainViewModel(
+    application: Application,
+    private val searchEngineOverride: ClassifiedSearchEngine? = null,
+) : AndroidViewModel(application) {
     private val appContainer = (application as LikeListManagerApp).container
     private val repository = appContainer.repository
+    private val searchEngine = searchEngineOverride ?: appContainer.localSearchEngine
     private val filters = MutableStateFlow(TweetFilterState())
     private val sort = MutableStateFlow(ClassifiedSortState())
     private val apiSettings = MutableStateFlow(ApiSettings())
     private val oauthSession = MutableStateFlow<OAuthSession?>(null)
     private val settingsSnapshot = MutableStateFlow(SettingsSnapshot())
+    private val searchState = MutableStateFlow(ClassifiedSearchState())
+    private var smartSearchJob: Job? = null
+    private var searchRequestGeneration = 0L
     private val mediaGridSource = repository.mediaGridSource
     private val selectedMediaGridClipId = MutableStateFlow<Long?>(null)
     private val mediaGridCache = MediaGridMetadataCache()
@@ -400,7 +463,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             filters = filterValue,
             sort = sortValue,
         )
-    }
+    }.combine(searchState) { baseState, searchValue -> baseState.copy(searchState = searchValue) }
 
     val uiState: StateFlow<MainUiState> = combine(
         uiStateBase,
@@ -414,18 +477,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         repository.tagHierarchy,
         filters,
         sort,
-    ) { source, hierarchy, filterValue, sortValue -> Triple(source, hierarchy, filterValue to sortValue) }
-        .transformLatest { (snapshot, hierarchy, conditions) ->
-            val (filterValue, sortValue) = conditions
+        searchState,
+    ) { source, hierarchy, filterValue, sortValue, searchValue ->
+        MediaGridPreparationInputs(source, hierarchy, filterValue, sortValue, searchValue)
+    }
+        .transformLatest { inputs ->
+            val snapshot = inputs.snapshot
+            val hierarchy = inputs.hierarchy
+            val filterValue = inputs.filters
+            val sortValue = inputs.sort
+            val searchValue = inputs.searchState
             val effectiveFilter = effectiveMediaGridFilter(filterValue)
-            val effectiveSort = effectiveMediaGridSort(sortValue)
-            val key = MediaGridCacheKey(snapshot.revision, hierarchy.structuralRevision, effectiveFilter, effectiveSort)
+            val effectiveSort = if (searchValue.isActive) ClassifiedSortState() else effectiveMediaGridSort(sortValue)
+            val key = MediaGridCacheKey(
+                sourceRevision = snapshot.revision,
+                hierarchyRevision = hierarchy.structuralRevision,
+                filter = effectiveFilter,
+                sort = effectiveSort,
+                searchIdentity = searchValue.mediaGridIdentity,
+                searchGeneration = searchValue.requestGeneration,
+            )
             val cached = mediaGridCache.get(key)
             if (cached != null) {
                 emit(cached)
             } else {
-                emit(ClassifiedMediaGridState(status = MediaGridLoadStatus.Calculating, dataKey = MediaGridDataKey(snapshot.revision, hierarchy.structuralRevision, effectiveFilter, effectiveSort)))
-                emit(prepareMediaGridMetadata(snapshot, hierarchy, effectiveFilter, effectiveSort, mediaGridCache, key))
+                emit(ClassifiedMediaGridState(status = MediaGridLoadStatus.Calculating, dataKey = MediaGridDataKey(snapshot.revision, hierarchy.structuralRevision, effectiveFilter, effectiveSort, searchValue.mediaGridIdentity, searchValue.requestGeneration)))
+                emit(prepareMediaGridMetadata(snapshot, hierarchy, effectiveFilter, effectiveSort, searchValue, mediaGridCache, key))
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ClassifiedMediaGridState(status = MediaGridLoadStatus.Calculating))
@@ -454,18 +531,64 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun setQuery(value: String) {
-        filters.value = filters.value.copy(query = value)
+    fun applySearch(criteria: ClassifiedSearchCriteria) {
+        val normalized = criteria.copy(query = criteria.normalizedQuery)
+        if (normalized.normalizedQuery.isBlank()) {
+            clearSearch()
+            return
+        }
+        if (!normalized.canApply) return
+        smartSearchJob?.cancel()
+        val generation = ++searchRequestGeneration
+        if (normalized.mode == SearchMode.Regex) {
+            searchState.value = ClassifiedSearchState(
+                criteria = normalized,
+                status = ClassifiedSearchExecutionStatus.READY,
+                requestGeneration = generation,
+            )
+            return
+        }
+        searchState.value = ClassifiedSearchState(
+            criteria = normalized,
+            status = ClassifiedSearchExecutionStatus.LOADING,
+            requestGeneration = generation,
+        )
+        smartSearchJob = viewModelScope.launch {
+            try {
+                val rankedIds = searchEngine.search(normalized.normalizedQuery).map { it.clipId }.distinct()
+                if (searchRequestGeneration == generation) {
+                    searchState.value = ClassifiedSearchState(
+                        criteria = normalized,
+                        status = ClassifiedSearchExecutionStatus.READY,
+                        rankedClipIds = rankedIds,
+                        requestGeneration = generation,
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                if (searchRequestGeneration == generation) {
+                    searchState.value = ClassifiedSearchState(
+                        criteria = normalized,
+                        status = ClassifiedSearchExecutionStatus.FAILED,
+                        errorMessage = error.message ?: "スマート検索に失敗しました",
+                        requestGeneration = generation,
+                    )
+                }
+            }
+        }
     }
 
-    fun setSearchMode(value: SearchMode) {
-        filters.value = filters.value.copy(searchMode = value)
+    fun retrySearch() {
+        val current = searchState.value
+        if (current.isFailed && current.criteria.mode == SearchMode.Smart) applySearch(current.criteria)
     }
 
-    fun toggleSearchTarget(target: SearchTarget) {
-        val current = filters.value.searchTargets
-        val next = if (target in current && current.size > 1) current - target else current + target
-        filters.value = filters.value.copy(searchTargets = next)
+    fun clearSearch() {
+        smartSearchJob?.cancel()
+        smartSearchJob = null
+        searchRequestGeneration++
+        searchState.value = ClassifiedSearchState(requestGeneration = searchRequestGeneration)
     }
 
     fun setDateRange(startDate: LocalDate?, endDate: LocalDate?) {
@@ -703,14 +826,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        smartSearchJob?.cancel()
         mediaGridSessionCoordinator.dispose()
         super.onCleared()
     }
 
     companion object {
-        fun factory(application: Application): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
+        fun factory(
+            application: Application,
+            searchEngineOverride: ClassifiedSearchEngine? = null,
+        ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T = MainViewModel(application) as T
+            override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                MainViewModel(application, searchEngineOverride) as T
         }
     }
 }
@@ -973,6 +1101,9 @@ fun MainScreen(
                         ClassifiedDisplayMode.MediaGrid -> ClassifiedDisplayMode.Card
                     }
                 },
+                onApplySearch = viewModel::applySearch,
+                onClearSearch = viewModel::clearSearch,
+                onRetrySearch = viewModel::retrySearch,
                 modifier = Modifier.padding(padding).testTag("classified_screen"),
                 onApplyFilters = viewModel::applyFilters,
                 onApplySort = viewModel::applySort,
@@ -1084,24 +1215,49 @@ internal fun matchesTagFilters(
     return excluded.none(::matches) && required.all(::matches) && (included.isEmpty() || included.any(::matches))
 }
 
-internal fun <T : ClassifiedClipItem> filterClipsForSearch(
+internal fun <T : ClassifiedClipItem> filterClipsByConditions(
     clips: List<T>,
     hierarchy: TagHierarchy,
     filters: TweetFilterState,
 ): List<T> {
-    val regex = if (filters.searchMode == SearchMode.Regex && filters.query.isNotBlank()) {
-        runCatching { Regex(filters.query, RegexOption.IGNORE_CASE) }.getOrNull() ?: return emptyList()
-    } else {
-        null
-    }
     return clips
         .asSequence()
         .filter { clip -> !filters.taggedOnly || clip.tags.isNotEmpty() }
         .filter { clip -> matchesDateRange(clip.clip, filters.startDate, filters.endDate) }
         .filter { clip -> matchesAuthors(clip.clip, filters.selectedAuthors) }
         .filter { clip -> matchesTagFilters(clip, hierarchy, filters.tagFilters) }
-        .filter { clip -> matchesTextSearch(clip.clip, filters.query, filters.searchMode, filters.searchTargets, regex) }
         .toList()
+}
+
+internal fun <T : ClassifiedClipItem> filterClipsByRegex(
+    clips: List<T>,
+    criteria: ClassifiedSearchCriteria,
+): List<T> {
+    val query = criteria.normalizedQuery
+    if (query.isBlank() || criteria.mode != SearchMode.Regex) return if (query.isBlank()) clips else emptyList()
+    val regex = runCatching { Regex(query, RegexOption.IGNORE_CASE) }.getOrNull() ?: return emptyList()
+    return clips.filter { clip -> matchesRegexSearch(clip.clip, criteria.regexTargets, regex) }
+}
+
+internal fun <T : ClassifiedClipItem> classifiedClipsForDisplay(
+    clips: List<T>,
+    hierarchy: TagHierarchy,
+    filters: TweetFilterState,
+    sort: ClassifiedSortState,
+    searchState: ClassifiedSearchState,
+): List<T> {
+    if (!searchState.isActive) {
+        return sortClipsForDisplay(filterClipsByConditions(clips, hierarchy, filters), hierarchy, filters, sort)
+    }
+    val searched = when {
+        searchState.isLoading || searchState.isFailed -> emptyList()
+        searchState.criteria.mode == SearchMode.Smart -> {
+            val clipsById = clips.associateBy { it.clip.id }
+            searchState.rankedClipIds.asSequence().distinct().mapNotNull(clipsById::get).toList()
+        }
+        else -> filterClipsByRegex(clips, searchState.criteria)
+    }
+    return filterClipsByConditions(searched, hierarchy, filters)
 }
 
 private fun matchesDateRange(clip: ClipEntity, startDate: LocalDate?, endDate: LocalDate?): Boolean {
@@ -1115,15 +1271,11 @@ private fun matchesAuthors(clip: ClipEntity, selectedAuthors: Set<TweetAuthorKey
     return clip.authorKey() in selectedAuthors
 }
 
-private fun matchesTextSearch(
+private fun matchesRegexSearch(
     clip: ClipEntity,
-    query: String,
-    mode: SearchMode,
     targets: Set<SearchTarget>,
-    regex: Regex?,
+    regex: Regex,
 ): Boolean {
-    val cleanQuery = query.trim()
-    if (cleanQuery.isBlank()) return true
     val values = buildList {
         if (SearchTarget.Text in targets) add(clip.text)
         if (SearchTarget.Summary in targets) add(clip.summary)
@@ -1132,10 +1284,7 @@ private fun matchesTextSearch(
         if (SearchTarget.Username in targets) add(clip.authorUsername)
     }
     if (values.isEmpty()) return false
-    return when (mode) {
-        SearchMode.Literal -> values.any { it.contains(cleanQuery, ignoreCase = true) }
-        SearchMode.Regex -> regex?.let { compiled -> values.any { compiled.containsMatchIn(it) } } ?: false
-    }
+    return values.any { regex.containsMatchIn(it) }
 }
 
 private fun buildAuthorOptions(clips: List<out ClassifiedClipItem>): List<TweetAuthorOption> =
@@ -1326,15 +1475,23 @@ internal fun sortConditionSummary(sort: ClassifiedSortState): String {
     return "並び:${parts.joinToString(" → ")}"
 }
 
+internal fun searchConditionSummary(searchState: ClassifiedSearchState): String {
+    if (!searchState.isActive) return ""
+    val label = if (searchState.criteria.mode == SearchMode.Smart) "検索" else "正規表現"
+    return "$label:\"${searchState.criteria.normalizedQuery}\""
+}
+
 internal fun classifiedConditionSummary(
     filters: TweetFilterState,
     sort: ClassifiedSortState,
     hierarchy: TagHierarchy,
     authors: List<TweetAuthorOption>,
-): String = listOf(
-    filterConditionSummary(filters, hierarchy, authors),
-    sortConditionSummary(sort),
-).joinToString(" / ")
+    searchState: ClassifiedSearchState = ClassifiedSearchState(),
+): String = buildList {
+    if (searchState.isActive) add(searchConditionSummary(searchState))
+    add(filterConditionSummary(filters, hierarchy, authors))
+    if (!searchState.isActive) add(sortConditionSummary(sort))
+}.joinToString(" / ")
 
 internal fun ClipEntity.authorKey(): TweetAuthorKey =
     TweetAuthorKey(authorId = authorId?.takeIf { it.isNotBlank() }, username = authorUsername.lowercase())
@@ -1431,7 +1588,7 @@ private fun MainUiState.classifiedScrollKey(): String {
         sort.likeCountDescending,
         sort.postTimeDescending,
     ).joinToString("|")
-    return "classified:${filters.query.trim()}:${filters.searchMode.name}:${filters.searchTargets.sortedBy { it.name }}:${filters.startDate}:${filters.endDate}:$authors:${filters.taggedOnly}:$filterKey:$sortKey"
+    return "classified:${searchState.mediaGridIdentity}:${filters.startDate}:${filters.endDate}:$authors:${filters.taggedOnly}:$filterKey:$sortKey"
 }
 
 fun tabIcon(tab: AppTab): String = when (tab) {

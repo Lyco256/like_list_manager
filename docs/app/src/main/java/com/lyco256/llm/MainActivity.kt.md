@@ -1,5 +1,15 @@
 # `app/src/main/java/com/lyco256/llm/MainActivity.kt`
 
+## 2026-09-12 分類済みスマート検索UI
+
+分類済み画面の検索を条件絞り込みから分離しました。`TweetFilterState` は期間・投稿者・タグ条件・タグ付きのみだけを保持し、`ClassifiedSearchCriteria` と `ClassifiedSearchState` がquery、SMART/正規表現モード、正規表現対象、`INACTIVE` / `LOADING` / `READY` / `FAILED`、SMARTのranked clip IDを保持します。
+
+検索Dialogは`search_dialog`の全画面Dialogで、`search_query`、`search_mode_smart`、`search_mode_regex`、`search_target_*`、`search_apply`、`search_clear`、`search_cancel`を公開します。SMARTは`AppContainer.localSearchEngine`を共有し、非同期結果を世代付きlatest-winsで適用します。正規表現は現在のsource orderを維持して対象fieldだけを照合し、不正regexは適用しません。空queryは検索解除になります。`MainActivity.createMainViewModelFactory` と `MainViewModel.factory` の任意engine overrideは、実行時経路を変えずにintegration testだけがfake engineを注入するための保護された拡張点です。
+
+表示順は、検索なしでは条件絞り込み後に通常sort、SMART READYではranked clip ID順、正規表現ではsource orderを維持します。検索中・失敗時は旧結果や通常一覧へfallbackせず専用表示を行い、条件変更は確定済み検索結果へANDするだけで検索エンジンを再実行しません。検索中はsort操作を無効化しますがsort stateは保持し、解除後に復元します。MediaGridも同じ順序を使い、検索中は日付・いいね見出しを出しません。
+
+MediaGridのcache/session/data keyとカードのscroll keyには検索identity・generationを含めますが、ranked ID一覧はkeyへ連結しません。検索なしの既存filter、sort、grid、scroll、morph、scrollbar挙動は従来どおりです。
+
 ## 2026-08-12 タグdraftの保存結果通知
 
 未分類・分類済み通常カード・MediaGrid previewへ、`MainViewModel.setClipTags` の完了callback付き経路を渡します。各UIはchip操作ではこの経路を呼ばず、「適用」時だけ呼び、成功または失敗の結果をdraft状態へ反映します。
@@ -33,9 +43,9 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 
 - `MainActivity`: 通常Compose起動とAppAuthのActivity Result受信。benchmark Intent、snapshot import、計測State、frame/result出力は扱いません。
 - `MainViewModel`: RepositoryのFlowをUI stateへ合成し、ユーザー操作をRepositoryへ渡す
-- `MainViewModel`: `MediaGridSessionCoordinator`を所有し、分類済みメディアグリッドのframe/controller/anchorをComposableより長く保持する。session keyはfilter/sortだけで、列数・revision変更は同一sessionの更新として扱う。
-- `MainUiState`: 未分類、分類済み、検索条件、並び替え、投稿者一覧、タグ階層、保存先状態、同期状態、設定画面用スナップショットをまとめる
-- `TweetFilterState`: 分類済み画面の文字列検索、検索モード、検索対象、期間、投稿者条件、タグ条件、タグのみtoggleを表す
+- `MainViewModel`: `MediaGridSessionCoordinator`を所有し、分類済みメディアグリッドのframe/controller/anchorをComposableより長く保持する。session keyは条件filter/sortに検索identity・generationを加え、列数・revision変更は同一sessionの更新として扱う。
+- `MainUiState`: 未分類、分類済み、検索状態、条件絞り込み、並び替え、投稿者一覧、タグ階層、保存先状態、同期状態、設定画面用スナップショットをまとめる
+- `TweetFilterState`: 期間、投稿者条件、タグ条件、タグのみtoggleだけを表す。検索は`ClassifiedSearchCriteria` / `ClassifiedSearchState`が表す
 - `SettingsScreen`: X API設定、同期、使用量、データ管理、保存先候補、移動開始入口を全画面で表示する
 - `StorageMoveEstimateDialog`: 保存先移動の最終確認内容と、移動開始/キャンセル操作を扱う
 - `StorageProgressDialog`: 保存先見積もり中、移動開始準備中、移動中などの待機表示を行う
@@ -64,7 +74,7 @@ Activity、ViewModel、UI state、Compose画面の接続入口です。未分類
 
 `RenameNodeDialog` は入力欄、保存、閉じる操作に `rename_node_*` のtest tagを付け、名称変更の保存とキャンセルをE2Eで安定して検証できます。
 
-`ClassifiedSortState` のUIは `sort_open`、`sort_dialog`、`sort_options_list`、`sort_clear_all_open`、`sort_apply` などの test tag で操作します。分類済み画面の概要行には `filterConditionSummary` と並んで現在の並び替え条件も表示します。
+検索と条件絞り込みのUIはそれぞれ`search_open` / `search_dialog`と`filter_open` / `filter_dialog`に分離しています。`ClassifiedSortState` のUIは `sort_open`、`sort_dialog`、`sort_options_list`、`sort_clear_all_open`、`sort_apply` などの test tag で操作します。分類済み画面の概要行には検索identity、条件filter、検索非適用時だけ現在の並び替え条件を表示します。
 
 メディアグリッドの`LazyGridState`は`MainScreen`でsaveableに保持し、タブ・設定・カード表示でComposableが破棄されてもsession anchorとともに復元します。
 
@@ -126,7 +136,7 @@ UI項目を追加する場合は、対応するViewModel操作、Repository API�
 ## 2026-07 media grid lightweight state
 
 - `MainViewModel` now exposes `classifiedMediaGridState`, which combines the lightweight media source with filters, sort config, and tag hierarchy.
-- `filterClipsForSearch` and `sortClipsForDisplay` are shared by the card path and the media-grid path through the common `ClassifiedClipItem` contract.
+- `filterClipsByRegex` / `filterClipsByConditions` と `sortClipsForDisplay` は、共通の `ClassifiedClipItem` 契約を通じてカード経路とMediaGrid経路で同じ検索順・条件絞り込みを使う。
 - `uiState.classified` remains the source for the existing card display.
 - The media-grid state tracks both the matching clip count and the rendered media count so the UI can distinguish the zero-clip and no-media empty states.
 

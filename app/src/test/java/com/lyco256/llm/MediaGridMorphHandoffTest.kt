@@ -105,7 +105,8 @@ class MediaGridMorphHandoffTest {
         assertCancelled { it.copy(sourceRevision = it.sourceRevision + 1L) }
         assertCancelled {
             val changedDataKey = it.frameKey.dataKey.copy(
-                filter = it.frameKey.dataKey.filter.copy(query = "changed"),
+                searchIdentity = "changed",
+                searchGeneration = it.frameKey.dataKey.searchGeneration + 1L,
             )
             it.copy(frameKey = it.frameKey.copy(dataKey = changedDataKey))
         }

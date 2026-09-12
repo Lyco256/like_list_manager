@@ -39,13 +39,29 @@ class MediaGridAnchorPersistenceIntegrationTest {
 
     @Test
     fun explicitAnchorSaveStaysWithTargetSessionAndEqualSaveDoesNotPublish() {
-        val keyA = MediaGridSessionKey(TweetFilterState(query = "A"), ClassifiedSortState())
-        val keyB = MediaGridSessionKey(TweetFilterState(query = "B"), ClassifiedSortState())
+        val keyA = MediaGridSessionKey(TweetFilterState(), ClassifiedSortState(), searchIdentity = "A", searchGeneration = 1L)
+        val keyB = MediaGridSessionKey(TweetFilterState(), ClassifiedSortState(), searchIdentity = "B", searchGeneration = 2L)
         val sourceA = ClassifiedMediaGridState(
             status = MediaGridLoadStatus.Calculating,
-            dataKey = MediaGridDataKey(1L, 1L, keyA.filter, keyA.sort),
+            dataKey = MediaGridDataKey(
+                1L,
+                1L,
+                keyA.filter,
+                keyA.sort,
+                keyA.searchIdentity,
+                keyA.searchGeneration,
+            ),
         )
-        val sourceB = sourceA.copy(dataKey = MediaGridDataKey(2L, 1L, keyB.filter, keyB.sort))
+        val sourceB = sourceA.copy(
+            dataKey = MediaGridDataKey(
+                2L,
+                1L,
+                keyB.filter,
+                keyB.sort,
+                keyB.searchIdentity,
+                keyB.searchGeneration,
+            ),
+        )
         val anchorA = ClassifiedMediaGridScrollAnchor("media_grid_item_1", 3, 12, 4f)
         val anchorA2 = anchorA.copy(index = 8)
         val anchorB = ClassifiedMediaGridScrollAnchor("media_grid_item_2", 5, 20, -2f)

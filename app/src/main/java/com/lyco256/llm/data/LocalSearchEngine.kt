@@ -10,6 +10,11 @@ import kotlin.coroutines.coroutineContext
 
 data class LocalSearchResult(val clipId: Long, val score: Float)
 
+/** The UI may borrow the shared local search runtime without owning its lifecycle. */
+fun interface ClassifiedSearchEngine {
+    suspend fun search(query: String): List<LocalSearchResult>
+}
+
 object LocalSearchTuning {
     const val LEXICAL_WEIGHT = 0.64f
     const val TEXT_WEIGHT = 0.24f
@@ -60,7 +65,7 @@ class LocalSearchEngine internal constructor(
     private val textEmbedder: QueryEmbedder,
     private val imageEmbedder: MultimodalTextEmbedder,
     private val annFactory: SearchAnnFactory,
-) {
+) : ClassifiedSearchEngine {
     constructor(
         storage: DerivedSearchStorage,
         analyzer: LexicalTextAnalyzer,
@@ -74,7 +79,7 @@ class LocalSearchEngine internal constructor(
     private var semantic: AnnCache<SemanticMetadata>? = null
     private var images: AnnCache<Long>? = null
 
-    suspend fun search(query: String): List<LocalSearchResult> = withContext(Dispatchers.Default) {
+    override suspend fun search(query: String): List<LocalSearchResult> = withContext(Dispatchers.Default) {
         mutex.withLock {
             coroutineContext.ensureActive()
             check(!closed) { "Local search engine is closed" }

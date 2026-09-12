@@ -19,7 +19,7 @@
 | 4 | データ破壊防止 | 主要項目完了 | 概要/OCR/tag relationのfield・差分Undo、タグ・グループ作成/編集/削除Undo、投稿hard DELETEの画像staging・復元・失敗rollback、検索非変更、画像失敗、保存先失敗 |
 | 5 | Fake X API 同期 | 主要項目完了 | pagination、401/403/429/500、refresh失敗、中断再開、欠落/不正JSON、mixed media |
 | 6 | API料金/rate limit | 主要項目完了 | production URL遮断、呼出履歴、月間停止、429無限retry防止 |
-| 7 | 検索/絞り込み | ロジック完了・主要UI完了 | 全検索target、regex、期間、投稿者、タグ複合、件数summary、非変更。filter dialogのquery適用、日付条件適用/DatePicker内解除/クリア、投稿者Dialogクリア、タグ条件のみクリア、投稿者＋タグ条件の複合E2E、Cancel/Back破棄、Dialog内全クリア確認キャンセル、全クリアE2Eを確認 |
+| 7 | 検索/絞り込み | ロジック完了・主要UI完了 | SMARTは共有LocalSearchEngineのranked ID順、正規表現はsource order、invalid regex/blank clear、LOADING/FAILED/retry、条件filterとのAND、カード/MediaGrid同順、sort無効化、検索identity/generation、全regex target、期間、投稿者、タグ複合、件数summary、DB非変更。`ClassifiedSearchViewModelIntegrationTest` のfake engineでLOADING→READY、rank順、latest-wins、FAILED/retry/clear、Regexのengine非呼出しを確認し、`ClassifiedSearchUiIntegrationTest` でfake結果のカード順→条件AND→sort無効→MediaGrid同順→検索解除後sort復元を確認。検索Dialogのapply/clear/cancel、filter Dialogの条件適用・DatePicker内解除/クリア、投稿者Dialogクリア、タグ条件のみクリア、投稿者＋タグ条件の複合E2E、Cancel/Back破棄、全クリア確認キャンセル、全クリアE2Eを確認 |
 | 8 | 分類操作 E2E | 主要項目完了 | 付与・解除、DB・件数、popup非伝播、別グループ同名タグの複数同時付与を確認 |
 | 9 | タグ/グループ管理 E2E | 主要項目完了 | 作成、タグ/グループ作成Dialogキャンセル、同名子タグ、tag名称変更/削除、group名称変更/削除、名称変更Dialogキャンセル、タグ/グループ削除Dialogキャンセル、タグの別グループ移動UI、タグ/グループ移動Dialogキャンセル、別タグへの一括追加、別タグへの一括追加Dialogキャンセル、循環/順序ロジックを確認 |
 | 10 | スクロール/大量表示 | 主要項目完了 | SC-56C実機で1,000件末尾/先頭UI、10,000件Room、50件リスクseedを確認 |
@@ -47,7 +47,7 @@
 
 ## 合格ゲート
 
-ローカル検索エンジン（実装9）: 自動・隔離実機確認済み。`LocalSearchEngineTest` / `LocalSearchLexicalTest` / `LocalSearchEngineIntegrationTest` でliteral FTS、実768/256 ANN、clip統合、revision再利用・交換、rollback、cancel、closeを固定fixtureで確認する。`LocalAnnIndexSnapshotTest` で完成snapshotのdispatcher受け渡し時cancelによる解放も確認する。cache更新→FTSの順序と途中lexical変更への再整合、fuzzy document tokenのone-to-one割当を確認済み。2026-09-12に `run-safe-integration-check.cmd`、その後 `run-safe-debug-check.cmd -InstallToDevice` がともにSuccess。正本Room・既存検索UI・一覧挙動は変更せず、検索品質・実データ目視は対象外。
+ローカル検索エンジン／分類済み検索UI: `LocalSearchEngineTest` / `LocalSearchLexicalTest` / `LocalSearchEngineIntegrationTest` でliteral FTS、実768/256 ANN、clip統合、revision再利用・交換、rollback、cancel、closeを固定fixtureで確認する。`ClassifiedSearchViewModelIntegrationTest`、`ClassifiedSearchUiIntegrationTest`、`MainActivityComposeTest` と分類済みロジックテストでSMART/正規表現の状態、表示順、条件AND、検索Dialog、sort無効化、DB非変更を確認する。自然言語の品質・実データ目視は対象外。変更後ゲートは `run-safe-integration-check.cmd` と `run-safe-debug-check.cmd -InstallToDevice`。
 
 - 通常必須: debug／integration共通Build task集合、`testDebugUnitTest`、`lintDebug`。phase別入力と成功stateにより自動省略し、main入力不変時の変更unit test classだけは限定実行できる。判断不能時はphase全体へ戻る
 - 実機必須: `verifyTestEnvironmentIsolation`、`connectedIntegrationTestAndroidTest`

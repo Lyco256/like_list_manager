@@ -69,6 +69,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.outlined.Input
 import androidx.compose.material3.AlertDialog
@@ -78,6 +79,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.Divider
@@ -129,6 +131,9 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -443,6 +448,9 @@ internal fun EnhancedClassifiedScreen(
     onMediaGridCellClick: (Long) -> Unit = {},
     onMediaGridBulkTagsChange: (Set<Long>, Set<Long>, Set<Long>, (String?) -> Unit) -> Unit = { _, _, _, _ -> },
     onToggleDisplayMode: () -> Unit,
+    onApplySearch: (ClassifiedSearchCriteria) -> Unit = {},
+    onClearSearch: () -> Unit = {},
+    onRetrySearch: () -> Unit = {},
     modifier: Modifier = Modifier,
     onApplyFilters: (TweetFilterState) -> Unit,
     onApplySort: (ClassifiedSortState) -> Unit,
@@ -465,11 +473,14 @@ internal fun EnhancedClassifiedScreen(
     onAuthorClick: (ClipEntity) -> Unit,
 ) {
     val state = rememberLazyGridState()
+    val effectiveSort = if (uiState.searchState.isActive) ClassifiedSortState() else effectiveMediaGridSort(uiState.sort)
     val dataKey = mediaGridState.dataKey ?: MediaGridDataKey(
         mediaGridState.sourceRevision,
         uiState.tagHierarchy.structuralRevision,
         effectiveMediaGridFilter(uiState.filters),
-        effectiveMediaGridSort(uiState.sort),
+        effectiveSort,
+        uiState.searchState.mediaGridIdentity,
+        uiState.searchState.requestGeneration,
     )
     val frame = remember(mediaGridState.entries, dataKey, mediaGridColumnCount) {
         buildMediaGridFrameData(mediaGridState.entries, dataKey.sort, mediaGridColumnCount, dataKey)
@@ -493,6 +504,9 @@ internal fun EnhancedClassifiedScreen(
         onMediaGridCellClick = onMediaGridCellClick,
         onMediaGridBulkTagsChange = onMediaGridBulkTagsChange,
         onToggleDisplayMode = onToggleDisplayMode,
+        onApplySearch = onApplySearch,
+        onClearSearch = onClearSearch,
+        onRetrySearch = onRetrySearch,
         modifier = modifier,
         onApplyFilters = onApplyFilters,
         onApplySort = onApplySort,
@@ -522,6 +536,9 @@ internal fun EnhancedClassifiedScreen(
     onMediaGridCellClick: (Long) -> Unit = {},
     onMediaGridBulkTagsChange: (Set<Long>, Set<Long>, Set<Long>, (String?) -> Unit) -> Unit = { _, _, _, _ -> },
     onToggleDisplayMode: () -> Unit,
+    onApplySearch: (ClassifiedSearchCriteria) -> Unit = {},
+    onClearSearch: () -> Unit = {},
+    onRetrySearch: () -> Unit = {},
     modifier: Modifier = Modifier,
     onApplyFilters: (TweetFilterState) -> Unit,
     onApplySort: (ClassifiedSortState) -> Unit,
@@ -547,6 +564,7 @@ internal fun EnhancedClassifiedScreen(
     val appContainer = (context.applicationContext as LikeListManagerApp).container
     var filterDialogOpen by remember { mutableStateOf(false) }
     var sortDialogOpen by remember { mutableStateOf(false) }
+    var searchDialogOpen by remember { mutableStateOf(false) }
     var selectedMediaGridClipIds by remember { mutableStateOf(emptySet<Long>()) }
     var mediaGridSelectionMode by remember { mutableStateOf(false) }
     var bulkTagDialogOpen by remember { mutableStateOf(false) }
@@ -557,7 +575,7 @@ internal fun EnhancedClassifiedScreen(
     LaunchedEffect(persistedTagIdsByClassifiedClip) {
         tagDrafts = reconcileClipTagDrafts(tagDrafts, persistedTagIdsByClassifiedClip)
     }
-    val itemKeys = remember(displayMode, uiState.clips, uiState.filters, uiState.sort, uiState.tagHierarchy) {
+    val itemKeys = remember(displayMode, uiState.clips, uiState.filters, uiState.sort, uiState.searchState, uiState.tagHierarchy) {
         if (displayMode == ClassifiedDisplayMode.Card) uiState.classified.map { it.clip.id } else emptyList()
     }
     var pendingPinchAnchor by remember { mutableStateOf<ClassifiedMediaGridScrollAnchor?>(null) }
@@ -749,6 +767,7 @@ internal fun EnhancedClassifiedScreen(
                     MediaGridLoadStatus.Calculating -> null
                     MediaGridLoadStatus.Ready -> mediaGridState.matchingClipCount
                 },
+                onOpenSearch = { searchDialogOpen = true },
                 onOpen = { filterDialogOpen = true },
                 onOpenSort = { sortDialogOpen = true },
                 onToggleDisplayMode = onToggleDisplayMode,
@@ -764,7 +783,28 @@ internal fun EnhancedClassifiedScreen(
                 .weight(1f)
                 .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
         ) {
-        if (displayMode == ClassifiedDisplayMode.MediaGrid) {
+        if (uiState.searchState.isLoading) {
+            Box(
+                Modifier.fillMaxSize().testTag("classified_search_loading"),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CircularProgressIndicator()
+                    Text("検索中…")
+                }
+            }
+        } else if (uiState.searchState.isFailed) {
+            Box(
+                Modifier.fillMaxSize().testTag("classified_search_error"),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("検索に失敗しました", style = MaterialTheme.typography.titleMedium)
+                    Text(uiState.searchState.errorMessage ?: "スマート検索に失敗しました")
+                    Button(onClick = onRetrySearch, modifier = Modifier.testTag("classified_search_retry")) { Text("再試行") }
+                }
+            }
+        } else if (displayMode == ClassifiedDisplayMode.MediaGrid) {
             when {
                 mediaGridSessionState.frame?.items?.isEmpty() == true && mediaGridState.status == MediaGridLoadStatus.Ready && mediaGridState.isEmptyByFilter -> HierarchyEmptyState("条件に合うツイートはありません")
                 mediaGridSessionState.frame?.items?.isEmpty() == true && mediaGridState.status == MediaGridLoadStatus.Ready && mediaGridState.hasMatchingClipButNoMedia -> HierarchyEmptyState("この条件に一致する画像・動画サムネイルはありません")
@@ -774,7 +814,7 @@ internal fun EnhancedClassifiedScreen(
                 ) { androidx.compose.material3.CircularProgressIndicator() }
                 else -> ClassifiedMediaGridContent(
                     frame = mediaGridSessionState.frame!!,
-                    sort = uiState.sort,
+                    sort = if (uiState.searchState.isActive) ClassifiedSortState() else uiState.sort,
                     columnCount = mediaGridSessionState.columnCount,
                     state = mediaGridLazyState,
                     controller = mediaGridSessionState.controller,
@@ -872,12 +912,22 @@ internal fun EnhancedClassifiedScreen(
     }
     }
     if (filterDialogOpen) {
-        SearchFilterDialog(
+        ClassifiedFilterDialog(
             uiState = uiState,
             hierarchy = uiState.tagHierarchy,
             initialFilters = uiState.filters,
+            searchState = uiState.searchState,
             onApply = onApplyFilters,
             onDismiss = { filterDialogOpen = false },
+        )
+    }
+    if (searchDialogOpen) {
+        ClassifiedSearchDialog(
+            initialCriteria = uiState.searchState.criteria,
+            searchActive = uiState.searchState.isActive,
+            onApply = { criteria -> onApplySearch(criteria); searchDialogOpen = false },
+            onClear = { onClearSearch(); searchDialogOpen = false },
+            onDismiss = { searchDialogOpen = false },
         )
     }
     if (sortDialogOpen) {
@@ -1660,12 +1710,14 @@ internal fun TagFilterSummaryRow(
     hierarchy: TagHierarchy,
     displayMode: ClassifiedDisplayMode,
     matchingClipCount: Int?,
+    onOpenSearch: () -> Unit = {},
     onOpen: () -> Unit,
     onOpenSort: () -> Unit,
     onToggleDisplayMode: () -> Unit,
     interactionEnabled: Boolean,
 ) {
     val filters = uiState.filters
+    val searchState = uiState.searchState
     Row(
         Modifier.fillMaxWidth().zIndex(ClassifiedMediaGridToolbarZIndex),
         verticalAlignment = Alignment.CenterVertically,
@@ -1687,6 +1739,22 @@ internal fun TagFilterSummaryRow(
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.labelSmall,
                 )
+                if (searchState.isActive) {
+                    Text(
+                        searchConditionSummary(searchState),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "｜",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Text(
                     filterConditionSummary(filters, hierarchy, uiState.authorOptions),
                     maxLines = 1,
@@ -1694,21 +1762,35 @@ internal fun TagFilterSummaryRow(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Text(
-                    "｜",
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    sortConditionSummary(uiState.sort),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (!searchState.isActive) {
+                    Text(
+                        "｜",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        sortConditionSummary(uiState.sort),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
+        ClassifiedToolbarButton(
+            onClick = { if (interactionEnabled) onOpenSearch() },
+            enabled = interactionEnabled,
+            highlighted = searchState.isActive,
+            modifier = Modifier.width(36.dp).height(32.dp).testTag("search_open"),
+        ) {
+            Icon(
+                Icons.Filled.Search,
+                contentDescription = "検索",
+                modifier = Modifier.size(18.dp),
+            )
+        }
         ClassifiedToolbarButton(
             onClick = { if (interactionEnabled) onOpen() },
             enabled = interactionEnabled,
@@ -1723,8 +1805,8 @@ internal fun TagFilterSummaryRow(
         }
         ClassifiedToolbarButton(
             onClick = { if (interactionEnabled) onOpenSort() },
-            enabled = interactionEnabled,
-            highlighted = uiState.sort != ClassifiedSortState(),
+            enabled = interactionEnabled && !searchState.isActive,
+            highlighted = uiState.sort != ClassifiedSortState() && !searchState.isActive,
             modifier = Modifier.width(36.dp).height(32.dp).testTag("sort_open"),
         ) {
             Icon(
@@ -1782,11 +1864,6 @@ internal fun filterConditionSummary(
     authors: List<TweetAuthorOption>,
 ): String {
     val conditions = mutableListOf(if (filters.taggedOnly) "対象:タグ付きのみ" else "対象:全ツイート")
-    if (filters.query.isNotBlank()) {
-        val kind = if (filters.searchMode == SearchMode.Regex) "正規表現" else "文字列"
-        val targets = SearchTarget.entries.filter { it in filters.searchTargets }.joinToString("・") { it.label }
-        conditions += "$kind:\"${filters.query}\"(対象:$targets)"
-    }
     if (filters.startDate != null || filters.endDate != null) {
         conditions += "期間:${filters.startDate?.summaryText() ?: "..."}~${filters.endDate?.summaryText() ?: "..."}"
     }
@@ -1816,10 +1893,141 @@ private enum class DateFilterEndpoint { Start, End }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SearchFilterDialog(
+private fun ClassifiedSearchDialog(
+    initialCriteria: ClassifiedSearchCriteria,
+    searchActive: Boolean,
+    onApply: (ClassifiedSearchCriteria) -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var criteria by remember(initialCriteria, searchActive) {
+        mutableStateOf(if (searchActive) initialCriteria else ClassifiedSearchCriteria())
+    }
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        runCatching { focusRequester.requestFocus() }
+        keyboardController?.show()
+    }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
+    ) {
+        Surface(Modifier.fillMaxSize().testTag("search_dialog"), shape = RoundedCornerShape(0.dp)) {
+            Column(Modifier.fillMaxSize().padding(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("検索", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    if (searchActive) {
+                        TextButton(onClick = onClear, modifier = Modifier.testTag("search_clear")) { Text("検索解除") }
+                    }
+                }
+                LazyColumn(
+                    Modifier.weight(1f).padding(top = 12.dp).testTag("search_options_list"),
+                    contentPadding = PaddingValues(bottom = 96.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    item {
+                        OutlinedTextField(
+                            value = criteria.query,
+                            onValueChange = { criteria = criteria.copy(query = it) },
+                            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester).testTag("search_query"),
+                            singleLine = true,
+                            isError = criteria.regexError != null,
+                            label = { Text("検索") },
+                            supportingText = {
+                                criteria.regexError?.let { Text(it) }
+                            },
+                            trailingIcon = {
+                                if (criteria.query.isNotBlank()) {
+                                    IconButton(
+                                        onClick = { criteria = criteria.copy(query = "") },
+                                        modifier = Modifier.testTag("search_query_clear"),
+                                    ) { Icon(Icons.Filled.Close, contentDescription = "検索文字列をクリア") }
+                                }
+                            },
+                        )
+                    }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = criteria.mode == SearchMode.Smart,
+                                onClick = { criteria = criteria.copy(mode = SearchMode.Smart) },
+                                modifier = Modifier.testTag("search_mode_smart"),
+                                label = { Text("スマート") },
+                            )
+                            FilterChip(
+                                selected = criteria.mode == SearchMode.Regex,
+                                onClick = { criteria = criteria.copy(mode = SearchMode.Regex) },
+                                modifier = Modifier.testTag("search_mode_regex"),
+                                label = { Text("正規表現") },
+                            )
+                        }
+                    }
+                    if (criteria.mode == SearchMode.Smart) {
+                        item {
+                            Text("本文・概要・OCR・投稿者・画像を総合して関連度順に検索します", style = MaterialTheme.typography.bodySmall)
+                        }
+                    } else {
+                        item { Text("検索対象", style = MaterialTheme.typography.titleSmall) }
+                        items(SearchTarget.entries.chunked(2), key = { row -> row.joinToString { it.name } }) { targets ->
+                            Row(Modifier.fillMaxWidth()) {
+                                targets.forEach { target ->
+                                    Row(
+                                        Modifier.weight(1f).clickable {
+                                            val next = if (target in criteria.regexTargets && criteria.regexTargets.size > 1) {
+                                                criteria.regexTargets - target
+                                            } else {
+                                                criteria.regexTargets + target
+                                            }
+                                            criteria = criteria.copy(regexTargets = next)
+                                        },
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Checkbox(
+                                            checked = target in criteria.regexTargets,
+                                            onCheckedChange = {
+                                                val next = if (target in criteria.regexTargets && criteria.regexTargets.size > 1) {
+                                                    criteria.regexTargets - target
+                                                } else criteria.regexTargets + target
+                                                criteria = criteria.copy(regexTargets = next)
+                                            },
+                                            modifier = Modifier.testTag("search_target_${target.name.lowercase()}"),
+                                        )
+                                        Text(target.label)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Divider()
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    TextButton(onClick = onDismiss, modifier = Modifier.weight(1f).testTag("search_cancel")) { Text("キャンセル") }
+                    Button(
+                        onClick = {
+                            if (criteria.normalizedQuery.isBlank()) onClear()
+                            else onApply(criteria.copy(query = criteria.normalizedQuery))
+                        },
+                        enabled = criteria.canApply || (searchActive && criteria.normalizedQuery.isBlank()),
+                        modifier = Modifier.weight(1f).testTag("search_apply"),
+                    ) { Text("検索") }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ClassifiedFilterDialog(
     uiState: MainUiState,
     hierarchy: TagHierarchy,
     initialFilters: TweetFilterState,
+    searchState: ClassifiedSearchState,
     onApply: (TweetFilterState) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -1830,17 +2038,18 @@ private fun SearchFilterDialog(
     var discardConfirmationOpen by remember { mutableStateOf(false) }
     var clearConfirmationOpen by remember { mutableStateOf(false) }
     val expandedTagGroups = remember { mutableStateMapOf<Long, Boolean>() }
-    val matchingCount = remember(uiState.clips, hierarchy, filters) {
-        filterClipsForSearch(uiState.clips, hierarchy, filters).size
+    val matchingCount = remember(uiState.clips, hierarchy, filters, searchState) {
+        classifiedClipsForDisplay(
+            clips = uiState.clips,
+            hierarchy = hierarchy,
+            filters = filters,
+            sort = ClassifiedSortState(),
+            searchState = searchState,
+        ).size
     }
     val hasChanges = filters != initialFilters
     fun requestDismiss() {
         if (hasChanges) discardConfirmationOpen = true else onDismiss()
-    }
-    fun toggleTarget(target: SearchTarget) {
-        val current = filters.searchTargets
-        val next = if (target in current && current.size > 1) current - target else current + target
-        filters = filters.copy(searchTargets = next)
     }
     fun cycleTag(ref: TagNodeRef) {
         val next = nextFilterTagState(ref, filters.tagFilters[ref] ?: TagFilterState.NONE)
@@ -1887,46 +2096,6 @@ private fun SearchFilterDialog(
                                 onCheckedChange = { filters = filters.copy(taggedOnly = it) },
                                 modifier = Modifier.testTag("filter_tagged_only"),
                             )
-                        }
-                    }
-                    item { Divider() }
-                    item {
-                        Text("文字列検索", style = MaterialTheme.typography.titleSmall)
-                        OutlinedTextField(
-                            value = filters.query,
-                            onValueChange = { filters = filters.copy(query = it) },
-                            modifier = Modifier.fillMaxWidth().testTag("filter_query"),
-                            singleLine = true,
-                            isError = filters.regexError != null,
-                            label = { Text("検索") },
-                            supportingText = { Text(filters.regexError ?: "タグ名は検索対象に含めません") },
-                        )
-                    }
-                    item {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SearchMode.entries.forEach { mode ->
-                                FilterChip(
-                                    selected = filters.searchMode == mode,
-                                    onClick = { filters = filters.copy(searchMode = mode) },
-                                    label = { Text(mode.label) },
-                                )
-                            }
-                        }
-                    }
-                    item {
-                        Text("検索対象", style = MaterialTheme.typography.titleSmall)
-                    }
-                    items(SearchTarget.entries.chunked(2), key = { row -> row.joinToString { it.name } }) { targets ->
-                        Row(Modifier.fillMaxWidth()) {
-                            targets.forEach { target ->
-                                Row(
-                                    Modifier.weight(1f).clickable { toggleTarget(target) },
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Checkbox(checked = target in filters.searchTargets, onCheckedChange = { toggleTarget(target) })
-                                    Text(target.label)
-                                }
-                            }
                         }
                     }
                     item { Divider() }

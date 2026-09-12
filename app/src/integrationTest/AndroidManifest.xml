@@ -12,5 +12,8 @@
         <activity
             android:name="net.openid.appauth.RedirectUriReceiverActivity"
             tools:node="remove" />
+        <activity
+            android:name="com.lyco256.llm.ClassifiedSearchTestActivity"
+            android:exported="false" />
     </application>
 </manifest>

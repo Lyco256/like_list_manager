@@ -197,10 +197,12 @@ internal class MediaGridSessionCoordinator(
 internal data class MediaGridSessionKey(
     val filter: TweetFilterState,
     val sort: ClassifiedSortState,
+    val searchIdentity: String = "inactive",
+    val searchGeneration: Long = 0L,
 )
 
 internal fun mediaGridSessionKey(dataKey: MediaGridDataKey): MediaGridSessionKey =
-    MediaGridSessionKey(dataKey.filter, dataKey.sort)
+    MediaGridSessionKey(dataKey.filter, dataKey.sort, dataKey.searchIdentity, dataKey.searchGeneration)
 
 internal data class MediaGridSessionUiState(
     val sessionKey: MediaGridSessionKey? = null,

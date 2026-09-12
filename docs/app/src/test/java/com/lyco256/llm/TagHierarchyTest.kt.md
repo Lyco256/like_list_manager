@@ -73,7 +73,7 @@
 ## 関連ファイルと関連理由
 
 - `app/src/main/java/com/lyco256/llm/MainActivity.kt`
-  - `matchesTagFilters` と `filterClipsForSearch` の分類済み検索/絞り込みロジックを検証します。
+  - `matchesTagFilters`、`filterClipsByRegex`、`filterClipsByConditions` の分類済み検索/絞り込みロジックを検証します。
 - `app/src/main/java/com/lyco256/llm/data/Entities.kt`
   - `TagHierarchy`、`TagNodeRef`、`TagFilterState` などのデータ構造を利用します。
 - `app/src/main/java/com/lyco256/llm/data/ClipRepository.kt`

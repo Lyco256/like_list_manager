@@ -74,7 +74,7 @@ class MediaGridSessionCoordinatorTest {
 
     @Test
     fun columnsAndSourceRevisionsDoNotChangeSessionIdentity() {
-        val filter = TweetFilterState(query = "robot")
+        val filter = TweetFilterState()
         val sort = ClassifiedSortState(baseOrder = ClassifiedSortBase.PostTime)
         val first = MediaGridDataKey(1L, 2L, filter, sort)
         val refreshed = MediaGridDataKey(9L, 7L, filter, sort)
@@ -85,7 +85,7 @@ class MediaGridSessionCoordinatorTest {
     @Test
     fun explicitFilterOrSortChangeStartsAnotherSessionIdentity() {
         val base = MediaGridDataKey(1L, 1L, TweetFilterState(), ClassifiedSortState())
-        val filtered = base.copy(filter = TweetFilterState(query = "different"))
+        val filtered = base.copy(searchIdentity = "different", searchGeneration = 1L)
         val sorted = base.copy(sort = ClassifiedSortState(baseOrder = ClassifiedSortBase.LikeCount))
 
         assertNotEquals(mediaGridSessionKey(base), mediaGridSessionKey(filtered))

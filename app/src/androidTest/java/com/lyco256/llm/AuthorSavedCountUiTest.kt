@@ -42,7 +42,7 @@ class AuthorSavedCountUiTest {
     @Test
     fun classifiedFilteredCardStillShowsAllSavedCount() {
         val state = stateWithFiveSavedClips().copy(
-            filters = TweetFilterState(query = "visible", taggedOnly = false),
+            filters = TweetFilterState(taggedOnly = false),
         )
         composeRule.setContent {
             MaterialTheme {

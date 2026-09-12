@@ -24,6 +24,8 @@ internal data class MediaGridCacheKey(
     val hierarchyRevision: Long,
     val filter: TweetFilterState,
     val sort: ClassifiedSortState,
+    val searchIdentity: String = "inactive",
+    val searchGeneration: Long = 0L,
 )
 
 internal fun effectiveMediaGridSort(sort: ClassifiedSortState): ClassifiedSortState = sort.copy(
@@ -34,10 +36,7 @@ internal fun effectiveMediaGridSort(sort: ClassifiedSortState): ClassifiedSortSt
     postTimeDescending = sort.postTimeDescending.takeIf { sort.baseOrder == ClassifiedSortBase.PostTime } ?: true,
 )
 
-internal fun effectiveMediaGridFilter(filters: TweetFilterState): TweetFilterState = filters.copy(
-    searchMode = filters.searchMode.takeIf { filters.query.isNotBlank() } ?: SearchMode.Literal,
-    searchTargets = filters.searchTargets.takeIf { filters.query.isNotBlank() } ?: SearchTarget.entries.toSet(),
-)
+internal fun effectiveMediaGridFilter(filters: TweetFilterState): TweetFilterState = filters
 
 internal fun mediaGridSortIsEffective(sort: ClassifiedSortState): Boolean =
     sort.baseOrder != ClassifiedSortBase.Default || sort.tagEnabled || sort.userEnabled
@@ -47,18 +46,35 @@ internal suspend fun prepareMediaGridMetadata(
     hierarchy: com.lyco256.llm.data.TagHierarchy,
     filters: TweetFilterState,
     sort: ClassifiedSortState,
+    searchState: ClassifiedSearchState,
     cache: MediaGridMetadataCache,
     key: MediaGridCacheKey,
 ): ClassifiedMediaGridState = withContext(Dispatchers.Default) {
     cache.get(key)?.let { return@withContext it }
     val source = snapshot.clips
+    val searchOrdered = when {
+        !searchState.isActive -> source
+        searchState.isLoading || searchState.isFailed -> emptyList()
+        searchState.criteria.mode == SearchMode.Smart -> {
+            val sourceById = source.associateBy { it.clip.id }
+            searchState.rankedClipIds.asSequence().distinct().mapNotNull(sourceById::get).toList()
+        }
+        else -> source.filter { matchesMediaGridRegex(it, searchState.criteria) }
+    }
     val filtered = ArrayList<MediaGridClipSource>(source.size)
     val preparedFilter = prepareMediaGridFilter(hierarchy, filters)
-    source.forEach { clip -> if (matchesMediaGridFilter(clip, preparedFilter)) filtered += clip }
-    val ordered = if (!mediaGridSortIsEffective(sort)) filtered else sortMediaGridClips(filtered, hierarchy, filters, sort)
+    searchOrdered.forEach { clip -> if (matchesMediaGridFilter(clip, preparedFilter)) filtered += clip }
+    val ordered = if (searchState.isActive || !mediaGridSortIsEffective(sort)) filtered else sortMediaGridClips(filtered, hierarchy, filters, sort)
     val built = buildMediaGridResult(ordered)
     val result = ClassifiedMediaGridState(
-        dataKey = MediaGridDataKey(key.sourceRevision, key.hierarchyRevision, key.filter, key.sort),
+        dataKey = MediaGridDataKey(
+            key.sourceRevision,
+            key.hierarchyRevision,
+            key.filter,
+            key.sort,
+            key.searchIdentity,
+            key.searchGeneration,
+        ),
         sourceRevision = key.sourceRevision,
         sourceClipCount = source.size,
         sourceMediaAssetCount = source.sumOf { it.mediaAssetCount },
@@ -76,8 +92,6 @@ internal suspend fun prepareMediaGridMetadata(
 
 private data class PreparedMediaGridFilter(
     val filters: TweetFilterState,
-    val query: String,
-    val regex: Regex?,
     val included: List<Set<Long>>,
     val required: List<Set<Long>>,
     val excluded: List<Set<Long>>,
@@ -93,8 +107,6 @@ private fun prepareMediaGridFilter(
     }
     return PreparedMediaGridFilter(
         filters = filters,
-        query = filters.query.trim(),
-        regex = if (filters.searchMode == SearchMode.Regex && filters.query.isNotBlank()) runCatching { Regex(filters.query, RegexOption.IGNORE_CASE) }.getOrNull() else null,
         included = targetSets.filterKeys { filters.tagFilters[it] == TagFilterState.INCLUDED }.values.toList(),
         required = targetSets.filterKeys { filters.tagFilters[it] == TagFilterState.REQUIRED }.values.toList(),
         excluded = targetSets.filterKeys { filters.tagFilters[it] == TagFilterState.EXCLUDED }.values.toList(),
@@ -119,20 +131,23 @@ private fun matchesMediaGridFilter(clip: MediaGridClipSource, prepared: Prepared
     }
     if (filters.excluded.any(::matches) || filters.required.any { !matches(it) }) return false
     if (filters.included.isNotEmpty() && filters.included.none(::matches)) return false
-    if (filters.query.isNotBlank()) {
-        fun textMatch(value: String): Boolean = when (options.searchMode) {
-            SearchMode.Literal -> value.contains(filters.query, ignoreCase = true)
-            SearchMode.Regex -> filters.regex?.containsMatchIn(value) == true
-        }
-        var textMatches = false
-        if (SearchTarget.Text in options.searchTargets) textMatches = textMatches || textMatch(clip.clip.text)
-        if (SearchTarget.Summary in options.searchTargets) textMatches = textMatches || textMatch(clip.clip.summary)
-        if (SearchTarget.OcrText in options.searchTargets) textMatches = textMatches || textMatch(clip.clip.ocrText)
-        if (SearchTarget.AuthorName in options.searchTargets) textMatches = textMatches || textMatch(clip.clip.authorName)
-        if (SearchTarget.Username in options.searchTargets) textMatches = textMatches || textMatch(clip.clip.authorUsername)
-        if (!textMatches) return false
-    }
     return true
+}
+
+private fun matchesMediaGridRegex(
+    clip: MediaGridClipSource,
+    criteria: ClassifiedSearchCriteria,
+): Boolean {
+    if (criteria.mode != SearchMode.Regex || criteria.normalizedQuery.isBlank()) return false
+    val regex = runCatching { Regex(criteria.normalizedQuery, RegexOption.IGNORE_CASE) }.getOrNull() ?: return false
+    val values = buildList {
+        if (SearchTarget.Text in criteria.regexTargets) add(clip.clip.text)
+        if (SearchTarget.Summary in criteria.regexTargets) add(clip.clip.summary)
+        if (SearchTarget.OcrText in criteria.regexTargets) add(clip.clip.ocrText)
+        if (SearchTarget.AuthorName in criteria.regexTargets) add(clip.clip.authorName)
+        if (SearchTarget.Username in criteria.regexTargets) add(clip.clip.authorUsername)
+    }
+    return values.any(regex::containsMatchIn)
 }
 
 private data class MediaGridSortKey(

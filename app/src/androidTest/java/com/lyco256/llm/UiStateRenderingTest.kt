@@ -286,7 +286,7 @@ class UiStateRenderingTest {
         composeRule.onAllNodesWithTag("filter_clear").assertCountEquals(0)
 
         composeRule.runOnIdle {
-            uiState = uiState.copy(filters = TweetFilterState(query = "active"))
+            uiState = uiState.copy(filters = TweetFilterState(taggedOnly = false))
         }
         assertEquals("適用中", stateDescription("filter_open"))
         assertEquals("未適用", stateDescription("sort_open"))

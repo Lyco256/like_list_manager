@@ -75,13 +75,7 @@ class SearchFilterDatabaseIntegrationTest {
 
         val clips = repository.clipsWithDetails.first { it.size == 5 }
         val hierarchy = repository.tagHierarchy.first { it.tags.size == 2 && it.groups.size == 2 }
-        val filtered = filterClipsForSearch(
-            clips = clips,
-            hierarchy = hierarchy,
-            filters = TweetFilterState(
-                query = "manual\\s+summary",
-                searchMode = SearchMode.Regex,
-                searchTargets = setOf(SearchTarget.Summary),
+        val filters = TweetFilterState(
                 startDate = java.time.LocalDate.of(2026, 6, 15),
                 endDate = java.time.LocalDate.of(2026, 6, 15),
                 selectedAuthors = setOf(TweetAuthorKey(authorId = "author-alpha", username = "alpha")),
@@ -90,7 +84,18 @@ class SearchFilterDatabaseIntegrationTest {
                     TagNodeRef(TagNodeType.TAG, fixture.excludedTagId) to TagFilterState.EXCLUDED,
                 ),
                 taggedOnly = true,
+        )
+        val filtered = filterClipsByConditions(
+            clips = filterClipsByRegex(
+                clips = clips,
+                criteria = ClassifiedSearchCriteria(
+                    query = "manual\\s+summary",
+                    mode = SearchMode.Regex,
+                    regexTargets = setOf(SearchTarget.Summary),
+                ),
             ),
+            hierarchy = hierarchy,
+            filters = filters,
         )
 
         assertEquals(listOf("search-match"), filtered.map { it.clip.xPostId })
@@ -111,13 +116,12 @@ class SearchFilterDatabaseIntegrationTest {
 
         val clips = repository.clipsWithDetails.first { it.any { item -> item.clip.id == clip.id } }
         val hierarchy = repository.tagHierarchy.first()
-        val filtered = filterClipsForSearch(
+        val filtered = filterClipsByRegex(
             clips = clips,
-            hierarchy = hierarchy,
-            filters = TweetFilterState(
+            criteria = ClassifiedSearchCriteria(
                 query = "ocr needle",
-                searchTargets = setOf(SearchTarget.OcrText),
-                taggedOnly = false,
+                mode = SearchMode.Regex,
+                regexTargets = setOf(SearchTarget.OcrText),
             ),
         )
 

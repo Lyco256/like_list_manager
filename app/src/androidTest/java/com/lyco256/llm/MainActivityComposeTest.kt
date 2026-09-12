@@ -78,6 +78,7 @@ class MainActivityComposeTest {
         storage().withDatabase { it.clearAllTables() }
         (composeRule.activity.application as LikeListManagerApp).container.repository.ensureSeedData()
         composeRule.waitForIdle()
+        mainViewModel().clearSearch()
         composeRule.waitUntil(10_000) {
             composeRule.onAllNodesWithTag("main_screen").fetchSemanticsNodes().isNotEmpty()
         }
@@ -152,16 +153,14 @@ class MainActivityComposeTest {
         waitUntil { clipTagIds(clipId).isNotEmpty() }
 
         composeRule.onNodeWithTag("tab_classified").performClick()
-        composeRule.onNodeWithTag("filter_open").performClick()
-        composeRule.onNodeWithTag("filter_query").performTextReplacement("RecreateFilterNeedle")
-        composeRule.onNodeWithTag("filter_apply").performClick()
-        composeRule.onNodeWithText("文字列:\"RecreateFilterNeedle\"", substring = true).assertIsDisplayed()
+        applyRegexSearch("RecreateFilterNeedle")
+        composeRule.onNodeWithText("正規表現:\"RecreateFilterNeedle\"", substring = true).assertIsDisplayed()
         composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
 
         composeRule.activityRule.scenario.recreate()
 
         composeRule.onNodeWithTag("classified_screen").assertIsDisplayed()
-        composeRule.onNodeWithText("文字列:\"RecreateFilterNeedle\"", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("正規表現:\"RecreateFilterNeedle\"", substring = true).assertIsDisplayed()
         composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
     }
 
@@ -365,10 +364,9 @@ class MainActivityComposeTest {
 
         // A source-revision change from filter and sort must also produce its first viewport
         // without a compensating scroll or a user tap on the grid.
-        composeRule.onNodeWithTag("filter_open").performClick()
-        composeRule.onNodeWithTag("filter_query").performTextReplacement("Classified grid clip")
-        composeRule.onNodeWithTag("filter_apply").performClick()
+        applyRegexSearch("Classified grid clip")
         waitDisplayed(photoTag)
+        clearSearch()
 
         composeRule.onNodeWithTag("sort_open").performClick()
         composeRule.onNodeWithTag("sort_base_like").performClick()
@@ -449,9 +447,7 @@ class MainActivityComposeTest {
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithTag("classified_display_toggle").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithTag("filter_open").performClick()
-        composeRule.onNodeWithTag("filter_query").performTextReplacement("Production claim path regression")
-        composeRule.onNodeWithTag("filter_apply").performClick()
+        applyRegexSearch("Production claim path regression")
         composeRule.waitUntil(30_000) {
             assetIds.any { assetId ->
                 composeRule.onAllNodesWithTag("media_grid_item_$assetId").fetchSemanticsNodes().isNotEmpty()
@@ -470,6 +466,7 @@ class MainActivityComposeTest {
         }
         composeRule.waitUntil(30_000) { !mainViewModel().mediaGridSessionState.value.showInitialProgress }
         assertEquals(4, mainViewModel().mediaGridSessionState.value.columnCount)
+        clearSearch()
         composeRule.onNodeWithTag("classified_media_grid").performScrollToIndex(0)
         composeRule.waitForIdle()
 
@@ -631,9 +628,7 @@ class MainActivityComposeTest {
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithTag("classified_display_toggle").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithTag("filter_open").performClick()
-        composeRule.onNodeWithTag("filter_query").performTextReplacement("Production missing target readiness")
-        composeRule.onNodeWithTag("filter_apply").performClick()
+        applyRegexSearch("Production missing target readiness")
         composeRule.waitUntil(30_000) {
             assetIds.any { assetId ->
                 composeRule.onAllNodesWithTag("media_grid_item_$assetId").fetchSemanticsNodes().isNotEmpty()
@@ -651,7 +646,6 @@ class MainActivityComposeTest {
             val session = mainViewModel().mediaGridSessionState.value
             !session.showInitialProgress && session.frame?.ordinalIndex?.assetIdByMediaOrdinal?.size == assetIds.size
         }
-
         retainProductionMatrixAssets(assetIds, paths, previewStore)
         prepareProductionMatrixLocation(ProductionMorphMatrixLocation.Start, assetIds.size)
 
@@ -895,9 +889,7 @@ class MainActivityComposeTest {
         composeRule.waitUntil(ProductionMorphWaitTimeoutMs) {
             composeRule.onAllNodesWithTag("classified_display_toggle").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithTag("filter_open").performClick()
-        composeRule.onNodeWithTag("filter_query").performTextReplacement(fixtureName)
-        composeRule.onNodeWithTag("filter_apply").performClick()
+        applyRegexSearch(fixtureName)
         composeRule.waitUntil(ProductionMorphWaitTimeoutMs) {
             dataset.assetIds.any { assetId ->
                 composeRule.onAllNodesWithTag("media_grid_item_$assetId").fetchSemanticsNodes().isNotEmpty()
@@ -915,6 +907,7 @@ class MainActivityComposeTest {
             val session = mainViewModel().mediaGridSessionState.value
             !session.showInitialProgress && session.frame?.ordinalIndex?.assetIdByMediaOrdinal?.size == dataset.assetIds.size
         }
+        clearSearch()
         applyProductionMatrixSort(matrixCase.sortBase)
         waitForGridColumnCount(matrixCase.fromColumns, ProductionMorphWaitTimeoutMs)
         val expectedFirstVisibleMediaOrdinal = prepareProductionMatrixLocation(
@@ -1273,9 +1266,7 @@ class MainActivityComposeTest {
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithTag("classified_display_toggle").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithTag("filter_open").performClick()
-        composeRule.onNodeWithTag("filter_query").performTextReplacement("Production morph live pinch")
-        composeRule.onNodeWithTag("filter_apply").performClick()
+        applyRegexSearch("Production morph live pinch")
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithTag("media_grid_item_${assetIds.first()}").fetchSemanticsNodes().isNotEmpty() ||
                 composeRule.onAllNodesWithTag("clip_card_$clipId").fetchSemanticsNodes().isNotEmpty()
@@ -1446,10 +1437,9 @@ class MainActivityComposeTest {
         composeRule.onNodeWithTag("media_grid_item_$selectedAfterFling", useUnmergedTree = true).performClick()
         composeRule.onNodeWithTag("media_grid_tweet_dialog").assertIsDisplayed()
         composeRule.onNodeWithTag("media_grid_tweet_dialog_close").performClick()
+        composeRule.waitForIdle()
 
-        composeRule.onNodeWithTag("filter_open").performClick()
-        composeRule.onNodeWithTag("filter_query").performTextReplacement("ViewportFilterTarget")
-        composeRule.onNodeWithTag("filter_apply").performClick()
+        applyRegexSearch("ViewportFilterTarget")
         val targetAssetId = assetIds.last()
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithTag("media_grid_item_$targetAssetId").fetchSemanticsNodes().isNotEmpty()
@@ -1575,13 +1565,10 @@ class MainActivityComposeTest {
             composeRule.onNodeWithTag("classified_display_toggle").performClick()
         }
         composeRule.onNodeWithTag("media_grid_item_$highAssetId", useUnmergedTree = true).assertIsDisplayed()
-        composeRule.onNodeWithTag("filter_open").performClick()
-        composeRule.waitUntil(30_000) {
-            composeRule.onAllNodesWithTag("filter_dialog", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
-        }
-        composeRule.onNodeWithTag("filter_query").performTextReplacement("NoMedia")
-        composeRule.onNodeWithTag("filter_apply").performClick()
+        applyRegexSearch("NoMedia")
         composeRule.onNodeWithText("この条件に一致する画像・動画サムネイルはありません").assertIsDisplayed()
+        composeRule.onNodeWithTag("search_open").performClick()
+        composeRule.onNodeWithTag("search_clear").performClick()
 
         composeRule.onNodeWithTag("filter_open").performClick()
         composeRule.onNodeWithTag("filter_clear_all_open").performClick()
@@ -1764,39 +1751,38 @@ class MainActivityComposeTest {
 
         composeRule.onNodeWithTag("tab_classified").performClick()
         waitForText("一致件数:1件")
-        composeRule.onNodeWithTag("filter_open").performClick()
-        composeRule.onNodeWithTag("filter_query").performTextReplacement("FilterNeedle")
-        composeRule.onNodeWithTag("filter_apply").performClick()
-        composeRule.onNodeWithText("文字列:\"FilterNeedle\"", substring = true).assertIsDisplayed()
+        applyRegexSearch("FilterNeedle")
+        composeRule.onNodeWithText("正規表現:\"FilterNeedle\"", substring = true).assertIsDisplayed()
         composeRule.onNodeWithTag("clip_card_$clipId").assertIsDisplayed()
 
         composeRule.onNodeWithTag("filter_open").performClick()
-        composeRule.onNodeWithTag("filter_query").performTextReplacement("discarded-query")
+        composeRule.onNodeWithTag("filter_tagged_only").performClick()
         composeRule.onNodeWithTag("filter_cancel").performClick()
         composeRule.onNodeWithText("変更を破棄しますか？").assertIsDisplayed()
         composeRule.onNodeWithTag("filter_discard_confirm").performClick()
-        composeRule.onNodeWithText("文字列:\"FilterNeedle\"", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("正規表現:\"FilterNeedle\"", substring = true).assertIsDisplayed()
 
         composeRule.onNodeWithTag("filter_open").performClick()
-        composeRule.onNodeWithTag("filter_query").performTextReplacement("back-discarded-query")
-        composeRule.onNodeWithText("back-discarded-query").assertIsDisplayed()
+        composeRule.onNodeWithTag("filter_tagged_only").performClick()
         requestDiscardConfirmation()
         composeRule.onNodeWithTag("filter_discard_confirm").assertIsDisplayed()
         composeRule.onNodeWithTag("filter_discard_confirm").performClick()
-        composeRule.onNodeWithText("文字列:\"FilterNeedle\"", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("正規表現:\"FilterNeedle\"", substring = true).assertIsDisplayed()
 
         composeRule.onNodeWithTag("filter_open").performClick()
         composeRule.onNodeWithTag("filter_clear_all_open").performClick()
         composeRule.onNodeWithTag("filter_clear_all_cancel").performClick()
         composeRule.onNodeWithTag("filter_apply").performClick()
-        composeRule.onNodeWithText("文字列:\"FilterNeedle\"", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("正規表現:\"FilterNeedle\"", substring = true).assertIsDisplayed()
 
         composeRule.onNodeWithTag("filter_open").performClick()
         composeRule.onNodeWithTag("filter_clear_all_open").performClick()
         composeRule.onNodeWithText("すべての条件をクリアしますか？").assertIsDisplayed()
         composeRule.onNodeWithTag("filter_clear_all_confirm").performClick()
         composeRule.onNodeWithTag("filter_apply").performClick()
-        composeRule.onNodeWithText("対象:タグ付きのみ、条件なし").assertIsDisplayed()
+        composeRule.runOnIdle {
+            assertEquals(TweetFilterState(), mainViewModel().uiState.value.filters)
+        }
         assertEquals(before, databaseFingerprint())
     }
 
@@ -2324,18 +2310,16 @@ class MainActivityComposeTest {
         val before = databaseFingerprint()
 
         composeRule.onNodeWithTag("tab_classified").performClick()
-        composeRule.onNodeWithTag("filter_open").performClick()
-        composeRule.onNodeWithTag("filter_query").performTextReplacement("ScrollFilterNeedle")
-        composeRule.onNodeWithTag("filter_apply").performClick()
+        applyRegexSearch("ScrollFilterNeedle")
         composeRule.waitUntil(10_000) {
             composeRule.onAllNodesWithText("一致件数:24件").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onAllNodesWithText("文字列:\"ScrollFilterNeedle\"", substring = true).assertCountEquals(1)
+        composeRule.onAllNodesWithText("正規表現:\"ScrollFilterNeedle\"", substring = true).assertCountEquals(1)
 
         composeRule.onNodeWithTag("clip_list").performScrollToIndex(10)
         composeRule.onNodeWithTag("scroll_to_top").performClick()
         composeRule.onNodeWithTag("clip_list").performScrollToNode(hasTestTag("clip_card_${clipIds.last()}"))
-        composeRule.onAllNodesWithText("文字列:\"ScrollFilterNeedle\"", substring = true).assertCountEquals(1)
+        composeRule.onAllNodesWithText("正規表現:\"ScrollFilterNeedle\"", substring = true).assertCountEquals(1)
         composeRule.onNodeWithTag("clip_card_${clipIds.last()}").assertIsDisplayed()
 
         assertEquals(before, databaseFingerprint())
@@ -3426,6 +3410,21 @@ class MainActivityComposeTest {
 
     private fun dismissBackHandledDialog() {
         InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        composeRule.waitForIdle()
+    }
+
+    private fun applyRegexSearch(query: String) {
+        composeRule.onNodeWithTag("search_open").performClick()
+        composeRule.onNodeWithTag("search_dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("search_query").performTextReplacement(query)
+        composeRule.onNodeWithTag("search_mode_regex").performClick()
+        composeRule.onNodeWithTag("search_apply").performClick()
+        composeRule.waitForIdle()
+    }
+
+    private fun clearSearch() {
+        composeRule.onNodeWithTag("search_open").performClick()
+        composeRule.onNodeWithTag("search_clear").performClick()
         composeRule.waitForIdle()
     }
 

@@ -249,12 +249,12 @@ class TagHierarchyTest {
         val hierarchy = hierarchy()
         val untagged = clip(id = 101, text = "needle")
         val tagged = clip(kotlin, id = 102, text = "needle")
-        val filters = TweetFilterState(query = "needle")
+        val filters = TweetFilterState()
 
-        assertEquals(listOf(tagged), filterClipsForSearch(listOf(untagged, tagged), hierarchy, filters))
+        assertEquals(listOf(tagged), filterClipsByConditions(listOf(untagged, tagged), hierarchy, filters))
         assertEquals(
             listOf(untagged, tagged),
-            filterClipsForSearch(listOf(untagged, tagged), hierarchy, filters.copy(taggedOnly = false)),
+            filterClipsByConditions(listOf(untagged, tagged), hierarchy, filters.copy(taggedOnly = false)),
         )
     }
 
@@ -271,7 +271,7 @@ class TagHierarchyTest {
             ),
         )
 
-        assertEquals(listOf(first, third), filterClipsForSearch(listOf(first, second, third), hierarchy, filters))
+        assertEquals(listOf(first, third), filterClipsByConditions(listOf(first, second, third), hierarchy, filters))
     }
 
     @Test
@@ -286,16 +286,16 @@ class TagHierarchyTest {
             endDate = java.time.LocalDate.of(2026, 6, 12),
         )
 
-        assertEquals(listOf(start, end), filterClipsForSearch(listOf(early, start, end, late), hierarchy, filters))
+        assertEquals(listOf(start, end), filterClipsByConditions(listOf(early, start, end, late), hierarchy, filters))
     }
 
     @Test
     fun invalidRegexSearchReturnsEmptyList() {
         val hierarchy = hierarchy()
         val clip = clip(kotlin)
-        val filters = TweetFilterState(query = "[", searchMode = SearchMode.Regex)
+        val criteria = ClassifiedSearchCriteria(query = "[", mode = SearchMode.Regex)
 
-        assertEquals(emptyList<ClipWithDetails>(), filterClipsForSearch(listOf(clip), hierarchy, filters))
+        assertEquals(emptyList<ClipWithDetails>(), filterClipsByRegex(listOf(clip), criteria))
     }
 
     @Test
@@ -315,11 +315,18 @@ class TagHierarchyTest {
         )
 
         cases.forEach { (target, query) ->
-            val filters = TweetFilterState(query = query, searchTargets = setOf(target))
-            assertEquals(listOf(candidate), filterClipsForSearch(listOf(candidate), hierarchy(), filters))
+            val criteria = ClassifiedSearchCriteria(
+                query = Regex.escape(query),
+                mode = SearchMode.Regex,
+                regexTargets = setOf(target),
+            )
+            assertEquals(listOf(candidate), filterClipsByRegex(listOf(candidate), criteria))
             assertEquals(
                 emptyList<ClipWithDetails>(),
-                filterClipsForSearch(listOf(candidate), hierarchy(), filters.copy(searchTargets = SearchTarget.entries.toSet() - target)),
+                filterClipsByRegex(
+                    listOf(candidate),
+                    criteria.copy(regexTargets = SearchTarget.entries.toSet() - target),
+                ),
             )
         }
     }
@@ -350,10 +357,12 @@ class TagHierarchyTest {
             username = "alice",
             createdAt = "2026-06-12T12:00:00Z",
         )
-        val filters = TweetFilterState(
+        val criteria = ClassifiedSearchCriteria(
             query = "kotlin\\s+2\\.0",
-            searchMode = SearchMode.Regex,
-            searchTargets = setOf(SearchTarget.Text),
+            mode = SearchMode.Regex,
+            regexTargets = setOf(SearchTarget.Text),
+        )
+        val filters = TweetFilterState(
             startDate = java.time.LocalDate.of(2026, 6, 12),
             endDate = java.time.LocalDate.of(2026, 6, 12),
             selectedAuthors = setOf(TweetAuthorKey("author-1", "alice")),
@@ -362,7 +371,11 @@ class TagHierarchyTest {
 
         assertEquals(
             listOf(matching),
-            filterClipsForSearch(listOf(matching, wrongAuthor, wrongTag), hierarchy(), filters),
+            filterClipsByConditions(
+                filterClipsByRegex(listOf(matching, wrongAuthor, wrongTag), criteria),
+                hierarchy(),
+                filters,
+            ),
         )
     }
 
@@ -373,7 +386,7 @@ class TagHierarchyTest {
         val source = mutableListOf(first, second)
         val before = source.map { it.copy(clip = it.clip.copy(), tags = it.tags.toList(), assets = it.assets.toList()) }
 
-        filterClipsForSearch(source, hierarchy(), TweetFilterState(query = "needle"))
+        filterClipsByConditions(source, hierarchy(), TweetFilterState())
 
         assertEquals(before, source)
         assertEquals(listOf(301L, 302L), source.map { it.clip.id })
@@ -395,8 +408,6 @@ class TagHierarchyTest {
     fun filterSummaryFormatsCombinedConditionsAsSentence() {
         val author = TweetAuthorOption(TweetAuthorKey("a1", "alice"), "Alice", "alice", 12)
         val filters = TweetFilterState(
-            query = "猫",
-            searchTargets = setOf(SearchTarget.Text, SearchTarget.Summary),
             startDate = java.time.LocalDate.of(2026, 6, 1),
             endDate = java.time.LocalDate.of(2026, 6, 20),
             selectedAuthors = setOf(author.key),
@@ -408,7 +419,7 @@ class TagHierarchyTest {
         )
 
         assertEquals(
-            "対象:タグ付きのみ、文字列:\"猫\"(対象:本文・概要)、期間:2026/6/1~2026/6/20、ユーザー:@alice、タグ:含む[Kotlin],必須[Compose],排除[Design]",
+            "対象:タグ付きのみ、期間:2026/6/1~2026/6/20、ユーザー:@alice、タグ:含む[Kotlin],必須[Compose],排除[Design]",
             filterConditionSummary(filters, hierarchy(), listOf(author)),
         )
     }
@@ -597,8 +608,13 @@ class TagHierarchyTest {
         val alphaHidden = clip(id = 502, text = "hidden", authorName = "Alpha", username = "zeta")
         val betaVisible = clip(id = 503, text = "needle", authorName = "Beta", username = "alpha")
         val source = listOf(alphaVisible, alphaHidden, betaVisible)
-        val filters = TweetFilterState(query = "needle", taggedOnly = false)
-        val filtered = filterClipsForSearch(source, hierarchy(), filters)
+        val criteria = ClassifiedSearchCriteria(
+            query = "needle",
+            mode = SearchMode.Regex,
+            regexTargets = setOf(SearchTarget.Text),
+        )
+        val filters = TweetFilterState(taggedOnly = false)
+        val filtered = filterClipsByConditions(filterClipsByRegex(source, criteria), hierarchy(), filters)
 
         assertEquals(
             listOf(betaVisible, alphaVisible),
@@ -619,7 +635,7 @@ class TagHierarchyTest {
             endDate = java.time.LocalDate.of(2026, 6, 1),
         )
 
-        assertEquals(emptyList<ClipWithDetails>(), filterClipsForSearch(listOf(clip), hierarchy(), filters))
+        assertEquals(emptyList<ClipWithDetails>(), filterClipsByConditions(listOf(clip), hierarchy(), filters))
     }
 
     @Test(expected = IllegalArgumentException::class)
@@ -1207,8 +1223,6 @@ class TagHierarchyTest {
             ),
         )
         val filters = TweetFilterState(
-            query = "needle",
-            searchTargets = setOf(SearchTarget.Text),
             tagFilters = mapOf(TagNodeRef(TagNodeType.TAG, tag.id) to TagFilterState.REQUIRED),
         )
         val sort = ClassifiedSortState(
@@ -1216,7 +1230,7 @@ class TagHierarchyTest {
             postTimeDescending = true,
         )
 
-        val cardResult = sortClipsForDisplay(filterClipsForSearch(cardClips, hierarchy, filters), hierarchy, filters, sort)
+        val cardResult = sortClipsForDisplay(filterClipsByConditions(cardClips, hierarchy, filters), hierarchy, filters, sort)
         val mediaResult = mediaClips.sortedByDescending { it.postTimeMillis ?: Long.MIN_VALUE }
         val entries = buildMediaGridEntries(mediaResult)
 

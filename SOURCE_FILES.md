@@ -41,7 +41,7 @@ MainActivity / Compose UI
     -> noBackupFilesDir/multimodal_embedding/japanese_clip/<revision>/
     -> local CLYP tokenizer + ONNX Runtime CPU text/vision sessions
 
-  LocalSearchEngine（独立検索API。既存検索UIへ未接続）
+  LocalSearchEngine（AppContainer共有の分類済み検索runtime）
     -> DerivedSearchStorage revision / literal FTS / lexical cache
     -> shared Sudachi / EmbeddingGemma query / Japanese CLIP text query
     -> revision-cached LocalAnnIndexSnapshot（768 / 256次元）
@@ -60,7 +60,7 @@ MainActivity / Compose UI
 
 - ダークテーマ
 - 未分類リスト: 初回DB emissionまでProgressを表示し、グループを展開して配下タグをカード内draftとして選択し、`適用`で一括確定する
-- 分類済みリスト: 一致件数と文章形式の条件サブバー、適用中だけ背景highlightするfilter/sortボタン、背景highlightを持たない表示切替、適用/キャンセル付き全画面絞り込みDialog、タグのみトグル付きの全ツイート検索、投稿日・本文・概要・投稿者・ユーザー・タグ／グループの「含む」「必須」「排除」複合絞り込み、タグ再割り当て
+- 分類済みリスト: Search / Filter / Sort / Displayの36x32 symbol toolbar、検索と条件絞り込みを分離した全画面Dialog、SMARTの共有LocalSearchEngine検索と正規表現のsource-order検索、検索中/失敗表示、検索中のsort無効化、タグのみトグル付きの全ツイート条件、投稿日・投稿者・タグ／グループの「含む」「必須」「排除」複合絞り込み、タグ再割り当て
 - タグリスト: 無制限階層の縦guide付きcompact rowで、グループ／タグ追加、名称変更、移動、長押し並び替え、削除、Tree popupから別タグへの一括追加
 - X風の投稿本文、クリック可能な投稿者、保存済み投稿数、いいね数（詳細popup付き）、カード幅・画像比率に応じた高さ上限、画像previewを表示
 - メディアグリッドの通常スクロール中は既存見出しと同じ現在位置ラベルを上端の一時ピルで表示し、停止後3秒保持して上方向へ消す。スクロールバー操作中は現在frameの全インライン見出しを開始media ordinal位置へ固定した文字入りピルで表示し、保存順では表示しない。pointer UP／cancel／frame変更／FinalTargetPendingでは消去し、正常終了後だけ最終位置を上部ピルへ引き継ぐ。列数Morph中は旧ラベルを固定し、handoff後に新粒度で再評価する
@@ -100,18 +100,18 @@ MainActivity / Compose UI
 - 投稿IDのunique制約で重複保存を防止
 - 月間取得数、月別API使用量履歴、警告/停止判定値、15分rate limitを記録
 - 初回サンプルデータはDBが空の場合だけ投入
-- 派生検索ストレージは正本Room・画像・Undo・保存先設定から独立した再生成可能DBとして保持し、既存検索UIへは接続しない。productionではApplication起動後に専用synchronizerが非同期reconcileを開始し、TEST_HARNESSでは明示起動時だけ動作する
+- 派生検索ストレージは正本Room・画像・Undo・保存先設定から独立した再生成可能DBとして保持し、`AppContainer.localSearchEngine`を通じて分類済みSMART検索UIへ接続する。productionではApplication起動後に専用synchronizerが非同期reconcileを開始し、TEST_HARNESSでは明示起動時だけ動作する
 - `LexicalIndexSynchronizer`は現在の`PostStorageManager.database`から`ClipDao.observeAllClips()`だけを監視し、5つの検索対象fieldのfingerprint差分で逐次処理する。解析失敗はそのclipを未同期のまま残し、正本操作へ伝播させない
 - `DerivedSearchStorage`はBundled SQLite 2.7.0、通常FTS5、trigram FTS5、semantic embedding BLOB、画像embedding BLOB、FULLMUTEX単一connection、clip／source単位のdocument・fingerprint transaction置換・削除、schema不一致・破損時の1回再作成を担当する。派生schemaはversion 4
-- `LocalTextEmbedder`は固定revisionのEmbeddingGemma 300M Q4、DJL tokenizer、ONNX Runtime CPU sessionを完全ローカルで扱う。query/document prompt、2048 token truncation、768次元・finite・L2 normalize検証、遅延初期化、session再利用、並行要求の直列化、close、モデル専用noBackup配置を担当し、`DocumentEmbedder`としてsemantic同期へ注入される。QueryEmbedderとしてLocalSearchEngineの768次元ANN検索へ共有し、既存検索UIへは未接続
-- `LocalMultimodalEmbedder`は固定revisionのJapanese CLIP q4f16、CLYP tokenizer、224黒背景center-pad、OpenAI CLIP normalization、ONNX Runtime CPU text/vision sessionを完全ローカルで扱う。256次元・finite・L2 normalize検証、modality別遅延初期化、session再利用、並行要求の直列化、close、モデル専用noBackup配置を担当する。画像embedding同期へimage実装を注入し、MultimodalTextEmbedderとしてLocalSearchEngineの256次元ANN検索へ共有する。既存検索UIへは未接続
-- `LocalAnnIndexSnapshot`はUSearch v2.26.0をcosine／Float32／connectivity 32／expansion 256で使い、256／768次元の入力検証、内部L2 normalize、不変snapshot、候補限定のexact cosine rerank、並行search／close lifecycleを担当する。LocalSearchEngineが派生DBのrevisionごとにsnapshotを構築・再利用する。index永続化と既存検索UIへは未接続
+- `LocalTextEmbedder`は固定revisionのEmbeddingGemma 300M Q4、DJL tokenizer、ONNX Runtime CPU sessionを完全ローカルで扱う。query/document prompt、2048 token truncation、768次元・finite・L2 normalize検証、遅延初期化、session再利用、並行要求の直列化、close、モデル専用noBackup配置を担当し、`DocumentEmbedder`としてsemantic同期へ注入される。QueryEmbedderとしてLocalSearchEngineの768次元ANN検索へ共有し、分類済みSMART検索UIから借用される
+- `LocalMultimodalEmbedder`は固定revisionのJapanese CLIP q4f16、CLYP tokenizer、224黒背景center-pad、OpenAI CLIP normalization、ONNX Runtime CPU text/vision sessionを完全ローカルで扱う。256次元・finite・L2 normalize検証、modality別遅延初期化、session再利用、並行要求の直列化、close、モデル専用noBackup配置を担当する。画像embedding同期へimage実装を注入し、MultimodalTextEmbedderとしてLocalSearchEngineの256次元ANN検索へ共有し、分類済みSMART検索UIから借用される
+- `LocalAnnIndexSnapshot`はUSearch v2.26.0をcosine／Float32／connectivity 32／expansion 256で使い、256／768次元の入力検証、内部L2 normalize、不変snapshot、候補限定のexact cosine rerank、並行search／close lifecycleを担当する。LocalSearchEngineが派生DBのrevisionごとにsnapshotを構築・再利用し、分類済みSMART検索へranked clip IDを返す。index永続化は行わない
 - `LocalRuntimeAssetInstaller`はEmbeddingGemmaとJapanese CLIPのgenerated metadata、SHA-256、byte size、専用directory内atomic copy／部分復旧を共有する内部utilityであり、各runtimeの固定specと出力wrapperは分離して保持する
 - `SemanticIndexSynchronizer`は正本Roomの`ClipEntity.text`／`summary`／`ocrText`だけをUnicode code point chunkへ分割し、固定順・逐次でEmbeddingGemmaを実行する。source fingerprint差分、空source削除、clip削除、DB null停止、途中失敗時の旧データ保持、production自動起動／TEST_HARNESS明示起動を担当する
 
 ## 変更目的別の入口
 
-文字列から統合ローカル検索: `docs/app/src/main/java/com/lyco256/llm/data/LocalSearchEngine.kt.md` → `LocalSearchLexical.kt.md` → `DerivedSearchStorage.kt.md`。FTS literal・OSA/anagram・scoreは`LocalSearchLexical`、revision ANN cacheと候補統合・共有runtimeは`LocalSearchEngine`。関連テストは`LocalSearchEngineTest`、`LocalSearchLexicalTest`、`LocalSearchEngineIntegrationTest`。
+分類済みの統合ローカル検索: `docs/app/src/main/java/com/lyco256/llm/MainActivity.kt.md` → `docs/app/src/main/java/com/lyco256/llm/data/LocalSearchEngine.kt.md` → `LocalSearchLexical.kt.md` → `DerivedSearchStorage.kt.md`。UIのSMART/正規表現状態と表示順は`MainActivity`、FTS literal・OSA/anagram・scoreは`LocalSearchLexical`、revision ANN cacheと候補統合・共有runtimeは`LocalSearchEngine`。関連テストは`LocalSearchEngineTest`、`LocalSearchLexicalTest`、`LocalSearchEngineIntegrationTest`、`ClassifiedSearchViewModelIntegrationTest`、`ClassifiedSearchUiIntegrationTest`、`MainActivityComposeTest`。
 
 | 変更したいこと | 最初に読む文書 | 次に確認する文書 |
 | --- | --- | --- |
@@ -319,7 +319,7 @@ MainActivity / Compose UI
 
 - X API由来の自動バックグラウンド同期は未実装（派生lexical／semantic indexの起動時同期は実装済み）
 - backup/import/exportは未実装
-- EmbeddingGemmaのsemantic source同期、画像embedding同期、USearchとFTSを統合する`LocalSearchEngine`の独立検索APIは実装済み。既存検索UI・一覧への接続は未実装
+- EmbeddingGemmaのsemantic source同期、画像embedding同期、USearchとFTSを統合する`LocalSearchEngine`と、分類済み画面のSMART/正規表現検索UIは実装済み
 - USearch v2.26.0のnative release archiveはbuild時に固定SHA-256検証してgenerated JNI libsへ展開する。release zipとgenerated `.so` はsource treeへcommitしない
 - 任意フォルダへの保存とアンインストール後の投稿データ保持は未実装
 - タグ色変更は12色パレットで実装済み

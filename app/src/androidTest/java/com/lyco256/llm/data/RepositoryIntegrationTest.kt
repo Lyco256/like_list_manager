@@ -8,10 +8,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.lyco256.llm.BuildConfig
 import com.lyco256.llm.ClassifiedSortBase
 import com.lyco256.llm.ClassifiedSortState
-import com.lyco256.llm.SearchMode
-import com.lyco256.llm.SearchTarget
 import com.lyco256.llm.buildMediaGridEntries
-import com.lyco256.llm.filterClipsForSearch
+import com.lyco256.llm.filterClipsByConditions
 import com.lyco256.llm.sortClipsForDisplay
 import com.lyco256.llm.TweetFilterState
 import kotlinx.coroutines.CoroutineStart
@@ -1705,9 +1703,6 @@ class RepositoryIntegrationTest {
 
         val hierarchy = repository.tagHierarchy.first { it.tags.any { tag -> tag.tag.id == fixture.tagId } }
         val filters = TweetFilterState(
-            query = "Needle",
-            searchMode = SearchMode.Literal,
-            searchTargets = setOf(SearchTarget.Text),
             taggedOnly = true,
             tagFilters = mapOf(TagNodeRef(TagNodeType.TAG, fixture.tagId) to TagFilterState.REQUIRED),
         )
@@ -1718,7 +1713,7 @@ class RepositoryIntegrationTest {
         val cardClips = repository.clipsWithDetails.first { it.size == 3 }
         val mediaSource = repository.mediaGridSource.first { it.clips.size == 3 }.clips
 
-        val cardResult = sortClipsForDisplay(filterClipsForSearch(cardClips, hierarchy, filters), hierarchy, filters, sort)
+        val cardResult = sortClipsForDisplay(filterClipsByConditions(cardClips, hierarchy, filters), hierarchy, filters, sort)
         val mediaResult = mediaSource.sortedWith(compareByDescending<MediaGridClipSource> { it.clip.likeCount ?: Long.MIN_VALUE }.thenBy { it.sourceIndex })
 
         assertEquals(cardResult.map { it.clip.id }, mediaResult.map { it.clip.id })
