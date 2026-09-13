@@ -12,6 +12,24 @@ import org.junit.Test
 
 class LocalRelatedTweetsEngineTest {
     @Test
+    fun emptyReferenceReturnsEmptyWithoutBuildingOrQueryingAnn() = runBlocking {
+        val snapshot = MutableRelatedSnapshot(
+            semanticRevision = 1L,
+            imageRevision = 1L,
+            referenceSemanticDocuments = emptyList(),
+            referenceImageDocuments = emptyList(),
+            semanticDocuments = listOf(semantic(1L, SemanticSourceType.TEXT, 0, 1f)),
+            imageDocuments = listOf(image(10L, 1L, 5f)),
+        )
+        val factory = FakeAnnFactory(emptyMap())
+        val engine = LocalRelatedTweetsEngine(snapshot, factory)
+
+        assertTrue(engine.findRelated(1L).isEmpty())
+        assertEquals(2, factory.buildCount)
+        assertTrue(factory.requestedCandidateCounts.isEmpty())
+    }
+
+    @Test
     fun aggregatesMaximumPerChannelExcludesReferenceAndNormalizesAvailableWeights() = runBlocking {
         val snapshot = MutableRelatedSnapshot(
             semanticRevision = 1L,
@@ -51,6 +69,57 @@ class LocalRelatedTweetsEngineTest {
         assertTrue(result.map { it.clipId }.distinct().size == result.size)
         engine.close()
         engine.close()
+    }
+
+    @Test
+    fun aggregatesSummaryOcrAndMultipleImagesByMaximumWithoutCountingRows() = runBlocking {
+        val referenceSemantic = listOf(
+            semantic(1L, SemanticSourceType.TEXT, 0, 1f),
+            semantic(1L, SemanticSourceType.TEXT, 1, 2f),
+            semantic(1L, SemanticSourceType.SUMMARY, 0, 3f),
+            semantic(1L, SemanticSourceType.SUMMARY, 1, 4f),
+            semantic(1L, SemanticSourceType.OCR, 0, 5f),
+            semantic(1L, SemanticSourceType.OCR, 1, 6f),
+        )
+        val candidateSemantic = listOf(
+            semantic(1L, SemanticSourceType.TEXT, 0, 1f),
+            semantic(1L, SemanticSourceType.TEXT, 1, 2f),
+            semantic(1L, SemanticSourceType.SUMMARY, 0, 3f),
+            semantic(1L, SemanticSourceType.SUMMARY, 1, 4f),
+            semantic(1L, SemanticSourceType.OCR, 0, 5f),
+            semantic(1L, SemanticSourceType.OCR, 1, 6f),
+            semantic(2L, SemanticSourceType.TEXT, 0, 20f),
+        )
+        val snapshot = MutableRelatedSnapshot(
+            semanticRevision = 1L,
+            imageRevision = 1L,
+            referenceSemanticDocuments = referenceSemantic,
+            referenceImageDocuments = listOf(image(101L, 1L, 10f), image(102L, 1L, 11f)),
+            semanticDocuments = candidateSemantic,
+            imageDocuments = listOf(
+                image(101L, 1L, 10f),
+                image(102L, 1L, 11f),
+                image(201L, 2L, 20f),
+            ),
+        )
+        val factory = FakeAnnFactory(
+            plans = mapOf(
+                1f to listOf(6L to .80f),
+                2f to listOf(6L to .70f),
+                3f to listOf(6L to .60f),
+                4f to listOf(6L to .40f),
+                5f to listOf(6L to .30f),
+                6f to listOf(6L to .70f),
+                10f to listOf(201L to .50f),
+                11f to listOf(201L to .90f),
+            ),
+        )
+        val engine = LocalRelatedTweetsEngine(snapshot, factory)
+
+        val result = engine.findRelated(1L)
+
+        assertEquals(listOf(2L), result.map { it.clipId })
+        assertEquals(.76f, result.single().score, .0001f)
     }
 
     @Test
@@ -109,6 +178,93 @@ class LocalRelatedTweetsEngineTest {
         assertEquals(2, factory.closeCount)
         engine.close()
         assertEquals(2, factory.closeCount)
+    }
+
+    @Test
+    fun failedRevisionBuildKeepsOldSnapshotAndDoesNotAdoptPartialCache() = runBlocking {
+        val first = MutableRelatedSnapshot(
+            semanticRevision = 7L,
+            imageRevision = 9L,
+            referenceSemanticDocuments = listOf(semantic(1L, SemanticSourceType.TEXT, 0, 1f)),
+            referenceImageDocuments = emptyList(),
+            semanticDocuments = listOf(semantic(1L, SemanticSourceType.TEXT, 0, 1f), semantic(2L, SemanticSourceType.TEXT, 0, 2f)),
+            imageDocuments = emptyList(),
+        )
+        val source = MutableRelatedSnapshotSource(first)
+        val factory = FakeAnnFactory(mapOf(1f to listOf(0L to 1f, 1L to .8f)))
+        val engine = LocalRelatedTweetsEngine(source, factory)
+        engine.findRelated(1L)
+
+        source.current = first.copy(semanticRevision = 8L)
+        factory.failBuild = true
+        assertTrue(runCatching { engine.findRelated(1L) }.isFailure)
+        assertEquals(0, factory.closeCount)
+
+        factory.failBuild = false
+        assertEquals(listOf(2L), engine.findRelated(1L).map { it.clipId })
+        assertEquals(3, factory.buildCount)
+        assertEquals(1, factory.closeCount)
+    }
+
+    @Test
+    fun changingOnlyImageRevisionRebuildsImageAnnAndReusesSemanticAnn() = runBlocking {
+        val first = MutableRelatedSnapshot(
+            semanticRevision = 7L,
+            imageRevision = 9L,
+            referenceSemanticDocuments = listOf(semantic(1L, SemanticSourceType.TEXT, 0, 1f)),
+            referenceImageDocuments = listOf(image(10L, 1L, 5f)),
+            semanticDocuments = listOf(semantic(1L, SemanticSourceType.TEXT, 0, 1f), semantic(2L, SemanticSourceType.TEXT, 0, 2f)),
+            imageDocuments = listOf(image(10L, 1L, 5f), image(20L, 2L, 6f)),
+        )
+        val source = MutableRelatedSnapshotSource(first)
+        val factory = FakeAnnFactory(
+            plans = mapOf(
+                1f to listOf(0L to 1f, 1L to .8f),
+                5f to listOf(10L to 1f, 20L to .7f),
+            ),
+        )
+        val engine = LocalRelatedTweetsEngine(source, factory)
+        engine.findRelated(1L)
+        assertEquals(listOf(768, 256), factory.builtDimensions)
+
+        source.current = first.copy(
+            imageRevision = 10L,
+            imageDocuments = first.imageDocuments!!.map { it.copy(embedding = vector(it.embedding[0] + 1f, 256)) },
+        )
+        engine.findRelated(1L)
+
+        assertEquals(listOf(768, 256, 256), factory.builtDimensions)
+        assertEquals(1, factory.closeCount)
+    }
+
+    @Test
+    fun equalTotalUsesHigherMaximumChannelBeforeClipId() = runBlocking {
+        val snapshot = MutableRelatedSnapshot(
+            semanticRevision = 1L,
+            imageRevision = 1L,
+            referenceSemanticDocuments = listOf(semantic(1L, SemanticSourceType.TEXT, 0, 1f)),
+            referenceImageDocuments = listOf(image(10L, 1L, 5f)),
+            semanticDocuments = listOf(
+                semantic(1L, SemanticSourceType.TEXT, 0, 1f),
+                semantic(2L, SemanticSourceType.TEXT, 0, 2f),
+                semantic(3L, SemanticSourceType.TEXT, 0, 3f),
+            ),
+            imageDocuments = listOf(image(10L, 1L, 5f), image(20L, 2L, 6f), image(30L, 3L, 7f)),
+        )
+        val engine = LocalRelatedTweetsEngine(
+            snapshot,
+            FakeAnnFactory(
+                plans = mapOf(
+                    1f to listOf(0L to 1f, 1L to .80f, 2L to .70f),
+                    5f to listOf(10L to 1f, 20L to .40f, 30L to .60f),
+                ),
+            ),
+        )
+
+        val result = engine.findRelated(1L)
+
+        assertEquals(listOf(2L, 3L), result.map { it.clipId })
+        assertEquals(result[0].score, result[1].score, .0001f)
     }
 
     @Test
@@ -229,10 +385,14 @@ class LocalRelatedTweetsEngineTest {
     ) : RelatedSearchAnnFactory {
         var buildCount = 0
         var closeCount = 0
+        var failBuild = false
+        val builtDimensions = mutableListOf<Int>()
         val requestedCandidateCounts = mutableListOf<Int>()
 
         override suspend fun build(dimension: Int, entries: List<LocalAnnEntry>): RelatedSearchAnn {
             buildCount++
+            builtDimensions += dimension
+            if (failBuild) error("fake ANN build failure")
             return object : RelatedSearchAnn {
                 override suspend fun search(query: FloatArray, candidateCount: Int): List<AnnHit> {
                     requestedCandidateCounts += candidateCount

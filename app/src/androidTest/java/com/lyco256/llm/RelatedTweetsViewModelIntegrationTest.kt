@@ -13,9 +13,11 @@ import com.lyco256.llm.data.RelatedTweetsProgress
 import com.lyco256.llm.data.SemanticIndexSyncState
 import com.lyco256.llm.data.SemanticIndexSyncStatus
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
@@ -84,7 +86,7 @@ class RelatedTweetsViewModelIntegrationTest {
     }
 
     @Test
-    fun retryAndNewSelectionCancelOldGeneration() {
+    fun retryAndNewSelectionCancelOldGeneration() = runBlocking {
         semanticState.value = SemanticIndexSyncState(status = SemanticIndexSyncStatus.COMPLETE)
         imageState.value = ImageEmbeddingSyncState(status = ImageEmbeddingSyncStatus.COMPLETE)
         viewModel.openMediaGridTweetDialog(clipIds[0])
@@ -96,6 +98,7 @@ class RelatedTweetsViewModelIntegrationTest {
         val retry = relatedEngine.awaitRequest(1)
         viewModel.openMediaGridTweetDialog(clipIds[1])
         val second = relatedEngine.awaitRequest(2)
+        withTimeout(5_000L) { retry.cancelled.await() }
         retry.complete(listOf(RelatedTweetResult(99L, .99f)))
         second.complete(listOf(RelatedTweetResult(clipIds[2], .7f)))
 
@@ -104,7 +107,10 @@ class RelatedTweetsViewModelIntegrationTest {
         assertEquals(listOf(clipIds[2]), ready.rankedClipIds)
         assertTrue(awaitDialogState { it is MediaGridTweetDialogState.Loaded } is MediaGridTweetDialogState.Loaded)
 
+        viewModel.openMediaGridTweetDialog(clipIds[0])
+        val closing = relatedEngine.awaitRequest(3)
         viewModel.closeMediaGridTweetDialog()
+        withTimeout(5_000L) { closing.cancelled.await() }
         assertEquals(RelatedTweetsStatus.INACTIVE, viewModel.relatedTweetsUiState.value.status)
     }
 
@@ -125,7 +131,11 @@ class RelatedTweetsViewModelIntegrationTest {
         ): List<RelatedTweetResult> {
             val request = Request(clipId, onProgress)
             synchronized(requests) { requests += request }
-            return request.result.await()
+            return try {
+                request.result.await()
+            } finally {
+                if (!currentCoroutineContext().isActive) request.cancelled.complete(Unit)
+            }
         }
 
         fun requestCount(): Int = synchronized(requests) { requests.size }
@@ -148,6 +158,7 @@ class RelatedTweetsViewModelIntegrationTest {
             private val onProgress: (RelatedTweetsProgress) -> Unit,
         ) {
             val result = CompletableDeferred<List<RelatedTweetResult>>()
+            val cancelled = CompletableDeferred<Unit>()
             fun progress(value: RelatedTweetsProgress) = onProgress(value)
             fun complete(value: List<RelatedTweetResult>) { result.complete(value) }
             fun fail(error: Throwable) { result.completeExceptionally(error) }

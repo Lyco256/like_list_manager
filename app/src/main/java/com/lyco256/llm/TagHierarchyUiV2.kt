@@ -1112,7 +1112,10 @@ fun MediaGridTweetDialog(
                             }
                             val effectiveTagDraft = tagDraft.reconcilePersisted(persistedTagIds)
                             Column(
-                                Modifier.fillMaxSize().verticalScroll(dialogScrollState).padding(8.dp),
+                                Modifier.fillMaxSize()
+                                    .verticalScroll(dialogScrollState)
+                                    .testTag("media_grid_tweet_dialog_scroll")
+                                    .padding(8.dp),
                             ) {
                                 EnhancedTweetCard(
                                     clip = state.clip,
@@ -1265,7 +1268,7 @@ private fun RelatedTweetRow(
     clip: ClipWithDetails,
     onClick: () -> Unit,
 ) {
-    val image = clip.assets.firstOrNull()?.let { it.localPath ?: it.previewUrl ?: it.remoteUrl }
+    val image = clip.assets.firstOrNull()?.let { it.localPath ?: it.previewUrl }
     Row(
         modifier = Modifier
             .fillMaxWidth()
