@@ -45,7 +45,13 @@ MainActivity / Compose UI
     -> DerivedSearchStorage revision / literal FTS / lexical cache
     -> shared Sudachi / EmbeddingGemma query / Japanese CLIP text query
     -> revision-cached LocalAnnIndexSnapshot（768 / 256次元）
-    -> clip単位max集約 / admission / weighted ranking
+     -> clip単位max集約 / admission / weighted ranking
+
+  LocalImageDuplicateSearchEngine（AppContainer共有の画像重複検索runtime）
+    -> DerivedSearchStorageのimage snapshotを検索開始時に一度だけ読む
+    -> 一つの256次元USearch ANN / 最大32近傍 / exact cosine score
+    -> threshold + mutual edge / primitive-array Union-Find / deterministic groups
+    -> ordered asset IDをMainViewModelへ返す（画像再embedding・storage writeなし）
 
   LocalAnnIndexSnapshot（不変ANN runtime。LocalSearchEngineが所有）
     -> vendored USearch v2.26.0 Java binding
@@ -60,7 +66,7 @@ MainActivity / Compose UI
 
 - ダークテーマ
 - 未分類リスト: 初回DB emissionまでProgressを表示し、グループを展開して配下タグをカード内draftとして選択し、`適用`で一括確定する
-- 分類済みリスト: Search / Filter / Sort / Displayの36x32 symbol toolbar、検索と条件絞り込みを分離した全画面Dialog、SMARTの共有LocalSearchEngine検索と正規表現のsource-order検索、検索中/失敗表示、検索中のsort無効化、タグのみトグル付きの全ツイート条件、投稿日・投稿者・タグ／グループの「含む」「必須」「排除」複合絞り込み、タグ再割り当て
+- 分類済みリスト: Search / Filter / Sort / Displayの36x32 symbol toolbar、検索と条件絞り込みを分離した全画面Dialog、SMARTの共有LocalSearchEngine検索と正規表現のsource-order検索、保存画像の画像重複検索（専用状態、進捗、失敗／再試行、asset-level MediaGrid）、検索中/失敗表示、検索中のsort無効化、タグのみトグル付きの全ツイート条件、投稿日・投稿者・タグ／グループの「含む」「必須」「排除」複合絞り込み、タグ再割り当て
 - タグリスト: 無制限階層の縦guide付きcompact rowで、グループ／タグ追加、名称変更、移動、長押し並び替え、削除、Tree popupから別タグへの一括追加
 - X風の投稿本文、クリック可能な投稿者、保存済み投稿数、いいね数（詳細popup付き）、カード幅・画像比率に応じた高さ上限、画像previewを表示
 - メディアグリッドの通常スクロール中は既存見出しと同じ現在位置ラベルを上端の一時ピルで表示し、停止後3秒保持して上方向へ消す。スクロールバー操作中は現在frameの全インライン見出しを開始media ordinal位置へ固定した文字入りピルで表示し、保存順では表示しない。pointer UP／cancel／frame変更／FinalTargetPendingでは消去し、正常終了後だけ最終位置を上部ピルへ引き継ぐ。列数Morph中は旧ラベルを固定し、handoff後に新粒度で再評価する
@@ -212,6 +218,7 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/data/TagColorPalette.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/DerivedSearchStorage.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/LocalSearchEngine.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/LocalImageDuplicateSearchEngine.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/LocalSearchLexical.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/ImageEmbeddingModels.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/ImageEmbeddingBlobCodec.kt.md`
@@ -244,6 +251,10 @@ MainActivity / Compose UI
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/PaddleOcrRuntimeSmokeTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/DerivedSearchStorageIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LocalSearchEngineIntegrationTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/data/LocalImageDuplicateSearchEngineTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/LocalImageDuplicateSearchEngineIntegrationTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/ClassifiedImageDuplicateSearchViewModelIntegrationTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/ImageDuplicateMediaGridTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LexicalIndexSynchronizerIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LexicalIndexRepositoryUndoIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/SemanticSearchStorageIntegrationTest.kt.md`
@@ -319,7 +330,7 @@ MainActivity / Compose UI
 
 - X API由来の自動バックグラウンド同期は未実装（派生lexical／semantic indexの起動時同期は実装済み）
 - backup/import/exportは未実装
-- EmbeddingGemmaのsemantic source同期、画像embedding同期、USearchとFTSを統合する`LocalSearchEngine`と、分類済み画面のSMART/正規表現検索UIは実装済み
+- EmbeddingGemmaのsemantic source同期、画像embedding同期、USearchとFTSを統合する`LocalSearchEngine`、画像embeddingだけを読む`LocalImageDuplicateSearchEngine`、分類済み画面のSMART/正規表現／画像重複検索UIは実装済み
 - USearch v2.26.0のnative release archiveはbuild時に固定SHA-256検証してgenerated JNI libsへ展開する。release zipとgenerated `.so` はsource treeへcommitしない
 - 任意フォルダへの保存とアンインストール後の投稿データ保持は未実装
 - タグ色変更は12色パレットで実装済み

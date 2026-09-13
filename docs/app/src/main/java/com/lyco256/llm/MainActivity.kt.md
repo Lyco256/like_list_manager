@@ -1,5 +1,13 @@
 # `app/src/main/java/com/lyco256/llm/MainActivity.kt`
 
+## 2026-09 画像重複検索
+
+`ClassifiedImageDuplicateSearchState` は画像重複検索専用に`INACTIVE`／`LOADING`／`READY`／`FAILED`、ordered asset ID、group数、snapshot revision、処理数、世代、エラーを保持します。`MainViewModel`は重複検索開始時に通常文字検索をcancelして解除し、画像embedding同期が`SYNCING`の間だけ待機します。`NOT_STARTED`／`FAILED`では既存snapshotを読み、世代が古いprogress/result/errorは無視します。再試行と解除は専用イベントで行い、解除時は保持していたsort stateを復元します。
+
+検索Dialogには`image_duplicate_search_apply`として「画像重複検索」と「保存画像の中から同じ・よく似た画像を探します」を表示します。実行後はDialogを閉じ、検索条件の文字列を消します。重複検索中・完了・失敗では専用状態を表示し、失敗時に通常一覧へfallbackしません。
+
+重複検索がactiveな間は、ユーザーがCardを選んでいても実効表示だけをMediaGridへ切り替えます。ユーザーのdisplay mode自体は変更せず、sortとdisplay切替を無効化し、filterだけを有効にします。MediaGrid cache/session keyには重複検索identity・generationを含め、ordered asset ID一覧はkeyへ埋め込みません。タップ時の既存parent clip dialog経路は維持します。
+
 ## 2026-09-12 分類済みスマート検索UI
 
 分類済み画面の検索を条件絞り込みから分離しました。`TweetFilterState` は期間・投稿者・タグ条件・タグ付きのみだけを保持し、`ClassifiedSearchCriteria` と `ClassifiedSearchState` がquery、SMART/正規表現モード、正規表現対象、`INACTIVE` / `LOADING` / `READY` / `FAILED`、SMARTのranked clip IDを保持します。

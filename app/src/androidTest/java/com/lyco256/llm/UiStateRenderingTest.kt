@@ -313,6 +313,40 @@ class UiStateRenderingTest {
     }
 
     @Test
+    fun duplicateSearchSummaryUsesAssetCountAndHidesSortAndDisplayControls() {
+        val state = MainUiState(
+            imageDuplicateSearchState = ClassifiedImageDuplicateSearchState(
+                status = ClassifiedImageDuplicateSearchStatus.READY,
+                orderedAssetIds = listOf(10L, 20L),
+                groupCount = 1,
+                requestGeneration = 1L,
+            ),
+        )
+        composeRule.setContent {
+            MaterialTheme {
+                TagFilterSummaryRow(
+                    uiState = state,
+                    hierarchy = TagHierarchy(),
+                    displayMode = ClassifiedDisplayMode.MediaGrid,
+                    matchingClipCount = 1,
+                    matchingMediaCount = 7,
+                    onOpen = {},
+                    onOpenSort = {},
+                    onToggleDisplayMode = {},
+                    interactionEnabled = true,
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("一致件数:7件").assertIsDisplayed()
+        composeRule.onNodeWithText("画像重複検索").assertIsDisplayed()
+        composeRule.onAllNodesWithText("保存順", substring = true).assertCountEquals(0)
+        composeRule.onNodeWithTag("sort_open").assertIsNotEnabled()
+        composeRule.onNodeWithTag("classified_display_toggle").assertIsNotEnabled()
+        composeRule.onNodeWithTag("filter_open").assertIsEnabled()
+    }
+
+    @Test
     fun selectedFilterConditionsStayHorizontalCycleWithoutNoneAndRemoveSeparately() {
         val now = "2026-08-12T00:00:00Z"
         val firstGroup = TagGroupEntity(1, "Root A", createdAt = now, updatedAt = now)

@@ -1,5 +1,11 @@
 # MediaGridMetadata.kt
 
+## 2026-09 画像重複検索のasset-level path
+
+重複検索READYでは、Repositoryの軽量`MediaGridAssetRow`をasset ID→asset／parent clipへ一度lookupし、engineが返したordered asset IDだけをその順でentriesへ変換します。sourceに存在しないassetは省略し、同じparent clipの他assetを追加したり、groupを再構築・補充したりしません。通常のparent filterは各候補assetのparent clipへ適用し、filter変更後も検索結果の相対順を維持します。
+
+重複経路の`matchingMediaCount`は実際にfilteredされたasset数、`matchingClipCount`はそれらのparent clip数です。dedicated frameは保存順・既定sortとして連続cellだけを作り、投稿日／いいね／group headerを追加しません。通常のtext search・filter・sort・MediaGrid展開経路は変更しません。
+
 メディアグリッド専用のメタデータ処理を担当する。Repositoryから受け取った軽量Asset行・現存Clip・ClipTagのスナップショットを、`Dispatchers.Default`でlatest-wins処理する。
 
 完成結果は最大3件のLRUキャッシュへ保持し、Bitmapやファイル内容は保持しない。キャッシュヒット時は`Calculating`を挟まずReady結果を即時発行し、ミス時だけ`Calculating`からReadyへ遷移する。枠は静的グラデーションを先に描画し、次フレーム以降に既存URLの画像要求を開始する。メタデータ処理中にFile I/Oや画像デコードは行わない。

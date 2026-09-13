@@ -6,6 +6,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -102,6 +103,29 @@ class ClassifiedSearchUiIntegrationTest {
         }
         composeRule.onNodeWithTag("sort_open").assertIsEnabled()
         assertEquals(ClassifiedSortBase.LikeCount, mainViewModel().uiState.value.sort.baseOrder)
+    }
+
+    @Test
+    fun searchDialogStartsImageDuplicateModeAndDisablesOnlyItsUnsupportedControls() {
+        composeRule.onNodeWithTag("search_open").performClick()
+        composeRule.onNodeWithTag("image_duplicate_search_apply").assertIsDisplayed()
+        composeRule.onNodeWithText("画像重複検索").assertIsDisplayed()
+        composeRule.onNodeWithText("保存画像の中から同じ・よく似た画像を探します").assertIsDisplayed()
+
+        composeRule.onNodeWithTag("image_duplicate_search_apply").performClick()
+        composeRule.waitUntil(5_000L) {
+            mainViewModel().uiState.value.imageDuplicateSearchState.isActive &&
+                composeRule.onAllNodesWithTag("search_dialog").fetchSemanticsNodes().isEmpty()
+        }
+        composeRule.onNodeWithTag("sort_open").assertIsNotEnabled()
+        composeRule.onNodeWithTag("classified_display_toggle").assertIsNotEnabled()
+        composeRule.onNodeWithTag("filter_open").assertIsEnabled()
+        assertTrue(mainViewModel().uiState.value.imageDuplicateSearchState.isActive)
+
+        composeRule.onNodeWithTag("search_open").performClick()
+        composeRule.onNodeWithTag("search_clear").performClick()
+        composeRule.waitUntil(5_000L) { !mainViewModel().uiState.value.imageDuplicateSearchState.isActive }
+        composeRule.onNodeWithTag("sort_open").assertIsEnabled()
     }
 
     private fun seedSearchFixture(): SearchFixture = runBlocking {

@@ -2,6 +2,8 @@
 
 `MainViewModel`が所有する、分類済みメディアグリッドの長寿命session管理です。
 
+2026-09の`MediaGridSessionKey`は画像重複検索のidentity・generationも保持します。通常一覧と重複検索、または異なる重複検索世代が同じanchor/sessionへ書き込まないようにし、新しい重複検索は別sessionとして先頭から開始します。重複検索のordered asset ID本体はkeyへ連結しません。
+
 2026-07-26時点では、coordinatorが`MediaGridRetainedImageStore`を一つだけ所有し、複数session/controllerへ共有します。session eviction、列数変更、カード画面遷移ではstore全体をclearせず、controller owner tokenのvisible／active保護だけを更新します。coordinator dispose時のみcallback解除とstore全entry解放を行います。
 
 - session keyは有効なfilter/sortだけで構成し、列数・source revision・hierarchy revisionを含めません。

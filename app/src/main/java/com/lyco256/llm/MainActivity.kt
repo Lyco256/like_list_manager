@@ -93,6 +93,10 @@ import com.lyco256.llm.data.ClassifiedSearchEngine
 import com.lyco256.llm.data.ClipEntity
 import com.lyco256.llm.data.ClassifiedClipItem
 import com.lyco256.llm.data.ClipWithDetails
+import com.lyco256.llm.data.ImageDuplicateSearchEngine
+import com.lyco256.llm.data.ImageDuplicateSearchResult
+import com.lyco256.llm.data.ImageEmbeddingSyncState
+import com.lyco256.llm.data.ImageEmbeddingSyncStatus
 import com.lyco256.llm.data.LikeCountRefreshEstimate
 import com.lyco256.llm.data.OAuthSession
 import com.lyco256.llm.data.OcrPostRecognitionResult
@@ -121,7 +125,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.transformLatest
@@ -291,6 +297,43 @@ data class ClassifiedSearchState(
         }
 }
 
+enum class ClassifiedImageDuplicateSearchStatus { INACTIVE, LOADING, READY, FAILED }
+
+data class ClassifiedImageDuplicateSearchState(
+    val status: ClassifiedImageDuplicateSearchStatus = ClassifiedImageDuplicateSearchStatus.INACTIVE,
+    val orderedAssetIds: List<Long> = emptyList(),
+    val groupCount: Int = 0,
+    val sourceRevision: Long = 0L,
+    val processedAssetCount: Int = 0,
+    val totalAssetCount: Int = 0,
+    val errorMessage: String? = null,
+    val requestGeneration: Long = 0L,
+) {
+    val isActive: Boolean get() = status != ClassifiedImageDuplicateSearchStatus.INACTIVE
+    val isLoading: Boolean get() = status == ClassifiedImageDuplicateSearchStatus.LOADING
+    val isReady: Boolean get() = status == ClassifiedImageDuplicateSearchStatus.READY
+    val isFailed: Boolean get() = status == ClassifiedImageDuplicateSearchStatus.FAILED
+
+    /** Lightweight cache/session identity; the ordered asset IDs are intentionally not serialized here. */
+    val mediaGridIdentity: String
+        get() = if (!isActive) "inactive" else "image-duplicate:$requestGeneration:${status.name}"
+}
+
+private fun ImageDuplicateSearchResult.toReadyState(
+    generation: Long,
+    processedAssetCount: Int,
+    totalAssetCount: Int,
+): ClassifiedImageDuplicateSearchState =
+    ClassifiedImageDuplicateSearchState(
+        status = ClassifiedImageDuplicateSearchStatus.READY,
+        orderedAssetIds = orderedAssetIds,
+        groupCount = groupCount,
+        sourceRevision = sourceRevision,
+        processedAssetCount = processedAssetCount,
+        totalAssetCount = totalAssetCount,
+        requestGeneration = generation,
+    )
+
 data class TweetFilterState(
     val startDate: LocalDate? = null,
     val endDate: LocalDate? = null,
@@ -319,6 +362,7 @@ data class MainUiState(
     val filters: TweetFilterState = TweetFilterState(),
     val sort: ClassifiedSortState = ClassifiedSortState(),
     val searchState: ClassifiedSearchState = ClassifiedSearchState(),
+    val imageDuplicateSearchState: ClassifiedImageDuplicateSearchState = ClassifiedImageDuplicateSearchState(),
 ) {
     val isInitialClipLoading: Boolean
         get() = !hasReceivedInitialClipEmission &&
@@ -343,6 +387,8 @@ data class MediaGridDataKey(
     val sort: ClassifiedSortState,
     val searchIdentity: String = "inactive",
     val searchGeneration: Long = 0L,
+    val imageDuplicateSearchIdentity: String = "inactive",
+    val imageDuplicateSearchGeneration: Long = 0L,
 )
 
 data class ClassifiedMediaGridState(
@@ -384,6 +430,7 @@ private data class MediaGridPreparationInputs(
     val filters: TweetFilterState,
     val sort: ClassifiedSortState,
     val searchState: ClassifiedSearchState,
+    val imageDuplicateSearchState: ClassifiedImageDuplicateSearchState,
 )
 
 internal data class InitialClipListState(
@@ -397,10 +444,14 @@ internal data class InitialClipListState(
 class MainViewModel(
     application: Application,
     private val searchEngineOverride: ClassifiedSearchEngine? = null,
+    private val imageDuplicateSearchEngineOverride: ImageDuplicateSearchEngine? = null,
+    private val imageEmbeddingSyncStateOverride: StateFlow<ImageEmbeddingSyncState>? = null,
 ) : AndroidViewModel(application) {
     private val appContainer = (application as LikeListManagerApp).container
     private val repository = appContainer.repository
     private val searchEngine = searchEngineOverride ?: appContainer.localSearchEngine
+    private val imageDuplicateSearchEngine = imageDuplicateSearchEngineOverride ?: appContainer.imageDuplicateSearchEngine
+    private val imageEmbeddingSyncState = imageEmbeddingSyncStateOverride ?: appContainer.imageEmbeddingSynchronizer.state
     private val filters = MutableStateFlow(TweetFilterState())
     private val sort = MutableStateFlow(ClassifiedSortState())
     private val apiSettings = MutableStateFlow(ApiSettings())
@@ -409,6 +460,9 @@ class MainViewModel(
     private val searchState = MutableStateFlow(ClassifiedSearchState())
     private var smartSearchJob: Job? = null
     private var searchRequestGeneration = 0L
+    private var imageDuplicateSearchJob: Job? = null
+    private var imageDuplicateSearchRequestGeneration = 0L
+    private val imageDuplicateSearchState = MutableStateFlow(ClassifiedImageDuplicateSearchState())
     private val mediaGridSource = repository.mediaGridSource
     private val selectedMediaGridClipId = MutableStateFlow<Long?>(null)
     private val mediaGridCache = MediaGridMetadataCache()
@@ -464,6 +518,9 @@ class MainViewModel(
             sort = sortValue,
         )
     }.combine(searchState) { baseState, searchValue -> baseState.copy(searchState = searchValue) }
+        .combine(imageDuplicateSearchState) { baseState, duplicateValue ->
+            baseState.copy(imageDuplicateSearchState = duplicateValue)
+        }
 
     val uiState: StateFlow<MainUiState> = combine(
         uiStateBase,
@@ -479,7 +536,16 @@ class MainViewModel(
         sort,
         searchState,
     ) { source, hierarchy, filterValue, sortValue, searchValue ->
-        MediaGridPreparationInputs(source, hierarchy, filterValue, sortValue, searchValue)
+        MediaGridPreparationInputs(
+            snapshot = source,
+            hierarchy = hierarchy,
+            filters = filterValue,
+            sort = sortValue,
+            searchState = searchValue,
+            imageDuplicateSearchState = ClassifiedImageDuplicateSearchState(),
+        )
+    }.combine(imageDuplicateSearchState) { inputs, duplicateValue ->
+        inputs.copy(imageDuplicateSearchState = duplicateValue)
     }
         .transformLatest { inputs ->
             val snapshot = inputs.snapshot
@@ -487,8 +553,13 @@ class MainViewModel(
             val filterValue = inputs.filters
             val sortValue = inputs.sort
             val searchValue = inputs.searchState
+            val duplicateValue = inputs.imageDuplicateSearchState
             val effectiveFilter = effectiveMediaGridFilter(filterValue)
-            val effectiveSort = if (searchValue.isActive) ClassifiedSortState() else effectiveMediaGridSort(sortValue)
+            val effectiveSort = if (searchValue.isActive || duplicateValue.isActive) {
+                ClassifiedSortState()
+            } else {
+                effectiveMediaGridSort(sortValue)
+            }
             val key = MediaGridCacheKey(
                 sourceRevision = snapshot.revision,
                 hierarchyRevision = hierarchy.structuralRevision,
@@ -496,13 +567,40 @@ class MainViewModel(
                 sort = effectiveSort,
                 searchIdentity = searchValue.mediaGridIdentity,
                 searchGeneration = searchValue.requestGeneration,
+                imageDuplicateSearchIdentity = duplicateValue.mediaGridIdentity,
+                imageDuplicateSearchGeneration = duplicateValue.requestGeneration,
             )
             val cached = mediaGridCache.get(key)
             if (cached != null) {
                 emit(cached)
             } else {
-                emit(ClassifiedMediaGridState(status = MediaGridLoadStatus.Calculating, dataKey = MediaGridDataKey(snapshot.revision, hierarchy.structuralRevision, effectiveFilter, effectiveSort, searchValue.mediaGridIdentity, searchValue.requestGeneration)))
-                emit(prepareMediaGridMetadata(snapshot, hierarchy, effectiveFilter, effectiveSort, searchValue, mediaGridCache, key))
+                emit(
+                    ClassifiedMediaGridState(
+                        status = MediaGridLoadStatus.Calculating,
+                        dataKey = MediaGridDataKey(
+                            sourceRevision = snapshot.revision,
+                            hierarchyRevision = hierarchy.structuralRevision,
+                            filter = effectiveFilter,
+                            sort = effectiveSort,
+                            searchIdentity = searchValue.mediaGridIdentity,
+                            searchGeneration = searchValue.requestGeneration,
+                            imageDuplicateSearchIdentity = duplicateValue.mediaGridIdentity,
+                            imageDuplicateSearchGeneration = duplicateValue.requestGeneration,
+                        ),
+                    ),
+                )
+                emit(
+                    prepareMediaGridMetadata(
+                        snapshot = snapshot,
+                        hierarchy = hierarchy,
+                        filters = effectiveFilter,
+                        sort = effectiveSort,
+                        searchState = searchValue,
+                        cache = mediaGridCache,
+                        key = key,
+                        imageDuplicateSearchState = duplicateValue,
+                    ),
+                )
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ClassifiedMediaGridState(status = MediaGridLoadStatus.Calculating))
@@ -539,6 +637,8 @@ class MainViewModel(
         }
         if (!normalized.canApply) return
         smartSearchJob?.cancel()
+        smartSearchJob = null
+        deactivateImageDuplicateSearch()
         val generation = ++searchRequestGeneration
         if (normalized.mode == SearchMode.Regex) {
             searchState.value = ClassifiedSearchState(
@@ -585,11 +685,88 @@ class MainViewModel(
     }
 
     fun clearSearch() {
+        if (imageDuplicateSearchState.value.isActive) {
+            clearImageDuplicateSearch()
+        } else {
+            clearTextSearch()
+        }
+    }
+
+    fun startImageDuplicateSearch() {
+        smartSearchJob?.cancel()
+        smartSearchJob = null
+        searchRequestGeneration++
+        searchState.value = ClassifiedSearchState(requestGeneration = searchRequestGeneration)
+        imageDuplicateSearchJob?.cancel()
+        val generation = ++imageDuplicateSearchRequestGeneration
+        val syncState = imageEmbeddingSyncState.value
+        imageDuplicateSearchState.value = ClassifiedImageDuplicateSearchState(
+            status = ClassifiedImageDuplicateSearchStatus.LOADING,
+            processedAssetCount = 0,
+            totalAssetCount = syncState.targetAssetCount,
+            requestGeneration = generation,
+        )
+        imageDuplicateSearchJob = viewModelScope.launch {
+            try {
+                imageEmbeddingSyncState
+                    .filter { it.status != ImageEmbeddingSyncStatus.SYNCING }
+                    .first()
+                if (!isCurrentImageDuplicateGeneration(generation)) return@launch
+                val result = imageDuplicateSearchEngine.search { progress ->
+                    if (isCurrentImageDuplicateGeneration(generation)) {
+                        val current = imageDuplicateSearchState.value
+                        imageDuplicateSearchState.value = current.copy(
+                            processedAssetCount = progress.processedAssetCount,
+                            totalAssetCount = progress.totalAssetCount,
+                        )
+                    }
+                }
+                if (isCurrentImageDuplicateGeneration(generation)) {
+                    val current = imageDuplicateSearchState.value
+                    imageDuplicateSearchState.value = result.toReadyState(
+                        generation = generation,
+                        processedAssetCount = current.processedAssetCount,
+                        totalAssetCount = current.totalAssetCount,
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                if (isCurrentImageDuplicateGeneration(generation)) {
+                    val current = imageDuplicateSearchState.value
+                    imageDuplicateSearchState.value = current.copy(
+                        status = ClassifiedImageDuplicateSearchStatus.FAILED,
+                        errorMessage = error.message ?: "画像重複検索に失敗しました",
+                    )
+                }
+            }
+        }
+    }
+
+    fun retryImageDuplicateSearch() {
+        if (imageDuplicateSearchState.value.isFailed) startImageDuplicateSearch()
+    }
+
+    fun clearImageDuplicateSearch() {
+        deactivateImageDuplicateSearch()
+    }
+
+    private fun clearTextSearch() {
         smartSearchJob?.cancel()
         smartSearchJob = null
         searchRequestGeneration++
         searchState.value = ClassifiedSearchState(requestGeneration = searchRequestGeneration)
     }
+
+    private fun deactivateImageDuplicateSearch() {
+        imageDuplicateSearchJob?.cancel()
+        imageDuplicateSearchJob = null
+        val generation = ++imageDuplicateSearchRequestGeneration
+        imageDuplicateSearchState.value = ClassifiedImageDuplicateSearchState(requestGeneration = generation)
+    }
+
+    private fun isCurrentImageDuplicateGeneration(generation: Long): Boolean =
+        imageDuplicateSearchState.value.requestGeneration == generation
 
     fun setDateRange(startDate: LocalDate?, endDate: LocalDate?) {
         filters.value = filters.value.copy(startDate = startDate, endDate = endDate)
@@ -827,6 +1004,7 @@ class MainViewModel(
 
     override fun onCleared() {
         smartSearchJob?.cancel()
+        imageDuplicateSearchJob?.cancel()
         mediaGridSessionCoordinator.dispose()
         super.onCleared()
     }
@@ -835,10 +1013,17 @@ class MainViewModel(
         fun factory(
             application: Application,
             searchEngineOverride: ClassifiedSearchEngine? = null,
+            imageDuplicateSearchEngineOverride: ImageDuplicateSearchEngine? = null,
+            imageEmbeddingSyncStateOverride: StateFlow<ImageEmbeddingSyncState>? = null,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                MainViewModel(application, searchEngineOverride) as T
+                MainViewModel(
+                    application,
+                    searchEngineOverride,
+                    imageDuplicateSearchEngineOverride,
+                    imageEmbeddingSyncStateOverride,
+                ) as T
         }
     }
 }
@@ -944,16 +1129,22 @@ fun MainScreen(
     val mediaGridState by viewModel.classifiedMediaGridState.collectAsState()
     val mediaGridSessionState by viewModel.mediaGridSessionState.collectAsState()
     val mediaGridLazyState = rememberSaveable(saver = LazyGridState.Saver) { LazyGridState() }
-    LaunchedEffect(mediaGridState, classifiedMediaGridColumnCount, tab, settingsOpen, classifiedDisplayMode) {
+    val imageDuplicateActive = uiState.imageDuplicateSearchState.isActive
+    val effectiveClassifiedDisplayMode = if (imageDuplicateActive) {
+        ClassifiedDisplayMode.MediaGrid
+    } else {
+        classifiedDisplayMode
+    }
+    LaunchedEffect(mediaGridState, classifiedMediaGridColumnCount, tab, settingsOpen, effectiveClassifiedDisplayMode) {
         viewModel.mediaGridSessionCoordinator.update(
             mediaGridState,
             classifiedMediaGridColumnCount,
-            tab == AppTab.Classified && classifiedDisplayMode == ClassifiedDisplayMode.MediaGrid && !settingsOpen,
+            tab == AppTab.Classified && effectiveClassifiedDisplayMode == ClassifiedDisplayMode.MediaGrid && !settingsOpen,
         )
     }
-    LaunchedEffect(tab, settingsOpen, classifiedDisplayMode) {
+    LaunchedEffect(tab, settingsOpen, effectiveClassifiedDisplayMode) {
         viewModel.mediaGridSessionCoordinator.setVisible(
-            tab == AppTab.Classified && classifiedDisplayMode == ClassifiedDisplayMode.MediaGrid && !settingsOpen,
+            tab == AppTab.Classified && effectiveClassifiedDisplayMode == ClassifiedDisplayMode.MediaGrid && !settingsOpen,
         )
     }
     val classifiedListState = remember(classifiedScrollKey) {
@@ -978,9 +1169,9 @@ fun MainScreen(
         likeRefreshEstimating ||
         likeRefreshRunning ||
         mediaGridTweetDialogState is MediaGridTweetDialogState.Loading ||
-        (tab == AppTab.Classified &&
-            classifiedDisplayMode == ClassifiedDisplayMode.MediaGrid &&
-            (mediaGridState.status == MediaGridLoadStatus.Calculating || mediaGridSessionState.showInitialProgress))
+            (tab == AppTab.Classified &&
+             effectiveClassifiedDisplayMode == ClassifiedDisplayMode.MediaGrid &&
+             (mediaGridState.status == MediaGridLoadStatus.Calculating || mediaGridSessionState.showInitialProgress))
     val showHeavyWorkIndicator = shouldShowHeavyWorkIndicator(
         heavyLocalWorkActive = heavyLocalWorkActive,
         dedicatedProgressVisible = dedicatedProgressVisible,
@@ -1090,7 +1281,7 @@ fun MainScreen(
                 onMediaGridAnchorCheckpoint = { sessionKey, anchor ->
                     viewModel.mediaGridSessionCoordinator.saveAnchor(sessionKey, anchor)
                 },
-                displayMode = classifiedDisplayMode,
+                displayMode = effectiveClassifiedDisplayMode,
                 mediaGridColumnCount = classifiedMediaGridColumnCount,
                 onMediaGridColumnCountChange = { classifiedMediaGridColumnCount = it },
                 onMediaGridCellClick = viewModel::openMediaGridTweetDialog,
@@ -1104,6 +1295,8 @@ fun MainScreen(
                 onApplySearch = viewModel::applySearch,
                 onClearSearch = viewModel::clearSearch,
                 onRetrySearch = viewModel::retrySearch,
+                onStartImageDuplicateSearch = viewModel::startImageDuplicateSearch,
+                onRetryImageDuplicateSearch = viewModel::retryImageDuplicateSearch,
                 modifier = Modifier.padding(padding).testTag("classified_screen"),
                 onApplyFilters = viewModel::applyFilters,
                 onApplySort = viewModel::applySort,

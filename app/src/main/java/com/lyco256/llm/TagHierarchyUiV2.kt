@@ -451,6 +451,8 @@ internal fun EnhancedClassifiedScreen(
     onApplySearch: (ClassifiedSearchCriteria) -> Unit = {},
     onClearSearch: () -> Unit = {},
     onRetrySearch: () -> Unit = {},
+    onStartImageDuplicateSearch: () -> Unit = {},
+    onRetryImageDuplicateSearch: () -> Unit = {},
     modifier: Modifier = Modifier,
     onApplyFilters: (TweetFilterState) -> Unit,
     onApplySort: (ClassifiedSortState) -> Unit,
@@ -473,7 +475,11 @@ internal fun EnhancedClassifiedScreen(
     onAuthorClick: (ClipEntity) -> Unit,
 ) {
     val state = rememberLazyGridState()
-    val effectiveSort = if (uiState.searchState.isActive) ClassifiedSortState() else effectiveMediaGridSort(uiState.sort)
+    val effectiveSort = if (uiState.searchState.isActive || uiState.imageDuplicateSearchState.isActive) {
+        ClassifiedSortState()
+    } else {
+        effectiveMediaGridSort(uiState.sort)
+    }
     val dataKey = mediaGridState.dataKey ?: MediaGridDataKey(
         mediaGridState.sourceRevision,
         uiState.tagHierarchy.structuralRevision,
@@ -481,6 +487,8 @@ internal fun EnhancedClassifiedScreen(
         effectiveSort,
         uiState.searchState.mediaGridIdentity,
         uiState.searchState.requestGeneration,
+        uiState.imageDuplicateSearchState.mediaGridIdentity,
+        uiState.imageDuplicateSearchState.requestGeneration,
     )
     val frame = remember(mediaGridState.entries, dataKey, mediaGridColumnCount) {
         buildMediaGridFrameData(mediaGridState.entries, dataKey.sort, mediaGridColumnCount, dataKey)
@@ -507,6 +515,8 @@ internal fun EnhancedClassifiedScreen(
         onApplySearch = onApplySearch,
         onClearSearch = onClearSearch,
         onRetrySearch = onRetrySearch,
+        onStartImageDuplicateSearch = onStartImageDuplicateSearch,
+        onRetryImageDuplicateSearch = onRetryImageDuplicateSearch,
         modifier = modifier,
         onApplyFilters = onApplyFilters,
         onApplySort = onApplySort,
@@ -539,6 +549,8 @@ internal fun EnhancedClassifiedScreen(
     onApplySearch: (ClassifiedSearchCriteria) -> Unit = {},
     onClearSearch: () -> Unit = {},
     onRetrySearch: () -> Unit = {},
+    onStartImageDuplicateSearch: () -> Unit = {},
+    onRetryImageDuplicateSearch: () -> Unit = {},
     modifier: Modifier = Modifier,
     onApplyFilters: (TweetFilterState) -> Unit,
     onApplySort: (ClassifiedSortState) -> Unit,
@@ -562,6 +574,11 @@ internal fun EnhancedClassifiedScreen(
 ) {
     val context = LocalContext.current
     val appContainer = (context.applicationContext as LikeListManagerApp).container
+    val effectiveDisplayMode = if (uiState.imageDuplicateSearchState.isActive) {
+        ClassifiedDisplayMode.MediaGrid
+    } else {
+        displayMode
+    }
     var filterDialogOpen by remember { mutableStateOf(false) }
     var sortDialogOpen by remember { mutableStateOf(false) }
     var searchDialogOpen by remember { mutableStateOf(false) }
@@ -575,8 +592,8 @@ internal fun EnhancedClassifiedScreen(
     LaunchedEffect(persistedTagIdsByClassifiedClip) {
         tagDrafts = reconcileClipTagDrafts(tagDrafts, persistedTagIdsByClassifiedClip)
     }
-    val itemKeys = remember(displayMode, uiState.clips, uiState.filters, uiState.sort, uiState.searchState, uiState.tagHierarchy) {
-        if (displayMode == ClassifiedDisplayMode.Card) uiState.classified.map { it.clip.id } else emptyList()
+    val itemKeys = remember(effectiveDisplayMode, uiState.clips, uiState.filters, uiState.sort, uiState.searchState, uiState.tagHierarchy) {
+        if (effectiveDisplayMode == ClassifiedDisplayMode.Card) uiState.classified.map { it.clip.id } else emptyList()
     }
     var pendingPinchAnchor by remember { mutableStateOf<ClassifiedMediaGridScrollAnchor?>(null) }
     var pinchCompletionGeneration by remember { mutableStateOf(0) }
@@ -594,8 +611,8 @@ internal fun EnhancedClassifiedScreen(
             mediaGridScrollbarSnapshot.isDragging
     val latestSuppressScrollCheckpoint by rememberUpdatedState(suppressScrollCheckpoint)
     val lifecycleOwner = LocalContext.current as? LifecycleOwner
-    if (displayMode == ClassifiedDisplayMode.MediaGrid && lifecycleOwner != null) {
-        DisposableEffect(lifecycleOwner, mediaGridSessionState.sessionKey, displayMode) {
+    if (effectiveDisplayMode == ClassifiedDisplayMode.MediaGrid && lifecycleOwner != null) {
+        DisposableEffect(lifecycleOwner, mediaGridSessionState.sessionKey, effectiveDisplayMode) {
             val outgoingSessionKey = mediaGridSessionState.sessionKey
             val outgoingFrame = mediaGridSessionState.frame
             val observer = LifecycleEventObserver { _, event ->
@@ -612,7 +629,7 @@ internal fun EnhancedClassifiedScreen(
             onDispose {
                 if (
                     !latestSuppressScrollCheckpoint &&
-                    displayMode == ClassifiedDisplayMode.MediaGrid &&
+                    effectiveDisplayMode == ClassifiedDisplayMode.MediaGrid &&
                     outgoingSessionKey != null &&
                     outgoingFrame != null
                 ) {
@@ -623,7 +640,7 @@ internal fun EnhancedClassifiedScreen(
             }
         }
     }
-    LaunchedEffect(mediaGridLazyState, mediaGridSessionState.sessionKey, displayMode) {
+    LaunchedEffect(mediaGridLazyState, mediaGridSessionState.sessionKey, effectiveDisplayMode) {
         var checkpointState = MediaGridScrollCheckpointState()
         combine(
             snapshotFlow { mediaGridLazyState.isScrollInProgress }.distinctUntilChanged(),
@@ -645,7 +662,7 @@ internal fun EnhancedClassifiedScreen(
                 val frame = latestFrame
                 if (
                     !latestSuppressScrollCheckpoint &&
-                    displayMode == ClassifiedDisplayMode.MediaGrid &&
+                    effectiveDisplayMode == ClassifiedDisplayMode.MediaGrid &&
                     key != null &&
                     frame != null
                 ) {
@@ -690,10 +707,10 @@ internal fun EnhancedClassifiedScreen(
             selectedMediaGridClipIds = selectedVisibleMediaGridClipIds
         }
     }
-    LaunchedEffect(mediaGridState.sourceRevision, mediaGridState.entries, uiState.sort, displayMode) {
+    LaunchedEffect(mediaGridState.sourceRevision, mediaGridState.entries, uiState.sort, effectiveDisplayMode) {
         pendingPinchAnchor = null
     }
-    if (displayMode == ClassifiedDisplayMode.Card) PreserveScrollAnchor(listState, "classified", itemKeys)
+    if (effectiveDisplayMode == ClassifiedDisplayMode.Card) PreserveScrollAnchor(listState, "classified", itemKeys)
     LaunchedEffect(mediaGridSessionState.sessionKey, mediaGridSessionState.columnCount, mediaGridSessionState.frame, pinchCompletionGeneration) {
         if (!shouldRestoreLegacyMediaGridPinchAnchor(pendingPinchAnchor, morphCheckpointSuppressed)) {
             return@LaunchedEffect
@@ -724,7 +741,7 @@ internal fun EnhancedClassifiedScreen(
             ?.let { latestSessionKey?.let { key -> latestCheckpoint(key, it) } }
         legacyPinchCheckpointSuppressed = false
     }
-    BackHandler(enabled = displayMode == ClassifiedDisplayMode.MediaGrid && mediaGridSelectionMode && !bulkTagDialogOpen) {
+    BackHandler(enabled = effectiveDisplayMode == ClassifiedDisplayMode.MediaGrid && mediaGridSelectionMode && !bulkTagDialogOpen) {
         mediaGridSelectionMode = false
         selectedMediaGridClipIds = emptySet()
     }
@@ -740,7 +757,7 @@ internal fun EnhancedClassifiedScreen(
                     .fillMaxWidth()
                     .padding(top = 12.dp, start = 12.dp, end = 12.dp),
             ) {
-        if (displayMode == ClassifiedDisplayMode.MediaGrid && mediaGridSelectionMode) {
+        if (effectiveDisplayMode == ClassifiedDisplayMode.MediaGrid && mediaGridSelectionMode) {
             MediaGridSelectionToolbar(
                 selectedCount = selectedVisibleMediaGridClipIds.size,
                 allSelected = selectedVisibleMediaGridClipIds == selectableMediaGridClipIds,
@@ -762,10 +779,14 @@ internal fun EnhancedClassifiedScreen(
             TagFilterSummaryRow(
                 uiState = uiState,
                 hierarchy = uiState.tagHierarchy,
-                displayMode = displayMode,
+                displayMode = effectiveDisplayMode,
                 matchingClipCount = when (mediaGridState.status) {
                     MediaGridLoadStatus.Calculating -> null
                     MediaGridLoadStatus.Ready -> mediaGridState.matchingClipCount
+                },
+                matchingMediaCount = when (mediaGridState.status) {
+                    MediaGridLoadStatus.Calculating -> null
+                    MediaGridLoadStatus.Ready -> mediaGridState.matchingMediaCount
                 },
                 onOpenSearch = { searchDialogOpen = true },
                 onOpen = { filterDialogOpen = true },
@@ -783,7 +804,35 @@ internal fun EnhancedClassifiedScreen(
                 .weight(1f)
                 .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
         ) {
-        if (uiState.searchState.isLoading) {
+        if (uiState.imageDuplicateSearchState.isLoading) {
+            Box(
+                Modifier.fillMaxSize().testTag("classified_image_duplicate_loading"),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CircularProgressIndicator()
+                    Text("画像重複を検索中…")
+                    val duplicate = uiState.imageDuplicateSearchState
+                    if (duplicate.totalAssetCount > 0) {
+                        Text("処理中: ${duplicate.processedAssetCount}/${duplicate.totalAssetCount}")
+                    }
+                }
+            }
+        } else if (uiState.imageDuplicateSearchState.isFailed) {
+            Box(
+                Modifier.fillMaxSize().testTag("classified_image_duplicate_error"),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("画像重複検索に失敗しました", style = MaterialTheme.typography.titleMedium)
+                    Text(uiState.imageDuplicateSearchState.errorMessage ?: "画像重複検索に失敗しました")
+                    Button(
+                        onClick = onRetryImageDuplicateSearch,
+                        modifier = Modifier.testTag("classified_image_duplicate_retry"),
+                    ) { Text("再試行") }
+                }
+            }
+        } else if (uiState.searchState.isLoading) {
             Box(
                 Modifier.fillMaxSize().testTag("classified_search_loading"),
                 contentAlignment = Alignment.Center,
@@ -804,8 +853,12 @@ internal fun EnhancedClassifiedScreen(
                     Button(onClick = onRetrySearch, modifier = Modifier.testTag("classified_search_retry")) { Text("再試行") }
                 }
             }
-        } else if (displayMode == ClassifiedDisplayMode.MediaGrid) {
+        } else if (effectiveDisplayMode == ClassifiedDisplayMode.MediaGrid) {
             when {
+                uiState.imageDuplicateSearchState.isReady &&
+                    mediaGridSessionState.frame?.items?.isEmpty() == true &&
+                    mediaGridState.status == MediaGridLoadStatus.Ready ->
+                    HierarchyEmptyState("重複候補の画像はありません")
                 mediaGridSessionState.frame?.items?.isEmpty() == true && mediaGridState.status == MediaGridLoadStatus.Ready && mediaGridState.isEmptyByFilter -> HierarchyEmptyState("条件に合うツイートはありません")
                 mediaGridSessionState.frame?.items?.isEmpty() == true && mediaGridState.status == MediaGridLoadStatus.Ready && mediaGridState.hasMatchingClipButNoMedia -> HierarchyEmptyState("この条件に一致する画像・動画サムネイルはありません")
                 mediaGridSessionState.frame == null -> Box(
@@ -814,7 +867,11 @@ internal fun EnhancedClassifiedScreen(
                 ) { androidx.compose.material3.CircularProgressIndicator() }
                 else -> ClassifiedMediaGridContent(
                     frame = mediaGridSessionState.frame!!,
-                    sort = if (uiState.searchState.isActive) ClassifiedSortState() else uiState.sort,
+                sort = if (uiState.searchState.isActive || uiState.imageDuplicateSearchState.isActive) {
+                    ClassifiedSortState()
+                } else {
+                    uiState.sort
+                },
                     columnCount = mediaGridSessionState.columnCount,
                     state = mediaGridLazyState,
                     controller = mediaGridSessionState.controller,
@@ -924,9 +981,10 @@ internal fun EnhancedClassifiedScreen(
     if (searchDialogOpen) {
         ClassifiedSearchDialog(
             initialCriteria = uiState.searchState.criteria,
-            searchActive = uiState.searchState.isActive,
+            searchActive = uiState.searchState.isActive || uiState.imageDuplicateSearchState.isActive,
             onApply = { criteria -> onApplySearch(criteria); searchDialogOpen = false },
             onClear = { onClearSearch(); searchDialogOpen = false },
+            onStartImageDuplicateSearch = { onStartImageDuplicateSearch(); searchDialogOpen = false },
             onDismiss = { searchDialogOpen = false },
         )
     }
@@ -1710,6 +1768,7 @@ internal fun TagFilterSummaryRow(
     hierarchy: TagHierarchy,
     displayMode: ClassifiedDisplayMode,
     matchingClipCount: Int?,
+    matchingMediaCount: Int? = null,
     onOpenSearch: () -> Unit = {},
     onOpen: () -> Unit,
     onOpenSort: () -> Unit,
@@ -1718,6 +1777,8 @@ internal fun TagFilterSummaryRow(
 ) {
     val filters = uiState.filters
     val searchState = uiState.searchState
+    val imageDuplicateSearchState = uiState.imageDuplicateSearchState
+    val searchActive = searchState.isActive || imageDuplicateSearchState.isActive
     Row(
         Modifier.fillMaxWidth().zIndex(ClassifiedMediaGridToolbarZIndex),
         verticalAlignment = Alignment.CenterVertically,
@@ -1734,14 +1795,18 @@ internal fun TagFilterSummaryRow(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "一致件数:${if (displayMode == ClassifiedDisplayMode.MediaGrid) matchingClipCount?.toString() ?: "計算中" else uiState.classified.size}件",
+                    "一致件数:${when {
+                        imageDuplicateSearchState.isActive -> matchingMediaCount?.toString() ?: "計算中"
+                        displayMode != ClassifiedDisplayMode.MediaGrid -> uiState.classified.size
+                        else -> matchingClipCount?.toString() ?: "計算中"
+                    }}件",
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.labelSmall,
                 )
-                if (searchState.isActive) {
+                if (searchActive) {
                     Text(
-                        searchConditionSummary(searchState),
+                        if (imageDuplicateSearchState.isActive) "画像重複検索" else searchConditionSummary(searchState),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.labelSmall,
@@ -1762,7 +1827,7 @@ internal fun TagFilterSummaryRow(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (!searchState.isActive) {
+                if (!searchActive) {
                     Text(
                         "｜",
                         maxLines = 1,
@@ -1782,7 +1847,7 @@ internal fun TagFilterSummaryRow(
         ClassifiedToolbarButton(
             onClick = { if (interactionEnabled) onOpenSearch() },
             enabled = interactionEnabled,
-            highlighted = searchState.isActive,
+            highlighted = searchActive,
             modifier = Modifier.width(36.dp).height(32.dp).testTag("search_open"),
         ) {
             Icon(
@@ -1805,8 +1870,8 @@ internal fun TagFilterSummaryRow(
         }
         ClassifiedToolbarButton(
             onClick = { if (interactionEnabled) onOpenSort() },
-            enabled = interactionEnabled && !searchState.isActive,
-            highlighted = uiState.sort != ClassifiedSortState() && !searchState.isActive,
+            enabled = interactionEnabled && !searchActive,
+            highlighted = uiState.sort != ClassifiedSortState() && !searchActive,
             modifier = Modifier.width(36.dp).height(32.dp).testTag("sort_open"),
         ) {
             Icon(
@@ -1817,7 +1882,7 @@ internal fun TagFilterSummaryRow(
         }
         ClassifiedToolbarButton(
             onClick = { if (interactionEnabled) onToggleDisplayMode() },
-            enabled = interactionEnabled,
+            enabled = interactionEnabled && !imageDuplicateSearchState.isActive,
             highlighted = null,
             modifier = Modifier.width(36.dp).height(32.dp).testTag("classified_display_toggle"),
         ) {
@@ -1898,6 +1963,7 @@ private fun ClassifiedSearchDialog(
     searchActive: Boolean,
     onApply: (ClassifiedSearchCriteria) -> Unit,
     onClear: () -> Unit,
+    onStartImageDuplicateSearch: () -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     var criteria by remember(initialCriteria, searchActive) {
@@ -1927,6 +1993,20 @@ private fun ClassifiedSearchDialog(
                     contentPadding = PaddingValues(bottom = 96.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    item {
+                        Button(
+                            onClick = onStartImageDuplicateSearch,
+                            modifier = Modifier.fillMaxWidth().testTag("image_duplicate_search_apply"),
+                        ) {
+                            Column {
+                                Text("画像重複検索")
+                                Text(
+                                    "保存画像の中から同じ・よく似た画像を探します",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                    }
                     item {
                         OutlinedTextField(
                             value = criteria.query,
@@ -4157,7 +4237,12 @@ internal fun buildMediaGridFrameData(
     columnCount: Int,
     dataKey: MediaGridDataKey,
 ): MediaGridFrameData {
-    val items = buildClassifiedMediaGridItems(entries, sort, columnCount)
+    val effectiveSort = if (dataKey.imageDuplicateSearchIdentity != "inactive") {
+        ClassifiedSortState()
+    } else {
+        sort
+    }
+    val items = buildClassifiedMediaGridItems(entries, effectiveSort, columnCount)
     val itemByKey = HashMap<String, ClassifiedMediaGridItem>(items.size)
     val assetIdByItemKey = HashMap<String, Long>(entries.size)
     val mediaIndices = IntArray(entries.size)

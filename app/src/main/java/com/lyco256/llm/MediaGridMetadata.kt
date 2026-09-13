@@ -1,6 +1,7 @@
 package com.lyco256.llm
 
 import com.lyco256.llm.data.MediaGridClipSource
+import com.lyco256.llm.data.MediaGridAssetRow
 import com.lyco256.llm.data.TagFilterState
 import com.lyco256.llm.data.TagNodeType
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +27,8 @@ internal data class MediaGridCacheKey(
     val sort: ClassifiedSortState,
     val searchIdentity: String = "inactive",
     val searchGeneration: Long = 0L,
+    val imageDuplicateSearchIdentity: String = "inactive",
+    val imageDuplicateSearchGeneration: Long = 0L,
 )
 
 internal fun effectiveMediaGridSort(sort: ClassifiedSortState): ClassifiedSortState = sort.copy(
@@ -49,23 +52,42 @@ internal suspend fun prepareMediaGridMetadata(
     searchState: ClassifiedSearchState,
     cache: MediaGridMetadataCache,
     key: MediaGridCacheKey,
+    imageDuplicateSearchState: ClassifiedImageDuplicateSearchState = ClassifiedImageDuplicateSearchState(),
 ): ClassifiedMediaGridState = withContext(Dispatchers.Default) {
     cache.get(key)?.let { return@withContext it }
     val source = snapshot.clips
-    val searchOrdered = when {
-        !searchState.isActive -> source
-        searchState.isLoading || searchState.isFailed -> emptyList()
-        searchState.criteria.mode == SearchMode.Smart -> {
-            val sourceById = source.associateBy { it.clip.id }
-            searchState.rankedClipIds.asSequence().distinct().mapNotNull(sourceById::get).toList()
-        }
-        else -> source.filter { matchesMediaGridRegex(it, searchState.criteria) }
-    }
     val filtered = ArrayList<MediaGridClipSource>(source.size)
     val preparedFilter = prepareMediaGridFilter(hierarchy, filters)
-    searchOrdered.forEach { clip -> if (matchesMediaGridFilter(clip, preparedFilter)) filtered += clip }
-    val ordered = if (searchState.isActive || !mediaGridSortIsEffective(sort)) filtered else sortMediaGridClips(filtered, hierarchy, filters, sort)
-    val built = buildMediaGridResult(ordered)
+    val built: MediaGridBuildResult
+    if (imageDuplicateSearchState.isActive) {
+        if (imageDuplicateSearchState.isReady) {
+            val sourceByAssetId = buildMediaGridAssetLookup(source)
+            val filteredAssetIds = ArrayList<Long>(imageDuplicateSearchState.orderedAssetIds.size)
+            imageDuplicateSearchState.orderedAssetIds.forEach { assetId ->
+                val candidate = sourceByAssetId[assetId] ?: return@forEach
+                if (matchesMediaGridFilter(candidate.clip, preparedFilter)) {
+                    filtered += candidate.clip
+                    filteredAssetIds += assetId
+                }
+            }
+            built = buildMediaGridResultInAssetOrder(filteredAssetIds, sourceByAssetId)
+        } else {
+            built = MediaGridBuildResult(emptyList(), 0, false)
+        }
+    } else {
+        val searchOrdered = when {
+            !searchState.isActive -> source
+            searchState.isLoading || searchState.isFailed -> emptyList()
+            searchState.criteria.mode == SearchMode.Smart -> {
+                val sourceById = source.associateBy { it.clip.id }
+                searchState.rankedClipIds.asSequence().distinct().mapNotNull(sourceById::get).toList()
+            }
+            else -> source.filter { matchesMediaGridRegex(it, searchState.criteria) }
+        }
+        searchOrdered.forEach { clip -> if (matchesMediaGridFilter(clip, preparedFilter)) filtered += clip }
+        val ordered = if (searchState.isActive || !mediaGridSortIsEffective(sort)) filtered else sortMediaGridClips(filtered, hierarchy, filters, sort)
+        built = buildMediaGridResult(ordered)
+    }
     val result = ClassifiedMediaGridState(
         dataKey = MediaGridDataKey(
             key.sourceRevision,
@@ -74,6 +96,8 @@ internal suspend fun prepareMediaGridMetadata(
             key.sort,
             key.searchIdentity,
             key.searchGeneration,
+            key.imageDuplicateSearchIdentity,
+            key.imageDuplicateSearchGeneration,
         ),
         sourceRevision = key.sourceRevision,
         sourceClipCount = source.size,
@@ -81,7 +105,7 @@ internal suspend fun prepareMediaGridMetadata(
         sourceTaggedClipCount = source.count { it.tagIds.isNotEmpty() },
         entries = built.entries,
         tagIdsByClip = filtered.associate { it.clip.id to it.tagIds },
-        matchingClipCount = filtered.size,
+        matchingClipCount = filtered.map { it.clip.id }.distinct().size,
         matchingMediaCount = built.matchingMediaCount,
         isEmptyByFilter = filtered.isEmpty(),
         hasMatchingClipButNoMedia = filtered.isNotEmpty() && !built.hasMedia,
@@ -132,6 +156,57 @@ private fun matchesMediaGridFilter(clip: MediaGridClipSource, prepared: Prepared
     if (filters.excluded.any(::matches) || filters.required.any { !matches(it) }) return false
     if (filters.included.isNotEmpty() && filters.included.none(::matches)) return false
     return true
+}
+
+private data class MediaGridAssetSource(
+    val clip: MediaGridClipSource,
+    val asset: MediaGridAssetRow,
+    val mediaIndex: Int,
+)
+
+private fun buildMediaGridAssetLookup(source: List<MediaGridClipSource>): Map<Long, MediaGridAssetSource> {
+    val lookup = HashMap<Long, MediaGridAssetSource>(source.sumOf { it.assets.size })
+    source.forEach { clip ->
+        var mediaIndex = 0
+        clip.assets.forEach { asset ->
+            if (asset.assetType != "photo" && asset.assetType != "video_thumbnail") return@forEach
+            check(lookup.put(asset.assetId, MediaGridAssetSource(clip, asset, mediaIndex)) == null) {
+                "Duplicate media grid asset ID: ${asset.assetId}"
+            }
+            mediaIndex++
+        }
+    }
+    return lookup
+}
+
+private fun buildMediaGridResultInAssetOrder(
+    orderedAssetIds: List<Long>,
+    sourceByAssetId: Map<Long, MediaGridAssetSource>,
+): MediaGridBuildResult {
+    val entries = ArrayList<MediaGridEntry>(orderedAssetIds.size)
+    val seenAssetIds = HashSet<Long>(orderedAssetIds.size)
+    orderedAssetIds.forEach { assetId ->
+        if (!seenAssetIds.add(assetId)) return@forEach
+        val candidate = sourceByAssetId[assetId] ?: return@forEach
+        val clip = candidate.clip.clip
+        val asset = candidate.asset
+        entries += MediaGridEntry(
+            entryId = asset.assetId,
+            clipId = clip.id,
+            assetId = asset.assetId,
+            mediaKey = asset.mediaKey,
+            mediaIndex = candidate.mediaIndex,
+            type = asset.assetType,
+            displayUrl = asset.localPath ?: asset.previewUrl ?: asset.remoteUrl,
+            previewUrl = asset.previewUrl,
+            remoteUrl = asset.remoteUrl,
+            downloadState = asset.downloadState,
+            localPath = asset.localPath,
+            xCreatedAt = clip.xCreatedAt,
+            likeCount = clip.likeCount,
+        )
+    }
+    return MediaGridBuildResult(entries, entries.size, entries.isNotEmpty())
 }
 
 private fun matchesMediaGridRegex(

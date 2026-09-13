@@ -1,0 +1,3 @@
+# `LocalImageDuplicateSearchEngineIntegrationTest.kt`
+
+TEST_HARNESS専用の隔離`DerivedSearchStorage`へ人工256次元vectorを保存し、実USearchを使う`LocalImageDuplicateSearchEngine`を接続します。結果のasset ID妥当性、重複のないordered result、進捗、source revision、検索前後のsnapshot不変だけを確認し、semantic qualityや実データの重複精度はassertしません。

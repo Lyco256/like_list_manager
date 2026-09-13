@@ -18,7 +18,7 @@
 
 ## 役割
 
-`localSearchEngine` を1つ公開する。`localTextEmbedder` は同じ具体的 `LocalTextEmbedder` をSemantic同期とquery検索へ共有し、Japanese CLIPとSudachiも既存instanceを渡す。engine生成だけでは辞書・model・ANNをloadせず、Application起動時の検索やANN構築も追加しない。
+`localSearchEngine` と `imageDuplicateSearchEngine` を各1つ公開する。`localTextEmbedder` は同じ具体的 `LocalTextEmbedder` をSemantic同期とquery検索へ共有し、Japanese CLIPとSudachiも既存instanceを渡す。画像重複engineは同じ`DerivedSearchStorage`をread-onlyで借用し、検索時に一つの256次元ANNを所有する。engine生成だけでは辞書・model・ANNをloadせず、Application起動時の検索やANN構築も追加しない。
 
 投稿保存先マネージャー、暗号化設定ストア、OAuthマネージャー、Repositoryを組み立てる簡易DIコンテナです。
 
