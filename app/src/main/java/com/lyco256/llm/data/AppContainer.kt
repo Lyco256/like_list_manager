@@ -64,6 +64,7 @@ class AppContainer(context: Context) {
     val localSearchEngine = LocalSearchEngine(
         derivedSearchStorage, lexicalTextAnalyzer, localTextEmbedder, localMultimodalEmbedder,
     )
+    val localRelatedTweetsEngine: LocalRelatedTweetsEngine = LocalRelatedTweetsEngine(derivedSearchStorage)
     val imageDuplicateSearchEngine: ImageDuplicateSearchEngine =
         LocalImageDuplicateSearchEngine(derivedSearchStorage)
     val imageEmbeddingSynchronizer = ImageEmbeddingSynchronizer(

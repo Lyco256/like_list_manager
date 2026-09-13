@@ -1,5 +1,11 @@
 # `app/src/main/java/com/lyco256/llm/MainActivity.kt`
 
+## 2026-09 関連ツイートと投稿詳細
+
+`RelatedTweetsUiState`は`INACTIVE`／`WAITING_FOR_INDEX`／`LOADING`／`READY`／`FAILED`、reference clip ID、ranked clip ID、progress、世代、エラーだけを保持します。`MainViewModel.openMediaGridTweetDialog`は選択clip IDを即時更新して本体Dialogを開き、関連検索は別jobとして開始します。semantic/image同期中だけ関連sectionを待機し、`FAILED`／`NOT_STARTED`では保存済み派生snapshotを使って検索します。clip変更時のcancelとrequest generationにより、古いrelated jobのprogress/resultは新しい選択へ適用しません。
+
+関連候補は分類済み画面の文字検索、画像重複検索、filter、sortとは独立して表示します。Dialog本体の`EnhancedTweetCard`は関連検索中・失敗時も既存のタグ、概要、OCR、削除などを利用でき、`RelatedTweetRow`は投稿者、username、本文、先頭画像だけを表示するread-only rowです。row tapはDialogをstackせず、同じselected clip stateを切り替えます。
+
 ## 2026-09 画像重複検索
 
 `ClassifiedImageDuplicateSearchState` は画像重複検索専用に`INACTIVE`／`LOADING`／`READY`／`FAILED`、ordered asset ID、group数、snapshot revision、処理数、世代、エラーを保持します。`MainViewModel`は重複検索開始時に通常文字検索をcancelして解除し、画像embedding同期が`SYNCING`の間だけ待機します。`NOT_STARTED`／`FAILED`では既存snapshotを読み、世代が古いprogress/result/errorは無視します。再試行と解除は専用イベントで行い、解除時は保持していたsort stateを復元します。

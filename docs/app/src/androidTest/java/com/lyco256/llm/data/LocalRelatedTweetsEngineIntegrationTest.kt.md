@@ -1,0 +1,3 @@
+# `LocalRelatedTweetsEngineIntegrationTest.kt`
+
+隔離integration variantの`DerivedSearchStorage`へ人工的な768次元semantic vectorと256次元image vectorを保存し、実USearch JNIを使うrelated engineでsemantic/image ANN query、selected clip除外、重複のないclip結果、revision不変時のcache再利用、revision変更時の交換、closeを確認します。意味的な品質や実データ順位は評価しません。

@@ -1,0 +1,3 @@
+# `RelatedTweetsUiTest.kt`
+
+投稿詳細本体がrelated loading中も表示されること、関連section内だけがprogress/errorになること、related rowが同じDialog内でselected clipを切り替えることをComposeで確認します。分類済みCardの背景tapはdetail callbackを呼び、author actionはdetail callbackへbubbleしません。score表示はassertしません。

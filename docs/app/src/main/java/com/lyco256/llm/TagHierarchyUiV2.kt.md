@@ -1,5 +1,11 @@
 # `TagHierarchyUiV2.kt`
 
+## 2026-09 投稿詳細と関連ツイート
+
+分類済みCardの`EnhancedTweetCard`はoptionalなdetail callbackを持ち、Cardの非interactive領域だけが投稿詳細Dialogを開きます。投稿者、いいね数、オプション、タグ、概要、OCR、削除、Xリンクなど既存clickable操作はdetail openへbubbleしません。未分類CardとDialog内のselected cardではcallbackを無効にします。MediaGrid cellは既存のclip ID callbackから同じDialogを開きます。
+
+`MediaGridTweetDialog`はselected `EnhancedTweetCard`の下に`related_tweets_section`を描画します。related stateがWAITING／LOADING／FAILEDでもselected cardを残し、section内だけでprogress、error、retryを表示します。READYの結果は現在の`MainUiState.clips`からclip IDで解決した軽量`RelatedTweetRow`として表示し、score・percentage・match理由や編集操作は表示しません。row tapは同じDialogのselected clipを切り替え、scrollを先頭へ戻します。
+
 ## 2026-09-13 image duplicate session restore
 
 duplicateの新generationは通常MediaGridと異なるsession identityを使い、frame生成前の一時状態で復元済み扱いにしません。frameが到着してからanchorを復元し、duplicate側にanchorがなければ共有LazyGridStateを先頭へ移動します。通常MediaGridのanchorは別sessionへ保存され、duplicateのgeneration開始で上書きされません。

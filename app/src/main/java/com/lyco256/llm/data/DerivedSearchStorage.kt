@@ -43,6 +43,17 @@ data class LexicalRetrievalSnapshot(
     val candidateDocumentIds: Set<String>,
 )
 
+data class RelatedRetrievalSnapshot(
+    val semanticRevision: Long,
+    val imageRevision: Long,
+    val referenceSemanticDocuments: List<SemanticDocument>,
+    val referenceImageDocuments: List<ImageEmbeddingDocument>,
+    /** Null means the caller's semantic revision is current. */
+    val semanticDocuments: List<SemanticDocument>?,
+    /** Null means the caller's image revision is current. */
+    val imageDocuments: List<ImageEmbeddingDocument>?,
+)
+
 /**
  * Owns the independent, rebuildable SQLite database used by future lexical retrieval layers.
  *
@@ -343,6 +354,62 @@ class DerivedSearchStorage(
                 "SELECT asset_id, clip_id, source_fingerprint, embedding FROM image_embeddings ORDER BY asset_id",
                 {}, ::decodeImageEmbedding,
             ),
+        )
+    }
+
+    /**
+     * Reads both related-search references and revision-bound ANN corpus rows under one storage
+     * mutex. The caller never receives the private SQLite connection.
+     */
+    suspend fun getRelatedRetrievalSnapshot(
+        clipId: Long,
+        knownSemanticRevision: Long? = null,
+        knownImageRevision: Long? = null,
+    ): RelatedRetrievalSnapshot = withStorage {
+        require(clipId > 0L) { "Related-search clip ID must be positive" }
+        RelatedRetrievalSnapshot(
+            semanticRevision = semanticRevision,
+            imageRevision = imageRevision,
+            referenceSemanticDocuments = queryRows(
+                """
+                    SELECT document_id, clip_id, source_type, source_ordinal, embedding
+                    FROM semantic_documents
+                    WHERE clip_id = ?
+                    ORDER BY source_type, source_ordinal, document_id
+                """.trimIndent(),
+                { statement -> statement.bindLong(1, clipId) },
+                ::decodeSemanticDocument,
+            ),
+            referenceImageDocuments = queryRows(
+                """
+                    SELECT asset_id, clip_id, source_fingerprint, embedding
+                    FROM image_embeddings
+                    WHERE clip_id = ?
+                    ORDER BY asset_id
+                """.trimIndent(),
+                { statement -> statement.bindLong(1, clipId) },
+                ::decodeImageEmbedding,
+            ),
+            semanticDocuments = if (knownSemanticRevision == semanticRevision) {
+                null
+            } else {
+                queryRows(
+                    "SELECT document_id, clip_id, source_type, source_ordinal, embedding " +
+                        "FROM semantic_documents ORDER BY clip_id, source_type, source_ordinal, document_id",
+                    {},
+                    ::decodeSemanticDocument,
+                )
+            },
+            imageDocuments = if (knownImageRevision == imageRevision) {
+                null
+            } else {
+                queryRows(
+                    "SELECT asset_id, clip_id, source_fingerprint, embedding " +
+                        "FROM image_embeddings ORDER BY asset_id",
+                    {},
+                    ::decodeImageEmbedding,
+                )
+            },
         )
     }
 

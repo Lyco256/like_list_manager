@@ -53,6 +53,12 @@ MainActivity / Compose UI
     -> threshold + mutual edge / primitive-array Union-Find / deterministic groups
     -> ordered asset IDをMainViewModelへ返す（画像再embedding・storage writeなし）
 
+  LocalRelatedTweetsEngine（AppContainer共有の投稿詳細関連検索runtime）
+    -> DerivedSearchStorageの同一revision snapshot
+    -> 保存済みsemantic 768次元／image 256次元だけをquery
+    -> revision-cached LocalAnnIndexSnapshot（vectorごと最大256候補）
+    -> channel最大値集約 / available weight正規化 / deterministic top 50 clip ID
+
   LocalAnnIndexSnapshot（不変ANN runtime。LocalSearchEngineが所有）
     -> vendored USearch v2.26.0 Java binding
     -> generated arm64-v8a / armeabi-v7a JNI adapter + official libusearch_c.so
@@ -66,7 +72,7 @@ MainActivity / Compose UI
 
 - ダークテーマ
 - 未分類リスト: 初回DB emissionまでProgressを表示し、グループを展開して配下タグをカード内draftとして選択し、`適用`で一括確定する
-- 分類済みリスト: Search / Filter / Sort / Displayの36x32 symbol toolbar、検索と条件絞り込みを分離した全画面Dialog、SMARTの共有LocalSearchEngine検索と正規表現のsource-order検索、保存画像の画像重複検索（専用状態、進捗、失敗／再試行、asset-level MediaGrid）、検索中/失敗表示、検索中のsort無効化、タグのみトグル付きの全ツイート条件、投稿日・投稿者・タグ／グループの「含む」「必須」「排除」複合絞り込み、タグ再割り当て
+- 分類済みリスト: Search / Filter / Sort / Displayの36x32 symbol toolbar、検索と条件絞り込みを分離した全画面Dialog、SMARTの共有LocalSearchEngine検索と正規表現のsource-order検索、保存画像の画像重複検索（専用状態、進捗、失敗／再試行、asset-level MediaGrid）、投稿詳細Dialogの保存済みEmbeddingだけを使う非同期関連ツイートsection、検索中/失敗表示、検索中のsort無効化、タグのみトグル付きの全ツイート条件、投稿日・投稿者・タグ／グループの「含む」「必須」「排除」複合絞り込み、タグ再割り当て
 - タグリスト: 無制限階層の縦guide付きcompact rowで、グループ／タグ追加、名称変更、移動、長押し並び替え、削除、Tree popupから別タグへの一括追加
 - X風の投稿本文、クリック可能な投稿者、保存済み投稿数、いいね数（詳細popup付き）、カード幅・画像比率に応じた高さ上限、画像previewを表示
 - メディアグリッドの通常スクロール中は既存見出しと同じ現在位置ラベルを上端の一時ピルで表示し、停止後3秒保持して上方向へ消す。スクロールバー操作中は現在frameの全インライン見出しを開始media ordinal位置へ固定した文字入りピルで表示し、保存順では表示しない。pointer UP／cancel／frame変更／FinalTargetPendingでは消去し、正常終了後だけ最終位置を上部ピルへ引き継ぐ。列数Morph中は旧ラベルを固定し、handoff後に新粒度で再評価する
@@ -112,6 +118,7 @@ MainActivity / Compose UI
 - `LocalTextEmbedder`は固定revisionのEmbeddingGemma 300M Q4、DJL tokenizer、ONNX Runtime CPU sessionを完全ローカルで扱う。query/document prompt、2048 token truncation、768次元・finite・L2 normalize検証、遅延初期化、session再利用、並行要求の直列化、close、モデル専用noBackup配置を担当し、`DocumentEmbedder`としてsemantic同期へ注入される。QueryEmbedderとしてLocalSearchEngineの768次元ANN検索へ共有し、分類済みSMART検索UIから借用される
 - `LocalMultimodalEmbedder`は固定revisionのJapanese CLIP q4f16、CLYP tokenizer、224黒背景center-pad、OpenAI CLIP normalization、ONNX Runtime CPU text/vision sessionを完全ローカルで扱う。256次元・finite・L2 normalize検証、modality別遅延初期化、session再利用、並行要求の直列化、close、モデル専用noBackup配置を担当する。画像embedding同期へimage実装を注入し、MultimodalTextEmbedderとしてLocalSearchEngineの256次元ANN検索へ共有し、分類済みSMART検索UIから借用される
 - `LocalAnnIndexSnapshot`はUSearch v2.26.0をcosine／Float32／connectivity 32／expansion 256で使い、256／768次元の入力検証、内部L2 normalize、不変snapshot、候補限定のexact cosine rerank、並行search／close lifecycleを担当する。LocalSearchEngineが派生DBのrevisionごとにsnapshotを構築・再利用し、分類済みSMART検索へranked clip IDを返す。index永続化は行わない
+- `LocalRelatedTweetsEngine`は派生DBのsemantic/image revisionとreference rowsを同一snapshotから受け取り、保存済みvectorのみをrevision単位ANN cacheへ載せる。vectorごとの最大256候補、4channelの最大値集約、reference側available weight分母、閾値、selected clip除外、deterministic top 50を担当し、書込みは行わない
 - `LocalRuntimeAssetInstaller`はEmbeddingGemmaとJapanese CLIPのgenerated metadata、SHA-256、byte size、専用directory内atomic copy／部分復旧を共有する内部utilityであり、各runtimeの固定specと出力wrapperは分離して保持する
 - `SemanticIndexSynchronizer`は正本Roomの`ClipEntity.text`／`summary`／`ocrText`だけをUnicode code point chunkへ分割し、固定順・逐次でEmbeddingGemmaを実行する。source fingerprint差分、空source削除、clip削除、DB null停止、途中失敗時の旧データ保持、production自動起動／TEST_HARNESS明示起動を担当する
 
@@ -122,6 +129,7 @@ MainActivity / Compose UI
 | 変更したいこと | 最初に読む文書 | 次に確認する文書 |
 | --- | --- | --- |
 | 画面、操作、検索、タグUI | `docs/app/src/main/java/com/lyco256/llm/MainActivity.kt.md` | `docs/app/src/main/java/com/lyco256/llm/TagHierarchyUiV2.kt.md`, `ClipRepository.kt.md`, `Entities.kt.md` |
+| 投稿詳細の関連ツイート検索 | `docs/app/src/main/java/com/lyco256/llm/data/LocalRelatedTweetsEngine.kt.md` | `DerivedSearchStorage.kt.md`, `LocalAnnIndexSnapshot.kt.md`, `MainActivity.kt.md`, `TagHierarchyUiV2.kt.md` |
 | OCR全画面ビューア、全文range→polygon選択、Fit/zoom/pan | `docs/app/src/main/java/com/lyco256/llm/OcrUi.kt.md` | `OcrSession.kt.md`, `OcrViewerGeometry.kt.md`, `data/OcrTextRecognizer.kt.md`, `data/OcrReadingOrder.kt.md`, `data/PaddleOcrTextRecognizer.kt.md` |
 | メディアグリッド現在位置ピル、表示区間ラベル | `docs/app/src/main/java/com/lyco256/llm/MediaGridScrollPosition.kt.md` | `TagHierarchyUiV2.kt.md`, `MediaGridMorph.kt.md`, `MediaGridScrollPositionTest.kt.md` |
 | メディアグリッド高速スクロールバー、thumb drag | `docs/app/src/main/java/com/lyco256/llm/MediaGridScrollbar.kt.md` | `TagHierarchyUiV2.kt.md`, `MediaGridScrollPosition.kt.md`, `MediaGridScrollbarTest.kt.md`。投稿日／いいね数順のdrag中はframe内全header boundaryのlabel入りピルを開始ordinal位置へ表示し、保存順では表示しない |
@@ -229,6 +237,7 @@ MainActivity / Compose UI
 - `docs/app/src/main/java/com/lyco256/llm/data/LocalTextEmbedder.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/LocalMultimodalEmbedder.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/LocalAnnIndexSnapshot.kt.md`
+- `docs/app/src/main/java/com/lyco256/llm/data/LocalRelatedTweetsEngine.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/LocalRuntimeAssetInstaller.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/SemanticModels.kt.md`
 - `docs/app/src/main/java/com/lyco256/llm/data/SemanticTextChunker.kt.md`
@@ -265,7 +274,11 @@ MainActivity / Compose UI
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/ImageEmbeddingSynchronizerIntegrationTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/ImageEmbeddingVisionIntegrationTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/data/LocalMultimodalEmbedderTest.kt.md`
+- `docs/app/src/test/java/com/lyco256/llm/data/LocalRelatedTweetsEngineTest.kt.md`
 - `docs/app/src/androidTest/java/com/lyco256/llm/data/LocalMultimodalEmbedderIntegrationTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/data/LocalRelatedTweetsEngineIntegrationTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/RelatedTweetsViewModelIntegrationTest.kt.md`
+- `docs/app/src/androidTest/java/com/lyco256/llm/RelatedTweetsUiTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/TagHierarchyTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/TagManagementCompactRowContractTest.kt.md`
 - `docs/app/src/test/java/com/lyco256/llm/TagTreeGuideTest.kt.md`

@@ -446,6 +446,7 @@ internal fun EnhancedClassifiedScreen(
     mediaGridColumnCount: Int,
     onMediaGridColumnCountChange: (Int) -> Unit,
     onMediaGridCellClick: (Long) -> Unit = {},
+    onTweetDetailClick: ((Long) -> Unit)? = null,
     onMediaGridBulkTagsChange: (Set<Long>, Set<Long>, Set<Long>, (String?) -> Unit) -> Unit = { _, _, _, _ -> },
     onToggleDisplayMode: () -> Unit,
     onApplySearch: (ClassifiedSearchCriteria) -> Unit = {},
@@ -510,6 +511,7 @@ internal fun EnhancedClassifiedScreen(
         mediaGridColumnCount = mediaGridColumnCount,
         onMediaGridColumnCountChange = onMediaGridColumnCountChange,
         onMediaGridCellClick = onMediaGridCellClick,
+        onTweetDetailClick = onTweetDetailClick,
         onMediaGridBulkTagsChange = onMediaGridBulkTagsChange,
         onToggleDisplayMode = onToggleDisplayMode,
         onApplySearch = onApplySearch,
@@ -544,6 +546,7 @@ internal fun EnhancedClassifiedScreen(
     mediaGridColumnCount: Int,
     onMediaGridColumnCountChange: (Int) -> Unit,
     onMediaGridCellClick: (Long) -> Unit = {},
+    onTweetDetailClick: ((Long) -> Unit)? = null,
     onMediaGridBulkTagsChange: (Set<Long>, Set<Long>, Set<Long>, (String?) -> Unit) -> Unit = { _, _, _, _ -> },
     onToggleDisplayMode: () -> Unit,
     onApplySearch: (ClassifiedSearchCriteria) -> Unit = {},
@@ -959,6 +962,9 @@ internal fun EnhancedClassifiedScreen(
                             onOcrDetectStructured = onOcrDetectStructured,
                             onDelete = onDelete,
                             onAuthorClick = onAuthorClick,
+                            onDetailClick = onTweetDetailClick?.let { callback ->
+                                { callback(clip.clip.id) }
+                            },
                         )
                     }
                 }
@@ -1024,6 +1030,8 @@ internal fun EnhancedClassifiedScreen(
 @Composable
 fun MediaGridTweetDialog(
     state: MediaGridTweetDialogState,
+    relatedState: RelatedTweetsUiState = RelatedTweetsUiState(),
+    availableClips: List<ClipWithDetails> = emptyList(),
     hierarchy: TagHierarchy,
     authorSavedCountByAuthor: Map<TweetAuthorKey, Int> = emptyMap(),
     onDismiss: () -> Unit,
@@ -1044,9 +1052,17 @@ fun MediaGridTweetDialog(
     },
     onDelete: (ClipEntity) -> Unit,
     onAuthorClick: (ClipEntity) -> Unit,
+    onRelatedRetry: () -> Unit = {},
+    onRelatedClipClick: (Long) -> Unit = {},
 ) {
     if (state == MediaGridTweetDialogState.Closed) return
     BackHandler(onBack = onDismiss)
+    val dialogScrollState = rememberScrollState()
+    val selectedClipId = (state as? MediaGridTweetDialogState.Loaded)?.clip?.clip?.id
+    LaunchedEffect(selectedClipId) {
+        if (selectedClipId != null) dialogScrollState.scrollTo(0)
+    }
+    val availableClipsById = remember(availableClips) { availableClips.associateBy { it.clip.id } }
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = true),
@@ -1095,8 +1111,8 @@ fun MediaGridTweetDialog(
                                 tagDraft = tagDraft.reconcilePersisted(persistedTagIds)
                             }
                             val effectiveTagDraft = tagDraft.reconcilePersisted(persistedTagIds)
-                            Box(
-                                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp),
+                            Column(
+                                Modifier.fillMaxSize().verticalScroll(dialogScrollState).padding(8.dp),
                             ) {
                                 EnhancedTweetCard(
                                     clip = state.clip,
@@ -1135,6 +1151,13 @@ fun MediaGridTweetDialog(
                                     },
                                     onAuthorClick = onAuthorClick,
                                 )
+                                RelatedTweetsSection(
+                                    state = relatedState,
+                                    selectedClipId = state.clip.clip.id,
+                                    clipsById = availableClipsById,
+                                    onRetry = onRelatedRetry,
+                                    onSelect = onRelatedClipClick,
+                                )
                             }
                         }
                     }
@@ -1161,6 +1184,113 @@ fun MediaGridTweetDialog(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun RelatedTweetsSection(
+    state: RelatedTweetsUiState,
+    selectedClipId: Long,
+    clipsById: Map<Long, ClipWithDetails>,
+    onRetry: () -> Unit,
+    onSelect: (Long) -> Unit,
+) {
+    if (!state.isActive || state.referenceClipId != selectedClipId) return
+    val rows = state.rankedClipIds.asSequence()
+        .filter { it != selectedClipId }
+        .distinct()
+        .mapNotNull { clipsById[it] }
+        .toList()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 16.dp)
+            .testTag("related_tweets_section"),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("関連ツイート", style = MaterialTheme.typography.titleMedium)
+        when (state.status) {
+            RelatedTweetsStatus.WAITING_FOR_INDEX -> RelatedTweetsLoading(
+                message = "関連検索データを準備中…",
+                state = state,
+            )
+            RelatedTweetsStatus.LOADING -> RelatedTweetsLoading(
+                message = "関連ツイートを検索中…",
+                state = state,
+            )
+            RelatedTweetsStatus.FAILED -> Column(
+                modifier = Modifier.fillMaxWidth().testTag("related_tweets_error"),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text("関連ツイートの検索に失敗しました")
+                state.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                TextButton(
+                    onClick = onRetry,
+                    modifier = Modifier.testTag("related_tweets_retry"),
+                ) { Text("再試行") }
+            }
+            RelatedTweetsStatus.READY -> if (rows.isEmpty()) {
+                Text("関連ツイートはありません")
+            } else {
+                rows.forEach { clip ->
+                    RelatedTweetRow(clip = clip, onClick = { onSelect(clip.clip.id) })
+                }
+            }
+            RelatedTweetsStatus.INACTIVE -> Unit
+        }
+    }
+}
+
+@Composable
+private fun RelatedTweetsLoading(
+    message: String,
+    state: RelatedTweetsUiState,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().testTag("related_tweets_loading"),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(8.dp))
+            Text(message)
+        }
+        if (state.total > 0) Text("処理中: ${state.processed}/${state.total}", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun RelatedTweetRow(
+    clip: ClipWithDetails,
+    onClick: () -> Unit,
+) {
+    val image = clip.assets.firstOrNull()?.let { it.localPath ?: it.previewUrl ?: it.remoteUrl }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .testTag("related_tweet_${clip.clip.id}")
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        if (image != null) {
+            AsyncImage(
+                model = image,
+                contentDescription = null,
+                modifier = Modifier.size(64.dp).clip(RoundedCornerShape(6.dp)),
+                contentScale = ContentScale.Crop,
+            )
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(clip.clip.authorName, fontWeight = FontWeight.SemiBold)
+            Text("@${clip.clip.authorUsername}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                clip.clip.text.withoutTrailingMediaUrl(hasAssets = clip.assets.isNotEmpty()),
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -1406,6 +1536,7 @@ private fun EnhancedTweetCard(
     },
     onDelete: (ClipEntity) -> Unit,
     onAuthorClick: (ClipEntity) -> Unit,
+    onDetailClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -1432,7 +1563,16 @@ private fun EnhancedTweetCard(
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        modifier = modifier.fillMaxWidth().testTag("clip_card_${clip.clip.id}"),
+        modifier = modifier
+            .fillMaxWidth()
+            .then(
+                if (onDetailClick != null) {
+                    Modifier.clickable { onDetailClick.invoke() }
+                } else {
+                    Modifier
+                },
+            )
+            .testTag("clip_card_${clip.clip.id}"),
     ) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

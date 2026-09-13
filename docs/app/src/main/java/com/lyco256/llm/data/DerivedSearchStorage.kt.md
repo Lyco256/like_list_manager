@@ -4,7 +4,7 @@
 
 検索用に独立したprocess内lexical / semantic / image revisionを持つ。各対応replace/delete/clearの正常commit後だけ進め、rollbackでは進めない。派生DB再作成時は3つとも進める。schemaへのrevision追加は行わない。
 
-`getAllLexicalDocuments`、`getLexicalSnapshot`、`getSemanticSnapshot`、`getImageSnapshot`を提供する。snapshotはrevisionと全件を同じmutex区間で読む。semantic/imageは既知revisionと同じならnullを返し、BLOBを毎検索読み直さない。`retrieveLexical`は既知revisionからのcache更新とFTS候補unionを同じ区間で取得し、document総数をFTS LIMITへ渡す。空corpusではFTSを実行しない。既存のstorage単体FTS APIは維持し、検索engineの入力は `Fts5LiteralQueryBuilder` でliteral化する。
+`getAllLexicalDocuments`、`getLexicalSnapshot`、`getSemanticSnapshot`、`getImageSnapshot`、`getRelatedRetrievalSnapshot`を提供する。snapshotはrevisionと全件を同じmutex区間で読む。semantic/imageは既知revisionと同じならnullを返し、BLOBを毎検索読み直さない。`getRelatedRetrievalSnapshot`はreference clipのsemantic/image rowsを常に読み、callerのrevisionが変わった場合だけ対応する全corpus rowsも同じ区間で返すため、related engineがreferenceとANN corpusを異なるrevisionで組み合わせない。`retrieveLexical`は既知revisionからのcache更新とFTS候補unionを同じ区間で取得し、document総数をFTS LIMITへ渡す。空corpusではFTSを実行しない。既存のstorage単体FTS APIは維持し、検索engineの入力は `Fts5LiteralQueryBuilder` でliteral化する。
 
 - 保存先は`noBackupFilesDir/derived_search/search_index.db`です。投稿データ保存先の内部／SDカード領域には置きません。
 - `androidx.sqlite:sqlite-bundled:2.7.0`の`BundledSQLiteDriver`を`SQLITE_OPEN_FULLMUTEX`付きで使用します。

@@ -29,6 +29,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -97,6 +98,10 @@ import com.lyco256.llm.data.ImageDuplicateSearchEngine
 import com.lyco256.llm.data.ImageDuplicateSearchResult
 import com.lyco256.llm.data.ImageEmbeddingSyncState
 import com.lyco256.llm.data.ImageEmbeddingSyncStatus
+import com.lyco256.llm.data.RelatedTweetsEngine
+import com.lyco256.llm.data.RelatedTweetsProgressPhase
+import com.lyco256.llm.data.SemanticIndexSyncState
+import com.lyco256.llm.data.SemanticIndexSyncStatus
 import com.lyco256.llm.data.LikeCountRefreshEstimate
 import com.lyco256.llm.data.OAuthSession
 import com.lyco256.llm.data.OcrPostRecognitionResult
@@ -334,6 +339,21 @@ private fun ImageDuplicateSearchResult.toReadyState(
         requestGeneration = generation,
     )
 
+enum class RelatedTweetsStatus { INACTIVE, WAITING_FOR_INDEX, LOADING, READY, FAILED }
+
+data class RelatedTweetsUiState(
+    val status: RelatedTweetsStatus = RelatedTweetsStatus.INACTIVE,
+    val referenceClipId: Long? = null,
+    val rankedClipIds: List<Long> = emptyList(),
+    val phase: RelatedTweetsProgressPhase? = null,
+    val processed: Int = 0,
+    val total: Int = 0,
+    val errorMessage: String? = null,
+    val requestGeneration: Long = 0L,
+) {
+    val isActive: Boolean get() = status != RelatedTweetsStatus.INACTIVE
+}
+
 data class TweetFilterState(
     val startDate: LocalDate? = null,
     val endDate: LocalDate? = null,
@@ -446,12 +466,16 @@ class MainViewModel(
     private val searchEngineOverride: ClassifiedSearchEngine? = null,
     private val imageDuplicateSearchEngineOverride: ImageDuplicateSearchEngine? = null,
     private val imageEmbeddingSyncStateOverride: StateFlow<ImageEmbeddingSyncState>? = null,
+    private val relatedTweetsEngineOverride: RelatedTweetsEngine? = null,
+    private val semanticIndexSyncStateOverride: StateFlow<SemanticIndexSyncState>? = null,
 ) : AndroidViewModel(application) {
     private val appContainer = (application as LikeListManagerApp).container
     private val repository = appContainer.repository
     private val searchEngine = searchEngineOverride ?: appContainer.localSearchEngine
     private val imageDuplicateSearchEngine = imageDuplicateSearchEngineOverride ?: appContainer.imageDuplicateSearchEngine
     private val imageEmbeddingSyncState = imageEmbeddingSyncStateOverride ?: appContainer.imageEmbeddingSynchronizer.state
+    private val relatedTweetsEngine = relatedTweetsEngineOverride ?: appContainer.localRelatedTweetsEngine
+    private val semanticIndexSyncState = semanticIndexSyncStateOverride ?: appContainer.semanticIndexSynchronizer.state
     private val filters = MutableStateFlow(TweetFilterState())
     private val sort = MutableStateFlow(ClassifiedSortState())
     private val apiSettings = MutableStateFlow(ApiSettings())
@@ -463,6 +487,9 @@ class MainViewModel(
     private var imageDuplicateSearchJob: Job? = null
     private var imageDuplicateSearchRequestGeneration = 0L
     private val imageDuplicateSearchState = MutableStateFlow(ClassifiedImageDuplicateSearchState())
+    private var relatedTweetsJob: Job? = null
+    private var relatedTweetsRequestGeneration = 0L
+    private val relatedTweetsState = MutableStateFlow(RelatedTweetsUiState())
     private val mediaGridSource = repository.mediaGridSource
     private val selectedMediaGridClipId = MutableStateFlow<Long?>(null)
     private val mediaGridCache = MediaGridMetadataCache()
@@ -475,6 +502,7 @@ class MainViewModel(
     val pendingUndo: StateFlow<UndoEntity?> = repository.pendingUndo
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val heavyLocalWorkActive: StateFlow<Boolean> = repository.heavyLocalWorkActive
+    val relatedTweetsUiState: StateFlow<RelatedTweetsUiState> = relatedTweetsState
 
     private val initialClipListState = repository.clipsWithDetails
         .map { clips -> InitialClipListState().afterEmission(clips) }
@@ -812,11 +840,76 @@ class MainViewModel(
 
     fun openMediaGridTweetDialog(clipId: Long) {
         selectedMediaGridClipId.value = clipId
+        startRelatedTweets(clipId)
     }
 
     fun closeMediaGridTweetDialog() {
         selectedMediaGridClipId.value = null
+        deactivateRelatedTweets()
     }
+
+    private fun startRelatedTweets(clipId: Long) {
+        relatedTweetsJob?.cancel()
+        val generation = ++relatedTweetsRequestGeneration
+        relatedTweetsState.value = RelatedTweetsUiState(
+            status = RelatedTweetsStatus.WAITING_FOR_INDEX,
+            referenceClipId = clipId,
+            requestGeneration = generation,
+        )
+        relatedTweetsJob = viewModelScope.launch {
+            try {
+                combine(semanticIndexSyncState, imageEmbeddingSyncState) { semantic, image ->
+                    semantic.status to image.status
+                }.first { (semantic, image) ->
+                    semantic != SemanticIndexSyncStatus.SYNCING && image != ImageEmbeddingSyncStatus.SYNCING
+                }
+                if (!isCurrentRelatedTweetsGeneration(generation)) return@launch
+                relatedTweetsState.value = relatedTweetsState.value.copy(
+                    status = RelatedTweetsStatus.LOADING,
+                )
+                val result = relatedTweetsEngine.findRelated(clipId) { progress ->
+                    if (isCurrentRelatedTweetsGeneration(generation)) {
+                        relatedTweetsState.value = relatedTweetsState.value.copy(
+                            status = RelatedTweetsStatus.LOADING,
+                            phase = progress.phase,
+                            processed = progress.processed,
+                            total = progress.total,
+                        )
+                    }
+                }
+                if (isCurrentRelatedTweetsGeneration(generation)) {
+                    relatedTweetsState.value = relatedTweetsState.value.copy(
+                        status = RelatedTweetsStatus.READY,
+                        rankedClipIds = result.map { it.clipId }.distinct(),
+                        errorMessage = null,
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                if (isCurrentRelatedTweetsGeneration(generation)) {
+                    relatedTweetsState.value = relatedTweetsState.value.copy(
+                        status = RelatedTweetsStatus.FAILED,
+                        errorMessage = error.message ?: "関連ツイートの検索に失敗しました",
+                    )
+                }
+            }
+        }
+    }
+
+    fun retryRelatedTweets() {
+        relatedTweetsState.value.referenceClipId?.let(::startRelatedTweets)
+    }
+
+    private fun deactivateRelatedTweets() {
+        relatedTweetsJob?.cancel()
+        relatedTweetsJob = null
+        relatedTweetsRequestGeneration++
+        relatedTweetsState.value = RelatedTweetsUiState(requestGeneration = relatedTweetsRequestGeneration)
+    }
+
+    private fun isCurrentRelatedTweetsGeneration(generation: Long): Boolean =
+        relatedTweetsState.value.requestGeneration == generation
 
     fun applyFilters(value: TweetFilterState) { filters.value = value }
 
@@ -1005,6 +1098,7 @@ class MainViewModel(
     override fun onCleared() {
         smartSearchJob?.cancel()
         imageDuplicateSearchJob?.cancel()
+        relatedTweetsJob?.cancel()
         mediaGridSessionCoordinator.dispose()
         super.onCleared()
     }
@@ -1015,6 +1109,8 @@ class MainViewModel(
             searchEngineOverride: ClassifiedSearchEngine? = null,
             imageDuplicateSearchEngineOverride: ImageDuplicateSearchEngine? = null,
             imageEmbeddingSyncStateOverride: StateFlow<ImageEmbeddingSyncState>? = null,
+            relatedTweetsEngineOverride: RelatedTweetsEngine? = null,
+            semanticIndexSyncStateOverride: StateFlow<SemanticIndexSyncState>? = null,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T =
@@ -1023,6 +1119,8 @@ class MainViewModel(
                     searchEngineOverride,
                     imageDuplicateSearchEngineOverride,
                     imageEmbeddingSyncStateOverride,
+                    relatedTweetsEngineOverride,
+                    semanticIndexSyncStateOverride,
                 ) as T
         }
     }
@@ -1038,6 +1136,7 @@ fun LikeListManagerUi(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val mediaGridTweetDialogState by viewModel.mediaGridTweetDialogState.collectAsState()
+    val relatedTweetsUiState by viewModel.relatedTweetsUiState.collectAsState()
     val pendingUndo by viewModel.pendingUndo.collectAsState()
     MaterialTheme(
         colorScheme = darkColorScheme(
@@ -1060,6 +1159,8 @@ fun LikeListManagerUi(
                 )
                 MediaGridTweetDialog(
                     state = mediaGridTweetDialogState,
+                    relatedState = relatedTweetsUiState,
+                    availableClips = uiState.clips,
                     hierarchy = uiState.tagHierarchy,
                     authorSavedCountByAuthor = uiState.authorSavedCountByAuthor,
                     onDismiss = viewModel::closeMediaGridTweetDialog,
@@ -1075,6 +1176,8 @@ fun LikeListManagerUi(
                         viewModel.closeMediaGridTweetDialog()
                         viewModel.filterByAuthorFromClip(clip)
                     },
+                    onRelatedRetry = viewModel::retryRelatedTweets,
+                    onRelatedClipClick = viewModel::openMediaGridTweetDialog,
                 )
                 UndoNotificationHost(
                     pendingUndo = pendingUndo,
@@ -1285,6 +1388,7 @@ fun MainScreen(
                 mediaGridColumnCount = classifiedMediaGridColumnCount,
                 onMediaGridColumnCountChange = { classifiedMediaGridColumnCount = it },
                 onMediaGridCellClick = viewModel::openMediaGridTweetDialog,
+                onTweetDetailClick = viewModel::openMediaGridTweetDialog,
                 onMediaGridBulkTagsChange = viewModel::applyClipTagChanges,
                 onToggleDisplayMode = {
                     classifiedDisplayMode = when (classifiedDisplayMode) {
