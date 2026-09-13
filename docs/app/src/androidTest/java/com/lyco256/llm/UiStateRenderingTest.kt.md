@@ -96,3 +96,4 @@ MediaGrid previewにカード内titleがないこと、閉じるボタンがカ�
 ## 2026-08-19 media-grid current-position pill
 
 - The large-dataset header regression verifies that the initial grid has no current-position pill and that a real grid scroll shows `media_grid_position_pill` and its label without changing the existing header/column assertions.
+- 画像重複検索はLOADINGの進捗、FAILEDのerror/retry、READY empty、通常Cardではなく強制MediaGridになることを確認します。新generationのframeがsession作成後に到着する場合も共有LazyGridStateを先頭へ戻すことを確認します。

@@ -67,6 +67,42 @@ class LocalImageDuplicateSearchEngineTest {
     }
 
     @Test
+    fun strongEdgeIsAcceptedEvenWhenOnlyOneDirectionContainsTheCandidate() = runBlocking {
+        val fixture = Fixture((1L..3L).map(::document))
+        fixture.factory.hitProvider = { source, _ ->
+            when (source) {
+                1L -> listOf(AnnHit(1L, 1f), AnnHit(2L, .72f))
+                else -> listOf(AnnHit(source, 1f))
+            }
+        }
+
+        val result = fixture.engine.search()
+
+        assertEquals(listOf(1L, 2L), result.orderedAssetIds)
+        assertEquals(1, result.groupCount)
+    }
+
+    @Test
+    fun keepsAtMost32NeighborsAfterRemovingSelf() = runBlocking {
+        val documents = (1L..34L).map(::document)
+        val fixture = Fixture(documents)
+        fixture.factory.hitProvider = { source, _ ->
+            buildList {
+                add(AnnHit(source, 1f))
+                if (source != 34L) {
+                    addAll(documents.filter { it.assetId != source && it.assetId != 34L }.map { AnnHit(it.assetId, .8f) })
+                    add(AnnHit(34L, .8f))
+                }
+            }
+        }
+
+        val result = fixture.engine.search()
+
+        assertEquals((1L..33L).toList(), result.orderedAssetIds)
+        assertTrue(34L !in result.orderedAssetIds)
+    }
+
+    @Test
     fun strongerGroupSortsBeforeEqualScoreGroupAndUnorderedPairsAreDeduplicated() = runBlocking {
         val fixture = Fixture((1L..4L).map(::document))
         fixture.factory.hitProvider = { source, _ ->

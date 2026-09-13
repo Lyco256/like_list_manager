@@ -91,4 +91,20 @@ class MediaGridSessionCoordinatorTest {
         assertNotEquals(mediaGridSessionKey(base), mediaGridSessionKey(filtered))
         assertNotEquals(mediaGridSessionKey(base), mediaGridSessionKey(sorted))
     }
+
+    @Test
+    fun duplicateModeAndGenerationAreSeparateFromNormalAndEachOther() {
+        val base = MediaGridDataKey(1L, 1L, TweetFilterState(), ClassifiedSortState())
+        val duplicateFirst = base.copy(
+            imageDuplicateSearchIdentity = "image-duplicate:1:READY",
+            imageDuplicateSearchGeneration = 1L,
+        )
+        val duplicateSecond = duplicateFirst.copy(
+            imageDuplicateSearchIdentity = "image-duplicate:2:READY",
+            imageDuplicateSearchGeneration = 2L,
+        )
+
+        assertNotEquals(mediaGridSessionKey(base), mediaGridSessionKey(duplicateFirst))
+        assertNotEquals(mediaGridSessionKey(duplicateFirst), mediaGridSessionKey(duplicateSecond))
+    }
 }

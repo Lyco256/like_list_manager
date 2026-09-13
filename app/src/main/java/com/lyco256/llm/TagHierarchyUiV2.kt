@@ -673,14 +673,14 @@ internal fun EnhancedClassifiedScreen(
         }
     }
     var previousMediaGridSessionKey by remember { mutableStateOf<MediaGridSessionKey?>(null) }
-    LaunchedEffect(mediaGridSessionState.sessionKey) {
+    LaunchedEffect(mediaGridSessionState.sessionKey, mediaGridSessionState.frame) {
         val key = mediaGridSessionState.sessionKey ?: return@LaunchedEffect
         if (key == previousMediaGridSessionKey) return@LaunchedEffect
+        val frame = mediaGridSessionState.frame ?: return@LaunchedEffect
         sessionRestoreCheckpointSuppressed = true
         val saved = mediaGridSessionState.anchor
-        val frame = mediaGridSessionState.frame
-        if (saved == null || frame == null || frame.items.isEmpty()) {
-            if (frame != null && frame.items.isNotEmpty()) mediaGridLazyState.scrollToItem(0)
+        if (saved == null || frame.items.isEmpty()) {
+            if (frame.items.isNotEmpty()) mediaGridLazyState.scrollToItem(0)
         } else {
             val targetIndex = frame.items.indexOfFirst { it.key == saved.key }
                 .takeIf { it >= 0 }

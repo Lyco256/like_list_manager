@@ -341,9 +341,197 @@ class UiStateRenderingTest {
         composeRule.onNodeWithText("一致件数:7件").assertIsDisplayed()
         composeRule.onNodeWithText("画像重複検索").assertIsDisplayed()
         composeRule.onAllNodesWithText("保存順", substring = true).assertCountEquals(0)
+        assertEquals(
+            "適用中",
+            composeRule.onNodeWithTag("search_open").fetchSemanticsNode().config[SemanticsProperties.StateDescription],
+        )
         composeRule.onNodeWithTag("sort_open").assertIsNotEnabled()
         composeRule.onNodeWithTag("classified_display_toggle").assertIsNotEnabled()
         composeRule.onNodeWithTag("filter_open").assertIsEnabled()
+    }
+
+    @Test
+    fun duplicateSearchRendersLoadingFailureRetryEmptyAndForcedMediaGridStates() {
+        val now = "2026-09-13T00:00:00Z"
+        val entry = MediaGridEntry(
+            entryId = 10L,
+            clipId = 1L,
+            assetId = 10L,
+            mediaKey = "duplicate-10",
+            mediaIndex = 0,
+            type = "photo",
+            displayUrl = null,
+            downloadState = "missing",
+            localPath = null,
+            xCreatedAt = now,
+            likeCount = null,
+        )
+        var duplicateState by mutableStateOf(
+            ClassifiedImageDuplicateSearchState(
+                status = ClassifiedImageDuplicateSearchStatus.LOADING,
+                processedAssetCount = 1,
+                totalAssetCount = 2,
+                requestGeneration = 1L,
+            ),
+        )
+        var entries by mutableStateOf(listOf(entry))
+        var retryCount = 0
+        composeRule.setContent {
+            MaterialTheme {
+                EnhancedClassifiedScreen(
+                    uiState = MainUiState(
+                        filters = TweetFilterState(taggedOnly = false),
+                        imageDuplicateSearchState = duplicateState,
+                    ),
+                    mediaGridState = ClassifiedMediaGridState(
+                        entries = entries,
+                        matchingClipCount = entries.map { it.clipId }.distinct().size,
+                        matchingMediaCount = entries.size,
+                        isEmptyByFilter = entries.isEmpty(),
+                    ),
+                    listState = rememberLazyListState(),
+                    displayMode = ClassifiedDisplayMode.Card,
+                    mediaGridColumnCount = ClassifiedMediaGridDefaultColumnCount,
+                    onMediaGridColumnCountChange = {},
+                    onToggleDisplayMode = {},
+                    onRetryImageDuplicateSearch = { retryCount++ },
+                    onApplyFilters = {},
+                    onApplySort = {},
+                    onTagsChange = { _, _ -> },
+                    onSummaryChange = { _, _ -> },
+                    onOcrSave = { _, _ -> },
+                    onOcrDetect = { _, _, _ -> },
+                    onDelete = {},
+                    onAuthorClick = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("classified_image_duplicate_loading").assertIsDisplayed()
+        composeRule.onNodeWithText("画像重複を検索中…").assertIsDisplayed()
+        composeRule.onNodeWithText("処理中: 1/2").assertIsDisplayed()
+
+        composeRule.runOnIdle {
+            duplicateState = ClassifiedImageDuplicateSearchState(
+                status = ClassifiedImageDuplicateSearchStatus.FAILED,
+                errorMessage = "controlled failure",
+                requestGeneration = 1L,
+            )
+        }
+        composeRule.onNodeWithTag("classified_image_duplicate_error").assertIsDisplayed()
+        composeRule.onNodeWithText("controlled failure").assertIsDisplayed()
+        composeRule.onNodeWithTag("classified_image_duplicate_retry").performClick()
+        composeRule.runOnIdle { assertEquals(1, retryCount) }
+
+        composeRule.runOnIdle {
+            entries = emptyList()
+            duplicateState = ClassifiedImageDuplicateSearchState(
+                status = ClassifiedImageDuplicateSearchStatus.READY,
+                requestGeneration = 1L,
+            )
+        }
+        composeRule.onNodeWithText("重複候補の画像はありません").assertIsDisplayed()
+
+        composeRule.runOnIdle { entries = listOf(entry) }
+        composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
+        composeRule.onAllNodesWithTag("clip_list").assertCountEquals(0)
+    }
+
+    @Test
+    fun duplicateGenerationStartsAtTopWhenItsFrameArrivesAfterSessionCreation() {
+        val filter = TweetFilterState(taggedOnly = false)
+        val normalKey = MediaGridDataKey(1L, 1L, filter, ClassifiedSortState())
+        val duplicateKey = normalKey.copy(
+            imageDuplicateSearchIdentity = "image-duplicate:1:READY",
+            imageDuplicateSearchGeneration = 1L,
+        )
+        val entries = (1L..100L).map { assetId ->
+            MediaGridEntry(
+                entryId = assetId,
+                clipId = assetId,
+                assetId = assetId,
+                mediaKey = "duplicate-$assetId",
+                mediaIndex = 0,
+                type = "photo",
+                displayUrl = null,
+                downloadState = "missing",
+                localPath = null,
+                xCreatedAt = "2026-09-13T00:00:00Z",
+                likeCount = null,
+            )
+        }
+        val normalFrame = buildMediaGridFrameData(entries, normalKey.sort, 4, normalKey)
+        val duplicateFrame = buildMediaGridFrameData(entries, duplicateKey.sort, 4, duplicateKey)
+        var sessionState by mutableStateOf(
+            MediaGridSessionUiState(
+                sessionKey = mediaGridSessionKey(normalKey),
+                frame = normalFrame,
+                columnCount = 4,
+                requestedColumnCount = 4,
+            ),
+        )
+        var lazyGridState: androidx.compose.foundation.lazy.grid.LazyGridState? = null
+        composeRule.setContent {
+            MaterialTheme {
+                EnhancedClassifiedScreen(
+                    uiState = MainUiState(
+                        filters = filter,
+                        imageDuplicateSearchState = ClassifiedImageDuplicateSearchState(
+                            status = ClassifiedImageDuplicateSearchStatus.READY,
+                            orderedAssetIds = entries.map { it.assetId },
+                            requestGeneration = 1L,
+                        ),
+                    ),
+                    mediaGridState = ClassifiedMediaGridState(
+                        dataKey = duplicateKey,
+                        entries = entries,
+                        matchingClipCount = entries.size,
+                        matchingMediaCount = entries.size,
+                        isEmptyByFilter = false,
+                    ),
+                    mediaGridSessionState = sessionState,
+                    listState = rememberLazyListState(),
+                    mediaGridLazyState = androidx.compose.foundation.lazy.grid.rememberLazyGridState().also {
+                        lazyGridState = it
+                    },
+                    displayMode = ClassifiedDisplayMode.MediaGrid,
+                    mediaGridColumnCount = 4,
+                    onMediaGridColumnCountChange = {},
+                    onToggleDisplayMode = {},
+                    onApplyFilters = {},
+                    onApplySort = {},
+                    onTagsChange = { _, _ -> },
+                    onSummaryChange = { _, _ -> },
+                    onOcrSave = { _, _ -> },
+                    onOcrDetect = { _, _, _ -> },
+                    onDelete = {},
+                    onAuthorClick = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("classified_media_grid").performScrollToIndex(60)
+        composeRule.runOnIdle {
+            assertTrue(checkNotNull(lazyGridState).firstVisibleItemIndex > 0)
+            sessionState = MediaGridSessionUiState(
+                sessionKey = mediaGridSessionKey(duplicateKey),
+                frame = null,
+                columnCount = 4,
+                requestedColumnCount = 4,
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            sessionState = MediaGridSessionUiState(
+                sessionKey = mediaGridSessionKey(duplicateKey),
+                frame = duplicateFrame,
+                columnCount = 4,
+                requestedColumnCount = 4,
+            )
+        }
+        composeRule.waitUntil(5_000L) {
+            checkNotNull(lazyGridState).firstVisibleItemIndex == 0
+        }
     }
 
     @Test

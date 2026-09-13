@@ -1,5 +1,9 @@
 # `TagHierarchyUiV2.kt`
 
+## 2026-09-13 image duplicate session restore
+
+duplicateの新generationは通常MediaGridと異なるsession identityを使い、frame生成前の一時状態で復元済み扱いにしません。frameが到着してからanchorを復元し、duplicate側にanchorがなければ共有LazyGridStateを先頭へ移動します。通常MediaGridのanchorは別sessionへ保存され、duplicateのgeneration開始で上書きされません。
+
 ## 2026-08-20 media-grid scrollbar header boundary pills
 
 `buildMediaGridFrameData`は既存のheader/cell items走査中に、投稿日順・いいね数順の各header bucketについてbucket key、インライン見出しと同じlabel、最初のmedia ordinalを`MediaGridHeaderBoundaryIndex`へ記録します。保存順では索引を作りません。drag中はframe固有の全boundaryを見出し開始ordinalからscrollbar座標へ変換した文字入りピルとして、各位置へ固定表示します。位置一覧はframe key、track geometry、total/visible media数の変更時だけ再構築し、pointer MOVEのtarget変更では全件探索を行いません。

@@ -119,6 +119,37 @@ class ClassifiedImageDuplicateSearchViewModelIntegrationTest {
         assertEquals(listOf(30L), viewModel.uiState.value.imageDuplicateSearchState.orderedAssetIds)
     }
 
+    @Test
+    fun applyingTextSearchWhileDuplicateIsActiveSwitchesModesAndDoesNotRerunDuplicate() {
+        viewModel.startImageDuplicateSearch()
+        engine.awaitRequest()
+        val requestCount = engine.requestCount()
+
+        viewModel.applySearch(
+            ClassifiedSearchCriteria(
+                query = "switch back",
+                mode = SearchMode.Regex,
+                regexTargets = setOf(SearchTarget.Text),
+            ),
+        )
+
+        assertTrue(awaitSearchState { it.isActive }.criteria.normalizedQuery == "switch back")
+        assertTrue(awaitDuplicateState { !it.isActive }.orderedAssetIds.isEmpty())
+        assertEquals(requestCount, engine.requestCount())
+    }
+
+    @Test
+    fun changingFiltersDoesNotRerunAnActiveDuplicateSearch() {
+        viewModel.startImageDuplicateSearch()
+        engine.awaitRequest()
+        val requestCount = engine.requestCount()
+
+        viewModel.applyFilters(TweetFilterState(taggedOnly = false))
+        runBlocking { delay(100L) }
+
+        assertEquals(requestCount, engine.requestCount())
+    }
+
     private fun awaitSearchState(predicate: (ClassifiedSearchState) -> Boolean): ClassifiedSearchState = runBlocking {
         withTimeout(5_000L) { viewModel.uiState.first { predicate(it.searchState) }.searchState }
     }

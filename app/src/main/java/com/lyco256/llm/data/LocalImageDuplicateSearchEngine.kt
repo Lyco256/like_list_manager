@@ -158,14 +158,44 @@ class LocalImageDuplicateSearchEngine internal constructor(
 
             val groupRoots = ArrayList<Int>()
             val maxEdgeScoreByRoot = FloatArray(total) { Float.NEGATIVE_INFINITY }
+            val bestStartEdgeByRoot = IntArray(total) { -1 }
             for (edgeIndex in 0 until uniqueEdgeCount) {
                 coroutineContext.ensureActive()
                 val key = edgeKeys[edgeIndex]
                 val root = rootByIndex[pairLeft(key)]
                 maxEdgeScoreByRoot[root] = maxOf(maxEdgeScoreByRoot[root], edgeScores[edgeIndex])
+                val currentStartEdge = bestStartEdgeByRoot[root]
+                if (currentStartEdge < 0 ||
+                    isBetterStartEdge(edgeIndex, currentStartEdge, edgeKeys, edgeScores, assetIds)
+                ) {
+                    bestStartEdgeByRoot[root] = edgeIndex
+                }
             }
             for (root in componentSizes.indices) {
                 if (componentSizes[root] >= 2) groupRoots += root
+            }
+
+            val adjacencyDegree = IntArray(total)
+            for (edgeIndex in 0 until uniqueEdgeCount) {
+                coroutineContext.ensureActive()
+                val key = edgeKeys[edgeIndex]
+                adjacencyDegree[pairLeft(key)]++
+                adjacencyDegree[pairRight(key)]++
+            }
+            val adjacencyOffsets = IntArray(total + 1)
+            for (index in adjacencyDegree.indices) {
+                coroutineContext.ensureActive()
+                adjacencyOffsets[index + 1] = adjacencyOffsets[index] + adjacencyDegree[index]
+            }
+            val adjacencyEdgeIndices = IntArray(uniqueEdgeCount * 2)
+            val adjacencyCursor = adjacencyOffsets.copyOf()
+            for (edgeIndex in 0 until uniqueEdgeCount) {
+                coroutineContext.ensureActive()
+                val key = edgeKeys[edgeIndex]
+                val left = pairLeft(key)
+                val right = pairRight(key)
+                adjacencyEdgeIndices[adjacencyCursor[left]++] = edgeIndex
+                adjacencyEdgeIndices[adjacencyCursor[right]++] = edgeIndex
             }
 
             val groupStart = IntArray(total) { -1 }
@@ -198,7 +228,9 @@ class LocalImageDuplicateSearchEngine internal constructor(
                     assetIds = assetIds,
                     edgeKeys = edgeKeys,
                     edgeScores = edgeScores,
-                    edgeCount = uniqueEdgeCount,
+                    bestStartEdge = bestStartEdgeByRoot[root],
+                    adjacencyOffsets = adjacencyOffsets,
+                    adjacencyEdgeIndices = adjacencyEdgeIndices,
                     rootByIndex = rootByIndex,
                     emitted = emitted,
                     output = orderedAssetIds,
@@ -224,24 +256,15 @@ class LocalImageDuplicateSearchEngine internal constructor(
         assetIds: LongArray,
         edgeKeys: LongArray,
         edgeScores: FloatArray,
-        edgeCount: Int,
+        bestStartEdge: Int,
+        adjacencyOffsets: IntArray,
+        adjacencyEdgeIndices: IntArray,
         rootByIndex: IntArray,
         emitted: BooleanArray,
         output: MutableList<Long>,
     ) {
         val start = groupStart[root]
         val end = start + componentSizes[root]
-        var bestStartEdge = -1
-        for (edgeIndex in 0 until edgeCount) {
-            val key = edgeKeys[edgeIndex]
-            val left = pairLeft(key)
-            val right = pairRight(key)
-            if (rootByIndex[left] == root && rootByIndex[right] == root &&
-                (bestStartEdge < 0 || isBetterStartEdge(edgeIndex, bestStartEdge, edgeKeys, edgeScores, assetIds))
-            ) {
-                bestStartEdge = edgeIndex
-            }
-        }
         check(bestStartEdge >= 0) { "Image duplicate component has no starting edge" }
 
         val startKey = edgeKeys[bestStartEdge]
@@ -255,27 +278,34 @@ class LocalImageDuplicateSearchEngine internal constructor(
         output += assetIds[first]
         output += assetIds[second]
         var placedCount = 2
+        val frontierCandidateByEdge = IntArray(adjacencyEdgeIndices.size / 2) { -1 }
+        val frontier = EdgeFrontierHeap(edgeKeys, edgeScores, assetIds, frontierCandidateByEdge)
+
+        suspend fun addAdjacentEdges(placed: Int) {
+            for (offset in adjacencyOffsets[placed] until adjacencyOffsets[placed + 1]) {
+                coroutineContext.ensureActive()
+                val edgeIndex = adjacencyEdgeIndices[offset]
+                val key = edgeKeys[edgeIndex]
+                val other = if (pairLeft(key) == placed) pairRight(key) else pairLeft(key)
+                if (rootByIndex[other] != root || emitted[other] || frontierCandidateByEdge[edgeIndex] >= 0) {
+                    continue
+                }
+                frontierCandidateByEdge[edgeIndex] = other
+                frontier.add(edgeIndex)
+            }
+        }
+
+        addAdjacentEdges(first)
+        addAdjacentEdges(second)
 
         while (placedCount < componentSizes[root]) {
             coroutineContext.ensureActive()
             var bestCandidate = -1
-            var bestScore = Float.NEGATIVE_INFINITY
-            for (edgeIndex in 0 until edgeCount) {
-                val key = edgeKeys[edgeIndex]
-                val left = pairLeft(key)
-                val right = pairRight(key)
-                val candidate = when {
-                    emitted[left] && !emitted[right] -> right
-                    emitted[right] && !emitted[left] -> left
-                    else -> -1
-                }
-                if (candidate < 0 || rootByIndex[candidate] != root) continue
-                val score = edgeScores[edgeIndex]
-                if (score > bestScore ||
-                    (score == bestScore && (bestCandidate < 0 || assetIds[candidate] < assetIds[bestCandidate]))
-                ) {
+            while (bestCandidate < 0) {
+                val edgeIndex = frontier.poll() ?: break
+                val candidate = frontierCandidateByEdge[edgeIndex]
+                if (candidate >= 0 && !emitted[candidate] && rootByIndex[candidate] == root) {
                     bestCandidate = candidate
-                    bestScore = score
                 }
             }
             if (bestCandidate < 0) {
@@ -293,6 +323,65 @@ class LocalImageDuplicateSearchEngine internal constructor(
             emitted[bestCandidate] = true
             output += assetIds[bestCandidate]
             placedCount++
+            addAdjacentEdges(bestCandidate)
+        }
+    }
+
+    private class EdgeFrontierHeap(
+        private val edgeKeys: LongArray,
+        private val edgeScores: FloatArray,
+        private val assetIds: LongArray,
+        private val candidateByEdge: IntArray,
+    ) {
+        private var values = IntArray(16)
+        private var size = 0
+
+        suspend fun add(edgeIndex: Int) {
+            coroutineContext.ensureActive()
+            if (size == values.size) values = values.copyOf(values.size * 2)
+            var index = size
+            values[size++] = edgeIndex
+            while (index > 0) {
+                coroutineContext.ensureActive()
+                val parent = (index - 1) ushr 1
+                if (!isHigherPriority(values[index], values[parent])) break
+                val swap = values[index]
+                values[index] = values[parent]
+                values[parent] = swap
+                index = parent
+            }
+        }
+
+        suspend fun poll(): Int? {
+            if (size == 0) return null
+            coroutineContext.ensureActive()
+            val result = values[0]
+            values[0] = values[--size]
+            var index = 0
+            while (true) {
+                coroutineContext.ensureActive()
+                val left = index * 2 + 1
+                if (left >= size) break
+                val right = left + 1
+                var best = left
+                if (right < size && isHigherPriority(values[right], values[left])) best = right
+                if (!isHigherPriority(values[best], values[index])) break
+                val swap = values[index]
+                values[index] = values[best]
+                values[best] = swap
+                index = best
+            }
+            return result
+        }
+
+        private fun isHigherPriority(left: Int, right: Int): Boolean {
+            val scoreOrder = edgeScores[left].compareTo(edgeScores[right])
+            if (scoreOrder != 0) return scoreOrder > 0
+            val leftCandidate = candidateByEdge[left]
+            val rightCandidate = candidateByEdge[right]
+            val assetOrder = assetIds[leftCandidate].compareTo(assetIds[rightCandidate])
+            if (assetOrder != 0) return assetOrder < 0
+            return edgeKeys[left] < edgeKeys[right]
         }
     }
 

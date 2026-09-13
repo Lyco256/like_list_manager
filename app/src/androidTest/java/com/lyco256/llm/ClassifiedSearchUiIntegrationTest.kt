@@ -126,6 +126,27 @@ class ClassifiedSearchUiIntegrationTest {
         composeRule.onNodeWithTag("search_clear").performClick()
         composeRule.waitUntil(5_000L) { !mainViewModel().uiState.value.imageDuplicateSearchState.isActive }
         composeRule.onNodeWithTag("sort_open").assertIsEnabled()
+        composeRule.onNodeWithTag("clip_list").assertIsDisplayed()
+    }
+
+    @Test
+    fun duplicateSearchFromMediaGridReturnsToMediaGridAfterClear() {
+        composeRule.onNodeWithTag("classified_display_toggle").performClick()
+        composeRule.waitUntil(10_000L) {
+            composeRule.onAllNodesWithTag("classified_media_grid").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        composeRule.onNodeWithTag("search_open").performClick()
+        composeRule.onNodeWithTag("image_duplicate_search_apply").performClick()
+        composeRule.waitUntil(5_000L) {
+            mainViewModel().uiState.value.imageDuplicateSearchState.isActive &&
+                composeRule.onAllNodesWithTag("search_dialog").fetchSemanticsNodes().isEmpty()
+        }
+
+        composeRule.onNodeWithTag("search_open").performClick()
+        composeRule.onNodeWithTag("search_clear").performClick()
+        composeRule.waitUntil(5_000L) { !mainViewModel().uiState.value.imageDuplicateSearchState.isActive }
+        composeRule.onNodeWithTag("classified_media_grid").assertIsDisplayed()
     }
 
     private fun seedSearchFixture(): SearchFixture = runBlocking {
